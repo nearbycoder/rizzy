@@ -776,7 +776,7 @@
       "path": "/cards/:card_id/assignments/new(.:format)",
       "controller": "cards/assignments",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -2245,6 +2245,10 @@
     {
       "method": "POST",
       "path": "/{account}/cards/{number}/assignments"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/assignments/new"
     },
     {
       "method": "POST",

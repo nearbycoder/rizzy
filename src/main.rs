@@ -32,6 +32,7 @@ mod access_tokens_page;
 mod account_cancellation;
 mod account_settings;
 mod account_transfer;
+mod assignment_page;
 mod board_page;
 mod board_settings;
 mod board_views;
@@ -1933,6 +1934,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}/assignments",
             post(toggle_assignment),
+        )
+        .route(
+            "/{account}/cards/{number}/assignments/new",
+            get(assignment_page::new),
         )
         .route(
             "/{account}/cards/{number}/self_assignment",
@@ -8517,13 +8522,42 @@ async fn toggle_assignment(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    RawQuery(raw_query): RawQuery,
+    body: Bytes,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let assignee_id = required(&body, "assignee_id")?;
-    toggle_assignment_to(&app, &p, &c, &assignee_id).await
+    let query_assignee = raw_query.as_deref().and_then(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .find(|(key, _)| key == "assignee_id")
+            .map(|(_, value)| value.into_owned())
+    });
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+        || !headers.contains_key("x-rizzy-json-request");
+    let assignee_id = if let Some(value) = query_assignee {
+        value
+    } else if form {
+        url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "assignee_id")
+            .map(|(_, value)| value.into_owned())
+            .ok_or_else(|| bad("assignee_id is required"))?
+    } else {
+        let json: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
+        required(&json, "assignee_id")?
+    };
+    toggle_assignment_to(&app, &p, &c, &assignee_id).await?;
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/cards/{number}"))],
+        )
+            .into_response());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn toggle_self_assignment(
