@@ -25,7 +25,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - User email changes with validation, a 30-minute one-use confirmation token, session switch, and delivery through the configured sendmail executable.
 - Single-use device sign-in links on the user's profile, including a scannable QR code, four-hour expiry, regeneration that revokes older links, and atomic redemption across concurrent requests.
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
-- Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
+- Board webhooks with browser management forms, action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
 - Special board column JSON lists (Maybe?, Not now, Done) and public pages for those lists and named columns. The public board page links to each view.
 - Initial notifications for board watchers, card assignments, card watchers, and User attachments in card/comment rich text, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings. `@` User and `#` card picker routes return editor items; User items issue opaque attachment IDs, and writing those attachments creates mentions and in-app notifications. Draft and card pages now use Fizzy's Lexxy 0.9.32 editor. Rails-compatible signed IDs, push, and email delivery remain incomplete.
 - Board, column, and card create/read/update/delete JSON routes; browser board creation and settings forms for name, access, auto-close period, public link, and deletion; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions. Card JSON accepts explicit creation and last activity timestamps.
@@ -90,6 +90,7 @@ python3 tests/users_events_html_parity.py
 python3 tests/user_profile_html_parity.py
 python3 tests/session_transfer_parity.py
 python3 tests/my_menu_parity.py
+python3 tests/webhooks_html_parity.py
 python3 tests/card_edit_html_parity.py
 python3 tests/email_change_html_parity.py
 python3 tests/email_confirmation_html_parity.py

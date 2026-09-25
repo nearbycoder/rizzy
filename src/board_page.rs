@@ -12,6 +12,18 @@ use super::{
 
 const TEMPLATE: &str = include_str!("../static/board.html");
 
+fn webhook_link(principal: &Principal, board_id: &str) -> String {
+    if principal.role == "owner" || principal.role == "admin" {
+        format!(
+            "<a class=\"board-webhooks\" href=\"/{}/boards/{}/webhooks\" aria-label=\"Webhooks\" title=\"Webhooks\">◎<span class=\"for-screen-reader\">Webhooks</span></a>",
+            principal.slug,
+            escape(board_id)
+        )
+    } else {
+        String::new()
+    }
+}
+
 fn column_color_class(color: &str) -> &'static str {
     match color {
         "var(--color-card-1)" => "cards--color-1",
@@ -187,6 +199,7 @@ pub(super) async fn show_filtered(
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
         ("HOME_PATH", format!("/{}/", principal.slug)),
+        ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
         (
             "SETTINGS_LINK",
             format!(
@@ -544,6 +557,7 @@ pub(super) async fn show(
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
         ("HOME_PATH", format!("/{account}/")),
+        ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
         ("SETTINGS_LINK", format!("<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",escape(&board_id),escape(&board_name),escape(&board_name))),
         ("ADD_COLUMN", "<button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button>".to_owned()),
         ("FILTER_FORM", filter_form(account, &board_id, &CardQuery::default())),

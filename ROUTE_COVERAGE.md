@@ -2,14 +2,13 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 182. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 184. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
 | `my/passkeys` | 6 | 0 |
 | `notifications/unsubscribes` | 3 | 0 |
 | `users/push_subscriptions` | 3 | 0 |
-| `webhooks` | 8 | 6 |
 | `cards` | 8 | 7 |
 | `cards/assignments` | 2 | 1 |
 | `cards/boards` | 3 | 2 |
@@ -103,6 +102,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `users/joins` | 2 | 2 |
 | `users/roles` | 2 | 2 |
 | `users/verifications` | 2 | 2 |
+| `webhooks` | 8 | 8 |
 | `webhooks/activations` | 1 | 1 |
 | `webhooks/deliveries` | 1 | 1 |
 

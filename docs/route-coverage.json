@@ -426,14 +426,14 @@
       "path": "/boards/:board_id/webhooks/new(.:format)",
       "controller": "webhooks",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/boards/:board_id/webhooks/:id/edit(.:format)",
       "controller": "webhooks",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1900,6 +1900,18 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/boards/{board}/webhooks/new"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/boards/{board}/webhooks/{webhook}/edit"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/boards/{board}/webhooks/{webhook}"
+    },
+    {
+      "method": "POST",
       "path": "/{account}/boards/{board}/webhooks/{webhook}"
     },
     {

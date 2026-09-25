@@ -19,7 +19,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, and column pages | No |
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
-| Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
+| Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, and access cleanup | No |
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, and common formatted text | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
@@ -36,6 +36,8 @@ The first fidelity gate is to run each upstream API controller test against an e
 `tests/my_menu_parity.py` checks the account navigation menu's main sections, ETag reuse, board addition invalidation, and HTML-only response against Fizzy. Rizzy links to the menu from its board, card, and activity views. Its saved-view labels, styling, keyboard behavior, and conditional caching inputs are still simpler than Fizzy's.
 
 `tests/card_edit_html_parity.py` compares the dedicated edit route's Turbo frame, form fields, Lexxy editor, JSON rejection, save, and reloaded title against both apps. Chromium submitted the Rust form and showed the updated card without errors. Fizzy's edit route inserts the editor into the card view and updates its save control via Turbo; Rizzy's route currently renders a standalone editing page with a matching frame and a simpler save flow.
+
+`tests/webhooks_html_parity.py` compares the browser webhook list, new and edit forms, validation, create/update/delete redirects, rendered detail, and JSON collection against Fizzy. Chromium created a webhook and opened its edit form; `tests/webhooks.py` confirmed the JSON API and delivery worker still pass. The Rust pages use simpler styling, and specialized webhook payload formats and broader delivery parity remain outstanding.
 
 The filter settings refresh route returns a Turbo Stream save or delete toggle for the current filter without changing it. `tests/filters.py` checks unsaved, saved, and account-scoped filters. The live source returned the same status, content type, target, and save/delete state for unsaved and saved requests; exact markup and the complete filter settings UI have not been matched.
 

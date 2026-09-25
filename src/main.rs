@@ -49,6 +49,7 @@ mod signup_page;
 mod signup_seed;
 mod storage;
 mod user_page;
+mod webhook_page;
 
 struct App {
     db: SqlitePool,
@@ -1739,8 +1740,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(list_webhooks).post(create_webhook),
         )
         .route(
+            "/{account}/boards/{board}/webhooks/new",
+            get(webhook_page::new),
+        )
+        .route(
+            "/{account}/boards/{board}/webhooks/{webhook}/edit",
+            get(webhook_page::edit),
+        )
+        .route(
             "/{account}/boards/{board}/webhooks/{webhook}",
             get(show_webhook)
+                .post(update_webhook)
                 .put(update_webhook)
                 .patch(update_webhook)
                 .delete(delete_webhook),
@@ -4690,6 +4700,12 @@ async fn list_webhooks(
             .map_err(db_err)?;
     let rows=sqlx::query("SELECT * FROM webhooks WHERE board_id=? AND account_id=? ORDER BY name ASC,id DESC LIMIT ? OFFSET ?")
         .bind(&board_id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok(
+            webhook_page::index(p.slug, &board_id, &rows, page, total, offset, limit)
+                .into_response(),
+        );
+    }
     let host = base(&headers);
     let mut out = Vec::new();
     for row in &rows {
@@ -4701,33 +4717,101 @@ async fn show_webhook(
     State(app): Shared,
     Path((account, board_id, webhook_id)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let b = board(&app, &p, &board_id).await?;
     p.account_admin()?;
     let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
-    Ok(Json(webhook_json(&app, &p, &b, &w, &base(&headers)).await?))
+    if !headers.contains_key("x-rizzy-json-request") {
+        let deliveries = sqlx::query("SELECT state,created_at FROM webhook_deliveries WHERE webhook_id=? ORDER BY created_at DESC,id DESC LIMIT 20")
+            .bind(&webhook_id).fetch_all(&app.db).await.map_err(db_err)?;
+        return Ok(webhook_page::show(p.slug, &board_id, &w, &deliveries).into_response());
+    }
+    Ok(Json(webhook_json(&app, &p, &b, &w, &base(&headers)).await?).into_response())
+}
+fn webhook_body(headers: &HeaderMap, raw: &Bytes) -> Result<(Value, bool)> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
+    if !form {
+        return serde_json::from_slice(raw)
+            .map(|body| (body, false))
+            .map_err(|_| bad("Invalid JSON"));
+    }
+    let mut webhook = serde_json::Map::new();
+    let mut actions = Vec::new();
+    let mut method = None;
+    for (key, value) in url::form_urlencoded::parse(raw) {
+        match key.as_ref() {
+            "webhook[name]" => {
+                webhook.insert("name".into(), json!(value.into_owned()));
+            }
+            "webhook[url]" => {
+                webhook.insert("url".into(), json!(value.into_owned()));
+            }
+            "webhook[subscribed_actions][]" => actions.push(value.into_owned()),
+            "_method" => method = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+    webhook.insert("subscribed_actions".into(), json!(actions));
+    let mut body = json!({"webhook": webhook});
+    if let Some(method) = method {
+        body["_method"] = json!(method);
+    }
+    Ok((body, true))
 }
 async fn create_webhook(
     State(app): Shared,
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
+    let (body, form) = webhook_body(&headers, &body)?;
     let p = principal(&app, &headers, &account).await?;
     let b = board(&app, &p, &board_id).await?;
     p.write()?;
     p.account_admin()?;
     let v = nested(&body, "webhook");
-    let name = required(v, "name")?;
-    let url = validate_webhook_url(&required(v, "url")?)?;
+    let name = string(v, "name").unwrap_or_default();
+    let url = string(v, "url").unwrap_or_default();
     let actions = normalized_webhook_actions(v.get("subscribed_actions").unwrap_or(&Value::Null));
+    if name.trim().is_empty() || validate_webhook_url(&url).is_err() {
+        if form {
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                webhook_page::invalid_form(
+                    p.slug,
+                    &board_id,
+                    None,
+                    "Name and a valid http:// or https:// URL are required",
+                    &name,
+                    &url,
+                    &actions,
+                ),
+            )
+                .into_response());
+        }
+        return Err(bad("Name and a valid URL are required"));
+    }
+    let url = validate_webhook_url(&url)?;
     let webhook_id = id();
     let timestamp = now();
     sqlx::query("INSERT INTO webhooks(id,account_id,board_id,name,url,signing_secret,subscribed_actions,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
         .bind(&webhook_id).bind(&p.account_id).bind(&board_id).bind(name).bind(url).bind(webhook_secret())
         .bind(json!(actions).to_string()).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
     let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("/{account}/boards/{board_id}/webhooks/{webhook_id}"),
+            )],
+        )
+            .into_response());
+    }
     let host = base(&headers);
     Ok(created(
         format!("{host}/{account}/boards/{board_id}/webhooks/{webhook_id}.json"),
@@ -4738,8 +4822,23 @@ async fn update_webhook(
     State(app): Shared,
     Path((account, board_id, webhook_id)): Path<(String, String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
+    let (body, form) = webhook_body(&headers, &body)?;
+    if method == Method::POST {
+        if !form {
+            return Err(missing());
+        }
+        match body.get("_method").and_then(Value::as_str) {
+            Some("delete") => {
+                return delete_webhook(State(app), Path((account, board_id, webhook_id)), headers)
+                    .await;
+            }
+            Some("put" | "patch") => {}
+            _ => return Err(missing()),
+        }
+    }
     let p = principal(&app, &headers, &account).await?;
     let b = board(&app, &p, &board_id).await?;
     p.write()?;
@@ -4748,6 +4847,23 @@ async fn update_webhook(
     let v = nested(&body, "webhook");
     let name = string(v, "name").unwrap_or_else(|| w.get("name"));
     if name.trim().is_empty() {
+        if form {
+            let selected =
+                normalized_webhook_actions(v.get("subscribed_actions").unwrap_or(&Value::Null));
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                webhook_page::invalid_form(
+                    p.slug,
+                    &board_id,
+                    Some(&w),
+                    "Name can't be blank",
+                    &name,
+                    "",
+                    &selected,
+                ),
+            )
+                .into_response());
+        }
         return Err(bad("name is required"));
     }
     let actions = v
@@ -4765,15 +4881,23 @@ async fn update_webhook(
         .await
         .map_err(db_err)?;
     let updated = webhook_row(&app, &p, &board_id, &webhook_id).await?;
-    Ok(Json(
-        webhook_json(&app, &p, &b, &updated, &base(&headers)).await?,
-    ))
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("/{account}/boards/{board_id}/webhooks/{webhook_id}"),
+            )],
+        )
+            .into_response());
+    }
+    Ok(Json(webhook_json(&app, &p, &b, &updated, &base(&headers)).await?).into_response())
 }
 async fn delete_webhook(
     State(app): Shared,
     Path((account, board_id, webhook_id)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.write()?;
@@ -4788,7 +4912,18 @@ async fn delete_webhook(
     if deleted.rows_affected() == 0 {
         return Err(missing());
     }
-    Ok(StatusCode::NO_CONTENT)
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("/{account}/boards/{board_id}/webhooks"),
+            )],
+        )
+            .into_response())
+    }
 }
 async fn activate_webhook(
     State(app): Shared,
@@ -4813,6 +4948,16 @@ async fn activate_webhook(
         return Err(missing());
     }
     let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("/{account}/boards/{board_id}/webhooks/{webhook_id}"),
+            )],
+        )
+            .into_response());
+    }
     Ok((
         StatusCode::CREATED,
         Json(webhook_json(&app, &p, &b, &w, &base(&headers)).await?),
