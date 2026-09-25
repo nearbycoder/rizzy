@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 118. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 121. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -19,7 +19,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `my/access_tokens` | 5 | 3 |
 | `users/avatars` | 2 | 0 |
 | `users/data_exports` | 2 | 0 |
-| `users/verifications` | 2 | 0 |
 | `webhooks` | 8 | 6 |
 | `account/cancellations` | 1 | 0 |
 | `account/join_codes` | 5 | 4 |
@@ -73,7 +72,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `users` | 6 | 5 |
 | `users/email_addresses` | 2 | 1 |
 | `users/events` | 1 | 0 |
-| `users/joins` | 2 | 1 |
 | `account/entropies` | 2 | 2 |
 | `account/settings` | 3 | 3 |
 | `activities` | 1 | 1 |
@@ -102,7 +100,9 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `searches` | 1 | 1 |
 | `tags` | 1 | 1 |
 | `users/email_addresses/confirmations` | 2 | 2 |
+| `users/joins` | 2 | 2 |
 | `users/roles` | 2 | 2 |
+| `users/verifications` | 2 | 2 |
 | `webhooks/activations` | 1 | 1 |
 | `webhooks/deliveries` | 1 | 1 |
 

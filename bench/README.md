@@ -34,7 +34,7 @@ The [first card creation run](results/write-before-queue-2026-09-24.json) showed
 | 32 | 104.2 | 316.9 | 552.3 ms | 116.9 ms |
 | 64 | 104.8 | 317.6 | 840.1 ms | 217.0 ms |
 
-Each run had zero HTTP errors and unique card numbers. Fizzy performs additional event, search, notification, and job work on each write, which Rizzy has not fully replicated. These numbers show the current card creation path under contention, not full application write parity. The single process mutex also does not coordinate multiple Rizzy processes; clustered deployment needs a database coordinated allocation strategy.
+Each run had zero HTTP errors and unique card numbers. Fizzy performs additional event, search, notification, and job work on each write, which Rizzy has not fully replicated. These numbers show the current card creation path under contention, not full application write parity. The local mutex queues writes within one Rizzy process; the atomic SQLite account-row update allocates numbers across processes. `tests/cluster_writes.py` checks 100 concurrent creates through two processes for errors and duplicate or missing numbers. SQLite still serializes writers, so this check does not establish clustered throughput.
 
 The [current write run](results/write-current-2026-09-24.json), after adding creator watches and richer card responses, measured 314 Rizzy writes per second versus 107 Fizzy writes per second at 32 clients (200 cards each). Both had zero errors and unique card numbers. The same side effect and clustered deployment limits still apply.
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
   active INTEGER NOT NULL DEFAULT 1,
+  verified_at TEXT,
   created_at TEXT NOT NULL,
   UNIQUE(account_id, identity_id)
 );

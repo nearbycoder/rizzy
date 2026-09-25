@@ -1,5 +1,6 @@
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
     response::{Html, IntoResponse, Response},
@@ -960,6 +961,20 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    let user_columns = sqlx::query("PRAGMA table_info(users)")
+        .fetch_all(&db)
+        .await?;
+    if !user_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "verified_at")
+    {
+        sqlx::query("ALTER TABLE users ADD COLUMN verified_at TEXT")
+            .execute(&db)
+            .await?;
+        sqlx::query("UPDATE users SET verified_at=created_at WHERE role='owner'")
+            .execute(&db)
+            .await?;
+    }
     let search_backfilled: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_v1'")
             .fetch_one(&db)
@@ -1216,6 +1231,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(join_page).post(redeem_join_code),
         )
         .route("/{account}/users/joins", post(complete_join))
+        .route("/{account}/users/joins/new", get(new_user_join))
+        .route(
+            "/{account}/users/verifications/new",
+            get(new_user_verification),
+        )
+        .route("/{account}/users/verifications", post(verify_user))
         .route(
             "/{account}/users/{id}",
             get(show_user)
@@ -1442,7 +1463,7 @@ async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Er
         .bind(&timestamp)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,?,'owner',?)").bind(&user_id).bind(&account_id).bind(&identity_id).bind(name).bind(&timestamp).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)").bind(&user_id).bind(&account_id).bind(&identity_id).bind(name).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES(?,?,?,?,?,?)").bind(&token_id).bind(&identity_id).bind(hash(&token)).bind("Bootstrap token").bind("write").bind(&timestamp).execute(&mut *tx).await?;
     tx.commit().await?;
     println!("Account: {slug}\nBearer token: {token}");
@@ -1867,9 +1888,9 @@ async fn complete_signup(
     insert_join_code_tx(&mut tx, &account_id)
         .await
         .map_err(db_err)?;
-    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,?,'owner',?)")
+    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")
         .bind(&user_id).bind(&account_id).bind(&identity_id)
-        .bind(&name).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&name).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
         .bind(&system_identity)
         .bind(format!("system+{account_id}@rizzy.invalid"))
@@ -2643,10 +2664,24 @@ async fn complete_join(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    body: Bytes,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let name = url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "user[name]")
+            .map(|(_, value)| value.into_owned())
+            .unwrap_or_default();
+        json!({"user":{"name":name}})
+    } else {
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let name = required(nested(&body, "user"), "name")?;
     sqlx::query("UPDATE users SET name=? WHERE id=? AND account_id=?")
         .bind(name)
@@ -2655,7 +2690,53 @@ async fn complete_join(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    if form {
+        Ok((StatusCode::FOUND, [(header::LOCATION, "/")]).into_response())
+    } else {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    }
+}
+async fn new_user_join(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    Ok(Html(format!(
+        "<!doctype html><html><title>Enter your name</title><main><h1>Great! Now enter your name</h1><form method=post action=\"/{}/users/joins\"><label>Full name <input name=\"user[name]\" autocomplete=name required autofocus></label><button id=log_in>Continue</button></form></main></html>",
+        p.slug
+    )))
+}
+async fn new_user_verification(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    Ok(Html(format!(
+        "<!doctype html><html><title>Verify</title><main><form method=post action=\"/{}/users/verifications\"><button>Continue</button></form></main><script>document.forms[0].requestSubmit()</script></html>",
+        p.slug
+    )))
+}
+async fn verify_user(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    sqlx::query("UPDATE users SET verified_at=COALESCE(verified_at,?) WHERE id=? AND account_id=?")
+        .bind(now())
+        .bind(&p.user_id)
+        .bind(&p.account_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok((
+        StatusCode::FOUND,
+        [(header::LOCATION, format!("/{}/users/joins/new", p.slug))],
+    )
+        .into_response())
 }
 async fn update_account(
     State(app): Shared,

@@ -1147,21 +1147,21 @@
       "path": "/users/joins/new(.:format)",
       "controller": "users/joins",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/users/verifications(.:format)",
       "controller": "users/verifications",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/users/verifications/new(.:format)",
       "controller": "users/verifications",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1601,6 +1601,18 @@
     {
       "method": "POST",
       "path": "/{account}/users/joins"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/joins/new"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/verifications/new"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/users/verifications"
     },
     {
       "method": "GET",
