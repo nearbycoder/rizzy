@@ -5,6 +5,17 @@ use std::collections::HashMap;
 use super::{App, Principal, Result, board, comment_edit_page, db_err, escape, storage, wrap_html};
 
 const TEMPLATE: &str = include_str!("../static/card.html");
+const NEW_COMMENT: &str = include_str!("../static/new_comment.html");
+
+pub(super) fn new_comment_form(principal: &Principal, card: &SqliteRow) -> String {
+    let values = HashMap::from([
+        ("ACCOUNT", principal.slug.to_string()),
+        ("NUMBER", card.get::<i64, _>("number").to_string()),
+        ("CARD_ID", escape(&card.get::<String, _>("id"))),
+        ("BOARD_ID", escape(&card.get::<String, _>("board_id"))),
+    ]);
+    render_template(NEW_COMMENT, &values)
+}
 
 pub(super) fn edit(principal: &Principal, card: &SqliteRow) -> Html<String> {
     let card_id: String = card.get("id");
@@ -96,9 +107,6 @@ pub(super) async fn show(
         .await
         .map_err(db_err)?;
     let mut comment_html = String::new();
-    if comments.is_empty() {
-        comment_html.push_str("<p class=\"empty\">No comments yet.</p>");
-    }
     for comment in comments {
         let body: String = comment.get("body");
         let content = if comment.get::<String, _>("creator_role") == "system" {
@@ -219,6 +227,7 @@ pub(super) async fn show(
         ("CREATOR_NAME", escape(&creator_name)),
         ("CREATED_AT", escape(&card.get::<String, _>("created_at"))),
         ("COMMENTS", comment_html),
+        ("NEW_COMMENT_FORM", new_comment_form(principal, card)),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
         ("IMAGE", image),

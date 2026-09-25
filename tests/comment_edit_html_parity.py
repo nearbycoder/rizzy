@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare comment edit pages and JSON updates against a running Fizzy."""
 import http.cookiejar
+import datetime
 import json
 import os
 import re
@@ -32,7 +33,8 @@ def check(target):
         status, _, raw = request(target, f"/{account}/boards/{board['id']}/cards", "POST",
                                  {"card":{"title":"Edit my comment"}}, bearer=True)
         assert status == 201, (target["name"], "card", status)
-        number = json.loads(raw)["number"]
+        card = json.loads(raw)
+        number = card["number"]
         status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
                                  {"comment":{"body":"Original comment"}}, bearer=True)
         assert status == 201, (target["name"], "comment", status)
@@ -42,6 +44,27 @@ def check(target):
         assert status == 200, (target["name"], "edit", status)
         csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', body)
         csrf = csrf_match.group(1).decode() if csrf_match else None
+        new_target = f"new_comment_card_{card['id']}".encode()
+        status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200 and new_target in card_html
+        status, headers, created_stream = request(target, f"/{account}/cards/{number}/comments",
+                                                   "POST", {"comment":{"body":"Turbo-created comment"}},
+                                                   accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html"
+        assert b'action="before"' in created_stream and b'action="update"' in created_stream
+        assert created_stream.count(new_target) >= 2 and b"Turbo-created comment" in created_stream
+        status, headers, created_stream = request(target, f"/{account}/cards/{number}/comments",
+                                                   "POST", b"comment%5Bbody%5D=Form+Turbo+comment",
+                                                   accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html"
+        assert b'action="before"' in created_stream and b'action="update"' in created_stream
+        assert b"Form Turbo comment" in created_stream
+        backdated = "2024-01-15T10:30:00Z"
+        status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
+                                 {"comment":{"body":"Backdated comment","created_at":backdated}}, bearer=True)
+        assert status == 201
+        saved_time = json.loads(raw)["created_at"].replace('Z', '+00:00')
+        assert datetime.datetime.fromisoformat(saved_time) == datetime.datetime.fromisoformat(backdated.replace('Z', '+00:00'))
         for marker in (b"turbo-frame", b"Original comment", b"comment[body]", b"Save", b"Cancel", b"Delete", b"lexxy-editor"):
             assert marker in body, (target["name"], marker)
         status, _, _ = request(target, path + "/edit.json", bearer=True)
@@ -98,6 +121,7 @@ def check(target):
             assert status == 302 and headers["Location"] == f"/{account}/cards/{number}"
             assert request(target, form_path, bearer=True)[0] == 404
         return {"edit":200,"json_edit":406,"json_update":200,"browser_card":200,
+                "turbo_create":200,"turbo_form_create":200,"backdated_create":201,
                 "html_show":200,"turbo_update":200,"turbo_form":200,
                 "turbo_destroy":200,"html_delete":406}
     finally:
@@ -114,7 +138,7 @@ def main():
     os.environ["FIZZY_EMAIL"] = email
     source, rust = check(target("FIZZY")), check(target("RIZZY"))
     assert source == rust
-    print("Comment parity matched: HTML frames, JSON, Turbo edit/form/delete, and HTML delete side effect")
+    print("Comment parity matched: Turbo create/edit/delete, HTML frames, JSON timestamps, and HTML delete side effect")
 
 
 if __name__ == "__main__":

@@ -8599,20 +8599,39 @@ async fn create_comment(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
+    let body: Value = if form {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        let mut comment = json!({"body":fields.get("comment[body]")});
+        if let Some(created_at) = fields.get("comment[created_at]") {
+            comment["created_at"] = json!(created_at);
+        }
+        json!({"comment":comment})
+    } else {
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
     if c.get::<String, _>("status") != "published" {
         return Err(err(StatusCode::FORBIDDEN, "Card is not commentable"));
     }
-    let content = required(nested(&body, "comment"), "body")?;
+    let comment_input = nested(&body, "comment");
+    let content = required(comment_input, "body")?;
     let (plain_body, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
     let search_text = search_content(plain_body);
     let id = id();
     let timestamp = now();
+    let created_at =
+        timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id)
@@ -8620,7 +8639,7 @@ async fn create_comment(
         .bind(&p.user_id)
         .bind(&content)
         .bind(&search_text)
-        .bind(&timestamp)
+        .bind(&created_at)
         .bind(&timestamp)
         .execute(&mut *tx)
         .await
@@ -8663,10 +8682,23 @@ async fn create_comment(
         record_activity_spike(&app, &p.account_id, &c.get::<String, _>("id")).await?;
     }
     let r = comment_row(&app, &c, &id).await?;
-    Ok(created(
-        format!("/{account}/cards/{number}/comments/{id}.json"),
-        comment_json(&app, &p, &c, &r, &base(&headers)).await?,
-    ))
+    if wants_turbo_stream(&headers) {
+        let target = format!("new_comment_card_{}", escape(&c.get::<String, _>("id")));
+        let comment = comment_edit_page::rendered_comment_frame(&app, &p, &c, &r).await?;
+        let fresh_form = card_page::new_comment_form(&p, &c);
+        return Ok((
+            [(header::CONTENT_TYPE, "text/vnd.turbo-stream.html; charset=utf-8")],
+            format!("<turbo-stream action=\"before\" target=\"{target}\"><template>{comment}</template></turbo-stream><turbo-stream action=\"update\" target=\"{target}\"><template>{fresh_form}</template></turbo-stream>"),
+        ).into_response());
+    }
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(created(
+            format!("/{account}/cards/{number}/comments/{id}.json"),
+            comment_json(&app, &p, &c, &r, &base(&headers)).await?,
+        ))
+    } else {
+        Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
+    }
 }
 async fn show_comment(
     State(app): Shared,
