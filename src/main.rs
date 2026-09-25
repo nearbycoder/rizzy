@@ -1159,6 +1159,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
         .route("/", get(home))
+        .route(
+            "/client_configurations/android_v1.json",
+            get(android_config),
+        )
+        .route("/client_configurations/ios_v1.json", get(ios_config))
         .route("/session", post(request_magic_link).delete(logout_session))
         .route("/session/magic_link", post(complete_magic_link))
         .route("/signup", post(request_signup))
@@ -1170,6 +1175,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::delete(delete_token),
         )
         .route("/{account}/my/identity", get(my_identity))
+        .route(
+            "/{account}/my/timezone",
+            axum::routing::put(update_timezone).patch(update_timezone),
+        )
+        .route(
+            "/{account}/client_configurations/android_v1.json",
+            get(android_config),
+        )
+        .route(
+            "/{account}/client_configurations/ios_v1.json",
+            get(ios_config),
+        )
         .route(
             "/{account}/my/access_tokens",
             get(list_tokens).post(create_token),
@@ -1904,6 +1921,37 @@ async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
         }
     }
     Ok(())
+}
+fn config_response(body: &'static str) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "public, max-age=60"),
+        ],
+        body,
+    )
+        .into_response()
+}
+async fn android_config() -> Response {
+    config_response(include_str!(
+        "../static/client_configurations/android_v1.json"
+    ))
+}
+async fn ios_config() -> Response {
+    config_response(include_str!("../static/client_configurations/ios_v1.json"))
+}
+async fn update_timezone(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let timezone = body.get("timezone_name").and_then(Value::as_str);
+    sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name")
+        .bind(&p.user_id).bind(&p.account_id).bind(timezone).execute(&app.db).await.map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn my_identity(
     State(app): Shared,

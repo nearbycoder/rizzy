@@ -44,6 +44,7 @@ python3 tests/smoke.py
 python3 tests/auth.py
 python3 tests/join.py
 python3 tests/email_change.py
+python3 tests/client_settings.py
 python3 tests/webhooks.py
 python3 tests/notifications.py
 python3 tests/search.py

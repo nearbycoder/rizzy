@@ -232,6 +232,11 @@ CREATE TABLE IF NOT EXISTS notification_settings (
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   bundle_email_frequency TEXT NOT NULL DEFAULT 'never' CHECK(bundle_email_frequency IN ('never','every_few_hours','daily','weekly'))
 );
+CREATE TABLE IF NOT EXISTS user_timezones (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  timezone_name TEXT
+);
 CREATE TABLE IF NOT EXISTS webhooks (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
