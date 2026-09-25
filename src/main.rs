@@ -6396,16 +6396,24 @@ async fn show_notification_settings(
         let id: String = board.get("id");
         let name: String = board.get("name");
         let involvement: String = board.get("involvement");
+        let watching = involvement == "watching";
+        let action = if watching {
+            "Stop watching"
+        } else {
+            "Watch this"
+        };
         board_html.push_str(&format!(
-            "<li><a href=\"/{}/boards/{}\">{}</a> <span>{}</span></li>",
+            "<div class=\"board-involvement\"><h3>{}</h3><span class=\"board-separator\" aria-hidden=\"true\"></span><button type=\"button\" class=\"watch-button{}\" data-board-involvement data-url=\"/{}/boards/{}/involvement\" data-involvement=\"{}\" aria-label=\"{}\" title=\"{}\" aria-pressed=\"{}\"><span class=\"watch-icon\" aria-hidden=\"true\">{}{}</span></button></div>",
+            escape(&name),
+            if watching { " is-watching" } else { "" },
             p.slug,
             escape(&id),
-            escape(&name),
-            if involvement == "watching" {
-                "Watching"
-            } else {
-                "Access only"
-            }
+            involvement,
+            action,
+            action,
+            watching,
+            include_str!("../assets/notification-bell.svg"),
+            include_str!("../assets/notification-bell-off.svg"),
         ));
     }
     let choices = [
@@ -6434,11 +6442,12 @@ async fn show_notification_settings(
         "<h2>Push notifications are OFF</h2><p>Push delivery is not configured.</p>".into()
     };
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Notification Settings | Rizzy</title><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#f7f5f0;color:#252322}}main{{max-width:900px;margin:35px auto;padding:20px}}.panels{{display:grid;grid-template-columns:1fr 1fr;gap:24px}}section{{background:white;padding:22px;border-radius:12px;box-shadow:0 4px 24px #0001}}select,button{{font:inherit;padding:9px}}li{{margin:12px 0}}@media(max-width:700px){{.panels{{grid-template-columns:1fr}}}}</style></head><body><main><p><a href=\"/{}/\">← Activity</a></p><h1>Notification Settings</h1><div class=\"panels\"><section><h2>Boards</h2><ul>{board_html}</ul></section><section>{push_html}<p><a href=\"/{}/users/{}/push_subscriptions\">Manage this device’s push subscriptions</a></p><h2>Email Notifications</h2><p>Get a single email with all your notifications every few hours, daily, or weekly.</p><form method=\"post\" action=\"/{}/notifications/settings\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label for=\"bundle-email-frequency\">Email me about new notifications...</label><select id=\"bundle-email-frequency\" name=\"user_settings[bundle_email_frequency]\" onchange=\"this.form.requestSubmit()\">{choices}</select><button type=\"submit\">Save</button></form></section></div></main></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Notification Settings | Rizzy</title><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#f7f5f0;color:#252322}}main{{max-width:900px;margin:35px auto;padding:20px}}.panels{{display:grid;grid-template-columns:1fr 1fr;gap:24px}}section{{background:white;padding:22px;border-radius:12px;box-shadow:0 4px 24px #0001}}select,button{{font:inherit;padding:9px}}.board-involvement{{display:flex;align-items:center;gap:12px;min-height:42px}}.board-involvement h3{{font-size:1rem;font-weight:500;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.board-separator{{flex:1;border-top:1px dashed #a6a19b}}.watch-button{{border:1px solid #bcb7b0;border-radius:50%;width:36px;height:36px;padding:0;background:white;cursor:pointer}}.watch-button.is-watching{{background:#252322;color:white;border-color:#252322}}.watch-icon svg{{width:20px;height:20px;fill:currentColor;vertical-align:middle}}.watch-icon svg:first-child{{display:none}}.is-watching .watch-icon svg:first-child{{display:inline}}.is-watching .watch-icon svg:last-child{{display:none}}.watch-button:focus-visible{{outline:3px solid #147dbe;outline-offset:2px}}.watch-button:disabled{{opacity:.5;cursor:wait}}@media(max-width:700px){{.panels{{grid-template-columns:1fr}}}}</style></head><body><main><p><a href=\"/{}/\">← Activity</a></p><h1>Notification Settings</h1><div class=\"panels\"><section><h2>Boards</h2><div class=\"board-list\">{board_html}</div><p id=\"board-involvement-error\" role=\"status\"></p></section><section>{push_html}<p><a href=\"/{}/users/{}/push_subscriptions\">Manage this device’s push subscriptions</a></p><h2>Email Notifications</h2><p>Get a single email with all your notifications every few hours, daily, or weekly.</p><form method=\"post\" action=\"/{}/notifications/settings\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label for=\"bundle-email-frequency\">Email me about new notifications...</label><select id=\"bundle-email-frequency\" name=\"user_settings[bundle_email_frequency]\" onchange=\"this.form.requestSubmit()\">{choices}</select><button type=\"submit\">Save</button></form></section></div></main><script>{}</script></body></html>",
         p.slug,
         p.slug,
         escape(&p.user_id),
-        p.slug
+        p.slug,
+        include_str!("../assets/notifications_boards.js")
     );
     Ok(Html(html).into_response())
 }

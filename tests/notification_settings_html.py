@@ -56,9 +56,28 @@ def main():
             status, _, _ = call('/session/magic_link', 'POST', {'code': headers['X-Magic-Link-Code']}, 'application/json')
             assert status == 200
             path = f'/{account}/notifications/settings'
+            status, headers, _ = call(f'/{account}/boards', 'POST', {'board': {'name': 'Launch board'}},
+                                      'application/json', True)
+            assert status == 201
+            board_id = re.search(r'/boards/([^/.]+)', headers['Location']).group(1)
             status, _, html = call(path)
             assert status == 200 and b'Notification Settings' in html and b'Email Notifications' in html
             assert b'Boards' in html and b'value="every_few_hours" selected' in html
+            assert b'Launch board' in html and b'data-board-involvement' in html
+            assert b'data-involvement="watching"' in html and b'aria-label="Stop watching"' in html
+            assert b'fetch(button.dataset.url' in html
+            involvement_path = f'/{account}/boards/{board_id}/involvement'
+            status, _, _ = call(involvement_path, 'PUT', {'involvement': 'access_only'},
+                                'application/json', True)
+            assert status == 204
+            status, _, html = call(path)
+            assert status == 200 and b'data-involvement="access_only"' in html
+            assert b'aria-label="Watch this"' in html
+            status, _, _ = call(involvement_path, 'PUT', {'involvement': 'watching'},
+                                'application/json', True)
+            assert status == 204
+            status, _, html = call(path)
+            assert status == 200 and b'data-involvement="watching"' in html
             assert b'data-push-settings' in html and b'pushManager.subscribe' in html
             assert b'Turn ON push notifications on this device' in html
             form = urllib.parse.urlencode({'_method': 'patch', 'user_settings[bundle_email_frequency]': 'never'}).encode()
@@ -77,7 +96,7 @@ def main():
             assert status == 204
             status, _, html = call(path)
             assert b'value="weekly" selected' in html
-            print('PASS notification settings browser view, form, JSON, token issue')
+            print('PASS notification settings browser view, board involvement, form, JSON, token issue')
         finally:
             stop(server)
 
