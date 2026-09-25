@@ -1399,14 +1399,14 @@
       "path": "/prompts/users(.:format)",
       "controller": "prompts/users",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/prompts/boards/:board_id/users(.:format)",
       "controller": "prompts/boards/users",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1597,6 +1597,14 @@
     {
       "method": "GET",
       "path": "/{account}/users"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/prompts/users"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/prompts/boards/{board}/users"
     },
     {
       "method": "POST",

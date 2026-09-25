@@ -352,11 +352,13 @@ pub(crate) async fn build(app: &App, export: &SqliteRow) -> BuildResult<()> {
         let mut blob_ids: HashMap<String, String> = blob_rows.iter().map(|row| {
             (row.get("attachable_sgid"), format!("gid://fizzy/ActiveStorage::Blob/{}", row.get::<String,_>("id")))
         }).collect();
-        let user_ids = sqlx::query("SELECT id FROM users WHERE account_id=?")
+        let user_ids = sqlx::query("SELECT user_id,sgid FROM user_attachables WHERE account_id=?")
             .bind(&account_id).fetch_all(&app.db).await?;
         for user in user_ids {
-            let user_id: String = user.get("id");
-            blob_ids.insert(format!("gid://fizzy/User/{user_id}"), format!("gid://fizzy/User/{user_id}"));
+            let user_id: String = user.get("user_id");
+            let gid = format!("gid://fizzy/User/{user_id}");
+            blob_ids.insert(user.get("sgid"), gid.clone());
+            blob_ids.insert(gid.clone(), gid);
         }
         for record_set in RECORD_SETS {
             emit_record_set(app, &sender, &account_id, record_set, &blob_ids).await?;

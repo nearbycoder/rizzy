@@ -191,7 +191,8 @@ def run(archive_path):
                                              (imported_id,)).fetchone()[0]
                     assert 'sgid="' in description and ' gid="' not in description
                     if has_user_mention:
-                        assert f'sgid="gid://fizzy/User/{owner["id"]}"' in description
+                        user_sgid = db.execute("SELECT sgid FROM user_attachables WHERE user_id=?", (owner["id"],)).fetchone()[0]
+                        assert f'sgid="{user_sgid}"' in description
                     card_number = db.execute("SELECT number FROM cards WHERE account_id=? LIMIT 1",
                                              (imported_id,)).fetchone()[0]
                     status, card = call(url, token, f"/{created['account']}/cards/{card_number}")

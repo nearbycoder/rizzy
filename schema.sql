@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS users (
   UNIQUE(account_id, identity_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS users_system_account ON users(account_id) WHERE role='system';
+CREATE TABLE IF NOT EXISTS user_attachables (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  sgid TEXT NOT NULL UNIQUE
+);
+CREATE TRIGGER IF NOT EXISTS user_attachables_created AFTER INSERT ON users BEGIN
+  INSERT INTO user_attachables(user_id,account_id,sgid) VALUES(NEW.id,NEW.account_id,lower(hex(randomblob(32))));
+END;
 CREATE TABLE IF NOT EXISTS access_tokens (
   id TEXT PRIMARY KEY,
   identity_id TEXT NOT NULL REFERENCES identities(id),

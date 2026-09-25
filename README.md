@@ -25,7 +25,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
 - Special board column JSON lists (Maybe?, Not now, Done) and public pages for those lists and named columns. The public board page links to each view.
-- Initial notifications for board watchers, card assignments, card watchers, and User attachments in card/comment rich text, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings. Mention creation and in-app notifications work for Rizzy's portable User references; the native mention editor, signed IDs, push, and email delivery remain incomplete.
+- Initial notifications for board watchers, card assignments, card watchers, and User attachments in card/comment rich text, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings. User mention picker routes issue opaque attachment IDs, and writing those attachments creates mentions and in-app notifications. The native mention editor, Rails-compatible signed IDs, push, and email delivery remain incomplete.
 - Board, column, and card create/read/update/delete JSON routes; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions. Card JSON accepts explicit creation and last activity timestamps.
 - Tag listing, card filters for saved views, terms, dates, closures, stalled activity, assignments, boards, columns and tags, and SQLite FTS5 card and comment search over visible plain text with indexed edits and deletes.
 - Initial saved filter create/delete routes with per-user deduplication and Turbo Stream toggle responses.
@@ -58,6 +58,7 @@ python3 tests/cluster_writes.py
 python3 tests/webhooks.py
 python3 tests/notifications.py
 python3 tests/mentions.py
+python3 tests/user_attachables_migration.py
 python3 tests/search.py
 python3 tests/exports.py
 python3 tests/account_transfer.py
@@ -65,6 +66,7 @@ python3 tests/account_import.py
 python3 tests/notification_source_migration.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:
 python3 tests/parity.py
+python3 tests/prompt_parity.py
 python3 tests/filter_parity.py
 python3 tests/saved_filter_parity.py
 python3 tests/stalled_parity.py

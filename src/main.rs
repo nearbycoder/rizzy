@@ -532,6 +532,37 @@ async fn queue_webhooks(
     Ok(())
 }
 
+async fn referenced_users(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+    content: &str,
+) -> Result<Vec<String>> {
+    let mut users = HashSet::new();
+    for sgid in rich_text::attachment_sgids(content) {
+        let user_id: Option<String> = if let Some(legacy_id) =
+            sgid.strip_prefix("gid://fizzy/User/")
+        {
+            sqlx::query_scalar("SELECT id FROM users WHERE id=? AND account_id=?")
+                .bind(legacy_id)
+                .bind(account_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(db_err)?
+        } else {
+            sqlx::query_scalar("SELECT user_id FROM user_attachables WHERE sgid=? AND account_id=?")
+                .bind(&sgid)
+                .bind(account_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(db_err)?
+        };
+        if let Some(user_id) = user_id {
+            users.insert(user_id);
+        }
+    }
+    Ok(users.into_iter().collect())
+}
+
 async fn queue_notifications(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     p: &Principal,
@@ -563,13 +594,14 @@ async fn queue_notifications(
     } else {
         None
     };
-    let mentioned: HashSet<String> = mention_content
-        .as_deref()
-        .map(rich_text::attachment_sgids)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|sgid| sgid.strip_prefix("gid://fizzy/User/").map(str::to_owned))
-        .collect();
+    let mentioned: HashSet<String> = if let Some(content) = mention_content {
+        referenced_users(tx, &p.account_id, &content)
+            .await?
+            .into_iter()
+            .collect()
+    } else {
+        HashSet::new()
+    };
     let recipients: Vec<String> = if action == "card_assigned" {
         particulars["assignee_ids"]
             .as_array()
@@ -605,16 +637,9 @@ async fn create_new_mentions(
     source_id: &str,
     content: &str,
 ) -> Result<()> {
-    let mut seen = HashSet::new();
-    for sgid in rich_text::attachment_sgids(content) {
-        let Some(user_id) = sgid.strip_prefix("gid://fizzy/User/") else {
-            continue;
-        };
-        if !seen.insert(user_id.to_owned()) {
-            continue;
-        }
+    for user_id in referenced_users(tx, &p.account_id, content).await? {
         let accessible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users u JOIN accesses a ON a.user_id=u.id WHERE u.id=? AND u.account_id=? AND a.board_id=?")
-            .bind(user_id).bind(&p.account_id).bind(board_id)
+            .bind(&user_id).bind(&p.account_id).bind(board_id)
             .fetch_one(&mut **tx).await.map_err(db_err)?;
         if accessible == 0 {
             continue;
@@ -622,17 +647,17 @@ async fn create_new_mentions(
         let mention_id = id();
         let timestamp = now();
         let inserted = sqlx::query("INSERT INTO mentions(id,account_id,mentionee_id,mentioner_id,source_type,source_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM mentions WHERE mentionee_id=? AND mentioner_id=? AND source_type=? AND source_id=?)")
-            .bind(&mention_id).bind(&p.account_id).bind(user_id).bind(&p.user_id).bind(source_type).bind(source_id)
-            .bind(&timestamp).bind(&timestamp).bind(user_id).bind(&p.user_id).bind(source_type).bind(source_id)
+            .bind(&mention_id).bind(&p.account_id).bind(&user_id).bind(&p.user_id).bind(source_type).bind(source_id)
+            .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&p.user_id).bind(source_type).bind(source_id)
             .execute(&mut **tx).await.map_err(db_err)?;
         if inserted.rows_affected() == 0 {
             continue;
         }
         sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1")
-            .bind(card_id).bind(user_id).execute(&mut **tx).await.map_err(db_err)?;
+            .bind(card_id).bind(&user_id).execute(&mut **tx).await.map_err(db_err)?;
         if user_id != p.user_id && p.role != "system" {
             sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Mention',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
-                .bind(id()).bind(&p.account_id).bind(user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
+                .bind(id()).bind(&p.account_id).bind(&user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
                 .bind(&timestamp).bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
         }
     }
@@ -1154,6 +1179,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    sqlx::query("INSERT OR IGNORE INTO user_attachables(user_id,account_id,sgid) SELECT id,account_id,lower(hex(randomblob(32))) FROM users")
+        .execute(&db).await?;
     migrate_notification_sources(&db).await?;
     backfill_system_users(&db).await?;
     let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
@@ -1553,6 +1580,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::delete(delete_token),
         )
         .route("/{account}/users", get(list_users))
+        .route("/{account}/prompts/users", get(prompt_users))
+        .route(
+            "/{account}/prompts/boards/{board}/users",
+            get(prompt_board_users),
+        )
         .route(
             "/{account}/users/{user}/data_exports",
             post(exports::create_user),
@@ -2596,6 +2628,85 @@ async fn active_user(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
         .await
         .map_err(db_err)?
         .ok_or_else(missing)
+}
+fn prompt_response(body: String, headers: &HeaderMap) -> Response {
+    let etag = format!("W/\"{}\"", hash(&body));
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.split(',').any(|candidate| candidate.trim() == etag));
+    let mut response = if not_modified {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else {
+        Html(body).into_response()
+    };
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("hex ETag"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    response
+}
+
+fn prompt_user_item(p: &Principal, row: &SqliteRow) -> String {
+    let id: String = row.get("id");
+    let name: String = row.get("name");
+    let sgid: String = row.get("sgid");
+    let first = name.split_whitespace().next().unwrap_or(&name);
+    let initials: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .flat_map(char::to_uppercase)
+        .collect();
+    let self_label = if id == p.user_id { " me" } else { "" };
+    let avatar = format!(
+        "<img aria-hidden=\"true\" title=\"{}\" src=\"/{}/users/{id}/avatar\" width=\"48\" height=\"48\" />",
+        escape(&name),
+        p.slug
+    );
+    format!(
+        "<lexxy-prompt-item search=\"{} {}{}\" sgid=\"{}\">\n  <template type=\"menu\">\n    {}\n    {}\n  </template>\n  <template type=\"editor\">\n    {}\n    {}\n  </template>\n</lexxy-prompt-item>\n\n",
+        escape(&name),
+        escape(&initials),
+        self_label,
+        escape(&sgid),
+        avatar,
+        escape(&name),
+        avatar,
+        escape(first)
+    )
+}
+
+async fn prompt_users(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id WHERE u.account_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
+        .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    Ok(prompt_response(
+        rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
+        &headers,
+    ))
+}
+
+async fn prompt_board_users(
+    State(app): Shared,
+    Path((account, board_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    board(&app, &p, &board_id).await?;
+    let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id JOIN accesses a ON a.user_id=u.id WHERE u.account_id=? AND a.board_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
+        .bind(&p.account_id).bind(&board_id).fetch_all(&app.db).await.map_err(db_err)?;
+    Ok(prompt_response(
+        rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
+        &headers,
+    ))
 }
 async fn list_users(
     State(app): Shared,

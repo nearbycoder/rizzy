@@ -945,6 +945,15 @@ async fn apply_archive(
     {
         return Err("Storage file has no blob metadata".into());
     }
+    let user_rows = sqlx::query("SELECT user_id,sgid FROM user_attachables WHERE account_id=?")
+        .bind(account_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    let user_sgids: HashMap<String, String> = user_rows
+        .into_iter()
+        .map(|row| (row.get("user_id"), row.get("sgid")))
+        .collect();
     let gid = regex::Regex::new(r#"gid=["']gid://fizzy/(ActiveStorage::Blob|User)/([^"']+)["']"#)
         .map_err(|e| e.to_string())?;
     for rich in records(&archive, "action_text_rich_texts") {
@@ -952,11 +961,7 @@ async fn apply_archive(
         for capture in gid.captures_iter(original) {
             let valid = match &capture[1] {
                 "ActiveStorage::Blob" => blob_sgids.contains_key(&capture[2]),
-                "User" => archive.groups.get("users").is_some_and(|users| {
-                    users
-                        .iter()
-                        .any(|user| maybe_field(user, "id") == Some(&capture[2]))
-                }),
+                "User" => user_sgids.contains_key(&capture[2]),
                 _ => false,
             };
             if !valid {
@@ -966,7 +971,10 @@ async fn apply_archive(
         let body = gid
             .replace_all(original, |capture: &regex::Captures<'_>| {
                 let sgid = if &capture[1] == "User" {
-                    format!("gid://fizzy/User/{}", &capture[2])
+                    user_sgids
+                        .get(&capture[2])
+                        .expect("checked user")
+                        .to_owned()
                 } else {
                     blob_sgids
                         .get(&capture[2])
