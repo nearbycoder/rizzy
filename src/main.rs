@@ -372,6 +372,18 @@ async fn record_event(
         &timestamp,
     )
     .await?;
+    queue_notifications(
+        &mut tx,
+        p,
+        board_id,
+        card_id,
+        &event_id,
+        eventable_type,
+        action,
+        &particulars,
+        &timestamp,
+    )
+    .await?;
     sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
         .bind(&timestamp)
         .bind(card_id)
@@ -394,6 +406,46 @@ async fn queue_webhooks(
     for webhook_id in webhooks {
         sqlx::query("INSERT INTO webhook_deliveries(id,account_id,webhook_id,event_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(id()).bind(account_id).bind(webhook_id).bind(event_id).bind(timestamp).bind(timestamp)
+            .execute(&mut **tx).await.map_err(db_err)?;
+    }
+    Ok(())
+}
+
+async fn queue_notifications(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    p: &Principal,
+    board_id: &str,
+    card_id: &str,
+    event_id: &str,
+    eventable_type: &str,
+    action: &str,
+    particulars: &Value,
+    timestamp: &str,
+) -> Result<()> {
+    if p.role == "system" {
+        return Ok(());
+    }
+    let recipients: Vec<String> = if action == "card_assigned" {
+        particulars["assignee_ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str().map(str::to_owned))
+            .collect()
+    } else if eventable_type == "Comment" {
+        sqlx::query_scalar("SELECT w.user_id FROM watches w JOIN users u ON u.id=w.user_id JOIN accesses a ON a.user_id=u.id AND a.board_id=? WHERE w.card_id=? AND w.watching=1 AND u.active=1")
+            .bind(board_id).bind(card_id).fetch_all(&mut **tx).await.map_err(db_err)?
+    } else {
+        sqlx::query_scalar("SELECT a.user_id FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.involvement='watching' AND u.active=1")
+            .bind(board_id).fetch_all(&mut **tx).await.map_err(db_err)?
+    };
+    for recipient in unique_ids(recipients)
+        .into_iter()
+        .filter(|user| user != &p.user_id)
+    {
+        sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Event',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
+            .bind(id()).bind(&p.account_id).bind(&recipient).bind(&p.user_id).bind(card_id).bind(event_id)
+            .bind(timestamp).bind(timestamp).bind(board_id).bind(&recipient)
             .execute(&mut **tx).await.map_err(db_err)?;
     }
     Ok(())
@@ -1080,6 +1132,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/cards", get(list_cards))
         .route("/{account}/tags", get(list_tags))
         .route("/{account}/search", get(search_cards))
+        .route("/{account}/notifications", get(list_notifications))
+        .route(
+            "/{account}/notifications/settings",
+            get(show_notification_settings)
+                .put(update_notification_settings)
+                .patch(update_notification_settings),
+        )
+        .route("/{account}/notifications/tray", get(notification_tray))
+        .route(
+            "/{account}/notifications/bulk_reading",
+            post(read_all_notifications),
+        )
+        .route(
+            "/{account}/notifications/{id}/reading",
+            post(read_notification).delete(unread_notification),
+        )
         .route("/{account}/activities", get(list_activities))
         .route(
             "/{account}/cards/{number}",
@@ -2689,6 +2757,8 @@ async fn update_board(
                     .map_err(db_err)?;
                 sqlx::query("DELETE FROM watches WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
                     .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+                sqlx::query("DELETE FROM notifications WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
                 sqlx::query("DELETE FROM pins WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
                     .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
                 sqlx::query("DELETE FROM assignments WHERE assignee_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
@@ -3492,6 +3562,234 @@ async fn activity_items(
     }
     Ok(items)
 }
+async fn show_notification_settings(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    let frequency = sqlx::query_scalar::<_, String>(
+        "SELECT bundle_email_frequency FROM notification_settings WHERE user_id=? AND account_id=?",
+    )
+    .bind(&p.user_id)
+    .bind(&p.account_id)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?
+    .unwrap_or_else(|| "never".into());
+    Ok(Json(json!({"bundle_email_frequency":frequency})))
+}
+async fn update_notification_settings(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let frequency = required(nested(&body, "user_settings"), "bundle_email_frequency")?;
+    if !["never", "every_few_hours", "daily", "weekly"].contains(&frequency.as_str()) {
+        return Err(bad("Invalid bundle email frequency"));
+    }
+    sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
+        .bind(&p.user_id).bind(&p.account_id).bind(frequency).execute(&app.db).await.map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn notification_json(app: &App, p: &Principal, row: &SqliteRow, host: &str) -> Result<Value> {
+    let card_id: String = row.get("card_id");
+    let card = sqlx::query(
+        "SELECT c.*,b.name board_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.id=?",
+    )
+    .bind(&card_id)
+    .fetch_one(&app.db)
+    .await
+    .map_err(db_err)?;
+    let creator_id: String = row.get("creator_id");
+    let creator = user_json(app, p, &creator_id, host).await?;
+    let column = if let Some(column_id) = card.get::<Option<String>, _>("column_id") {
+        sqlx::query("SELECT * FROM columns WHERE id=?")
+            .bind(column_id)
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?
+            .map(|column| column_json(p, &column, host))
+    } else {
+        None
+    };
+    let source = sqlx::query("SELECT * FROM events WHERE id=?")
+        .bind(row.get::<String, _>("source_id"))
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let action: String = source.get("action");
+    let title = card.get::<String, _>("title");
+    let title = if title.trim().is_empty() {
+        format!("Card {}", card.get::<i64, _>("number"))
+    } else {
+        title
+    };
+    let name = creator["name"].as_str().unwrap_or("");
+    let particulars: Value =
+        serde_json::from_str(&source.get::<String, _>("particulars")).unwrap_or(json!({}));
+    let body = match action.as_str() {
+        "card_assigned" => {
+            let assignee = particulars["assignee_ids"]
+                .as_array()
+                .and_then(|ids| ids.first())
+                .and_then(Value::as_str);
+            if let Some(assignee) = assignee {
+                let assignee_name = sqlx::query_scalar::<_, String>(
+                    "SELECT name FROM users WHERE id=? AND account_id=?",
+                )
+                .bind(assignee)
+                .bind(&p.account_id)
+                .fetch_optional(&app.db)
+                .await
+                .map_err(db_err)?;
+                format!(
+                    "Assigned to {}",
+                    assignee_name.unwrap_or_else(|| "self".into())
+                )
+            } else {
+                "Assigned to self".into()
+            }
+        }
+        "card_published" => format!("Added by {name}"),
+        "card_closed" => format!("Moved to Done by {name}"),
+        "card_reopened" => format!("Reopened by {name}"),
+        "card_postponed" => format!("Moved to Not Now by {name}"),
+        "card_unassigned" => format!("Unassigned by {name}"),
+        "card_board_changed" => format!("Moved by {name}"),
+        "card_sent_back_to_triage" => format!("Moved back to Maybe? by {name}"),
+        "comment_created" => {
+            let comment = sqlx::query_scalar::<_, String>("SELECT body FROM comments WHERE id=?")
+                .bind(source.get::<String, _>("eventable_id"))
+                .fetch_optional(&app.db)
+                .await
+                .map_err(db_err)?;
+            comment.unwrap_or_default().chars().take(200).collect()
+        }
+        _ => name.to_owned(),
+    };
+    let number: i64 = card.get("number");
+    let read_at: Option<String> = row.get("read_at");
+    Ok(
+        json!({"id":row.get::<String,_>("id"),"unread_count":row.get::<i64,_>("unread_count"),
+        "read":read_at.is_some(),"read_at":read_at,"created_at":row.get::<String,_>("created_at"),
+        "source_type":"event","title":if action=="comment_created" {format!("RE: {title}")} else {title},
+        "body":body,"creator":creator,"card":{"id":card_id,"number":number,
+        "title":card.get::<String,_>("title"),"status":card.get::<String,_>("status"),
+        "board_name":card.get::<String,_>("board_name"),"closed":card.get::<i64,_>("closed")!=0,
+        "postponed":card.get::<i64,_>("postponed")!=0,
+        "url":format!("{host}/{}/cards/{number}",p.slug),"column":column},
+        "url":format!("{host}/{}/notifications/{}",p.slug,row.get::<String,_>("id"))}),
+    )
+}
+
+async fn notification_items(
+    app: &App,
+    p: &Principal,
+    rows: Vec<SqliteRow>,
+    host: &str,
+) -> Result<Vec<Value>> {
+    let mut result = Vec::with_capacity(rows.len());
+    for row in &rows {
+        result.push(notification_json(app, p, row, host).await?);
+    }
+    Ok(result)
+}
+
+async fn list_notifications(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<PageQuery>,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let unread=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL ORDER BY updated_at DESC LIMIT 100")
+        .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let page = query.page.unwrap_or(1).max(1);
+    let (offset, limit) = page_window(page);
+    let total:i64=sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NOT NULL")
+        .bind(&p.user_id).bind(&p.account_id).fetch_one(&app.db).await.map_err(db_err)?;
+    let read=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NOT NULL ORDER BY read_at DESC,updated_at DESC LIMIT ? OFFSET ?")
+        .bind(&p.user_id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
+    let host = base(&headers);
+    let mut items = if page == 1 {
+        notification_items(&app, &p, unread, &host).await?
+    } else {
+        Vec::new()
+    };
+    items.extend(notification_items(&app, &p, read, &host).await?);
+    Ok(paginated(json!(items), total, page, &uri, &headers))
+}
+
+#[derive(Deserialize)]
+struct NotificationTrayQuery {
+    include_read: Option<bool>,
+}
+async fn notification_tray(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<NotificationTrayQuery>,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    let unread=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL ORDER BY updated_at DESC LIMIT 100")
+        .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let host = base(&headers);
+    let mut items = notification_items(&app, &p, unread, &host).await?;
+    if query.include_read.unwrap_or(false) {
+        let read=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NOT NULL ORDER BY read_at DESC,updated_at DESC LIMIT 100")
+            .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+        items.extend(notification_items(&app, &p, read, &host).await?);
+    }
+    Ok(Json(json!(items)))
+}
+async fn read_notification(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let result=sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE id=? AND user_id=? AND account_id=?")
+        .bind(now()).bind(now()).bind(id.trim_end_matches(".json")).bind(&p.user_id).bind(&p.account_id)
+        .execute(&app.db).await.map_err(db_err)?;
+    if result.rows_affected() == 0 {
+        return Err(missing());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn unread_notification(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let result=sqlx::query("UPDATE notifications SET read_at=NULL,unread_count=1,updated_at=? WHERE id=? AND user_id=? AND account_id=?")
+        .bind(now()).bind(id.trim_end_matches(".json")).bind(&p.user_id).bind(&p.account_id)
+        .execute(&app.db).await.map_err(db_err)?;
+    if result.rows_affected() == 0 {
+        return Err(missing());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn read_all_notifications(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE user_id=? AND account_id=? AND read_at IS NULL")
+        .bind(now()).bind(now()).bind(&p.user_id).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn list_activities(
     State(app): Shared,
     Path(account): Path<String>,
@@ -3641,6 +3939,18 @@ async fn create_card(
         &board_id,
         &event_id,
         "card_published",
+        &timestamp,
+    )
+    .await?;
+    queue_notifications(
+        &mut tx,
+        &p,
+        &board_id,
+        &id,
+        &event_id,
+        "Card",
+        "card_published",
+        &json!({}),
         &timestamp,
     )
     .await?;

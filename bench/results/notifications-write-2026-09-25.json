@@ -1,0 +1,32 @@
+{
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "count": 200,
+        "seconds": 2.03,
+        "created": 200,
+        "unique_numbers": 200,
+        "errors": [],
+        "rps": 98.6,
+        "p50_ms": 280.88,
+        "p95_ms": 528.11,
+        "p99_ms": 660.33
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "count": 200,
+        "seconds": 0.69,
+        "created": 200,
+        "unique_numbers": 200,
+        "errors": [],
+        "rps": 288.4,
+        "p50_ms": 102.1,
+        "p95_ms": 118.97,
+        "p99_ms": 129.81
+      }
+    ]
+  }
+}

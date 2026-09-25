@@ -201,6 +201,26 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_account_recent ON events(account_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS events_board_recent ON events(board_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS events_eventable ON events(eventable_type,eventable_id);
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES users(id),
+  card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL DEFAULT 'Event',
+  unread_count INTEGER NOT NULL DEFAULT 1,
+  read_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(user_id,card_id)
+);
+CREATE INDEX IF NOT EXISTS notifications_user_read ON notifications(user_id,read_at,updated_at DESC);
+CREATE TABLE IF NOT EXISTS notification_settings (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  bundle_email_frequency TEXT NOT NULL DEFAULT 'never' CHECK(bundle_email_frequency IN ('never','every_few_hours','daily','weekly'))
+);
 CREATE TABLE IF NOT EXISTS webhooks (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

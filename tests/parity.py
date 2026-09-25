@@ -43,6 +43,11 @@ def run(target):
         return value
 
     identity = step("identity_show", "/my/identity")
+    step("notifications_index","/notifications")
+    step("notifications_tray","/notifications/tray")
+    step("notification_settings","/notifications/settings")
+    step("notification_settings_update","/notifications/settings","PUT",{"user_settings":{"bundle_email_frequency":"every_few_hours"}})
+    step("notification_settings_restore","/notifications/settings","PUT",{"user_settings":{"bundle_email_frequency":"never"}})
     step("account_show","/account/settings")
     join_code=step("account_join_code","/account/join_code")
     result["account_join_code_defaults"]=[join_code["usage_count"],join_code["usage_limit"],join_code["active"]]
