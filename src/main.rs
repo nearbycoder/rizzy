@@ -159,6 +159,57 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
     }
     next.run(request).await
 }
+async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next) -> Response {
+    let session_cookie = cookie_value(request.headers(), "session_token").is_some();
+    let headers = if session_cookie {
+        Some(request.headers().clone())
+    } else {
+        None
+    };
+    let response = next.run(request).await;
+    if !response.status().is_success()
+        || !response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/html"))
+    {
+        return response;
+    }
+    let Some(headers) = headers else {
+        return response;
+    };
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Could not render page").into_response();
+    };
+    let leading = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    if !bytes
+        .get(leading..leading.saturating_add("<!doctype html".len()))
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"<!doctype html"))
+    {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    if identity_auth(&app, &headers).await.is_err() {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    let Ok(mut html) = String::from_utf8(bytes.to_vec()) else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    if let Some(head) = html.find("</head>") {
+        html.insert_str(head, "<link rel=\"manifest\" href=\"/manifest.json\">");
+    }
+    let script_position = html
+        .find("</body>")
+        .or_else(|| html.find("</html>"))
+        .unwrap_or(html.len());
+    html.insert_str(script_position, include_str!("../assets/pwa_register.html"));
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(html))
+}
 fn db_err(e: sqlx::Error) -> ApiError {
     eprintln!("database error: {e}");
     err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
@@ -2091,6 +2142,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/cards/{number}/comments/{comment}/reactions/{reaction}",
             axum::routing::delete(delete_comment_reaction),
         )
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            register_pwa_on_pages,
+        ))
         .with_state(app)
         .layer(middleware::from_fn(mark_request_format));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
