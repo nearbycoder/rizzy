@@ -48,6 +48,7 @@ mod imports;
 mod join_code_page;
 mod my_menu;
 mod passkeys;
+mod push_subscriptions;
 mod pwa;
 mod reaction_page;
 mod rich_text;
@@ -1620,6 +1621,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/account/imports", post(imports::create).layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)))
         .route("/my/access_tokens", get(list_tokens).post(create_token))
         .route("/my/access_tokens/new", get(new_token))
+        .route("/{account}/users/{user}/push_subscriptions", get(push_subscriptions::index).post(push_subscriptions::create))
+        .route("/{account}/users/{user}/push_subscriptions/{subscription}", axum::routing::delete(push_subscriptions::destroy).post(push_subscriptions::form_destroy))
         .route(
             "/my/access_tokens/{id}",
             get(show_token).post(delete_token).delete(delete_token),

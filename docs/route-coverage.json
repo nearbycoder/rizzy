@@ -160,21 +160,21 @@
       "path": "/users/:user_id/push_subscriptions(.:format)",
       "controller": "users/push_subscriptions",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/users/:user_id/push_subscriptions(.:format)",
       "controller": "users/push_subscriptions",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
       "path": "/users/:user_id/push_subscriptions/:id(.:format)",
       "controller": "users/push_subscriptions",
       "action": "destroy",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1637,6 +1637,22 @@
     {
       "method": "GET",
       "path": "/my/access_tokens/new"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/{user}/push_subscriptions"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/users/{user}/push_subscriptions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/{account}/users/{user}/push_subscriptions/{subscription}"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/users/{user}/push_subscriptions/{subscription}"
     },
     {
       "method": "GET",

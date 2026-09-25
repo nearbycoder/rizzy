@@ -20,7 +20,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue and JSON delivery | No |
-| Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, and access cleanup | No |
+| Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, and push subscription storage/validation | No |
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, and common formatted text | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
@@ -37,6 +37,8 @@ The source's parameterized client configuration route appears missing in that no
 `tests/passkey_parity.py` registers the same fixed-key WebAuthn test credential on both running apps, names it, verifies a signed assertion, checks challenge replay and bad-signature rejection, and deletes the credential. Rizzy stores one-use challenges and verifier state in SQLite, and asks browsers for resident credentials so the account-free sign-in picker can find them. The rendered scripts pass JavaScript syntax checks. This verifies a synthetic credential flow; hardware authenticator/browser interoperability and the full Fizzy passkey presentation still need testing.
 
 `tests/pwa_parity.py` compares the authenticated service worker script against live Fizzy after normalizing its bundled asset URL, then checks Rizzy's manifest, icons, and local offline bundle. Automatic worker registration on every browser page and installation behavior remain unverified.
+
+`tests/push_subscription_parity.py` compares JSON creation, duplicate requests, forbidden endpoints, persisted key fields, and deletion against both apps. Rizzy also rejects DNS results outside public address ranges. Push message delivery, notification permission UI, and browser registration are still missing.
 
 `tests/my_menu_parity.py` checks the account navigation menu's main sections, ETag reuse, board addition invalidation, and HTML-only response against Fizzy. Rizzy links to the menu from its board, card, and activity views. Its saved-view labels, styling, keyboard behavior, and conditional caching inputs are still simpler than Fizzy's.
 
