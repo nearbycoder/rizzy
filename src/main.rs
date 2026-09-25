@@ -47,6 +47,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod my_menu;
+mod passkeys;
 mod reaction_page;
 mod rich_text;
 mod session_transfer;
@@ -1534,6 +1535,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     &expiration,
                 ),
                 (
+                    "DELETE FROM passkey_challenges WHERE expires_at<?",
+                    &expiration,
+                ),
+                (
                     "DELETE FROM storage_download_tokens WHERE expires_at<?",
                     &expiration,
                 ),
@@ -1575,7 +1580,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/client_configurations/ios_v1.json", get(ios_config))
         .route("/session", post(request_magic_link).delete(logout_session))
         .route("/session/new", get(new_session))
+        .route("/session/passkey", post(passkeys::sign_in))
         .route("/session/menu", get(account_cancellation::menu))
+        .route("/my/passkey_challenge", post(passkeys::challenge))
+        .route("/my/passkeys", get(passkeys::index).post(passkeys::register))
+        .route("/my/passkeys/{id}/edit", get(passkeys::edit))
+        .route(
+            "/my/passkeys/{id}",
+            axum::routing::put(passkeys::update)
+                .patch(passkeys::update)
+                .post(passkeys::form_update_or_delete)
+                .delete(passkeys::destroy),
+        )
         .route(
             "/session/transfers/{token}",
             get(session_transfer::show)
@@ -2865,7 +2881,8 @@ async fn new_session(State(app): Shared, headers: HeaderMap) -> Result<Response>
     } else {
         ""
     };
-    Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enter your email | Rizzy</title></head><body><main><h1>Get into Rizzy</h1><form method=\"post\" action=\"/session\"><label>Enter your email address<input type=\"email\" name=\"email_address\" autocomplete=\"username webauthn\" required autofocus></label><button type=\"submit\">Let's go</button></form>{signup_link}</main></body></html>")).into_response())
+    let passkey_button = passkeys::sign_in_button().unwrap_or_default();
+    Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enter your email | Rizzy</title></head><body><main><h1>Get into Rizzy</h1><form method=\"post\" action=\"/session\"><label>Enter your email address<input type=\"email\" name=\"email_address\" autocomplete=\"username webauthn\" required autofocus></label><button type=\"submit\">Let's go</button></form>{passkey_button}{signup_link}</main></body></html>")).into_response())
 }
 async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
     let mut parts = uri.path().trim_start_matches('/').split('/');

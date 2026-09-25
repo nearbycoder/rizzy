@@ -1210,7 +1210,7 @@
       "path": "/session/passkey(.:format)",
       "controller": "sessions/passkeys",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1273,7 +1273,7 @@
       "path": "/my/passkey_challenge(.:format)",
       "controller": "my/passkey_challenges",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1322,42 +1322,42 @@
       "path": "/my/passkeys(.:format)",
       "controller": "my/passkeys",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/my/passkeys(.:format)",
       "controller": "my/passkeys",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/my/passkeys/:id/edit(.:format)",
       "controller": "my/passkeys",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PATCH",
       "path": "/my/passkeys/:id(.:format)",
       "controller": "my/passkeys",
       "action": "update",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PUT",
       "path": "/my/passkeys/:id(.:format)",
       "controller": "my/passkeys",
       "action": "update",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
       "path": "/my/passkeys/:id(.:format)",
       "controller": "my/passkeys",
       "action": "destroy",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1503,8 +1503,44 @@
       "path": "/session/new"
     },
     {
+      "method": "POST",
+      "path": "/session/passkey"
+    },
+    {
       "method": "GET",
       "path": "/session/menu"
+    },
+    {
+      "method": "POST",
+      "path": "/my/passkey_challenge"
+    },
+    {
+      "method": "GET",
+      "path": "/my/passkeys"
+    },
+    {
+      "method": "POST",
+      "path": "/my/passkeys"
+    },
+    {
+      "method": "GET",
+      "path": "/my/passkeys/{id}/edit"
+    },
+    {
+      "method": "PUT",
+      "path": "/my/passkeys/{id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/my/passkeys/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/my/passkeys/{id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/my/passkeys/{id}"
     },
     {
       "method": "GET",

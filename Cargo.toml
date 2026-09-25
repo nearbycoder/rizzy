@@ -32,3 +32,4 @@ tower-http = { version = "0.6", features = ["trace"] }
 uuid = { version = "1", features = ["v7"] }
 url = "2"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+webauthn-rs = { version = "0.5.5", default-features = false, features = ["conditional-ui", "danger-allow-state-serialisation"] }

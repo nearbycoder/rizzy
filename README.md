@@ -10,10 +10,12 @@ Rizzy is an in-progress Rust implementation of [Fizzy](https://github.com/baseca
 cargo run --release -- seed
 # For local development only, show sign-in codes in the browser:
 RIZZY_DEV_MAGIC_LINKS=1 cargo run --release
-# Open http://127.0.0.1:3007/ and sign in with the seeded email.
+# Open http://localhost:3007/ and sign in with the seeded email.
 ```
 
 The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`. Card images and user avatar bytes are stored in `data/storage/files` by default; set `RIZZY_STORAGE_DIR` to move them. User and account exports are stored in `data/exports` by default; set `RIZZY_EXPORT_DIR` for another path. Uploaded account import ZIPs are stored in `data/imports` by default; set `RIZZY_IMPORT_DIR` to move them. Export notifications use `RIZZY_SENDMAIL` and `RIZZY_PUBLIC_URL` when configured.
+
+Passkeys use `http://localhost:3007` by default. Set `RIZZY_PASSKEY_ORIGIN` to the exact browser origin for another domain or port, then open that origin in the browser. The server stores one-use registration and sign-in challenges in SQLite.
 
 For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and `RIZZY_MAIL_FROM` to its sender address. `RIZZY_DEV_MAGIC_LINKS=1` exposes sign-in codes and email-change tokens in response headers for local testing. Without either delivery option, email sign-in returns 503; the seeded API token can still be entered through **Use an API token**. Bearer tokens are accepted only for JSON requests, and read tokens cannot make write requests, matching Fizzy. On a fresh database, the first email-code sign-in or the browser **Sign up** form can create an account with Fizzy's Playground board and 11 starter cards. Set `RIZZY_MULTI_TENANT=1` to allow additional accounts and owner-initiated cancellation. Cancellation closes account access immediately; the hourly maintenance worker deletes its records and stored files after 30 days.
 
@@ -24,6 +26,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Account join links with browser email/code/name flow, usage limits, reset, member name setup, user verification, and atomic redemption across Rust processes. Account settings can promote, demote, and remove people; a removed person can rejoin with a new user record.
 - User email changes with validation, a 30-minute one-use confirmation token, session switch, and delivery through the configured sendmail executable.
 - Single-use device sign-in links on the user's profile, including a scannable QR code, four-hour expiry, regeneration that revokes older links, and atomic redemption across concurrent requests.
+- Passkey registration, naming, deletion, and sign-in with verified WebAuthn assertions and one-use challenges. The profile links to passkey management.
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with browser management forms, action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
 - Special board column JSON lists (Maybe?, Not now, Done) and public pages for those lists and named columns. The public board page links to each view.
@@ -44,7 +47,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 
 ## Parity still required
 
-The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, general remote and media-rich embeds, push, specialized webhook payloads, full account transfer parity, background jobs, and the complete Hotwire UI. User exports include accessible cards, comments, and their uploaded rich-text attachments. Account exports cover records currently stored by Rizzy and can be imported by Fizzy for the tested workflow. Rizzy imports those represented record groups, but rejects unsupported source records rather than dropping them. Import ZIPs above 512 MiB and unrepresented source features still need work. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
+The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, general remote and media-rich embeds, push, specialized webhook payloads, full account transfer parity, background jobs, and the complete Hotwire UI. User exports include accessible cards, comments, and their uploaded rich-text attachments. Account exports cover records currently stored by Rizzy and can be imported by Fizzy for the tested workflow. Rizzy imports those represented record groups, but rejects unsupported source records rather than dropping them. Import ZIPs above 512 MiB and unrepresented source features still need work. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
 
 ## Verification and benchmarks
 

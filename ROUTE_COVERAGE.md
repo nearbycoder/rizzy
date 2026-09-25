@@ -2,17 +2,14 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 193. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 201. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
-| `my/passkeys` | 6 | 0 |
 | `notifications/unsubscribes` | 3 | 0 |
 | `users/push_subscriptions` | 3 | 0 |
 | `client_configurations` | 1 | 0 |
-| `my/passkey_challenges` | 1 | 0 |
 | `pwa` | 1 | 0 |
-| `sessions/passkeys` | 1 | 0 |
 | `account/cancellations` | 1 | 1 |
 | `account/entropies` | 2 | 2 |
 | `account/exports` | 2 | 2 |
@@ -67,6 +64,8 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `my/access_tokens` | 5 | 5 |
 | `my/identities` | 1 | 1 |
 | `my/menus` | 1 | 1 |
+| `my/passkey_challenges` | 1 | 1 |
+| `my/passkeys` | 6 | 6 |
 | `my/pins` | 1 | 1 |
 | `my/timezones` | 2 | 2 |
 | `notifications` | 1 | 1 |
@@ -88,6 +87,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `sessions` | 3 | 3 |
 | `sessions/magic_links` | 2 | 2 |
 | `sessions/menus` | 1 | 1 |
+| `sessions/passkeys` | 1 | 1 |
 | `sessions/transfers` | 3 | 3 |
 | `signups` | 2 | 2 |
 | `signups/completions` | 2 | 2 |

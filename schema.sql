@@ -106,6 +106,27 @@ CREATE TABLE IF NOT EXISTS sessions (
   signup_pending INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS passkeys (
+  id TEXT PRIMARY KEY,
+  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+  credential_id TEXT NOT NULL UNIQUE,
+  credential_json TEXT NOT NULL,
+  name TEXT,
+  transports TEXT NOT NULL DEFAULT '[]',
+  sign_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS passkeys_identity_name ON passkeys(identity_id,name,created_at DESC);
+CREATE TABLE IF NOT EXISTS passkey_challenges (
+  challenge TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL CHECK(purpose IN ('registration','authentication')),
+  identity_id TEXT REFERENCES identities(id) ON DELETE CASCADE,
+  state_json TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS passkey_challenges_expiration ON passkey_challenges(expires_at);
 CREATE INDEX IF NOT EXISTS sessions_identity ON sessions(identity_id);
 CREATE TABLE IF NOT EXISTS authentication_attempts (
   id TEXT PRIMARY KEY,
