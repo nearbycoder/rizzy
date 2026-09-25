@@ -11,7 +11,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
 | Full board and card HTML interface | Basic UI | No |
-| Sign up, magic links, sessions, passkeys | Magic links, sessions, and initial signup | No |
+| Sign up, magic links, sessions, passkeys | Magic links, sessions, initial signup, and sign-in entry page | No |
 | Users, roles, invitations, board involvement | User listing/editing, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
 | Assignments, reactions, pins, watches | ✓ | No |
@@ -38,6 +38,8 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 
 `tests/exports.py` checks user export ZIP content, board access scope, download permissions, asynchronous completion, and the 24-hour request limit. A live Fizzy export confirmed the same sample card's board, title, status, escaped description, and comment body format. User ZIPs currently omit attachments because Rizzy does not yet store them; account ZIP export and import are still missing. The background worker retries processing exports after a five-minute stale lease and removes completed exports after 24 hours.
 
-`tests/board_views_parity.py` compares private special-column JSON status, response shape, card order, and pagination, plus public column membership and pagination, against live Fizzy. The Rust public pages are still simplified and need a full visual and interaction pass. Fizzy rejects bearer-token requests for these HTML views while Rizzy currently accepts them; unauthenticated JSON also follows different sign-in behavior. The test checks that private JSON is protected without treating those differing status codes as parity.
+`tests/board_views_parity.py` compares private special-column JSON status, response shape, card order, and pagination, plus public column membership and pagination, against live Fizzy. The Rust public pages are still simplified and need a full visual and interaction pass. The test checks that private JSON is protected; `tests/auth_format_parity.py` covers bearer format and unauthenticated redirect behavior separately.
+
+`tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified and passkey sign-in is still absent. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

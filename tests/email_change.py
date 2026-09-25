@@ -25,7 +25,7 @@ def main():
             identity, _ = call(port, "/my/identity", bearer=owner_token)
             owner_id = identity["accounts"][0]["user"]["id"]
             request_path = f"/{account}/users/{owner_id}/email_addresses"
-            call(port, request_path, "POST", {"email_address": "new@example.com"}, status=401)
+            call(port, request_path, "POST", {"email_address": "new@example.com"}, status=406)
             call(port, f"/{account}/users/other/email_addresses", "POST", {"email_address": "new@example.com"}, bearer=owner_token, status=404)
             call(port, request_path, "POST", {}, bearer=owner_token, status=400)
             invalid, _ = call(port, request_path, "POST", {"email_address": "invalid"}, bearer=owner_token, status=422)

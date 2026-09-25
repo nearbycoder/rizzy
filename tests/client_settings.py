@@ -34,7 +34,7 @@ def main():
                 call(port, "/client_configurations/" + path, status=404)
 
             path = f"/{account}/my/timezone"
-            call(port, path, "PATCH", {"timezone_name": "America/Chicago"}, status=401)
+            call(port, path, "PATCH", {"timezone_name": "America/Chicago"}, status=302)
             with sqlite3.connect(database) as db:
                 account_id, owner_id = db.execute("SELECT account_id,id FROM users WHERE role='owner'").fetchone()
                 db.execute("INSERT INTO identities(id,email_address,created_at) VALUES('tz-identity','tz@example.com','2026-01-01T00:00:00Z')")

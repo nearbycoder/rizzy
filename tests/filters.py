@@ -16,12 +16,14 @@ from auth import BINARY, ROOT, start, stop
 from join import call
 
 
-def turbo(port, path, token, method="POST", params=None, status=200):
+def turbo(port, path, token, method="POST", params=None, status=200, bearer=None):
     body = urllib.parse.urlencode(params or {}, doseq=True).encode() if method == "POST" else None
     headers = {"Accept": "text/vnd.turbo-stream.html",
                "Content-Type": "application/x-www-form-urlencoded"}
     if token:
-        headers["Authorization"] = "Bearer " + token
+        headers["Cookie"] = "session_token=" + token
+    if bearer:
+        headers["Authorization"] = "Bearer " + bearer
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}", body, method=method,
         headers=headers,
@@ -52,6 +54,9 @@ def main():
             db.execute("INSERT INTO identities(id,email_address,created_at) VALUES('filter-identity','filter@example.com','2026-01-01T00:00:00Z')")
             db.execute("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES('filter-user',?,'filter-identity','Filter Member','member','2026-01-01T00:00:00Z')", (account_id,))
             db.execute("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES('filter-token','filter-identity',?,'Test','write','2026-01-01T00:00:00Z')", (hashlib.sha256(b'filter-token').hexdigest(),))
+            owner_identity = db.execute("SELECT identity_id FROM users WHERE role='owner'").fetchone()[0]
+            db.execute("INSERT INTO sessions(id,identity_id,token_hash,signup_pending,created_at) VALUES('filter-owner-session',?,?,0,'2026-01-01T00:00:00Z')", (owner_identity, hashlib.sha256(b'filter-owner-cookie').hexdigest()))
+            db.execute("INSERT INTO sessions(id,identity_id,token_hash,signup_pending,created_at) VALUES('filter-member-session','filter-identity',?,0,'2026-01-01T00:00:00Z')", (hashlib.sha256(b'filter-member-cookie').hexdigest(),))
         port, server = start(env)
         try:
             board, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "Saved views"}}, bearer=owner_token, status=201)
@@ -63,8 +68,9 @@ def main():
             params = {"indexed_by": "closed", "assignment_status": "unassigned", "tag_ids[]": [tag_id],
                       "assignee_ids[]": ["filter-user"], "board_ids[]": [board["id"]]}
             path = f"/{account}/filters"
-            turbo(port, path, None, status=401)
-            html = turbo(port, path, owner_token, params=params)
+            turbo(port, path, None, status=406)
+            turbo(port, path, None, bearer=owner_token, status=401)
+            html = turbo(port, path, "filter-owner-cookie", params=params)
             assert "Delete custom view" in html
             with sqlite3.connect(database) as db:
                 filter_id, fields = db.execute("SELECT id,fields FROM filters WHERE creator_id=?", (owner_id,)).fetchone()
@@ -73,18 +79,18 @@ def main():
                                   "tag_ids": [tag_id], "assignee_ids": ["filter-user"], "board_ids": [board["id"]]}
                 for table in ("filters_tags", "assignees_filters", "boards_filters"):
                     assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE filter_id=?", (filter_id,)).fetchone()[0] == 1
-            turbo(port, path, owner_token, params={**params, "sorted_by": "latest"})
+            turbo(port, path, "filter-owner-cookie", params={**params, "sorted_by": "latest"})
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM filters WHERE creator_id=?", (owner_id,)).fetchone()[0] == 1
-            turbo(port, path, "filter-token", params=params)
+            turbo(port, path, "filter-member-cookie", params=params)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM filters").fetchone()[0] == 2
             private, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "Private", "all_access": False}}, bearer=owner_token, status=201)
-            turbo(port, path, "filter-token", params={"board_ids[]": [private["id"]]}, status=404)
+            turbo(port, path, "filter-member-cookie", params={"board_ids[]": [private["id"]]}, status=404)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM filters").fetchone()[0] == 2
-            turbo(port, path + "/" + filter_id, "filter-token", method="DELETE", status=404)
-            html = turbo(port, path + "/" + filter_id, owner_token, method="DELETE")
+            turbo(port, path + "/" + filter_id, "filter-member-cookie", method="DELETE", status=404)
+            html = turbo(port, path + "/" + filter_id, "filter-owner-cookie", method="DELETE")
             assert "Save custom view" in html
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM filters WHERE id=?", (filter_id,)).fetchone()[0] == 0

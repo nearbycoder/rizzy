@@ -1217,7 +1217,7 @@
       "path": "/session/new(.:format)",
       "controller": "sessions",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -1489,6 +1489,10 @@
     {
       "method": "DELETE",
       "path": "/session"
+    },
+    {
+      "method": "GET",
+      "path": "/session/new"
     },
     {
       "method": "POST",

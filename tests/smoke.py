@@ -30,7 +30,7 @@ def call(port, account, token, path, method="GET", payload=None, status=200):
     with response:
         assert response.status == status, (path, response.status, response.read())
         raw = response.read()
-        return json.loads(raw) if raw else None
+        return json.loads(raw) if raw and response.headers.get_content_type() == "application/json" else raw.decode() if raw else None
 
 
 def seed(env, email):
@@ -117,7 +117,7 @@ def main():
                 identity = db.execute("SELECT identity_id FROM users WHERE id=?", (board["creator"]["id"],)).fetchone()[0]
                 db.execute("INSERT INTO access_tokens VALUES(?,?,?,?,?,?)", ("read-only", identity, hashlib.sha256(b"read-only-token").hexdigest(), "read", "read", "2026-01-01T00:00:00Z"))
             assert call(port, owner, "read-only-token", "/boards")
-            call(port, owner, "read-only-token", "/boards", "POST", {"board": {"name": "Forbidden"}}, 403)
+            call(port, owner, "read-only-token", "/boards", "POST", {"board": {"name": "Forbidden"}}, 401)
             with sqlite3.connect(database) as db:
                 account_id = db.execute("SELECT account_id FROM users WHERE id=?", (board["creator"]["id"],)).fetchone()[0]
                 outsider_identity = db.execute("SELECT identity_id FROM access_tokens WHERE token_hash=?", (hashlib.sha256(outsider_token.encode()).hexdigest(),)).fetchone()[0]
@@ -126,7 +126,7 @@ def main():
             role_path = "/users/member-for-role-test/role"
             call(port, owner, owner_token, role_path, "PUT", {"user": {"role": "admin"}}, 204)
             assert call(port, owner, owner_token, "/users/member-for-role-test")["role"] == "admin"
-            call(port, owner, "read-only-token", role_path, "PUT", {"user": {"role": "member"}}, 403)
+            call(port, owner, "read-only-token", role_path, "PUT", {"user": {"role": "member"}}, 401)
             call(port, owner, outsider_token, role_path, "PUT", {"user": {"role": "member"}}, 403)
             call(port, owner, owner_token, f"/users/{board['creator']['id']}/role", "PUT", {"user": {"role": "member"}}, 403)
             call(port, owner, owner_token, role_path, "PUT", {"user": {"role": "system"}}, 204)

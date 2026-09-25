@@ -20,11 +20,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def post_form(port, path, token, data=None):
+def post_form(port, path, session, data=None):
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
         urllib.parse.urlencode(data or {}).encode(), method="POST",
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Cookie": "session_token=" + session, "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
         urllib.request.build_opener(NoRedirect).open(request, timeout=3)
@@ -51,21 +51,22 @@ def main():
                 db.execute("INSERT INTO identities(id,email_address,created_at) VALUES('verify-identity','verify@example.com','2026-01-01T00:00:00Z')")
                 db.execute("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES('verify-user',?,'verify-identity','verify@example.com','member','2026-01-01T00:00:00Z')", (account_id,))
                 db.execute("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES('verify-token','verify-identity',?,'Test','write','2026-01-01T00:00:00Z')", (hashlib.sha256(b'verify-token').hexdigest(),))
+                db.execute("INSERT INTO sessions(id,identity_id,token_hash,signup_pending,created_at) VALUES('verify-session-row','verify-identity',?,0,'2026-01-01T00:00:00Z')", (hashlib.sha256(b'verify-session').hexdigest(),))
             path = f"/{account}/users/verifications"
-            call(port, path + "/new", status=401)
-            call(port, path, "POST", status=401)
-            page, _ = call(port, path + "/new", bearer="verify-token")
+            call(port, path + "/new", status=406)
+            call(port, path, "POST", status=406)
+            page, _ = call(port, path + "/new", cookies=["session_token=verify-session"], accept="text/html")
             assert "<form" in page and path in page
-            assert post_form(port, path, "verify-token") == f"/{account}/users/joins/new"
+            assert post_form(port, path, "verify-session") == f"/{account}/users/joins/new"
             with sqlite3.connect(database) as db:
                 verified_at = db.execute("SELECT verified_at FROM users WHERE id='verify-user'").fetchone()[0]
                 assert verified_at
-            assert post_form(port, path, "verify-token") == f"/{account}/users/joins/new"
+            assert post_form(port, path, "verify-session") == f"/{account}/users/joins/new"
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT verified_at FROM users WHERE id='verify-user'").fetchone()[0] == verified_at
-            page, _ = call(port, f"/{account}/users/joins/new", bearer="verify-token")
+            page, _ = call(port, f"/{account}/users/joins/new", cookies=["session_token=verify-session"], accept="text/html")
             assert 'name="user[name]"' in page
-            assert post_form(port, f"/{account}/users/joins", "verify-token", {"user[name]": "Verified Member"}) == "/"
+            assert post_form(port, f"/{account}/users/joins", "verify-session", {"user[name]": "Verified Member"}) == "/"
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT name FROM users WHERE id='verify-user'").fetchone()[0] == "Verified Member"
         finally:

@@ -15,8 +15,8 @@ from pathlib import Path
 from auth import BINARY, ROOT, cookie, start, stop
 
 
-def call(port, path, method="GET", body=None, bearer=None, cookies=(), status=200):
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+def call(port, path, method="GET", body=None, bearer=None, cookies=(), status=200, accept="application/json"):
+    headers = {"Accept": accept, "Content-Type": "application/json"}
     if bearer:
         headers["Authorization"] = "Bearer " + bearer
     if cookies:
@@ -51,7 +51,7 @@ def main():
             public, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "Everyone"}}, bearer=owner_token, status=201)
             private, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "Private", "all_access": False}}, bearer=owner_token, status=201)
             owner_id = public["creator"]["id"]
-            call(port, path, status=401)
+            call(port, path, status=406)
             invite, _ = call(port, path, bearer=owner_token)
             assert invite["usage_count"] == 0 and invite["usage_limit"] == 10 and invite["active"]
             assert re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{4}(?:-[1-9A-HJ-NP-Za-km-z]{4}){2}", invite["code"])

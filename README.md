@@ -15,7 +15,7 @@ RIZZY_DEV_MAGIC_LINKS=1 cargo run --release
 
 The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`. User data exports are stored in `data/exports` by default; set `RIZZY_EXPORT_DIR` for another path. Export notifications use `RIZZY_SENDMAIL` and `RIZZY_PUBLIC_URL` when configured.
 
-For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and `RIZZY_MAIL_FROM` to its sender address. `RIZZY_DEV_MAGIC_LINKS=1` exposes sign-in codes and email-change tokens in response headers for local testing. Without either delivery option, email sign-in returns 503; the seeded API token can still be entered through **Use an API token**. On a fresh database, the first email-code sign-in can create an account. Set `RIZZY_MULTI_TENANT=1` to allow additional accounts.
+For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and `RIZZY_MAIL_FROM` to its sender address. `RIZZY_DEV_MAGIC_LINKS=1` exposes sign-in codes and email-change tokens in response headers for local testing. Without either delivery option, email sign-in returns 503; the seeded API token can still be entered through **Use an API token**. Bearer tokens are accepted only for JSON requests, and read tokens cannot make write requests, matching Fizzy. On a fresh database, the first email-code sign-in can create an account. Set `RIZZY_MULTI_TENANT=1` to allow additional accounts.
 
 ## Implemented now
 
@@ -56,11 +56,14 @@ python3 tests/cluster_writes.py
 python3 tests/webhooks.py
 python3 tests/notifications.py
 python3 tests/search.py
+python3 tests/exports.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:
 python3 tests/parity.py
 python3 tests/filter_parity.py
 python3 tests/saved_filter_parity.py
 python3 tests/stalled_parity.py
+python3 tests/board_views_parity.py
+python3 tests/auth_format_parity.py
 ```
 
 For a comparative run, start both applications on the same machine using the same database engine, equivalent seed data, and production builds. Then set `FIZZY_URL`, `FIZZY_ACCOUNT`, `FIZZY_TOKEN`, `RIZZY_URL`, `RIZZY_ACCOUNT`, and `RIZZY_TOKEN` and run `python3 bench/compare.py --cards 100 --seconds 10`. The script creates equal card and activity counts, checks sampled response shapes and first page sizes, warms both services, and reports throughput, p50, p95, p99, and errors at several concurrency levels. `tests/parity.py` passed 142 comparisons for the implemented workflow using fresh accounts. Fizzy was brought up with a local Ruby 3.4.8 installation for the [diagnostic runs](bench/README.md). A valid product wide performance claim still requires full behavioral parity, repeated runs, CPU and memory measurements, and a larger dataset.

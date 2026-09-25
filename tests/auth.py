@@ -84,7 +84,7 @@ def main():
             seeded.append(re.search(r"Account: (\d+)", result.stdout).group(1))
         port, server = start(env)
         try:
-            call(port, "/my/identity", status=401)
+            call(port, "/my/identity", status=406)
             pending, code = request_code(port, "owner@example.com")
             assert code and len(code) == 6
             call(port, "/session/magic_link", "POST", {"code": "WRONG0"}, [pending], 401)
@@ -104,7 +104,7 @@ def main():
             call(port, "/session/magic_link", "POST", {"code": code}, [pending], 401)
             _, headers = call(port, "/session", "DELETE", cookies=[session], status=204)
             assert cookie(headers, "session_token") == "session_token="
-            call(port, "/my/identity", cookies=[session], status=401)
+            call(port, "/my/identity", cookies=[session], status=406)
             fake, no_code = request_code(port, "unknown@example.com")
             assert fake and no_code is None
             for n in range(6):

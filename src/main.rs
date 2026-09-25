@@ -1,8 +1,9 @@
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, State},
+    extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -41,11 +42,47 @@ type Result<T> = std::result::Result<T, ApiError>;
 struct ApiError(StatusCode, String);
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        if self.0 == StatusCode::FOUND {
+            return (StatusCode::FOUND, [(header::LOCATION, self.1)]).into_response();
+        }
+        if self.0 == StatusCode::UNAUTHORIZED && self.1 == "HTTP Token: Access denied." {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Token realm=\"Application\"")],
+                "HTTP Token: Access denied.\n",
+            )
+                .into_response();
+        }
         (self.0, Json(json!({"message": self.1}))).into_response()
     }
 }
 fn err(status: StatusCode, message: &str) -> ApiError {
     ApiError(status, message.into())
+}
+fn token_denied() -> ApiError {
+    err(StatusCode::UNAUTHORIZED, "HTTP Token: Access denied.")
+}
+async fn mark_request_format(mut request: Request, next: Next) -> Response {
+    let json = request.uri().path().ends_with(".json")
+        || request
+            .headers()
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("application/json"));
+    let write = !matches!(request.method().as_str(), "GET" | "HEAD");
+    request.headers_mut().remove("x-rizzy-json-request");
+    request.headers_mut().remove("x-rizzy-write-request");
+    if json {
+        request
+            .headers_mut()
+            .insert("x-rizzy-json-request", HeaderValue::from_static("1"));
+    }
+    if write {
+        request
+            .headers_mut()
+            .insert("x-rizzy-write-request", HeaderValue::from_static("1"));
+    }
+    next.run(request).await
 }
 fn db_err(e: sqlx::Error) -> ApiError {
     eprintln!("database error: {e}");
@@ -1208,6 +1245,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/client_configurations/ios_v1.json", get(ios_config))
         .route("/session", post(request_magic_link).delete(logout_session))
+        .route("/session/new", get(new_session))
         .route("/session/magic_link", post(complete_magic_link))
         .route("/signup", post(request_signup))
         .route("/signup/completion", post(complete_signup))
@@ -1489,7 +1527,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/cards/{number}/comments/{comment}/reactions/{reaction}",
             axum::routing::delete(delete_comment_reaction),
         )
-        .with_state(app);
+        .with_state(app)
+        .layer(middleware::from_fn(mark_request_format));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
     if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
         return Err("RIZZY_DEV_MAGIC_LINKS requires a loopback bind address".into());
@@ -1987,18 +2026,47 @@ async fn identity_auth(app: &App, headers: &HeaderMap) -> Result<(String, String
             return Ok((identity_id, "write".into()));
         }
     }
-    let token = headers
+    let authorization = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
+        .unwrap_or_default();
+    let token = authorization.strip_prefix("Bearer ").ok_or_else(|| {
+        if authorization.contains("Bearer") {
+            token_denied()
+        } else {
+            ApiError(StatusCode::FOUND, format!("{}/session/new", base(headers)))
+        }
+    })?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(token_denied());
+    }
     let r = sqlx::query("SELECT identity_id,permission FROM access_tokens WHERE token_hash=?")
         .bind(hash(token))
         .fetch_optional(&app.db)
         .await
         .map_err(db_err)?
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+        .ok_or_else(token_denied)?;
+    if r.get::<String, _>("permission") == "read" && headers.contains_key("x-rizzy-write-request") {
+        return Err(token_denied());
+    }
     Ok((r.get("identity_id"), r.get("permission")))
+}
+async fn new_session(headers: HeaderMap) -> Response {
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if accept.contains("application/json") {
+        return (
+            StatusCode::NOT_ACCEPTABLE,
+            Json(json!({"status":406,"error":"Not Acceptable"})),
+        )
+            .into_response();
+    }
+    if accept.contains("text/vnd.turbo-stream.html") {
+        return StatusCode::NOT_ACCEPTABLE.into_response();
+    }
+    Html("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enter your email | Rizzy</title></head><body><main><h1>Get into Rizzy</h1><form method=\"post\" action=\"/session\"><label>Enter your email address<input type=\"email\" name=\"email_address\" autocomplete=\"username webauthn\" required autofocus></label><button type=\"submit\">Let's go</button></form></main></body></html>").into_response()
 }
 async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
     let mut parts = uri.path().trim_start_matches('/').split('/');
