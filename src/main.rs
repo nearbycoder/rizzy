@@ -1,5 +1,5 @@
 use axum::{
-    Json, Router,
+    Json, Router, ServiceExt,
     body::Bytes,
     extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
@@ -27,6 +27,7 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
+use tower::{Layer, util::MapRequestLayer};
 mod board_views;
 mod exports;
 
@@ -61,6 +62,41 @@ fn err(status: StatusCode, message: &str) -> ApiError {
 }
 fn token_denied() -> ApiError {
     err(StatusCode::UNAUTHORIZED, "HTTP Token: Access denied.")
+}
+fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Request<B> {
+    // This runs outside the router so collection routes such as /boards.json
+    // can match /boards. Explicit client configuration paths have their own routes.
+    request.headers_mut().remove("x-rizzy-original-path");
+    let original = request.uri().clone();
+    let path = original.path();
+    if !path.ends_with(".json") || path.contains("/client_configurations/") {
+        return request;
+    }
+    let stripped = &path[..path.len() - ".json".len()];
+    if stripped.is_empty() || stripped == "/" {
+        return request;
+    }
+    let path_and_query = match original.query() {
+        Some(query) => format!("{stripped}?{query}"),
+        None => stripped.to_owned(),
+    };
+    let Ok(path_and_query) = path_and_query.parse() else {
+        return request;
+    };
+    let mut parts = original.clone().into_parts();
+    parts.path_and_query = Some(path_and_query);
+    let Ok(rewritten) = Uri::from_parts(parts) else {
+        return request;
+    };
+    if let Ok(value) = HeaderValue::from_str(path) {
+        request.headers_mut().insert("x-rizzy-original-path", value);
+    }
+    // A format suffix takes precedence over a conflicting Accept header.
+    request
+        .headers_mut()
+        .insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+    *request.uri_mut() = rewritten;
+    request
 }
 async fn mark_request_format(mut request: Request, next: Next) -> Response {
     let json = request.uri().path().ends_with(".json")
@@ -268,10 +304,14 @@ fn paginated(items: Value, total: i64, page: i64, uri: &Uri, headers: &HeaderMap
         let query = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs(pairs)
             .finish();
+        let original_path = headers
+            .get("x-rizzy-original-path")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_else(|| uri.path());
         let link = format!(
             "<{}{path}?{query}>; rel=\"next\"",
             base(headers),
-            path = uri.path()
+            path = original_path
         );
         if let Ok(value) = HeaderValue::from_str(&link) {
             response.headers_mut().insert(header::LINK, value);
@@ -1419,6 +1459,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/boards/{board}/columns/{column}/cards",
             get(column_cards),
         )
+        .route(
+            "/{account}/columns/{column}/left_position",
+            post(move_column_left),
+        )
+        .route(
+            "/{account}/columns/{column}/right_position",
+            post(move_column_right),
+        )
         .route("/{account}/boards/{board}/cards", post(create_card))
         .route("/{account}/cards", get(list_cards))
         .route("/{account}/filters", post(create_filter))
@@ -1535,6 +1583,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("Rizzy listening on http://{bind}");
+    let routes = MapRequestLayer::new(rewrite_json_uri).layer(routes);
     axum::serve(
         listener,
         routes.into_make_service_with_connect_info::<SocketAddr>(),
@@ -3712,6 +3761,75 @@ async fn delete_column(
         .await
         .map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn move_column(
+    app: &App,
+    account: &str,
+    column_id: &str,
+    headers: &HeaderMap,
+    left: bool,
+) -> Result<StatusCode> {
+    let p = principal(app, headers, account).await?;
+    p.write()?;
+    let column = sqlx::query("SELECT * FROM columns WHERE id=? AND account_id=?")
+        .bind(column_id)
+        .bind(&p.account_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
+    let board_id: String = column.get("board_id");
+    board(app, &p, &board_id).await?;
+
+    let _guard = app.write_lock.lock().await;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let position: i64 = sqlx::query_scalar("SELECT position FROM columns WHERE id=?")
+        .bind(column_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let neighbor = if left {
+        sqlx::query("SELECT id,position FROM columns WHERE board_id=? AND position<? ORDER BY position DESC LIMIT 1")
+            .bind(&board_id).bind(position).fetch_optional(&mut *tx).await.map_err(db_err)?
+    } else {
+        sqlx::query("SELECT id,position FROM columns WHERE board_id=? AND position>? ORDER BY position ASC LIMIT 1")
+            .bind(&board_id).bind(position).fetch_optional(&mut *tx).await.map_err(db_err)?
+    };
+    if let Some(neighbor) = neighbor {
+        let neighbor_id: String = neighbor.get("id");
+        let neighbor_position: i64 = neighbor.get("position");
+        sqlx::query("UPDATE columns SET position=? WHERE id=?")
+            .bind(neighbor_position)
+            .bind(column_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("UPDATE columns SET position=? WHERE id=?")
+            .bind(position)
+            .bind(neighbor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(StatusCode::CREATED)
+}
+
+async fn move_column_left(
+    State(app): Shared,
+    Path((account, column_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    move_column(&app, &account, &column_id, &headers, true).await
+}
+
+async fn move_column_right(
+    State(app): Shared,
+    Path((account, column_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    move_column(&app, &account, &column_id, &headers, false).await
 }
 
 #[derive(Default)]

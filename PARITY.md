@@ -6,7 +6,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | --- | --- | --- |
 | Account scoped routing, bearer tokens, identity, user listing and settings | ✓ | No |
 | Boards CRUD and access control | CRUD, access records, and involvement | No |
-| Columns CRUD and card listings | Named and special board column listings, with public pages | No |
+| Columns CRUD and card listings | Named and special board column listings, position swaps, and public pages | No |
 | Cards CRUD and card numbering | JSON CRUD, explicit timestamps, and account numbering | No |
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
@@ -41,5 +41,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 `tests/board_views_parity.py` compares private special-column JSON status, response shape, card order, and pagination, plus public column membership and pagination, against live Fizzy. The Rust public pages are still simplified and need a full visual and interaction pass. The test checks that private JSON is protected; `tests/auth_format_parity.py` covers bearer format and unauthenticated redirect behavior separately.
 
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified and passkey sign-in is still absent. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
+
+`tests/json_suffix_parity.py` compares selected collection and item `.json` URLs, a configuration route, pagination links, token denial, and board creation/deletion with an HTML Accept header. `tests/column_position_parity.py` compares left and right column moves, no-op boundary moves, and an unknown ID using disposable boards. These checks cover selected JSON paths only; format handling and column reordering in the full browser interface remain incomplete.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

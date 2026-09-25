@@ -524,14 +524,14 @@
       "path": "/columns/:column_id/left_position(.:format)",
       "controller": "columns/left_positions",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/columns/:column_id/right_position(.:format)",
       "controller": "columns/right_positions",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1813,6 +1813,14 @@
     {
       "method": "GET",
       "path": "/{account}/boards/{board}/columns/{column}/cards"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/columns/{column}/left_position"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/columns/{column}/right_position"
     },
     {
       "method": "POST",
