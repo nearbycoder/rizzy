@@ -1,0 +1,80 @@
+{
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "count": 100,
+        "seconds": 2.98,
+        "created": 100,
+        "unique_numbers": 100,
+        "errors": [],
+        "rps": 33.6,
+        "p50_ms": 27.5,
+        "p95_ms": 43.29,
+        "p99_ms": 53.93
+      },
+      {
+        "concurrency": 8,
+        "count": 100,
+        "seconds": 1.14,
+        "created": 100,
+        "unique_numbers": 100,
+        "errors": [],
+        "rps": 87.8,
+        "p50_ms": 81.65,
+        "p95_ms": 141.92,
+        "p99_ms": 159.96
+      },
+      {
+        "concurrency": 32,
+        "count": 100,
+        "seconds": 1.06,
+        "created": 100,
+        "unique_numbers": 100,
+        "errors": [],
+        "rps": 94.7,
+        "p50_ms": 256.06,
+        "p95_ms": 557.9,
+        "p99_ms": 670.71
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "count": 100,
+        "seconds": 0.34,
+        "created": 100,
+        "unique_numbers": 100,
+        "errors": [],
+        "rps": 290.7,
+        "p50_ms": 3.03,
+        "p95_ms": 5.77,
+        "p99_ms": 7.04
+      },
+      {
+        "concurrency": 8,
+        "count": 100,
+        "seconds": 0.44,
+        "created": 100,
+        "unique_numbers": 100,
+        "errors": [],
+        "rps": 228.4,
+        "p50_ms": 3.03,
+        "p95_ms": 231.88,
+        "p99_ms": 334.62
+      },
+      {
+        "concurrency": 32,
+        "count": 100,
+        "seconds": 0.94,
+        "created": 100,
+        "unique_numbers": 100,
+        "errors": [],
+        "rps": 106.1,
+        "p50_ms": 66.3,
+        "p95_ms": 434.71,
+        "p99_ms": 837.61
+      }
+    ]
+  }
+}

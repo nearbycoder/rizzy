@@ -1,0 +1,6 @@
+/target
+/data
+/upstream
+*.sqlite3*
+__pycache__/
+*.pyc
