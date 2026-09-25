@@ -110,6 +110,21 @@ pub(super) async fn show(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
+    let image_url = storage::image_url_for_card(app, principal, &card_id).await?;
+    let image = image_url
+        .as_str()
+        .map(|url| {
+            format!(
+                "<img class=\"card-perma__image\" src=\"{}\" alt=\"\">",
+                escape(url)
+            )
+        })
+        .unwrap_or_default();
+    let image_button = if image_url.as_str().is_some() {
+        "<button class=\"side-action side-action--image\" id=\"remove-image\" type=\"button\" aria-label=\"Remove background image\" title=\"Remove background image\">⊠</button>".to_owned()
+    } else {
+        "<label class=\"side-action side-action--image\" title=\"Add background image\"><span class=\"for-screen-reader\">Add background image</span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><circle cx=\"8\" cy=\"9\" r=\"2\"/><path d=\"m3 18 6-6 4 4 3-3 5 5M18 1v6M15 4h6\"/></svg><input id=\"image-upload\" type=\"file\" accept=\"image/png,image/jpeg,image/webp\" aria-label=\"Add background image\"></label>".to_owned()
+    };
     let closed = card.get::<i64, _>("closed") != 0;
     let postponed = card.get::<i64, _>("postponed") != 0;
     let column_id: Option<String> = card.get("column_id");
@@ -155,6 +170,17 @@ pub(super) async fn show(
         ("COMMENTS", comment_html),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
+        ("IMAGE", image),
+        ("IMAGE_BUTTON", image_button),
+        (
+            "IMAGE_CLASS",
+            if image_url.as_str().is_some() {
+                " has-image"
+            } else {
+                ""
+            }
+            .to_owned(),
+        ),
     ]);
     values.insert(
         "STATUS",
