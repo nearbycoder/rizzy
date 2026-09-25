@@ -783,7 +783,7 @@
       "path": "/cards/:card_id/self_assignment(.:format)",
       "controller": "cards/self_assignments",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1957,6 +1957,10 @@
     {
       "method": "POST",
       "path": "/{account}/cards/{number}/assignments"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/cards/{number}/self_assignment"
     },
     {
       "method": "POST",

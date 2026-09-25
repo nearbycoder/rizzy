@@ -1530,6 +1530,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(toggle_assignment),
         )
         .route(
+            "/{account}/cards/{number}/self_assignment",
+            post(toggle_self_assignment),
+        )
+        .route(
             "/{account}/cards/{number}/watch",
             post(watch_card).delete(unwatch_card),
         )
@@ -5946,6 +5950,26 @@ async fn toggle_assignment(
     p.write()?;
     let c = card(&app, &p, &number).await?;
     let assignee_id = required(&body, "assignee_id")?;
+    toggle_assignment_to(&app, &p, &c, &assignee_id).await
+}
+
+async fn toggle_self_assignment(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let c = card(&app, &p, &number).await?;
+    toggle_assignment_to(&app, &p, &c, &p.user_id).await
+}
+
+async fn toggle_assignment_to(
+    app: &App,
+    p: &Principal,
+    c: &SqliteRow,
+    assignee_id: &str,
+) -> Result<StatusCode> {
     let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
     let assignee=sqlx::query("SELECT u.id,u.name FROM users u JOIN boards b ON b.id=? WHERE u.id=? AND u.account_id=? AND u.active=1 AND u.role!='system' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=u.id)")
