@@ -47,6 +47,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod my_menu;
+mod notification_mail;
 mod passkeys;
 mod push_subscriptions;
 mod pwa;
@@ -667,10 +668,13 @@ async fn queue_notifications(
         .into_iter()
         .filter(|user| user != &p.user_id && !mentioned.contains(user))
     {
-        sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Event',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
+        let inserted = sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Event',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
             .bind(id()).bind(&p.account_id).bind(&recipient).bind(&p.user_id).bind(card_id).bind(event_id)
             .bind(timestamp).bind(timestamp).bind(board_id).bind(&recipient)
             .execute(&mut **tx).await.map_err(db_err)?;
+        if inserted.rows_affected() != 0 {
+            notification_mail::queue(tx, &recipient, timestamp).await?;
+        }
     }
     Ok(())
 }
@@ -706,6 +710,7 @@ async fn create_new_mentions(
             sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Mention',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
                 .bind(id()).bind(&p.account_id).bind(&user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
                 .bind(&timestamp).bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
+            notification_mail::queue(tx, &user_id, &timestamp).await?;
         }
     }
     Ok(())
@@ -1514,11 +1519,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .await?;
         tx.commit().await?;
     }
+    if env::args().nth(1).as_deref() == Some("deliver-notifications") {
+        let count = notification_mail::deliver_due(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Delivered {count} notification bundles");
+        return Ok(());
+    }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
     tokio::spawn(exports::worker(app.clone()));
     tokio::spawn(imports::worker(app.clone()));
+    tokio::spawn(notification_mail::worker(app.clone()));
     let maintenance_db = app.db.clone();
     let maintenance_app = app.clone();
     tokio::spawn(async move {
@@ -1907,7 +1920,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/notifications/settings",
             get(show_notification_settings)
                 .put(update_notification_settings)
-                .patch(update_notification_settings),
+                .patch(update_notification_settings)
+                .post(update_notification_settings),
         )
         .route("/{account}/notifications/unsubscribe/new", get(unsubscribes::new))
         .route("/{account}/notifications/unsubscribe", get(unsubscribes::show).post(unsubscribes::create))
@@ -6338,7 +6352,7 @@ async fn show_notification_settings(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let frequency = sqlx::query_scalar::<_, String>(
         "SELECT bundle_email_frequency FROM notification_settings WHERE user_id=? AND account_id=?",
@@ -6348,27 +6362,113 @@ async fn show_notification_settings(
     .fetch_optional(&app.db)
     .await
     .map_err(db_err)?
-    .unwrap_or_else(|| "never".into());
-    Ok(Json(json!({"bundle_email_frequency":frequency})))
+    .unwrap_or_else(|| "every_few_hours".into());
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(Json(json!({"bundle_email_frequency":frequency})).into_response());
+    }
+    let boards = sqlx::query("SELECT b.id,b.name,a.involvement FROM accesses a JOIN boards b ON b.id=a.board_id WHERE a.user_id=? AND b.account_id=? ORDER BY lower(b.name)")
+        .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let mut board_html = String::new();
+    for board in boards {
+        let id: String = board.get("id");
+        let name: String = board.get("name");
+        let involvement: String = board.get("involvement");
+        board_html.push_str(&format!(
+            "<li><a href=\"/{}/boards/{}\">{}</a> <span>{}</span></li>",
+            p.slug,
+            escape(&id),
+            escape(&name),
+            if involvement == "watching" {
+                "Watching"
+            } else {
+                "Access only"
+            }
+        ));
+    }
+    let choices = [
+        ("never", "Never"),
+        ("every_few_hours", "Every few hours"),
+        ("daily", "Every day"),
+        ("weekly", "Every week"),
+    ]
+    .iter()
+    .map(|(value, label)| {
+        format!(
+            "<option value=\"{value}\"{}>{label}</option>",
+            if *value == frequency { " selected" } else { "" }
+        )
+    })
+    .collect::<String>();
+    let html = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Notification Settings | Rizzy</title><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#f7f5f0;color:#252322}}main{{max-width:900px;margin:35px auto;padding:20px}}.panels{{display:grid;grid-template-columns:1fr 1fr;gap:24px}}section{{background:white;padding:22px;border-radius:12px;box-shadow:0 4px 24px #0001}}select,button{{font:inherit;padding:9px}}li{{margin:12px 0}}@media(max-width:700px){{.panels{{grid-template-columns:1fr}}}}</style></head><body><main><p><a href=\"/{}/\">← Activity</a></p><h1>Notification Settings</h1><div class=\"panels\"><section><h2>Boards</h2><ul>{board_html}</ul></section><section><h2>Push notifications are OFF</h2><p><a href=\"/{}/users/{}/push_subscriptions\">Manage this device’s push subscriptions</a></p><h2>Email Notifications</h2><p>Get a single email with all your notifications every few hours, daily, or weekly.</p><form method=\"post\" action=\"/{}/notifications/settings\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label for=\"bundle-email-frequency\">Email me about new notifications...</label><select id=\"bundle-email-frequency\" name=\"user_settings[bundle_email_frequency]\" onchange=\"this.form.requestSubmit()\">{choices}</select><button type=\"submit\">Save</button></form></section></div></main></body></html>",
+        p.slug,
+        p.slug,
+        escape(&p.user_id),
+        p.slug
+    );
+    Ok(Html(html).into_response())
 }
 async fn update_notification_settings(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    body: Bytes,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
-    let frequency = required(nested(&body, "user_settings"), "bundle_email_frequency")?;
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    let frequency = if form {
+        url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "user_settings[bundle_email_frequency]")
+            .map(|(_, value)| value.into_owned())
+            .ok_or_else(|| bad("Missing email frequency"))?
+    } else {
+        let body: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
+        required(nested(&body, "user_settings"), "bundle_email_frequency")?
+    };
     if !["never", "every_few_hours", "daily", "weekly"].contains(&frequency.as_str()) {
         return Err(bad("Invalid bundle email frequency"));
     }
+    let previous: Option<String> = sqlx::query_scalar(
+        "SELECT bundle_email_frequency FROM notification_settings WHERE user_id=?",
+    )
+    .bind(&p.user_id)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?;
     sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
         .bind(&p.user_id).bind(&p.account_id).bind(&frequency).execute(&app.db).await.map_err(db_err)?;
+    if previous.as_deref() != Some(frequency.as_str()) {
+        if frequency == "never" {
+            sqlx::query("DELETE FROM notification_bundles WHERE user_id=? AND status=0")
+                .bind(&p.user_id)
+                .execute(&app.db)
+                .await
+                .map_err(db_err)?;
+        } else {
+            sqlx::query("UPDATE notification_bundles SET ends_at=?,updated_at=? WHERE user_id=? AND status=0")
+                .bind(now()).bind(now()).bind(&p.user_id)
+                .execute(&app.db).await.map_err(db_err)?;
+        }
+    }
     if frequency != "never" {
         unsubscribes::ensure_token(&app, &p.user_id).await?;
     }
-    Ok(StatusCode::NO_CONTENT)
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("/{}/notifications/settings", p.slug),
+            )],
+        )
+            .into_response())
+    }
 }
 
 async fn notification_json(app: &App, p: &Principal, row: &SqliteRow, host: &str) -> Result<Value> {

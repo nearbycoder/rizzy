@@ -25,7 +25,7 @@ def main():
             empty, _ = call(port, f"/{account}/notifications", bearer=owner_token)
             assert empty == []
             settings, _ = call(port, f"/{account}/notifications/settings", bearer=owner_token)
-            assert settings == {"bundle_email_frequency": "never"}
+            assert settings == {"bundle_email_frequency": "every_few_hours"}
             call(port, f"/{account}/notifications/settings", "PUT", {"user_settings": {"bundle_email_frequency": "every_few_hours"}}, bearer=owner_token, status=204)
             settings, _ = call(port, f"/{account}/notifications/settings", bearer=owner_token)
             assert settings == {"bundle_email_frequency": "every_few_hours"}
