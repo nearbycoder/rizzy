@@ -26,7 +26,8 @@ def main():
         sendmail.chmod(0o700)
         env = {**os.environ, 'RIZZY_DATABASE_URL': f'sqlite://{database}',
                'RIZZY_SENDMAIL': str(sendmail), 'RIZZY_MAIL_FROM': 'rizzy@example.test',
-               'RIZZY_PUBLIC_URL': 'http://localhost:3038', 'RIZZY_DISABLE_WEBHOOK_DELIVERY': '1'}
+               'RIZZY_PUBLIC_URL': 'http://localhost:3038', 'RIZZY_DISABLE_WEBHOOK_DELIVERY': '1',
+               'RIZZY_DISABLE_PUSH_DELIVERY': '1'}
         seed = subprocess.run([BINARY, 'seed'], cwd=ROOT, env=env, capture_output=True, text=True, check=True)
         account = re.search(r'Account: (\d+)', seed.stdout).group(1)
         owner_token = re.search(r'Bearer token: (\w+)', seed.stdout).group(1)
@@ -40,6 +41,7 @@ def main():
                 db.execute("insert into identities(id,email_address,created_at) values('mail-identity','mail-recipient@example.test',datetime('now'))")
                 db.execute("insert into users(id,account_id,identity_id,name,role,verified_at,created_at) values('mail-user',?,'mail-identity','Mail Recipient','member',datetime('now'),datetime('now'))", (account_id,))
                 db.execute("insert into access_tokens(id,identity_id,token_hash,description,permission,created_at) values('mail-token','mail-identity',?,'Test','write',datetime('now'))", (hashlib.sha256(b'mail-token').hexdigest(),))
+                db.execute("insert into push_subscriptions(id,account_id,user_id,endpoint,p256dh_key,auth_key,created_at,updated_at) values('mail-push',?,'mail-user','https://fcm.googleapis.com/fcm/send/test','browser-public-key','browser-auth',datetime('now'),datetime('now'))", (account_id,))
             call(port, f'/{account}/boards/{board_id}', 'PUT', {'user_ids': [owner_id, 'mail-user']}, bearer=owner_token)
             call(port, f'/{account}/boards/{board_id}/involvement', 'PUT', {'involvement': 'watching'}, bearer='mail-token', status=204)
             card, _ = call(port, f'/{account}/boards/{board_id}/cards', 'POST', {'card': {'title': 'Bundle `card` & <test>'}}, bearer=owner_token, status=201)
@@ -48,6 +50,7 @@ def main():
             with sqlite3.connect(database) as db:
                 bundles = db.execute("select id,starts_at,ends_at from notification_bundles where user_id='mail-user' and status=0").fetchall()
                 assert len(bundles) == 1, bundles
+                assert db.execute("select count(*) from push_deliveries where status=0").fetchone()[0] == 1
                 start_at, end_at = bundles[0][1:]
                 from datetime import datetime
                 assert 14390 <= (datetime.fromisoformat(end_at) - datetime.fromisoformat(start_at)).total_seconds() <= 14410
@@ -55,6 +58,7 @@ def main():
             time.sleep(2)
             with sqlite3.connect(database) as db:
                 assert db.execute("select count(*) from notification_bundles where user_id='mail-user'").fetchone()[0] == 1
+                assert db.execute("select count(*) from push_deliveries where status=0").fetchone()[0] == 2
                 from datetime import datetime, timezone, timedelta
                 cutoff = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
                 db.execute("update notification_bundles set ends_at=? where user_id='mail-user'", (cutoff,))

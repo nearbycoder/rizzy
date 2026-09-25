@@ -49,6 +49,7 @@ mod join_code_page;
 mod my_menu;
 mod notification_mail;
 mod passkeys;
+mod push_delivery;
 mod push_subscriptions;
 mod pwa;
 mod reaction_page;
@@ -674,6 +675,7 @@ async fn queue_notifications(
             .execute(&mut **tx).await.map_err(db_err)?;
         if inserted.rows_affected() != 0 {
             notification_mail::queue(tx, &recipient, timestamp).await?;
+            push_delivery::queue(tx, &recipient, card_id).await?;
         }
     }
     Ok(())
@@ -711,6 +713,7 @@ async fn create_new_mentions(
                 .bind(id()).bind(&p.account_id).bind(&user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
                 .bind(&timestamp).bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
             notification_mail::queue(tx, &user_id, &timestamp).await?;
+            push_delivery::queue(tx, &user_id, card_id).await?;
         }
     }
     Ok(())
@@ -1526,12 +1529,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("Delivered {count} notification bundles");
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("deliver-push") {
+        let count = push_delivery::deliver_due(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Delivered {count} push jobs");
+        return Ok(());
+    }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
     tokio::spawn(exports::worker(app.clone()));
     tokio::spawn(imports::worker(app.clone()));
     tokio::spawn(notification_mail::worker(app.clone()));
+    if env::var("RIZZY_DISABLE_PUSH_DELIVERY").as_deref() != Ok("1") {
+        tokio::spawn(push_delivery::worker(app.clone()));
+    }
     let maintenance_db = app.db.clone();
     let maintenance_app = app.clone();
     tokio::spawn(async move {
@@ -1585,6 +1598,16 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 {
                     eprintln!("authentication cleanup failed: {error}");
                 }
+            }
+            let delivered_cutoff = (Utc::now() - chrono::Duration::days(30))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            if let Err(error) =
+                sqlx::query("DELETE FROM push_deliveries WHERE status=2 AND updated_at<?")
+                    .bind(delivered_cutoff)
+                    .execute(&maintenance_db)
+                    .await
+            {
+                eprintln!("push delivery cleanup failed: {error}");
             }
             if let Err(error) = account_cancellation::incinerate_due(&maintenance_app).await {
                 eprintln!("account incineration failed: {error}");
@@ -6399,8 +6422,19 @@ async fn show_notification_settings(
         )
     })
     .collect::<String>();
+    let push_html = if let Some(key) = push_delivery::public_key() {
+        format!(
+            "<div data-push-settings data-vapid-key=\"{}\" data-subscriptions-url=\"/{}/users/{}/push_subscriptions\"><h2>Push notifications are <span data-push-state>OFF</span></h2><button type=\"button\">Turn ON push notifications on this device</button><p data-push-error role=\"status\"></p></div><script>{}</script>",
+            escape(&key),
+            p.slug,
+            escape(&p.user_id),
+            include_str!("../assets/notifications_push.js")
+        )
+    } else {
+        "<h2>Push notifications are OFF</h2><p>Push delivery is not configured.</p>".into()
+    };
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Notification Settings | Rizzy</title><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#f7f5f0;color:#252322}}main{{max-width:900px;margin:35px auto;padding:20px}}.panels{{display:grid;grid-template-columns:1fr 1fr;gap:24px}}section{{background:white;padding:22px;border-radius:12px;box-shadow:0 4px 24px #0001}}select,button{{font:inherit;padding:9px}}li{{margin:12px 0}}@media(max-width:700px){{.panels{{grid-template-columns:1fr}}}}</style></head><body><main><p><a href=\"/{}/\">← Activity</a></p><h1>Notification Settings</h1><div class=\"panels\"><section><h2>Boards</h2><ul>{board_html}</ul></section><section><h2>Push notifications are OFF</h2><p><a href=\"/{}/users/{}/push_subscriptions\">Manage this device’s push subscriptions</a></p><h2>Email Notifications</h2><p>Get a single email with all your notifications every few hours, daily, or weekly.</p><form method=\"post\" action=\"/{}/notifications/settings\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label for=\"bundle-email-frequency\">Email me about new notifications...</label><select id=\"bundle-email-frequency\" name=\"user_settings[bundle_email_frequency]\" onchange=\"this.form.requestSubmit()\">{choices}</select><button type=\"submit\">Save</button></form></section></div></main></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Notification Settings | Rizzy</title><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#f7f5f0;color:#252322}}main{{max-width:900px;margin:35px auto;padding:20px}}.panels{{display:grid;grid-template-columns:1fr 1fr;gap:24px}}section{{background:white;padding:22px;border-radius:12px;box-shadow:0 4px 24px #0001}}select,button{{font:inherit;padding:9px}}li{{margin:12px 0}}@media(max-width:700px){{.panels{{grid-template-columns:1fr}}}}</style></head><body><main><p><a href=\"/{}/\">← Activity</a></p><h1>Notification Settings</h1><div class=\"panels\"><section><h2>Boards</h2><ul>{board_html}</ul></section><section>{push_html}<p><a href=\"/{}/users/{}/push_subscriptions\">Manage this device’s push subscriptions</a></p><h2>Email Notifications</h2><p>Get a single email with all your notifications every few hours, daily, or weekly.</p><form method=\"post\" action=\"/{}/notifications/settings\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label for=\"bundle-email-frequency\">Email me about new notifications...</label><select id=\"bundle-email-frequency\" name=\"user_settings[bundle_email_frequency]\" onchange=\"this.form.requestSubmit()\">{choices}</select><button type=\"submit\">Save</button></form></section></div></main></body></html>",
         p.slug,
         p.slug,
         escape(&p.user_id),

@@ -1,6 +1,6 @@
 use super::*;
 
-async fn validated_endpoint(raw: &str) -> Result<String> {
+pub(super) async fn delivery_address(raw: &str) -> Result<(String, SocketAddr)> {
     const HOSTS: &[&str] = &[
         "jmt17.google.com",
         "fcm.googleapis.com",
@@ -34,6 +34,11 @@ async fn validated_endpoint(raw: &str) -> Result<String> {
     if addresses.is_empty() || addresses.iter().any(|address| !public_ip(address.ip())) {
         return Err(invalid_endpoint());
     }
+    Ok((host, addresses[0]))
+}
+
+async fn validated_endpoint(raw: &str) -> Result<String> {
+    delivery_address(raw).await?;
     Ok(raw.to_owned())
 }
 

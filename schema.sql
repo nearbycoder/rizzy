@@ -434,6 +434,24 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   UNIQUE(user_id,endpoint)
 );
 CREATE INDEX IF NOT EXISTS push_subscriptions_account ON push_subscriptions(account_id);
+CREATE TABLE IF NOT EXISTS push_deliveries (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  notification_id TEXT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  status INTEGER NOT NULL DEFAULT 0 CHECK(status IN (0,1,2)),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(notification_id,source_id)
+);
+CREATE INDEX IF NOT EXISTS push_deliveries_due ON push_deliveries(status,next_attempt_at);
+CREATE TABLE IF NOT EXISTS push_delivery_receipts (
+  delivery_id TEXT NOT NULL REFERENCES push_deliveries(id) ON DELETE CASCADE,
+  subscription_id TEXT NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+  PRIMARY KEY(delivery_id,subscription_id)
+);
 CREATE TABLE IF NOT EXISTS user_timezones (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

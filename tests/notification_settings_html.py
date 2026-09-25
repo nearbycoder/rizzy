@@ -24,7 +24,9 @@ def main():
     with tempfile.TemporaryDirectory() as folder:
         database = pathlib.Path(folder) / 'rizzy.sqlite3'
         env = {**os.environ, 'RIZZY_DATABASE_URL': f'sqlite://{database}',
-               'RIZZY_SEED_EMAIL': 'settings-email@example.test', 'RIZZY_DEV_MAGIC_LINKS': '1'}
+               'RIZZY_SEED_EMAIL': 'settings-email@example.test', 'RIZZY_DEV_MAGIC_LINKS': '1',
+               'RIZZY_DISABLE_PUSH_DELIVERY': '1',
+               'RIZZY_VAPID_PRIVATE_KEY': 'IQ9Ur0ykXoHS9gzfYX0aBjy9lvdrjx_PFUXmie9YRcY'}
         seed = subprocess.run([BINARY, 'seed'], cwd=ROOT, env=env, capture_output=True, text=True, check=True)
         account = re.search(r'Account: (\d+)', seed.stdout).group(1)
         token = re.search(r'Bearer token: (\w+)', seed.stdout).group(1)
@@ -57,6 +59,8 @@ def main():
             status, _, html = call(path)
             assert status == 200 and b'Notification Settings' in html and b'Email Notifications' in html
             assert b'Boards' in html and b'value="every_few_hours" selected' in html
+            assert b'data-push-settings' in html and b'pushManager.subscribe' in html
+            assert b'Turn ON push notifications on this device' in html
             form = urllib.parse.urlencode({'_method': 'patch', 'user_settings[bundle_email_frequency]': 'never'}).encode()
             status, headers, _ = call(path, 'POST', form)
             assert status == 302 and headers['Location'] == path
