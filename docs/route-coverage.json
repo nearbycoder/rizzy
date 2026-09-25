@@ -90,14 +90,14 @@
       "path": "/account/exports(.:format)",
       "controller": "account/exports",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/account/exports/:id(.:format)",
       "controller": "account/exports",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1597,6 +1597,14 @@
     {
       "method": "GET",
       "path": "/{account}/users/{user}/data_exports/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/account/exports"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/account/exports/{id}"
     },
     {
       "method": "GET",

@@ -28,6 +28,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
+mod account_transfer;
 mod board_views;
 mod exports;
 mod rich_text;
@@ -1467,6 +1468,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/users/{user}/data_exports/{id}",
             get(exports::show_user),
+        )
+        .route("/{account}/account/exports", post(exports::create_account))
+        .route(
+            "/{account}/account/exports/{id}",
+            get(exports::show_account),
         )
         .route("/{account}/exports/{id}/download", get(exports::download))
         .route(

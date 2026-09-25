@@ -12,7 +12,7 @@ fn export_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("data/exports"))
 }
 
-fn export_path(id: &str) -> PathBuf {
+pub(crate) fn export_path(id: &str) -> PathBuf {
     export_dir().join(format!("{id}.zip"))
 }
 
@@ -222,13 +222,97 @@ pub(super) async fn show_user(
     Ok(Html(html).into_response())
 }
 
+pub(super) async fn create_account(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.account_admin()?;
+    p.write()?;
+    let _guard = app.write_lock.lock().await;
+    let cutoff = (Utc::now() - chrono::Duration::hours(24))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM exports WHERE account_id=? AND kind='account' AND created_at>=?",
+    )
+    .bind(&p.account_id)
+    .bind(cutoff)
+    .fetch_one(&app.db)
+    .await
+    .map_err(db_err)?;
+    if count >= 10 {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "Export limit reached"));
+    }
+    let export_id = id();
+    let timestamp = now();
+    sqlx::query("INSERT INTO exports(id,account_id,user_id,kind,created_at,updated_at) VALUES(?,?,?,'account',?,?)")
+        .bind(&export_id).bind(&p.account_id).bind(&p.user_id).bind(&timestamp).bind(&timestamp)
+        .execute(&app.db).await.map_err(db_err)?;
+    if json_request(&headers, &account) {
+        let row = sqlx::query("SELECT * FROM exports WHERE id=?")
+            .bind(&export_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+        return Ok((
+            StatusCode::CREATED,
+            Json(export_view(&row, &base(&headers), p.slug)),
+        )
+            .into_response());
+    }
+    Ok((
+        StatusCode::FOUND,
+        [(header::LOCATION, format!("/{account}/account/settings"))],
+    )
+        .into_response())
+}
+
+pub(super) async fn show_account(
+    State(app): Shared,
+    Path((account, export_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.account_admin()?;
+    let id = export_id.trim_end_matches(".json");
+    let row = sqlx::query(
+        "SELECT * FROM exports WHERE id=? AND account_id=? AND user_id=? AND kind='account'",
+    )
+    .bind(id)
+    .bind(&p.account_id)
+    .bind(&p.user_id)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?;
+    if json_request(&headers, &export_id) {
+        return Ok(Json(export_view(
+            &row.ok_or_else(missing)?,
+            &base(&headers),
+            p.slug,
+        ))
+        .into_response());
+    }
+    let completed = row
+        .as_ref()
+        .is_some_and(|r| r.get::<String, _>("status") == "completed");
+    let html = if completed {
+        format!(
+            "<!doctype html><html><head><title>Download Export</title></head><body><h2>Download Export</h2><div>Your export is ready.</div><a id=\"download-link\" href=\"/{account}/exports/{id}/download\">Download your data</a></body></html>"
+        )
+    } else {
+        "<!doctype html><html><head><title>Download Expired</title></head><body><h2>Download Expired</h2><div>That download link has expired.</div></body></html>".to_owned()
+    };
+    Ok(Html(html).into_response())
+}
+
 pub(super) async fn download(
     State(app): Shared,
     Path((account, export_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    let row = sqlx::query("SELECT status,user_id FROM exports WHERE id=? AND account_id=?")
+    let row = sqlx::query("SELECT status,user_id,kind FROM exports WHERE id=? AND account_id=?")
         .bind(&export_id)
         .bind(&p.account_id)
         .fetch_optional(&app.db)
@@ -244,7 +328,11 @@ pub(super) async fn download(
     let file = tokio::fs::File::open(export_path(&export_id))
         .await
         .map_err(|_| missing())?;
-    let filename = format!("fizzy-user-data-export-{export_id}.zip");
+    let filename = if row.get::<String, _>("kind") == "account" {
+        format!("fizzy-account-{}-export-{export_id}.zip", p.account_id)
+    } else {
+        format!("fizzy-user-data-export-{export_id}.zip")
+    };
     Ok((
         [
             (header::CONTENT_TYPE, "application/zip".to_owned()),
@@ -334,12 +422,12 @@ async fn export_card(
 }
 
 #[derive(Debug)]
-enum ArchiveEntry {
+pub(crate) enum ArchiveEntry {
     Json(String, Vec<u8>),
     Blob(String, PathBuf),
 }
 
-fn write_archive(
+pub(crate) fn write_archive(
     path: PathBuf,
     mut receiver: tokio::sync::mpsc::Receiver<ArchiveEntry>,
 ) -> std::io::Result<()> {
@@ -444,8 +532,13 @@ async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
         .map_err(db_err)?;
     let export_id: String = row.get("id");
     let user_id: String = row.get("user_id");
+    let path = if row.get::<String, _>("kind") == "account" {
+        format!("/{account}/account/exports/{export_id}")
+    } else {
+        format!("/{account}/users/{user_id}/data_exports/{export_id}")
+    };
     let message = format!(
-        "From: {from}\nTo: {email}\nSubject: Your Rizzy data export is ready for download\nContent-Type: text/plain; charset=UTF-8\n\nYour data export is ready. Download it at:\n{origin}/{account}/users/{user_id}/data_exports/{export_id}\n"
+        "From: {from}\nTo: {email}\nSubject: Your Rizzy data export is ready for download\nContent-Type: text/plain; charset=UTF-8\n\nYour data export is ready. Download it at:\n{origin}{path}\n"
     );
     let mut child = Command::new(sendmail)
         .arg("-t")
@@ -477,6 +570,7 @@ async fn run_one(
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match row.get::<String, _>("kind").as_str() {
         "user" => build_user(app, row).await,
+        "account" => account_transfer::build(app, row).await,
         _ => Err("Unsupported export kind".into()),
     }
 }
