@@ -636,7 +636,7 @@
       "path": "/cards/:card_id/image(.:format)",
       "controller": "cards/images",
       "action": "destroy",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1527,6 +1527,22 @@
       "path": "/{account}/my/identity"
     },
     {
+      "method": "POST",
+      "path": "/{account}/rails/active_storage/direct_uploads"
+    },
+    {
+      "method": "PUT",
+      "path": "/{account}/rails/active_storage/disk/{token}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/rails/active_storage/disk/{token}/{filename}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/rails/active_storage/blobs/redirect/{signed_id}/{filename}"
+    },
+    {
       "method": "PUT",
       "path": "/{account}/my/timezone"
     },
@@ -1909,6 +1925,10 @@
     {
       "method": "POST",
       "path": "/{account}/cards/{number}/publish"
+    },
+    {
+      "method": "DELETE",
+      "path": "/{account}/cards/{number}/image"
     },
     {
       "method": "POST",

@@ -147,6 +147,40 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 CREATE INDEX IF NOT EXISTS cards_board_active ON cards(board_id, status, closed, postponed, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS cards_account_latest ON cards(account_id, last_active_at DESC);
+CREATE TABLE IF NOT EXISTS storage_blobs (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  storage_key TEXT NOT NULL UNIQUE,
+  filename TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  byte_size INTEGER NOT NULL,
+  checksum TEXT NOT NULL,
+  signed_id TEXT NOT NULL UNIQUE,
+  attachable_sgid TEXT NOT NULL UNIQUE,
+  upload_token_hash TEXT NOT NULL UNIQUE,
+  upload_expires_at TEXT NOT NULL,
+  uploaded_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS storage_attachments (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  blob_id TEXT NOT NULL REFERENCES storage_blobs(id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS storage_card_image_unique
+  ON storage_attachments(record_id) WHERE record_type='Card' AND name='image';
+CREATE UNIQUE INDEX IF NOT EXISTS storage_card_image_blob_unique
+  ON storage_attachments(blob_id) WHERE record_type='Card' AND name='image';
+CREATE INDEX IF NOT EXISTS storage_attachments_record ON storage_attachments(record_type,record_id);
+CREATE TABLE IF NOT EXISTS storage_download_tokens (
+  token_hash TEXT PRIMARY KEY,
+  blob_id TEXT NOT NULL REFERENCES storage_blobs(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS closures (
   card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),

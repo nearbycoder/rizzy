@@ -30,6 +30,7 @@ use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
 mod board_views;
 mod exports;
+mod storage;
 
 struct App {
     db: SqlitePool,
@@ -895,6 +896,7 @@ async fn card_json(
     let tags: Vec<String> = sqlx::query_scalar("SELECT t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title").bind(&id).fetch_all(&app.db).await.map_err(db_err)?;
     let b = board(app, p, &board_id).await?;
     let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":description,"description_html":rich_html(&description),"image_url":null,"has_attachments":false,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
+    out["image_url"] = storage::image_url_for_card(app, p, &id).await?;
     let assigned = sqlx::query(
         "SELECT assignee_id FROM assignments WHERE card_id=? ORDER BY created_at,id LIMIT 6",
     )
@@ -999,6 +1001,7 @@ async fn cards_json_batch(
     for tags in tag_values.values_mut() {
         tags.sort();
     }
+    let image_values = storage::image_urls_for_cards(app, p, &card_ids).await?;
     let mut assignee_values: HashMap<String, Vec<String>> = HashMap::new();
     for assignment in &assignments {
         assignee_values
@@ -1019,7 +1022,7 @@ async fn cards_json_batch(
             .filter_map(|id| users.get(id).cloned())
             .collect();
         let mut value = json!({"id":card_id,"number":number,"title":card.get::<String,_>("title"),"status":card.get::<String,_>("status"),
-            "description":description,"description_html":rich_html(&description),"image_url":null,"has_attachments":false,
+            "description":description,"description_html":rich_html(&description),"image_url":image_values.get(&card_id).cloned().unwrap_or(Value::Null),"has_attachments":false,
             "tags":tag_values.get(&card_id).cloned().unwrap_or_default(),"closed":card.get::<i64,_>("closed")!=0,
             "postponed":card.get::<i64,_>("postponed")!=0,"golden":card.get::<i64,_>("golden")!=0,
             "last_active_at":card.get::<String,_>("last_active_at"),"created_at":card.get::<String,_>("created_at"),
@@ -1262,6 +1265,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     &expiration,
                 ),
                 (
+                    "DELETE FROM storage_download_tokens WHERE expires_at<?",
+                    &expiration,
+                ),
+                (
                     "DELETE FROM authentication_attempts WHERE created_at<?",
                     &attempts_cutoff,
                 ),
@@ -1296,6 +1303,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::delete(delete_token),
         )
         .route("/{account}/my/identity", get(my_identity))
+        .route(
+            "/{account}/rails/active_storage/direct_uploads",
+            post(storage::direct_upload),
+        )
+        .route(
+            "/{account}/rails/active_storage/disk/{token}",
+            axum::routing::put(storage::upload_file),
+        )
+        .route(
+            "/{account}/rails/active_storage/disk/{token}/{filename}",
+            get(storage::download_file),
+        )
+        .route(
+            "/{account}/rails/active_storage/blobs/redirect/{signed_id}/{filename}",
+            get(storage::show_blob),
+        )
         .route(
             "/{account}/my/timezone",
             axum::routing::put(update_timezone).patch(update_timezone),
@@ -1502,6 +1525,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/cards/{number}/draft", get(show_draft))
         .route("/{account}/cards/{number}/publish", post(publish_card))
+        .route(
+            "/{account}/cards/{number}/image",
+            axum::routing::delete(storage::delete_image),
+        )
         .route(
             "/{account}/cards/{number}/closure",
             post(close_card).delete(open_card),
@@ -3526,12 +3553,16 @@ async fn delete_board(
     p.write()?;
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let keys = storage::purge_card_images_tx(&mut tx, &p.account_id, None, Some(&id)).await?;
     sqlx::query("DELETE FROM boards WHERE id=? AND account_id=?")
         .bind(id)
         .bind(&p.account_id)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    storage::remove_files(keys).await;
     Ok(StatusCode::NO_CONTENT)
 }
 fn publication_key() -> String {
@@ -4372,6 +4403,7 @@ async fn activity_items(
     );
     let comment_rows =
         rows_for_ids(app, "SELECT * FROM comments WHERE id IN (", &comment_ids).await?;
+    let image_values = storage::image_urls_for_cards(app, p, &card_ids).await?;
     let user_ids = unique_ids(
         card_rows
             .iter()
@@ -4436,7 +4468,7 @@ async fn activity_items(
             .filter_map(|id| users.get(id).cloned())
             .collect();
         let mut value = json!({"id":id,"number":number,"title":title,"status":c.get::<String,_>("status"),
-            "description":description,"description_html":rich_html(&description),"image_url":null,
+            "description":description,"description_html":rich_html(&description),"image_url":image_values.get(&id).cloned().unwrap_or(Value::Null),
             "has_attachments":false,"tags":tags.get(&id).cloned().unwrap_or_default(),
             "closed":c.get::<i64,_>("closed")!=0,"postponed":c.get::<i64,_>("postponed")!=0,
             "golden":c.get::<i64,_>("golden")!=0,"last_active_at":c.get::<String,_>("last_active_at"),
@@ -5136,6 +5168,7 @@ async fn create_card(
     .map_err(db_err)?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(description).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
+    storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
     sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
         .bind(&id)
         .bind(&p.user_id)
@@ -5406,6 +5439,7 @@ async fn update_card(
     let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
     let custom_last_active_at = timestamp_param(v, "last_active_at")?;
     let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query(
         "UPDATE cards SET title=?,description=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
     )
@@ -5416,9 +5450,14 @@ async fn update_card(
     .bind(now())
     .bind(&last_active_at)
     .bind(c.get::<String, _>("id"))
-    .execute(&app.db)
+    .execute(&mut *tx)
     .await
     .map_err(db_err)?;
+    let replaced_image_keys =
+        storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), v.get("image"))
+            .await?;
+    tx.commit().await.map_err(db_err)?;
+    storage::remove_files(replaced_image_keys).await;
     if status == "published" && title != old_title && !old_title.is_empty() {
         record_event(
             &app,
@@ -5471,11 +5510,16 @@ async fn delete_card(
             Err(err(StatusCode::FORBIDDEN, "Card administrator required"))
         }
     })?;
+    let card_id: String = c.get("id");
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let keys = storage::purge_card_images_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
     sqlx::query("DELETE FROM cards WHERE id=?")
-        .bind(c.get::<String, _>("id"))
-        .execute(&app.db)
+        .bind(card_id)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    storage::remove_files(keys).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

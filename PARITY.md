@@ -21,7 +21,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Basic event notifications and read controls | No |
-| Attachments and Action Text rich text | — | No |
+| Attachments and Action Text rich text | Card background image direct uploads, authorized serving, replacement, and removal | No |
 | Imports, exports, account lifecycle | Asynchronous user card ZIP exports, authenticated download, and expiry | No |
 | API response shape and pagination parity | Partial | No |
 | SQLite and MySQL deployment parity | SQLite only | No |
@@ -36,7 +36,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 `tests/filter_parity.py` passes 13 additional cross-app card-result comparisons, including terms, closure dates, closers, a backdated card, and a card approaching auto-postponement. `tests/saved_filter_parity.py` checks that a saved filter selects the same closed card on both apps; the Rails filter is created through its model layer because its Turbo controller requires a browser session. This does not cover the full filter UI or every time zone.
 `tests/stalled_parity.py` additionally checks the stalled index before and after an old spike, a fresh comment, and postponement. Local `tests/stalled.py` checks spike creation from assignment, reopening, and multi-person comments. These checks do not cover all background-job timing or all search syntax.
 
-`tests/exports.py` checks user export ZIP content, board access scope, download permissions, asynchronous completion, and the 24-hour request limit. A live Fizzy export confirmed the same sample card's board, title, status, escaped description, and comment body format. User ZIPs currently omit attachments because Rizzy does not yet store them; account ZIP export and import are still missing. The background worker retries processing exports after a five-minute stale lease and removes completed exports after 24 hours.
+`tests/exports.py` checks user export ZIP content, board access scope, download permissions, asynchronous completion, and the 24-hour request limit. A live Fizzy export confirmed the same sample card's board, title, status, escaped description, and comment body format. User ZIPs currently omit attachments even though Rizzy stores card background images; account ZIP export and import are still missing. The background worker retries processing exports after a five-minute stale lease and removes completed exports after 24 hours.
 
 `tests/board_views_parity.py` compares private special-column JSON status, response shape, card order, and pagination, plus public column membership and pagination, against live Fizzy. The Rust public pages are still simplified and need a full visual and interaction pass. The test checks that private JSON is protected; `tests/auth_format_parity.py` covers bearer format and unauthenticated redirect behavior separately.
 
@@ -47,5 +47,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 `tests/self_assignment_parity.py` compares assignment and unassignment of the current user, including the card's returned assignee list and an unknown card response.
 
 `tests/draft_workflow_parity.py` signs in through magic links on both servers and compares browser draft creation and resumption, draft redirects, JSON editing, publication, search indexing, activity creation, and creating another draft. The Rust draft page's save/publish controls and direct board/card links were exercised in a browser. Its HTML design and interaction details are still much simpler than Fizzy's, and its cookie writes do not yet implement Fizzy's CSRF protection.
+
+`tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. Other Action Text embeds, avatars, variants, file export, and the original image controls in the browser interface remain to be built.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.
