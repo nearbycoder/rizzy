@@ -1862,6 +1862,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .delete(delete_card),
         )
         .route("/{account}/cards/{number}/draft", get(show_draft))
+        .route("/{account}/cards/previews", get(card_previews))
+        .route("/{account}/cards/previews.turbo_stream", get(card_previews))
         .route("/{account}/cards/{number}/publish", post(publish_card))
         .route(
             "/{account}/cards/{number}/image",
@@ -6395,14 +6397,7 @@ async fn list_activities(
     let items = activity_items(&app, &p, &rows, &host).await?;
     Ok(paginated(json!(items), total, query.page, &uri, &headers))
 }
-async fn list_cards(
-    State(app): Shared,
-    Path(account): Path<String>,
-    headers: HeaderMap,
-    RawQuery(raw): RawQuery,
-    OriginalUri(uri): OriginalUri,
-) -> Result<Response> {
-    let p = principal(&app, &headers, &account).await?;
+async fn resolved_card_query(app: &App, p: &Principal, raw: Option<String>) -> Result<CardQuery> {
     let mut query = parse_card_query(raw);
     if let Some(filter_id) = query.filter_id.as_deref() {
         let fields: String = sqlx::query_scalar(
@@ -6419,6 +6414,17 @@ async fn list_cards(
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
         query = card_query_from_filter(&stored, query.page);
     }
+    Ok(query)
+}
+async fn list_cards(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let query = resolved_card_query(&app, &p, raw).await?;
     let (offset, limit) = page_window(query.page);
     let order = match query.sorted_by.as_deref() {
         Some("oldest") => "c.created_at ASC",
@@ -6440,6 +6446,94 @@ async fn list_cards(
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
     let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, query.page, &uri, &headers))
+}
+async fn card_previews(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let accepts_stream = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/vnd.turbo-stream.html"));
+    if !uri.path().ends_with(".turbo_stream") && !accepts_stream {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let p = principal(&app, &headers, &account).await?;
+    let target = raw
+        .as_deref()
+        .and_then(|raw| {
+            url::form_urlencoded::parse(raw.as_bytes())
+                .find(|(key, _)| key == "target")
+                .map(|(_, value)| value.into_owned())
+        })
+        .unwrap_or_default();
+    let query = resolved_card_query(&app, &p, raw.clone()).await?;
+    let (offset, limit) = page_window(query.page);
+    let order = match query.sorted_by.as_deref() {
+        Some("oldest") => "c.created_at ASC",
+        Some("newest") => "c.created_at DESC",
+        _ => "c.last_active_at DESC",
+    };
+    let mut count = cards_query("SELECT COUNT(*)", &p, &query);
+    let total: i64 = count
+        .build_query_scalar()
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut builder = cards_query("SELECT c.*", &p, &query);
+    builder
+        .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
+        .push_bind(limit)
+        .push(" OFFSET ")
+        .push_bind(offset);
+    let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
+    let mut cards = String::new();
+    for card in &rows {
+        let id: String = card.get("id");
+        let number: i64 = card.get("number");
+        let title = escape(&card.get::<String, _>("title"));
+        cards.push_str(&format!(
+            "<article id=\"article_card_{id}\" class=\"card\" data-id=\"{number}\"><a class=\"card__link\" href=\"/{}/cards/{number}\"><h3 class=\"card__title\">{title}</h3></a></article>",
+            p.slug
+        ));
+    }
+    if offset + (rows.len() as i64) < total {
+        let mut params = url::form_urlencoded::Serializer::new(String::new());
+        for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
+            if key != "page" {
+                params.append_pair(&key, &value);
+            }
+        }
+        params.append_pair("page", &(query.page + 1).to_string());
+        let next = format!(
+            "/{}/cards/previews.turbo_stream?{}",
+            p.slug,
+            params.finish()
+        );
+        cards.push_str(&format!(
+            "<a id=\"{}-load-page-{}\" href=\"{}\" data-turbo-stream=\"true\">Load more cards</a>",
+            escape(&target),
+            query.page + 1,
+            escape(&next)
+        ));
+    }
+    let html = format!(
+        "<turbo-stream action=\"remove\" target=\"{}-load-page-{}\"></turbo-stream><turbo-stream action=\"append\" target=\"{}\"><template>{cards}</template></turbo-stream>",
+        escape(&target),
+        query.page,
+        escape(&target)
+    );
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/vnd.turbo-stream.html; charset=utf-8",
+        )],
+        html,
+    )
+        .into_response())
 }
 fn filter_params(headers: &HeaderMap, body: &Bytes) -> Result<Value> {
     let form = headers

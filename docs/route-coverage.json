@@ -566,7 +566,7 @@
       "path": "/cards/previews(.:format)",
       "controller": "cards/previews",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -2117,6 +2117,14 @@
     {
       "method": "GET",
       "path": "/{account}/cards/{number}/draft"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/previews"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/previews.turbo_stream"
     },
     {
       "method": "POST",
