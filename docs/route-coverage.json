@@ -1392,7 +1392,7 @@
       "path": "/prompts/cards(.:format)",
       "controller": "prompts/cards",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1601,6 +1601,10 @@
     {
       "method": "GET",
       "path": "/{account}/prompts/users"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/prompts/cards"
     },
     {
       "method": "GET",

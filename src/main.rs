@@ -1581,6 +1581,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/users", get(list_users))
         .route("/{account}/prompts/users", get(prompt_users))
+        .route("/{account}/prompts/cards", get(prompt_cards))
         .route(
             "/{account}/prompts/boards/{board}/users",
             get(prompt_board_users),
@@ -2707,6 +2708,57 @@ async fn prompt_board_users(
         rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
         &headers,
     ))
+}
+
+#[derive(Deserialize)]
+struct PromptCardQuery {
+    filter: Option<String>,
+}
+
+fn prompt_card_item(slug: i64, row: &SqliteRow) -> String {
+    let number: i64 = row.get("number");
+    let title: String = row.get("title");
+    let label = format!("#{number} {}", escape(&title));
+    format!(
+        "<lexxy-prompt-item>\n  <template type=\"menu\">\n    {label}\n  </template>\n  <template type=\"editor\">\n    <a href=\"/{slug}/cards/{number}\">{label}</a>\n  </template>\n</lexxy-prompt-item>\n\n"
+    )
+}
+
+async fn prompt_cards(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<PromptCardQuery>,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let mut rows = Vec::new();
+    if let Some(filter) = query
+        .filter
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        if let Ok(number) = filter.parse::<i64>() {
+            if let Some(exact) = sqlx::query("SELECT c.number,c.title FROM cards c WHERE c.account_id=? AND c.number=? AND EXISTS(SELECT 1 FROM accesses a WHERE a.board_id=c.board_id AND a.user_id=?)")
+                .bind(&p.account_id).bind(number).bind(&p.user_id)
+                .fetch_optional(&app.db).await.map_err(db_err)? {
+                rows.push(exact);
+            }
+        }
+        if let Some(search) = fts_query(filter) {
+            let matched = sqlx::query("SELECT c.number,c.title FROM cards c JOIN (SELECT id AS card_id FROM cards WHERE rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ?) UNION ALL SELECT card_id FROM comments WHERE rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ?)) hits ON hits.card_id=c.id WHERE c.account_id=? AND c.status='published' AND EXISTS(SELECT 1 FROM accesses a WHERE a.board_id=c.board_id AND a.user_id=?) ORDER BY c.created_at DESC,c.id DESC LIMIT 10")
+                .bind(&search).bind(&search).bind(&p.account_id).bind(&p.user_id)
+                .fetch_all(&app.db).await.map_err(db_err)?;
+            rows.extend(matched);
+        }
+    } else {
+        rows = sqlx::query("SELECT c.number,c.title FROM cards c WHERE c.account_id=? AND c.status='published' AND EXISTS(SELECT 1 FROM accesses a WHERE a.board_id=c.board_id AND a.user_id=?) ORDER BY c.last_active_at DESC,c.id DESC")
+            .bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db).await.map_err(db_err)?;
+    }
+    let html: String = rows
+        .iter()
+        .map(|row| prompt_card_item(p.slug, row))
+        .collect();
+    Ok(prompt_response(html, &headers))
 }
 async fn list_users(
     State(app): Shared,
