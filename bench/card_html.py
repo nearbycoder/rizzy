@@ -34,13 +34,14 @@ def main():
                 request(target, f"/cards/{number}/steps", "POST", {"step": {"content": content}})
             request(target, f"/cards/{number}/comments", "POST",
                     {"comment": {"body": "Looks useful."}})
+            request(target, f"/cards/{number}/taggings", "POST", {"tag_title": "benchmark-tag"})
             target["cookie"] = browser_cookie(target)
             path = f"/cards/{number}"
             paths[name] = path
             sample = html(target, path)
             assert b'card-perma' in sample and b'Benchmark card 0' in sample
-            assert all(value in sample for value in (b'Review the idea', b'Share the update', b'Looks useful.'))
-            results["sample_parity"][name] = {"steps": 2, "comment": True, "html_bytes": len(sample)}
+            assert all(value in sample for value in (b'Review the idea', b'Share the update', b'Looks useful.', b'benchmark-tag'))
+            results["sample_parity"][name] = {"steps": 2, "comment": True, "tag": True, "html_bytes": len(sample)}
             for _ in range(5):
                 html(target, path)
         for concurrency in map(int, args.concurrency.split(",")):
