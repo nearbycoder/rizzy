@@ -108,19 +108,22 @@ pub(super) async fn show(
                 .await?
                 .1
         };
+        let comment_id: String = comment.get("id");
         let edit = if comment.get::<String, _>("creator_id") == principal.user_id {
             format!(
                 " <a href=\"/{}/cards/{number}/comments/{}/edit\">Edit</a>",
                 principal.slug,
-                escape(&comment.get::<String, _>("id"))
+                escape(&comment_id)
             )
         } else {
             String::new()
         };
         comment_html.push_str(&format!(
-            "<article class=\"comment\"><h3>{} <time>{}</time>{edit}</h3><div class=\"comment__body lexxy-content\">{content}</div></article>",
+            "<article class=\"comment\"><h3>{} <time>{}</time>{edit} <a href=\"/{}/cards/{number}/comments/{}/reactions/new\">React</a></h3><div class=\"comment__body lexxy-content\">{content}</div></article>",
             escape(&comment.get::<String, _>("creator_name")),
             escape(&comment.get::<String, _>("created_at")),
+            principal.slug,
+            escape(&comment_id),
         ));
     }
     let watching: i64 = sqlx::query_scalar(

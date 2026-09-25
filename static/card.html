@@ -37,6 +37,7 @@ main{width:100%;margin:0 auto;padding:0 36px 90px}main>nav{margin:9px 22px 41px}
   <div class="card__body"><div class="card__content"><h1 class="card__title">{{TITLE}}</h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div>{{STEPS}}</div>{{STAGE_RAIL}}</div>
   <div class="card__footer"><span class="byline">By {{CREATOR_NAME}} · {{CREATED_AT}}</span><div class="actions">
     <a class="secondary" href="/{{ACCOUNT}}/cards/{{NUMBER}}/assignments/new" aria-label="Assign this card">Assign</a>
+    <a class="secondary" href="/{{ACCOUNT}}/cards/{{NUMBER}}/reactions/new" aria-label="React to this card">React</a>
     <button id="watch" class="secondary side-action side-action--watch" type="button" aria-label="{{WATCH_LABEL}}" title="{{WATCH_LABEL}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4"/></svg></button>
     <button id="pin" class="secondary side-action side-action--pin" type="button" aria-label="{{PIN_LABEL}}" title="{{PIN_LABEL}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 0-1 7 3 3v2H7v-2l3-3-1-7ZM12 15v6"/></svg></button>
     <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>

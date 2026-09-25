@@ -47,6 +47,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod my_menu;
+mod reaction_page;
 mod rich_text;
 mod session_transfer;
 mod signup_page;
@@ -1966,6 +1967,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(list_card_reactions).post(create_card_reaction),
         )
         .route(
+            "/{account}/cards/{number}/reactions/new",
+            get(reaction_page::card_new),
+        )
+        .route(
             "/{account}/cards/{number}/reactions/{reaction}",
             axum::routing::delete(delete_card_reaction),
         )
@@ -2003,6 +2008,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}/comments/{comment}/reactions",
             get(list_comment_reactions).post(create_comment_reaction),
+        )
+        .route(
+            "/{account}/cards/{number}/comments/{comment}/reactions/new",
+            get(reaction_page::comment_new),
         )
         .route(
             "/{account}/cards/{number}/comments/{comment}/reactions/{reaction}",

@@ -755,7 +755,7 @@
       "path": "/cards/:card_id/reactions/new(.:format)",
       "controller": "cards/reactions",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -867,7 +867,7 @@
       "path": "/cards/:card_id/comments/:comment_id/reactions/new(.:format)",
       "controller": "cards/comments/reactions",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -2295,6 +2295,10 @@
       "path": "/{account}/cards/{number}/reactions"
     },
     {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/reactions/new"
+    },
+    {
       "method": "DELETE",
       "path": "/{account}/cards/{number}/reactions/{reaction}"
     },
@@ -2365,6 +2369,10 @@
     {
       "method": "POST",
       "path": "/{account}/cards/{number}/comments/{comment}/reactions"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/comments/{comment}/reactions/new"
     },
     {
       "method": "DELETE",
