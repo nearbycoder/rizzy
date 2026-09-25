@@ -23,6 +23,19 @@ def check(target):
             status, _, raw = request(target, f"/{account}/boards/{board_id}/cards", "POST",
                                      {"card": {"title": f"{marker} card {index:02d}"}}, bearer=True)
             assert status == 201, (target["name"], index, status, raw[:160])
+            if index == 16:
+                newest = json.loads(raw)
+        number = newest["number"]
+        status, _, raw = request(target, f"/{account}/cards/{number}/steps", "POST",
+                                 {"step": {"content": "Preview parity step"}}, bearer=True)
+        assert status == 201, (target["name"], status, raw[:160])
+        step_id = json.loads(raw)["id"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/steps/{step_id}", "PUT",
+                               {"step": {"completed": True}}, bearer=True)
+        assert status == 200, (target["name"], status)
+        status, _, _ = request(target, f"/{account}/cards/{number}/taggings", "POST",
+                               {"tag_title": "#preview-parity"}, bearer=True)
+        assert status == 204, (target["name"], status)
         status, _, raw = request(target, f"/{account}/boards/{board_id}/cards", "POST",
                                  {"card": {"title": f"{marker} completed"}}, bearer=True)
         assert status == 201, (target["name"], status)
@@ -41,7 +54,9 @@ def check(target):
         def found(body):
             return [index for index in range(17) if f"{marker} card {index:02d}" in body]
 
-        first = found(html())
+        first_body = html()
+        first = found(first_body)
+        assert "preview-parity" in first_body and "1/1" in first_body, target["name"]
         second = found(html("&page=2"))
         closed = html("&indexed_by=closed")
         term = found(html("&terms%5B%5D=" + urllib.parse.quote(marker + " card 05")))

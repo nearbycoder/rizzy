@@ -1,5 +1,5 @@
 use axum::response::Html;
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
@@ -11,13 +11,92 @@ use super::{
 
 const TEMPLATE: &str = include_str!("../static/cards.html");
 
-pub(super) fn previews(principal: &Principal, cards: &[SqliteRow]) -> String {
+#[derive(Default)]
+struct PreviewMeta {
+    tags: Vec<String>,
+    steps: i64,
+    completed_steps: i64,
+    comments: i64,
+    boosts: i64,
+    assignees: Vec<String>,
+}
+
+async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<String, PreviewMeta>> {
+    let mut metadata = HashMap::new();
+    if cards.is_empty() {
+        return Ok(metadata);
+    }
+    let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
+    // Each relationship is read in one page-scoped query. The UNION avoids a
+    // per-card set of round trips while leaving the JSON card API untouched.
+    let relations = [
+        (
+            "SELECT 'tag' AS kind,g.card_id,t.title AS label,0 AS completed,1 AS amount FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",
+            "",
+        ),
+        (
+            "SELECT 'step' AS kind,s.card_id,NULL AS label,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN (",
+            " GROUP BY s.card_id",
+        ),
+        (
+            "SELECT 'comment' AS kind,m.card_id,NULL AS label,0 AS completed,COUNT(*) AS amount FROM comments m JOIN users u ON u.id=m.creator_id AND u.role!='system' WHERE m.card_id IN (",
+            " GROUP BY m.card_id",
+        ),
+        (
+            "SELECT 'boost' AS kind,r.reactable_id AS card_id,NULL AS label,0 AS completed,COUNT(*) AS amount FROM reactions r WHERE r.reactable_type='Card' AND r.reactable_id IN (",
+            " GROUP BY r.reactable_id",
+        ),
+        (
+            "SELECT 'assignee' AS kind,a.card_id,u.name AS label,0 AS completed,1 AS amount FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id IN (",
+            "",
+        ),
+    ];
+    let mut builder = QueryBuilder::<Sqlite>::new("");
+    for (index, (relation, suffix)) in relations.iter().enumerate() {
+        if index > 0 {
+            builder.push(" UNION ALL ");
+        }
+        builder.push(*relation);
+        let mut separated = builder.separated(",");
+        for id in &ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        builder.push(*suffix);
+    }
+    builder.push(" ORDER BY kind,label");
+    for row in builder.build().fetch_all(&app.db).await.map_err(db_err)? {
+        let id: String = row.get("card_id");
+        let item = metadata.entry(id).or_insert_with(PreviewMeta::default);
+        match row.get::<String, _>("kind").as_str() {
+            "tag" => item.tags.push(row.get("label")),
+            "step" => {
+                item.steps += row.get::<i64, _>("amount");
+                item.completed_steps += row.get::<i64, _>("completed");
+            }
+            "comment" => item.comments += row.get::<i64, _>("amount"),
+            "boost" => item.boosts += row.get::<i64, _>("amount"),
+            "assignee" => item.assignees.push(row.get("label")),
+            _ => {}
+        }
+    }
+    Ok(metadata)
+}
+
+pub(super) async fn previews(
+    app: &App,
+    principal: &Principal,
+    cards: &[SqliteRow],
+) -> Result<String> {
+    let metadata = preview_metadata(app, cards).await?;
     let mut html = String::new();
     for card in cards {
         let id: String = card.get("id");
+        let meta = metadata.get(&id);
         let number: i64 = card.get("number");
         let title: String = card.get("title");
         let board_name: String = card.get("board_name");
+        let creator_name: Option<String> = card.get("creator_name");
         let column_name: Option<String> = card.get("column_name");
         let column_color: Option<String> = card.get("column_color");
         let closed = card.get::<i64, _>("closed") != 0;
@@ -46,6 +125,50 @@ pub(super) fn previews(principal: &Principal, cards: &[SqliteRow]) -> String {
             .as_ref()
             .map(|name| format!("<span class=\"card__column-name\">{}</span>", escape(name)))
             .unwrap_or_default();
+        let tags = meta
+            .filter(|item| !item.tags.is_empty())
+            .map(|item| {
+                let list = item
+                    .tags
+                    .iter()
+                    .map(|tag| format!("<span class=\"card__tag\">{}</span>", escape(tag)))
+                    .collect::<String>();
+                format!("<div class=\"card__tags\" aria-label=\"Tags\">{list}</div>")
+            })
+            .unwrap_or_default();
+        let steps = meta
+            .filter(|item| item.steps > 0)
+            .map(|item| {
+                format!(
+                    "<div class=\"card__steps\" aria-label=\"Steps completed\">{}/{}</div>",
+                    item.completed_steps, item.steps
+                )
+            })
+            .unwrap_or_default();
+        let assignees = meta
+            .filter(|item| !item.assignees.is_empty())
+            .map(|item| format!("<span class=\"card__meta-text card__meta-text--assignees\">Assigned to {}</span>", escape(&item.assignees.join(" / "))))
+            .unwrap_or_default();
+        let counts = meta
+            .map(|item| {
+                let mut output = String::new();
+                if item.boosts > 0 {
+                    let _ = write!(
+                        output,
+                        "<span class=\"card__boosts\" aria-label=\"Boosts\">▲ {}</span>",
+                        item.boosts
+                    );
+                }
+                if item.comments > 0 {
+                    let _ = write!(
+                        output,
+                        "<span class=\"card__comments\" aria-label=\"Comments\">◌ {}</span>",
+                        item.comments
+                    );
+                }
+                output
+            })
+            .unwrap_or_default();
         let created_at: String = card.get("created_at");
         let last_active_at: String = card.get("last_active_at");
         let stamp = if closed || postponed {
@@ -57,7 +180,7 @@ pub(super) fn previews(principal: &Principal, cards: &[SqliteRow]) -> String {
         };
         let _ = write!(
             html,
-            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\"><span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\">{}</time></span><span class=\"card__meta-text card__meta-text--updated\">Updated <time datetime=\"{}\">{}</time></span></div></footer></article>",
+            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{tags}{steps}{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\"><span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\">{}</time></span><span class=\"card__meta-text card__meta-text--author\">{}</span><span class=\"card__meta-text card__meta-text--updated\">Updated <time datetime=\"{}\">{}</time></span>{assignees}</div><div class=\"card__counts\">{counts}</div></footer></article>",
             escape(&id),
             class,
             color,
@@ -69,11 +192,12 @@ pub(super) fn previews(principal: &Principal, cards: &[SqliteRow]) -> String {
             escape(&title),
             escape(&created_at),
             escape(created_at.get(..10).unwrap_or(&created_at)),
+            escape(creator_name.as_deref().unwrap_or("")),
             escape(&last_active_at),
             escape(last_active_at.get(..10).unwrap_or(&last_active_at))
         );
     }
-    html
+    Ok(html)
 }
 
 fn page_query(raw: Option<&str>, page: i64, target: Option<&str>) -> String {
@@ -279,7 +403,7 @@ pub(super) async fn show(
         .iter()
         .map(|(value, label)| option(value, label, query.assignment_status.as_deref()))
         .collect::<String>();
-    let mut list = previews(principal, cards);
+    let mut list = previews(app, principal, cards).await?;
     if cards.is_empty() {
         list.push_str("<div class=\"blank-slate\">No cards match this filter</div>");
     }

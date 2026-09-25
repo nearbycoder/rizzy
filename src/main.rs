@@ -6443,7 +6443,7 @@ async fn list_cards(
         .map_err(db_err)?;
     let html = !headers.contains_key("x-rizzy-json-request");
     let select = if html {
-        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color"
+        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name"
     } else {
         "SELECT c.*,b.name AS board_name"
     };
@@ -6501,7 +6501,7 @@ async fn card_previews(
         .await
         .map_err(db_err)?;
     let mut builder = cards_query(
-        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color",
+        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name",
         &p,
         &query,
     );
@@ -6511,7 +6511,7 @@ async fn card_previews(
         .push(" OFFSET ")
         .push_bind(offset);
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
-    let mut cards = cards_page::previews(&p, &rows);
+    let mut cards = cards_page::previews(&app, &p, &rows).await?;
     if offset + (rows.len() as i64) < total {
         cards.push_str(&cards_page::next_link(
             &p,

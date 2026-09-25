@@ -1,0 +1,72 @@
+{
+  "fixture_cards": 100,
+  "rich_preview": true,
+  "sample_parity": {
+    "fizzy": {
+      "visible_cards": 15,
+      "html_bytes": 193802
+    },
+    "rizzy": {
+      "visible_cards": 15,
+      "html_bytes": 35464
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 64,
+        "seconds": 2.15,
+        "requests": 1431,
+        "errors": {},
+        "rps": 666.1,
+        "p50_ms": 81.71,
+        "p95_ms": 184.69,
+        "p99_ms": 213.7
+      },
+      {
+        "concurrency": 128,
+        "seconds": 2.26,
+        "requests": 1435,
+        "errors": {},
+        "rps": 635.5,
+        "p50_ms": 189.86,
+        "p95_ms": 285.3,
+        "p99_ms": 341.06
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 64,
+        "seconds": 2.06,
+        "requests": 2117,
+        "errors": {},
+        "rps": 1027.9,
+        "p50_ms": 60.68,
+        "p95_ms": 69.35,
+        "p99_ms": 70.85
+      },
+      {
+        "concurrency": 128,
+        "seconds": 2.11,
+        "requests": 2169,
+        "errors": {},
+        "rps": 1026.0,
+        "p50_ms": 121.81,
+        "p95_ms": 133.19,
+        "p99_ms": 135.79
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 64,
+      "rps_ratio_rizzy_over_fizzy": 1.543,
+      "p95_ratio_fizzy_over_rizzy": 2.663
+    },
+    {
+      "concurrency": 128,
+      "rps_ratio_rizzy_over_fizzy": 1.614,
+      "p95_ratio_fizzy_over_rizzy": 2.142
+    }
+  ]
+}

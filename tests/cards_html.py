@@ -33,6 +33,18 @@ def main():
                              {"column": {"name": "In progress", "color": "var(--color-card-4)"}}, bearer=token, status=201)
             call(port, f"/{account}/cards/{newest['number']}/triage", "POST",
                  {"column_id": column["id"]}, bearer=token, status=204)
+            step, _ = call(port, f"/{account}/cards/{newest['number']}/steps", "POST",
+                           {"step": {"content": "Preview step"}}, bearer=token, status=201)
+            call(port, f"/{account}/cards/{newest['number']}/steps/{step['id']}", "PUT",
+                 {"step": {"completed": True}}, bearer=token, status=200)
+            call(port, f"/{account}/cards/{newest['number']}/taggings", "POST",
+                 {"tag_title": "#preview"}, bearer=token, status=204)
+            call(port, f"/{account}/cards/{newest['number']}/comments", "POST",
+                 {"comment": {"body": "Preview comment"}}, bearer=token, status=201)
+            call(port, f"/{account}/cards/{newest['number']}/reactions", "POST",
+                 {"reaction": {"content": "👍"}}, bearer=token, status=201)
+            call(port, f"/{account}/cards/{newest['number']}/assignments", "POST",
+                 {"assignee_id": newest["creator"]["id"]}, bearer=token, status=204)
             closed, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST",
                              {"card": {"title": "Completed item"}}, bearer=token, status=201)
             call(port, f"/{account}/cards/{closed['number']}/closure", "POST", bearer=token, status=204)
@@ -55,6 +67,9 @@ def main():
             assert 'class="card__board"' in first and 'class="card__id"' in first
             assert 'class="card__footer"' in first and 'class="card__column-name">In progress</span>' in first
             assert 'card--color-4' in first
+            assert 'class="card__tag">preview</span>' in first and 'aria-label="Steps completed">1/1' in first
+            assert 'aria-label="Comments">◌ 1' in first and 'aria-label="Boosts">▲ 1' in first
+            assert 'Assigned to' in first and 'card__meta-text--author' in first
             assert all(f"Grid item {index:02d}" in first for index in range(2, 17))
             assert "Grid item 00" not in first and "Completed item" not in first
             assert 'data-preview-url=' in first and 'load-page-2' in first
