@@ -17,7 +17,7 @@ fn column_html(
     add_card: bool,
 ) -> String {
     let mut html = format!(
-        "<section class=\"cards cards--{}\" id=\"{}\" aria-label=\"{}\"><header class=\"cards__header\"><h2>{}</h2><span class=\"cards__count\">{count}</span></header><div class=\"cards__list\">",
+        "<section class=\"cards cards--{}\" id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><h2>{}</h2><span class=\"cards__count\">{count}</span></header><div class=\"cards__list\">",
         if id == "maybe" {
             "maybe"
         } else if id == "done" {
@@ -52,13 +52,18 @@ fn column_html(
     }
     if count == 0 {
         html.push_str("<p class=\"cards__empty\">No cards here yet.</p>");
+    } else if cards.is_none() {
+        html.push_str("<p class=\"cards__empty\" data-loading>Loading cards…</p>");
     }
     html.push_str("</div>");
-    if count > 15 {
+    let lazy = !add_card && cards.is_none() && count > 0;
+    if lazy || count > 15 {
         html.push_str(&format!(
-            "<button class=\"cards__more button button--secondary\" type=\"button\" data-path=\"/{account}/boards/{}{}\" data-page=\"2\">Load more</button>",
+            "<button class=\"cards__more button button--secondary\" type=\"button\" data-path=\"/{account}/boards/{}{}\" data-page=\"{}\">{}</button>",
             escape(board_id),
             escape(path),
+            if lazy { 1 } else { 2 },
+            if lazy { "Load cards" } else { "Load more" },
         ));
     }
     html.push_str("</section>");
@@ -77,22 +82,22 @@ pub(super) async fn show(
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
-    // Rank each visible card once, keeping only the first page for every column.
-    // Done uses its closure timestamp; active columns put golden cards first.
-    let cards = sqlx::query(
-        "WITH scoped AS (SELECT c.*,CASE WHEN c.closed=1 THEN 'done' WHEN c.postponed=1 THEN 'not-now' ELSE COALESCE(c.column_id,'maybe') END AS group_key,cl.created_at AS closed_at FROM cards c LEFT JOIN closures cl ON cl.card_id=c.id WHERE c.board_id=? AND c.status='published'), ranked AS (SELECT scoped.*,COUNT(*) OVER (PARTITION BY group_key) AS group_count,ROW_NUMBER() OVER (PARTITION BY group_key ORDER BY CASE WHEN closed=1 THEN closed_at END DESC,CASE WHEN closed=0 AND postponed=0 THEN golden END DESC,last_active_at DESC,id DESC) AS group_rank FROM scoped) SELECT * FROM ranked WHERE group_rank<=15 ORDER BY group_key,group_rank",
-    )
-    .bind(&board_id)
-    .fetch_all(&app.db)
-    .await
-    .map_err(db_err)?;
-    let mut grouped: HashMap<String, Vec<SqliteRow>> = HashMap::new();
+    // Fizzy renders the Maybe stream immediately and loads the other columns
+    // when their frames enter view. Keep that first response bounded by 15 cards.
+    let count_rows = sqlx::query("SELECT CASE WHEN closed=1 THEN 'done' WHEN postponed=1 THEN 'not-now' ELSE COALESCE(column_id,'maybe') END AS group_key,COUNT(*) AS total FROM cards WHERE board_id=? AND status='published' GROUP BY group_key")
+        .bind(&board_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
     let mut counts: HashMap<String, i64> = HashMap::new();
-    for card in cards {
-        let key: String = card.get("group_key");
-        counts.insert(key.clone(), card.get("group_count"));
-        grouped.entry(key).or_default().push(card);
+    for row in count_rows {
+        counts.insert(row.get("group_key"), row.get("total"));
     }
+    let maybe = sqlx::query("SELECT * FROM cards WHERE board_id=? AND column_id IS NULL AND status='published' AND closed=0 AND postponed=0 ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT 15")
+        .bind(&board_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
     let account = principal.slug;
     let mut column_markup = String::new();
     column_markup.push_str(&column_html(
@@ -101,7 +106,7 @@ pub(super) async fn show(
         "not-now",
         "Not Now",
         *counts.get("not-now").unwrap_or(&0),
-        grouped.get("not-now"),
+        None,
         "/columns/not_now",
         false,
     ));
@@ -111,7 +116,7 @@ pub(super) async fn show(
         "maybe",
         "Maybe?",
         *counts.get("maybe").unwrap_or(&0),
-        grouped.get("maybe"),
+        Some(&maybe),
         "/columns/stream",
         true,
     ));
@@ -124,7 +129,7 @@ pub(super) async fn show(
             &id,
             &name,
             *counts.get(&id).unwrap_or(&0),
-            grouped.get(&id),
+            None,
             &format!("/columns/{id}/cards"),
             false,
         ));
@@ -135,7 +140,7 @@ pub(super) async fn show(
         "done",
         "Done",
         *counts.get("done").unwrap_or(&0),
-        grouped.get("done"),
+        None,
         "/columns/closed",
         false,
     ));

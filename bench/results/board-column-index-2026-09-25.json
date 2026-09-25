@@ -6,8 +6,8 @@
       "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
       "USE TEMP B-TREE FOR ORDER BY"
     ],
-    "median_ms": 1.614,
-    "p95_ms": 1.853
+    "median_ms": 1.587,
+    "p95_ms": 2.22
   },
   "after": {
     "query_plan": [
@@ -16,6 +16,17 @@
     "median_ms": 0.014,
     "p95_ms": 0.015
   },
-  "median_speedup": 115.3,
+  "median_speedup": 113.4,
+  "board_initial_response": {
+    "eager_all_columns": {
+      "median_ms": 41.328,
+      "p95_ms": 47.034
+    },
+    "maybe_and_counts_with_lazy_other_columns": {
+      "median_ms": 3.112,
+      "p95_ms": 3.134
+    },
+    "scope": "the new first response defers non-Maybe card rows to browser requests"
+  },
   "scope": "in-memory SQLite query probe, not full HTTP or Fizzy comparison"
 }
