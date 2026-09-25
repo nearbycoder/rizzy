@@ -54,13 +54,21 @@ pub(super) async fn show(
     } else {
         ""
     };
+    let developer = if self_profile {
+        format!(
+            "<section class=\"profile-card\"><h2>Developer</h2><p>Manage <a href=\"/{}/my/access_tokens\">personal access tokens</a> used with the Rizzy developer API.</p></section>",
+            principal.slug
+        )
+    } else {
+        String::new()
+    };
     let timeline = if user.get::<Option<String>, _>("verified_at").is_some() {
         events_page::user_fragment(app, principal, user, headers, None).await?
     } else {
         String::new()
     };
     let content = format!(
-        "<div class=\"profile-card\"><div class=\"profile-card__actions\">{edit}</div><img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><h1>{}</h1><div class=\"profile-email\">{email_html}</div>{sign_out}</div>{timeline}",
+        "<div class=\"profile-card\"><div class=\"profile-card__actions\">{edit}</div><img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><h1>{}</h1><div class=\"profile-email\">{email_html}</div>{sign_out}</div>{developer}{timeline}",
         escape(&name),
         escape(&name)
     );

@@ -28,6 +28,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
+mod access_tokens_page;
 mod account_cancellation;
 mod account_settings;
 mod account_transfer;
@@ -1525,6 +1526,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     "DELETE FROM authentication_attempts WHERE created_at<?",
                     &attempts_cutoff,
                 ),
+                (
+                    "DELETE FROM access_token_reveals WHERE expires_at<?",
+                    &expiration,
+                ),
             ] {
                 if let Err(error) = sqlx::query(statement)
                     .bind(cutoff)
@@ -1559,9 +1564,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/account/imports/new", get(imports::new))
         .route("/account/imports", post(imports::create).layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)))
         .route("/my/access_tokens", get(list_tokens).post(create_token))
+        .route("/my/access_tokens/new", get(new_token))
         .route(
             "/my/access_tokens/{id}",
-            axum::routing::delete(delete_token),
+            get(show_token).post(delete_token).delete(delete_token),
         )
         .route("/{account}/my/identity", get(my_identity))
         .route("/assets/system_user.png", get(storage::system_avatar))
@@ -1610,9 +1616,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/my/access_tokens",
             get(list_tokens).post(create_token),
         )
+        .route("/{account}/my/access_tokens/new", get(new_token))
         .route(
             "/{account}/my/access_tokens/{id}",
-            axum::routing::delete(delete_token),
+            get(show_token).post(delete_token).delete(delete_token),
         )
         .route("/{account}/users", get(list_users))
         .route("/{account}/prompts/users", get(prompt_users))
@@ -2814,24 +2821,129 @@ async fn list_tokens(
     State(app): Shared,
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let (identity_id, _) = identity_auth(&app, &headers).await?;
     check_my_scope(&app, &identity_id, &uri).await?;
     let rows=sqlx::query("SELECT id,description,permission,created_at FROM access_tokens WHERE identity_id=? ORDER BY created_at DESC,id DESC")
-        .bind(identity_id).fetch_all(&app.db).await.map_err(db_err)?;
-    Ok(Json(json!(rows.iter().map(|r|json!({"id":r.get::<String,_>("id"),"description":r.get::<String,_>("description"),"permission":r.get::<String,_>("permission"),"created_at":r.get::<String,_>("created_at")})).collect::<Vec<_>>())))
+        .bind(&identity_id).fetch_all(&app.db).await.map_err(db_err)?;
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(Json(json!(rows.iter().map(|r|json!({"id":r.get::<String,_>("id"),"description":r.get::<String,_>("description"),"permission":r.get::<String,_>("permission"),"created_at":r.get::<String,_>("created_at")})).collect::<Vec<_>>())).into_response())
+    } else {
+        let root = token_root(&uri);
+        let back = if root.is_empty() {
+            "/session/menu".to_owned()
+        } else {
+            let slug: i64 = root
+                .trim_start_matches('/')
+                .parse()
+                .map_err(|_| missing())?;
+            let own_user: Option<String> = sqlx::query_scalar("SELECT u.id FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
+                .bind(identity_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?;
+            own_user
+                .map(|id| format!("{root}/users/{id}"))
+                .unwrap_or_else(|| "/session/menu".into())
+        };
+        Ok(access_tokens_page::index(&rows, &root, &back).into_response())
+    }
+}
+fn token_root(uri: &Uri) -> String {
+    uri.path()
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .filter(|segment| !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(|segment| format!("/{segment}"))
+        .unwrap_or_default()
+}
+async fn new_token(
+    State(app): Shared,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let (identity_id, _) = identity_auth(&app, &headers).await?;
+    check_my_scope(&app, &identity_id, &uri).await?;
+    Ok(access_tokens_page::new(&token_root(&uri)).into_response())
+}
+async fn show_token(
+    State(app): Shared,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let (identity_id, _) = identity_auth(&app, &headers).await?;
+    check_my_scope(&app, &identity_id, &uri).await?;
+    let reveal_id = uri.path().rsplit('/').next().ok_or_else(missing)?;
+    let row = sqlx::query("SELECT a.description,a.permission,r.token,r.identity_id,r.expires_at FROM access_token_reveals r JOIN access_tokens a ON a.id=r.access_token_id WHERE r.id=?")
+        .bind(reveal_id).fetch_optional(&app.db).await.map_err(db_err)?;
+    let Some(row) = row else {
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/my/access_tokens", token_root(&uri)),
+            )],
+        )
+            .into_response());
+    };
+    if row.get::<String, _>("identity_id") != identity_id {
+        return Err(missing());
+    }
+    if row.get::<String, _>("expires_at") <= now() {
+        sqlx::query("DELETE FROM access_token_reveals WHERE id=?")
+            .bind(reveal_id)
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/my/access_tokens", token_root(&uri)),
+            )],
+        )
+            .into_response());
+    }
+    let mut response = access_tokens_page::show(
+        &token_root(&uri),
+        &row.get::<String, _>("description"),
+        &row.get::<String, _>("permission"),
+        &row.get::<String, _>("token"),
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 async fn create_token(
     State(app): Shared,
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let (identity_id, permission) = identity_auth(&app, &headers).await?;
     check_my_scope(&app, &identity_id, &uri).await?;
     if permission != "write" {
         return Err(err(StatusCode::FORBIDDEN, "Write permission required"));
     }
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        json!({"access_token":{"description":fields.get("access_token[description]").cloned().unwrap_or_default(),"permission":fields.get("access_token[permission]").cloned().unwrap_or_else(||"read".into())}})
+    } else {
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let v = nested(&body, "access_token");
     let description = string(v, "description").unwrap_or_default();
     let token_permission = string(v, "permission").unwrap_or_else(|| "read".into());
@@ -2841,17 +2953,52 @@ async fn create_token(
     let id = id();
     let token = hex::encode(rand::random::<[u8; 32]>());
     let created = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES(?,?,?,?,?,?)")
-        .bind(&id).bind(identity_id).bind(hash(&token)).bind(&description).bind(&token_permission).bind(&created).execute(&app.db).await.map_err(db_err)?;
-    Ok((StatusCode::CREATED,Json(json!({"id":id,"token":token,"description":description,"permission":token_permission,"created_at":created}))).into_response())
+        .bind(&id).bind(&identity_id).bind(hash(&token)).bind(&description).bind(&token_permission).bind(&created).execute(&mut *tx).await.map_err(db_err)?;
+    let reveal_id = if form {
+        let reveal_id = random_token();
+        let expires = (Utc::now() + chrono::Duration::seconds(10))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        sqlx::query("INSERT INTO access_token_reveals(id,access_token_id,identity_id,token,expires_at) VALUES(?,?,?,?,?)")
+            .bind(&reveal_id).bind(&id).bind(&identity_id).bind(&token).bind(expires).execute(&mut *tx).await.map_err(db_err)?;
+        Some(reveal_id)
+    } else {
+        None
+    };
+    tx.commit().await.map_err(db_err)?;
+    if let Some(reveal_id) = reveal_id {
+        Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/my/access_tokens/{reveal_id}", token_root(&uri)),
+            )],
+        )
+            .into_response())
+    } else {
+        Ok((StatusCode::CREATED,Json(json!({"id":id,"token":token,"description":description,"permission":token_permission,"created_at":created}))).into_response())
+    }
 }
 async fn delete_token(
     State(app): Shared,
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
-) -> Result<StatusCode> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
     let (identity_id, permission) = identity_auth(&app, &headers).await?;
     check_my_scope(&app, &identity_id, &uri).await?;
+    if method == Method::POST
+        && (!headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .starts_with("application/x-www-form-urlencoded")
+            || !url::form_urlencoded::parse(&body).any(|(k, v)| k == "_method" && v == "delete"))
+    {
+        return Err(missing());
+    }
     if permission != "write" {
         return Err(err(StatusCode::FORBIDDEN, "Write permission required"));
     }
@@ -2865,7 +3012,18 @@ async fn delete_token(
     if done.rows_affected() == 0 {
         return Err(missing());
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if headers.contains_key("x-rizzy-json-request") {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/my/access_tokens", token_root(&uri)),
+            )],
+        )
+            .into_response()
+    })
 }
 async fn active_user(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
     sqlx::query("SELECT * FROM users WHERE id=? AND account_id=? AND active=1 AND role!='system'")

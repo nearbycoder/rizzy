@@ -1301,14 +1301,14 @@
       "path": "/my/access_tokens/new(.:format)",
       "controller": "my/access_tokens",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/my/access_tokens/:id(.:format)",
       "controller": "my/access_tokens",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -1543,6 +1543,18 @@
       "path": "/my/access_tokens"
     },
     {
+      "method": "GET",
+      "path": "/my/access_tokens/new"
+    },
+    {
+      "method": "GET",
+      "path": "/my/access_tokens/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/my/access_tokens/{id}"
+    },
+    {
       "method": "DELETE",
       "path": "/my/access_tokens/{id}"
     },
@@ -1609,6 +1621,18 @@
     {
       "method": "POST",
       "path": "/{account}/my/access_tokens"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/my/access_tokens/new"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/my/access_tokens/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/my/access_tokens/{id}"
     },
     {
       "method": "DELETE",

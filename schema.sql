@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   permission TEXT NOT NULL CHECK(permission IN ('read','write')),
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS access_token_reveals (
+  id TEXT PRIMARY KEY,
+  access_token_id TEXT NOT NULL REFERENCES access_tokens(id) ON DELETE CASCADE,
+  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS access_token_reveals_expiration ON access_token_reveals(expires_at);
 CREATE TABLE IF NOT EXISTS magic_links (
   id TEXT PRIMARY KEY,
   identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
