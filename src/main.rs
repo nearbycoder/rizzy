@@ -890,10 +890,12 @@ async fn card_json(
     let board_id: String = r.get("board_id");
     let creator: String = r.get("creator_id");
     let description: String = r.get("description");
+    let (description_plain, description_html, has_attachments) =
+        storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
     let number: i64 = r.get("number");
     let tags: Vec<String> = sqlx::query_scalar("SELECT t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title").bind(&id).fetch_all(&app.db).await.map_err(db_err)?;
     let b = board(app, p, &board_id).await?;
-    let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":rich_text::plain_text(&description),"description_html":rich_html(&description),"image_url":null,"has_attachments":false,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
+    let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":description_plain,"description_html":description_html,"image_url":null,"has_attachments":has_attachments,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
     out["image_url"] = storage::image_url_for_card(app, p, &id).await?;
     let assigned = sqlx::query(
         "SELECT assignee_id FROM assignments WHERE card_id=? ORDER BY created_at,id LIMIT 6",
@@ -1013,6 +1015,8 @@ async fn cards_json_batch(
         let board_id: String = card.get("board_id");
         let number: i64 = card.get("number");
         let description: String = card.get("description");
+        let (description_plain, description_html, has_attachments) =
+            storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
         let assigned = assignee_values.get(&card_id).cloned().unwrap_or_default();
         let assignees: Vec<Value> = assigned
             .iter()
@@ -1020,7 +1024,7 @@ async fn cards_json_batch(
             .filter_map(|id| users.get(id).cloned())
             .collect();
         let mut value = json!({"id":card_id,"number":number,"title":card.get::<String,_>("title"),"status":card.get::<String,_>("status"),
-            "description":rich_text::plain_text(&description),"description_html":rich_html(&description),"image_url":image_values.get(&card_id).cloned().unwrap_or(Value::Null),"has_attachments":false,
+            "description":description_plain,"description_html":description_html,"image_url":image_values.get(&card_id).cloned().unwrap_or(Value::Null),"has_attachments":has_attachments,
             "tags":tag_values.get(&card_id).cloned().unwrap_or_default(),"closed":card.get::<i64,_>("closed")!=0,
             "postponed":card.get::<i64,_>("postponed")!=0,"golden":card.get::<i64,_>("golden")!=0,
             "last_active_at":card.get::<String,_>("last_active_at"),"created_at":card.get::<String,_>("created_at"),
@@ -1064,6 +1068,36 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
+        .fetch_all(&db)
+        .await?;
+    for column in ["width", "height"] {
+        if !blob_columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == column)
+        {
+            sqlx::query(&format!(
+                "ALTER TABLE storage_blobs ADD COLUMN {column} INTEGER"
+            ))
+            .execute(&db)
+            .await?;
+        }
+    }
+    let download_columns = sqlx::query("PRAGMA table_info(storage_download_tokens)")
+        .fetch_all(&db)
+        .await?;
+    for (column, default) in [("disposition", "inline"), ("variant", "original")] {
+        if !download_columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == column)
+        {
+            sqlx::query(&format!(
+                "ALTER TABLE storage_download_tokens ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'"
+            ))
+            .execute(&db)
+            .await?;
+        }
+    }
     sqlx::query("INSERT OR IGNORE INTO closures(card_id,user_id,created_at) SELECT c.id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id),COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
         .execute(&db).await?;
     let user_columns = sqlx::query("PRAGMA table_info(users)")
@@ -1321,6 +1355,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/rails/active_storage/representations/redirect/{signed_id}/thumb/{filename}",
             get(storage::show_avatar_representation),
+        )
+        .route(
+            "/{account}/rails/active_storage/representations/redirect/{signed_id}/preview/{filename}",
+            get(storage::show_blob),
         )
         .route(
             "/{account}/rails/active_storage/disk/thumb/{token}/{filename}",
@@ -3579,7 +3617,7 @@ async fn delete_board(
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = storage::purge_card_images_tx(&mut tx, &p.account_id, None, Some(&id)).await?;
+    let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, None, Some(&id)).await?;
     sqlx::query("DELETE FROM boards WHERE id=? AND account_id=?")
         .bind(id)
         .bind(&p.account_id)
@@ -3704,11 +3742,19 @@ async fn public_card(
     .map_err(db_err)?
     .ok_or_else(missing)?;
     let title: String = card.get("title");
+    let slug: i64 = account.parse().map_err(|_| missing())?;
+    let (_, description_html, _) = storage::render_rich_text(
+        &app,
+        &board.get::<String, _>("account_id"),
+        slug,
+        &card.get::<String, _>("description"),
+    )
+    .await?;
     let body = format!(
         "<nav><a href=\"/{account}/public/boards/{key}\">{}</a></nav><h1>{}</h1><article>{}</article>",
         escape(&board.get::<String, _>("name")),
         escape(&title),
-        rich_html(&card.get::<String, _>("description"))
+        description_html
     );
     Ok(public_page(&title, &body))
 }
@@ -4486,6 +4532,8 @@ async fn activity_items(
         let number: i64 = c.get("number");
         let title: String = c.get("title");
         let description: String = c.get("description");
+        let (description_plain, description_html, has_attachments) =
+            storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
         let assigned = assignments.get(&id).cloned().unwrap_or_default();
         let assignees: Vec<Value> = assigned
             .iter()
@@ -4493,8 +4541,8 @@ async fn activity_items(
             .filter_map(|id| users.get(id).cloned())
             .collect();
         let mut value = json!({"id":id,"number":number,"title":title,"status":c.get::<String,_>("status"),
-            "description":rich_text::plain_text(&description),"description_html":rich_html(&description),"image_url":image_values.get(&id).cloned().unwrap_or(Value::Null),
-            "has_attachments":false,"tags":tags.get(&id).cloned().unwrap_or_default(),
+            "description":description_plain,"description_html":description_html,"image_url":image_values.get(&id).cloned().unwrap_or(Value::Null),
+            "has_attachments":has_attachments,"tags":tags.get(&id).cloned().unwrap_or_default(),
             "closed":c.get::<i64,_>("closed")!=0,"postponed":c.get::<i64,_>("postponed")!=0,
             "golden":c.get::<i64,_>("golden")!=0,"last_active_at":c.get::<String,_>("last_active_at"),
             "created_at":c.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),
@@ -4517,6 +4565,8 @@ async fn activity_items(
         let card_id: String = c.get("card_id");
         let (number, _, _) = card_meta.get(&card_id).ok_or_else(missing)?;
         let body: String = c.get("body");
+        let (body_plain, body_html, _) =
+            storage::render_rich_text(app, &p.account_id, p.slug, &body).await?;
         let created: String = c.get("created_at");
         let updated = c
             .get::<Option<String>, _>("updated_at")
@@ -4528,7 +4578,7 @@ async fn activity_items(
         comments.insert(
             id.clone(),
             json!({"id":id,"created_at":created,"updated_at":updated,
-            "body":{"plain_text":rich_text::plain_text(&body),"html":rich_html(&body)},"creator":creator,
+            "body":{"plain_text":body_plain,"html":body_html},"creator":creator,
             "card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},
             "reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),
             "url":format!("{host}/{}/cards/{number}/comments/{id}",p.slug)}),
@@ -5192,8 +5242,9 @@ async fn create_card(
     .await
     .map_err(db_err)?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(description).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
     storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
+    storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
     sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
         .bind(&id)
         .bind(&p.user_id)
@@ -5469,7 +5520,7 @@ async fn update_card(
         "UPDATE cards SET title=?,description=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
     )
     .bind(&title)
-    .bind(description)
+    .bind(&description)
     .bind(&status)
     .bind(&created_at)
     .bind(now())
@@ -5481,8 +5532,12 @@ async fn update_card(
     let replaced_image_keys =
         storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), v.get("image"))
             .await?;
+    let removed_embed_keys =
+        storage::sync_embeds_tx(&mut tx, &p, "Card", &c.get::<String, _>("id"), &description)
+            .await?;
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(replaced_image_keys).await;
+    storage::remove_files(removed_embed_keys).await;
     if status == "published" && title != old_title && !old_title.is_empty() {
         record_event(
             &app,
@@ -5537,7 +5592,7 @@ async fn delete_card(
     })?;
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = storage::purge_card_images_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
+    let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
     sqlx::query("DELETE FROM cards WHERE id=?")
         .bind(card_id)
         .execute(&mut *tx)
@@ -6060,7 +6115,8 @@ async fn comment_json(
     let (plain, html) = if creator["role"] == "system" {
         (system_plain_text(&body), wrap_html(&body))
     } else {
-        (rich_text::plain_text(&body), rich_html(&body))
+        let (plain, html, _) = storage::render_rich_text(app, &p.account_id, p.slug, &body).await?;
+        (plain, html)
     };
     Ok(
         json!({"id":id,"created_at":created,"updated_at":updated,"body":{"plain_text":plain,"html":html},"creator":creator,"card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},"reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),"url":format!("{host}/{}/cards/{number}/comments/{id}",p.slug)}),
@@ -6114,6 +6170,7 @@ async fn create_comment(
     let content = required(nested(&body, "comment"), "body")?;
     let id = id();
     let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?)")
         .bind(&id)
         .bind(c.get::<String, _>("id"))
@@ -6121,9 +6178,11 @@ async fn create_comment(
         .bind(&content)
         .bind(&timestamp)
         .bind(&timestamp)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
+    tx.commit().await.map_err(db_err)?;
     record_event(
         &app,
         &p,
@@ -6179,13 +6238,17 @@ async fn update_comment(
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }
     let content = required(nested(&body, "comment"), "body")?;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE comments SET body=?,updated_at=? WHERE id=?")
-        .bind(content)
+        .bind(&content)
         .bind(now())
         .bind(&id)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
+    tx.commit().await.map_err(db_err)?;
+    storage::remove_files(keys).await;
     let r = comment_row(&app, &c, &id).await?;
     Ok(Json(comment_json(&app, &p, &c, &r, &base(&headers)).await?))
 }
@@ -6201,12 +6264,14 @@ async fn delete_comment(
     if r.get::<String, _>("creator_id") != p.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &comment, "").await?;
     sqlx::query(
         "DELETE FROM events WHERE eventable_type='Comment' AND eventable_id=? AND card_id=?",
     )
     .bind(&comment)
     .bind(c.get::<String, _>("id"))
-    .execute(&app.db)
+    .execute(&mut *tx)
     .await
     .map_err(db_err)?;
     sqlx::query(
@@ -6214,19 +6279,21 @@ async fn delete_comment(
     )
     .bind(&comment)
     .bind(&p.account_id)
-    .execute(&app.db)
+    .execute(&mut *tx)
     .await
     .map_err(db_err)?;
     let done = sqlx::query("DELETE FROM comments WHERE id=? AND card_id=? AND creator_id=?")
         .bind(comment)
         .bind(c.get::<String, _>("id"))
         .bind(&p.user_id)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     if done.rows_affected() == 0 {
         return Err(missing());
     }
+    tx.commit().await.map_err(db_err)?;
+    storage::remove_files(keys).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

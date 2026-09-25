@@ -30,13 +30,14 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Tag listing, card filters for saved views, terms, dates, closures, stalled activity, assignments, boards, columns and tags, and SQLite FTS5 card and comment search with indexed edits and deletes.
 - Initial saved filter create/delete routes with per-user deduplication and Turbo Stream toggle responses.
 - Board publishing and unpublishing with unauthenticated public board and card pages.
+- Direct uploads for card images, user avatars, and uploaded image/file embeds in card descriptions and comments, with private/public blob access and cached image previews.
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
 - A basic browser interface for boards, columns, cards, description editing, and completion.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
 ## Parity still required
 
-The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, rich text and attachments, push, specialized webhook payloads, account imports and exports, background jobs, and the complete Hotwire UI. User exports currently include accessible cards and comments but cannot include attachments until attachment storage is built. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
+The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, remote and media-rich embeds, push, specialized webhook payloads, account imports and exports, background jobs, and the complete Hotwire UI. User exports currently include accessible cards and comments but omit stored attachments. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
 
 ## Verification and benchmarks
 
@@ -64,6 +65,10 @@ python3 tests/saved_filter_parity.py
 python3 tests/stalled_parity.py
 python3 tests/board_views_parity.py
 python3 tests/auth_format_parity.py
+python3 tests/card_image_parity.py
+python3 tests/avatar_parity.py
+python3 tests/rich_text_parity.py
+python3 tests/embed_parity.py
 ```
 
 For a comparative run, start both applications on the same machine using the same database engine, equivalent seed data, and production builds. Then set `FIZZY_URL`, `FIZZY_ACCOUNT`, `FIZZY_TOKEN`, `RIZZY_URL`, `RIZZY_ACCOUNT`, and `RIZZY_TOKEN` and run `python3 bench/compare.py --cards 100 --seconds 10`. The script creates equal card and activity counts, checks sampled response shapes and first page sizes, warms both services, and reports throughput, p50, p95, p99, and errors at several concurrency levels. `tests/parity.py` passed 142 comparisons for the implemented workflow using fresh accounts. Fizzy was brought up with a local Ruby 3.4.8 installation for the [diagnostic runs](bench/README.md). A valid product wide performance claim still requires full behavioral parity, repeated runs, CPU and memory measurements, and a larger dataset.

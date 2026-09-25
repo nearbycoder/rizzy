@@ -212,6 +212,25 @@ pub(super) fn plain_text(input: &str) -> String {
     text.trim_end_matches('\n').to_owned()
 }
 
+pub(super) fn attachment_sgids(input: &str) -> Vec<String> {
+    if !input.contains("action-text-attachment") {
+        return Vec::new();
+    }
+    let document = kuchiki::parse_html().one(input);
+    let Ok(attachments) = document.select("action-text-attachment[sgid]") else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    for attachment in attachments {
+        if let Some(sgid) = attachment.attributes.borrow().get("sgid") {
+            if !values.iter().any(|value| value == sgid) {
+                values.push(sgid.to_owned());
+            }
+        }
+    }
+    values
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

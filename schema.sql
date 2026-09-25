@@ -160,6 +160,8 @@ CREATE TABLE IF NOT EXISTS storage_blobs (
   upload_token_hash TEXT NOT NULL UNIQUE,
   upload_expires_at TEXT NOT NULL,
   uploaded_at TEXT,
+  width INTEGER,
+  height INTEGER,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS storage_attachments (
@@ -179,10 +181,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS storage_user_avatar_unique
   ON storage_attachments(record_id) WHERE record_type='User' AND name='avatar';
 CREATE UNIQUE INDEX IF NOT EXISTS storage_user_avatar_blob_unique
   ON storage_attachments(blob_id) WHERE record_type='User' AND name='avatar';
+CREATE UNIQUE INDEX IF NOT EXISTS storage_embed_unique
+  ON storage_attachments(record_type,record_id,name,blob_id) WHERE name='embed';
 CREATE INDEX IF NOT EXISTS storage_attachments_record ON storage_attachments(record_type,record_id);
 CREATE TABLE IF NOT EXISTS storage_download_tokens (
   token_hash TEXT PRIMARY KEY,
   blob_id TEXT NOT NULL REFERENCES storage_blobs(id) ON DELETE CASCADE,
+  disposition TEXT NOT NULL DEFAULT 'inline',
+  variant TEXT NOT NULL DEFAULT 'original',
   expires_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS closures (

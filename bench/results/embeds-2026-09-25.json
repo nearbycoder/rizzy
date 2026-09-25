@@ -1,0 +1,59 @@
+{
+  "fixture_cards": 20,
+  "fixture": "one moon.jpg embed per card",
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.08,
+        "requests": 6719,
+        "errors": {},
+        "rps": 1322.7,
+        "p50_ms": 19.38,
+        "p95_ms": 58.77,
+        "p99_ms": 86.12
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.1,
+        "requests": 5555,
+        "errors": {},
+        "rps": 1089.1,
+        "p50_ms": 52.37,
+        "p95_ms": 122.68,
+        "p99_ms": 155.06
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 17379,
+        "errors": {},
+        "rps": 3471.0,
+        "p50_ms": 6.96,
+        "p95_ms": 17.24,
+        "p99_ms": 18.91
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.02,
+        "requests": 16394,
+        "errors": {},
+        "rps": 3264.8,
+        "p50_ms": 15.25,
+        "p95_ms": 33.94,
+        "p99_ms": 36.15
+      }
+    ]
+  },
+  "sample_parity": {
+    "shape": true,
+    "description": true,
+    "html": true,
+    "first_page_bytes": {
+      "fizzy": 54925,
+      "rizzy": 43525
+    }
+  }
+}

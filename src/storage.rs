@@ -4,6 +4,7 @@ use base64::Engine as _;
 use futures_util::StreamExt;
 use md5::Md5;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
@@ -76,6 +77,169 @@ pub(super) async fn image_urls_for_cards(
             )
         })
         .collect())
+}
+
+fn human_size(bytes: i64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} Bytes")
+    } else {
+        let (value, unit) = if bytes < 1024 * 1024 {
+            (bytes as f64 / 1024.0, "KB")
+        } else {
+            (bytes as f64 / (1024.0 * 1024.0), "MB")
+        };
+        let decimals = (2.0 - value.log10().floor()).max(0.0) as usize;
+        let number = format!("{value:.decimals$}");
+        let number = if number.contains('.') {
+            number.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            &number
+        };
+        format!("{number} {unit}")
+    }
+}
+
+fn variable_image(content_type: &str) -> bool {
+    matches!(
+        content_type.to_ascii_lowercase().as_str(),
+        "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+    )
+}
+
+fn embed_html(blob: &SqliteRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
+    let filename: String = blob.get("filename");
+    let content_type: String = blob.get("content_type");
+    let size: i64 = blob.get("byte_size");
+    let signed_id: String = blob.get("signed_id");
+    let path = format!(
+        "/{slug}/rails/active_storage/blobs/redirect/{signed_id}/{}",
+        encoded_filename(&filename)
+    );
+    let variant = format!(
+        "/{slug}/rails/active_storage/representations/redirect/{signed_id}/preview/{}",
+        encoded_filename(&filename)
+    );
+    let safe_name = escape(&filename);
+    let safe_type = escape(&content_type);
+    let safe_sgid = escape(sgid);
+    let safe_path = escape(&path);
+    let safe_variant = escape(&variant);
+    let extension = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("file")
+        .to_ascii_lowercase();
+    let class_extension: String = extension
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect();
+    let (before_block, after_block) = if in_paragraph {
+        ("  </action-text-attachment></p>", "<p>")
+    } else {
+        ("  ", "</action-text-attachment>")
+    };
+    if variable_image(&content_type) {
+        let width = blob.get::<Option<i64>, _>("width").unwrap_or(0);
+        let height = blob.get::<Option<i64>, _>("height").unwrap_or(0);
+        let dimensions = if width > 0 && height > 0 {
+            format!(" width=\"{width}\" height=\"{height}\"")
+        } else {
+            String::new()
+        };
+        let image_dimensions = if width > 0 && height > 0 {
+            format!(" width=\"{width}\" height=\"{height}\"")
+        } else {
+            String::new()
+        };
+        format!(
+            "<action-text-attachment sgid=\"{safe_sgid}\" content-type=\"{safe_type}\" url=\"{safe_path}\" filename=\"{safe_name}\" filesize=\"{size}\"{dimensions} previewable=\"true\">{before_block}<figure class=\"attachment attachment--preview attachment--{class_extension}\">\n    \n  <a data-lightbox-target=\"image\" data-lightbox-caption-value=\"{safe_name}\" href=\"{safe_variant}\">\n    <img{image_dimensions} src=\"{safe_variant}\">\n</a>\n\n    <figcaption class=\"attachment__caption\">\n        <span class=\"attachment__name\">{safe_name}</span>\n      <span> · </span>\n      <span class=\"attachment__size\">{}</span>\n      <span> · </span>\n      <a class=\"attachment__link\" title=\"Download {safe_name}\" href=\"{safe_path}?disposition=attachment\">\n        <span>Download</span>\n</a>    </figcaption>\n  </figure>{after_block}",
+            human_size(size)
+        )
+    } else {
+        format!(
+            "<action-text-attachment sgid=\"{safe_sgid}\" content-type=\"{safe_type}\" url=\"{safe_path}\" filename=\"{safe_name}\" filesize=\"{size}\">{before_block}<div class=\"attachment attachment--file attachment--{class_extension}\">\n    \n  <span class=\"attachment__icon\">{class_extension}</span>\n\n\n    <div class=\"attachment__caption\">\n      <div>\n          <strong class=\"attachment__name\">{safe_name}</strong>\n      </div>\n      <div>\n        <span class=\"attachment__size\">{}</span>\n        <span> · </span>\n        <a class=\"attachment__link\" title=\"Download {safe_name}\" href=\"{safe_path}?disposition=attachment\">\n          <span>Download</span>\n</a>      </div>\n    </div>\n  </div>{after_block}",
+            human_size(size)
+        )
+    }
+}
+
+pub(super) async fn render_rich_text(
+    app: &App,
+    account_id: &str,
+    slug: i64,
+    raw: &str,
+) -> Result<(String, String, bool)> {
+    if !raw.contains("action-text-attachment") {
+        return Ok((rich_text::plain_text(raw), rich_text::html(raw), false));
+    }
+    static TAG: OnceLock<regex::Regex> = OnceLock::new();
+    static SGID: OnceLock<regex::Regex> = OnceLock::new();
+    let tag = TAG.get_or_init(|| {
+        regex::Regex::new(r"(?is)<action-text-attachment\b([^>]*)>.*?</action-text-attachment>")
+            .expect("attachment pattern")
+    });
+    let sgid = SGID.get_or_init(|| {
+        regex::Regex::new(r#"(?i)\bsgid\s*=\s*["']([^"']+)["']"#).expect("sgid pattern")
+    });
+    let mut plain_input = String::new();
+    let mut html_input = String::new();
+    let mut replacements = Vec::new();
+    let mut offset = 0;
+    let mut attached = false;
+    for (index, matched) in tag.captures_iter(raw).enumerate() {
+        let whole = matched.get(0).expect("whole attachment");
+        plain_input.push_str(&raw[offset..whole.start()]);
+        html_input.push_str(&raw[offset..whole.start()]);
+        let value = matched
+            .get(1)
+            .and_then(|attributes| sgid.captures(attributes.as_str()))
+            .and_then(|captures| captures.get(1))
+            .map(|value| value.as_str())
+            .unwrap_or("");
+        let blob = sqlx::query("SELECT * FROM storage_blobs WHERE attachable_sgid=? AND account_id=? AND uploaded_at IS NOT NULL")
+            .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
+        let token = format!("RIZZYEMBEDPLACEHOLDER{index}END");
+        if let Some(blob) = blob {
+            let filename: String = blob.get("filename");
+            plain_input.push_str(&format!("[{}]", filename));
+            replacements.push((
+                token.clone(),
+                embed_html(&blob, value, slug, true),
+                embed_html(&blob, value, slug, false),
+            ));
+            attached = true;
+        } else {
+            plain_input.push('☒');
+            let invalid = format!(
+                "<action-text-attachment sgid=\"{}\">☒</action-text-attachment>",
+                escape(value)
+            );
+            replacements.push((token.clone(), invalid.clone(), invalid));
+        }
+        html_input.push_str(&token);
+        offset = whole.end();
+    }
+    plain_input.push_str(&raw[offset..]);
+    html_input.push_str(&raw[offset..]);
+    let mut html = rich_text::html(&html_input);
+    for (token, paragraph_html, bare_html) in replacements {
+        let before = html
+            .split_once(&token)
+            .map(|(before, _)| before)
+            .unwrap_or("");
+        let in_paragraph = before
+            .rfind("<p>")
+            .is_some_and(|opening| before.rfind("</p>").is_none_or(|closing| opening > closing));
+        html = html.replace(
+            &token,
+            if in_paragraph {
+                &paragraph_html
+            } else {
+                &bare_html
+            },
+        );
+    }
+    Ok((rich_text::plain_text(&plain_input), html, attached))
 }
 
 pub(super) async fn attach_card_image_tx(
@@ -165,11 +329,108 @@ pub(super) async fn purge_card_images_tx(
     Ok(keys)
 }
 
+pub(super) async fn sync_embeds_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    p: &Principal,
+    record_type: &str,
+    record_id: &str,
+    content: &str,
+) -> Result<Vec<String>> {
+    if !matches!(record_type, "Card" | "Comment") {
+        return Err(bad("Invalid embedded attachment owner"));
+    }
+    let mut wanted = HashSet::new();
+    for sgid in rich_text::attachment_sgids(content) {
+        let blob: Option<String> = sqlx::query_scalar("SELECT id FROM storage_blobs WHERE attachable_sgid=? AND account_id=? AND uploaded_at IS NOT NULL")
+            .bind(sgid).bind(&p.account_id).fetch_optional(&mut **tx).await.map_err(db_err)?;
+        if let Some(blob) = blob {
+            wanted.insert(blob);
+        }
+    }
+    let existing = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type=? AND a.record_id=? AND a.name='embed' AND a.account_id=?")
+        .bind(record_type).bind(record_id).bind(&p.account_id)
+        .fetch_all(&mut **tx).await.map_err(db_err)?;
+    let mut current = HashSet::new();
+    let mut keys = Vec::new();
+    for row in existing {
+        let blob_id: String = row.get("blob_id");
+        if wanted.contains(&blob_id) {
+            current.insert(blob_id);
+            continue;
+        }
+        sqlx::query("DELETE FROM storage_attachments WHERE id=?")
+            .bind(row.get::<String, _>("attachment_id"))
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE blob_id=?")
+                .bind(&blob_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(db_err)?;
+        if remaining == 0 {
+            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
+                .bind(blob_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
+            keys.push(row.get("storage_key"));
+        }
+    }
+    for blob_id in wanted.difference(&current) {
+        sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,?,?,'embed',?)")
+            .bind(id()).bind(&p.account_id).bind(blob_id).bind(record_type).bind(record_id).bind(now())
+            .execute(&mut **tx).await.map_err(db_err)?;
+    }
+    Ok(keys)
+}
+
+pub(super) async fn purge_card_storage_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+    card_id: Option<&str>,
+    board_id: Option<&str>,
+) -> Result<Vec<String>> {
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))))")
+        .bind(account_id).bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
+        .bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
+        .fetch_all(&mut **tx).await.map_err(db_err)?;
+    let mut keys = Vec::new();
+    for row in rows {
+        let blob_id: String = row.get("blob_id");
+        sqlx::query("DELETE FROM storage_attachments WHERE id=?")
+            .bind(row.get::<String, _>("attachment_id"))
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE blob_id=?")
+                .bind(&blob_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(db_err)?;
+        if remaining == 0 {
+            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
+                .bind(blob_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
+            keys.push(row.get("storage_key"));
+        }
+    }
+    Ok(keys)
+}
+
 pub(super) async fn remove_files(keys: Vec<String>) {
     for key in keys {
         for path in [
             storage_dir().join(&key),
             storage_dir().join(format!("{key}.thumb")),
+            storage_dir().join(format!("{key}.large.jpg")),
+            storage_dir().join(format!("{key}.large.png")),
+            storage_dir().join(format!("{key}.large.gif")),
+            storage_dir().join(format!("{key}.large.webp")),
         ] {
             if let Err(error) = fs::remove_file(path).await {
                 if error.kind() != std::io::ErrorKind::NotFound {
@@ -426,8 +687,25 @@ pub(super) async fn upload_file(
         let _ = fs::remove_file(&temp).await;
     }
     result?;
-    sqlx::query("UPDATE storage_blobs SET uploaded_at=? WHERE id=?")
+    let dimensions = if content_type.starts_with("image/") {
+        tokio::task::spawn_blocking(move || {
+            image::ImageReader::open(path)
+                .ok()?
+                .with_guessed_format()
+                .ok()?
+                .into_dimensions()
+                .ok()
+        })
+        .await
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
+    sqlx::query("UPDATE storage_blobs SET uploaded_at=?,width=?,height=? WHERE id=?")
         .bind(now())
+        .bind(dimensions.map(|(width, _)| i64::from(width)))
+        .bind(dimensions.map(|(_, height)| i64::from(height)))
         .bind(blob.get::<String, _>("id"))
         .execute(&app.db)
         .await
@@ -451,6 +729,8 @@ async fn storage_user_id(app: &App, headers: &HeaderMap, account_id: &str) -> Re
 pub(super) async fn show_blob(
     State(app): Shared,
     Path((account, signed_id, _filename)): Path<(String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Result<Response> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
@@ -459,6 +739,14 @@ pub(super) async fn show_blob(
     if blob.get::<Option<String>, _>("uploaded_at").is_none() {
         return Err(missing());
     }
+    let variant = if uri.path().contains("/representations/redirect/") {
+        if !variable_image(&blob.get::<String, _>("content_type")) {
+            return Err(missing());
+        }
+        "large"
+    } else {
+        "original"
+    };
     let account_id: String = blob.get("account_id");
     let attachments =
         sqlx::query("SELECT record_type,record_id FROM storage_attachments WHERE blob_id=?")
@@ -471,15 +759,29 @@ pub(super) async fn show_blob(
     for attachment in &attachments {
         match attachment.get::<String, _>("record_type").as_str() {
             "User" => {
-                let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id=? AND account_id=?")
-                    .bind(attachment.get::<String, _>("record_id"))
-                    .bind(&account_id).fetch_one(&app.db).await.map_err(db_err)?;
+                let exists: i64 =
+                    sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id=? AND account_id=?")
+                        .bind(attachment.get::<String, _>("record_id"))
+                        .bind(&account_id)
+                        .fetch_one(&app.db)
+                        .await
+                        .map_err(db_err)?;
                 public |= exists > 0;
             }
-            "Card" => {
-                if let Some(card) = sqlx::query("SELECT c.status,c.board_id,b.publication_key FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.id=? AND c.account_id=?")
-                    .bind(attachment.get::<String, _>("record_id")).bind(&account_id)
-                    .fetch_optional(&app.db).await.map_err(db_err)? {
+            "Card" | "Comment" => {
+                let record_type: String = attachment.get("record_type");
+                let query = if record_type == "Card" {
+                    "SELECT c.status,c.board_id,b.publication_key FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.id=? AND c.account_id=?"
+                } else {
+                    "SELECT c.status,c.board_id,b.publication_key FROM comments m JOIN cards c ON c.id=m.card_id JOIN boards b ON b.id=c.board_id WHERE m.id=? AND c.account_id=?"
+                };
+                if let Some(card) = sqlx::query(query)
+                    .bind(attachment.get::<String, _>("record_id"))
+                    .bind(&account_id)
+                    .fetch_optional(&app.db)
+                    .await
+                    .map_err(db_err)?
+                {
                     public |= card.get::<String, _>("status") == "published"
                         && card.get::<Option<String>, _>("publication_key").is_some();
                     cards.push(card);
@@ -509,9 +811,16 @@ pub(super) async fn show_blob(
         }
     }
     let token = random_token();
-    sqlx::query("INSERT INTO storage_download_tokens(token_hash,blob_id,expires_at) VALUES(?,?,?)")
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    sqlx::query("INSERT INTO storage_download_tokens(token_hash,blob_id,disposition,variant,expires_at) VALUES(?,?,?,?,?)")
         .bind(hash(&token))
         .bind(blob.get::<String, _>("id"))
+        .bind(disposition)
+        .bind(variant)
         .bind(expires_in(5))
         .execute(&app.db)
         .await
@@ -525,18 +834,61 @@ pub(super) async fn show_blob(
     Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
 }
 
+async fn ensure_large_variant(key: &str, content_type: &str) -> Result<PathBuf> {
+    let (extension, format) = match content_type.to_ascii_lowercase().as_str() {
+        "image/png" => ("png", image::ImageFormat::Png),
+        "image/gif" => ("gif", image::ImageFormat::Gif),
+        "image/webp" => ("webp", image::ImageFormat::WebP),
+        _ => ("jpg", image::ImageFormat::Jpeg),
+    };
+    let source = storage_dir().join(key);
+    let target = storage_dir().join(format!("{key}.large.{extension}"));
+    if fs::metadata(&target).await.is_ok() {
+        return Ok(target);
+    }
+    let output = target.clone();
+    tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
+        let picture = image::ImageReader::open(&source)
+            .map_err(|error| error.to_string())?
+            .with_guessed_format()
+            .map_err(|error| error.to_string())?
+            .decode()
+            .map_err(|error| error.to_string())?;
+        let picture = if picture.width() > 1024 || picture.height() > 768 {
+            picture.resize(1024, 768, image::imageops::FilterType::Lanczos3)
+        } else {
+            picture
+        };
+        let temporary = output.with_extension(format!("{extension}.{}.tmp", random_token()));
+        picture
+            .save_with_format(&temporary, format)
+            .map_err(|error| error.to_string())?;
+        std::fs::rename(&temporary, &output).map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?;
+    Ok(target)
+}
+
 pub(super) async fn download_file(
     State(app): Shared,
     Path((account, token, _filename)): Path<(String, String, String)>,
 ) -> Result<Response> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
-    let blob = sqlx::query("SELECT b.* FROM storage_download_tokens t JOIN storage_blobs b ON b.id=t.blob_id JOIN accounts a ON a.id=b.account_id WHERE t.token_hash=? AND a.external_account_id=? AND t.expires_at>=?")
+    let blob = sqlx::query("SELECT b.*,t.disposition,t.variant FROM storage_download_tokens t JOIN storage_blobs b ON b.id=t.blob_id JOIN accounts a ON a.id=b.account_id WHERE t.token_hash=? AND a.external_account_id=? AND t.expires_at>=?")
         .bind(hash(&token)).bind(slug).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     let key: String = blob.get("storage_key");
-    let file = fs::File::open(storage_dir().join(key))
-        .await
-        .map_err(|_| missing())?;
     let declared: String = blob.get("content_type");
+    let variant: String = blob.get("variant");
+    let path = if variant == "large" {
+        ensure_large_variant(&key, &declared).await?
+    } else {
+        storage_dir().join(&key)
+    };
+    let file = fs::File::open(&path).await.map_err(|_| missing())?;
+    let length = file.metadata().await.map_err(|_| missing())?.len();
     let lowercase = declared.to_ascii_lowercase();
     let dangerous = !declared.is_ascii()
         || lowercase.starts_with("text/html")
@@ -563,8 +915,7 @@ pub(super) async fn download_file(
     );
     response.headers_mut().insert(
         header::CONTENT_LENGTH,
-        HeaderValue::from_str(&blob.get::<i64, _>("byte_size").to_string())
-            .expect("nonnegative blob size"),
+        HeaderValue::from_str(&length.to_string()).expect("nonnegative blob size"),
     );
     let filename: String = blob.get("filename");
     let safe_filename: String = filename
@@ -579,7 +930,11 @@ pub(super) async fn download_file(
         .collect();
     let disposition = format!(
         "{}; filename=\"{}\"",
-        if dangerous { "attachment" } else { "inline" },
+        if dangerous || blob.get::<String, _>("disposition") == "attachment" {
+            "attachment"
+        } else {
+            "inline"
+        },
         safe_filename
     );
     response.headers_mut().insert(
