@@ -1882,6 +1882,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .delete(delete_card),
         )
         .route("/{account}/cards/{number}/draft", get(show_draft))
+        .route("/{account}/cards/{number}/edit", get(edit_card))
         .route("/{account}/cards/{number}/column/edit", get(card_column_page::edit))
         .route("/{account}/cards/previews", get(card_previews))
         .route("/{account}/cards/previews.turbo_stream", get(card_previews))
@@ -6908,6 +6909,18 @@ async fn show_card(
         return Ok(card_page::show(&app, &p, &c).await?.into_response());
     }
     Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
+}
+async fn edit_card(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let p = principal(&app, &headers, &account).await?;
+    let c = card(&app, &p, &number).await?;
+    Ok(card_page::edit(&p, &c).into_response())
 }
 async fn create_card(
     State(app): Shared,

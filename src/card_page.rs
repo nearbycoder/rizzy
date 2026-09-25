@@ -6,6 +6,24 @@ use super::{App, Principal, Result, board, db_err, escape, storage, wrap_html};
 
 const TEMPLATE: &str = include_str!("../static/card.html");
 
+pub(super) fn edit(principal: &Principal, card: &SqliteRow) -> Html<String> {
+    let card_id: String = card.get("id");
+    let board_id: String = card.get("board_id");
+    let number: i64 = card.get("number");
+    let title: String = card.get("title");
+    let description: String = card.get("description");
+    let path = format!("/{}/cards/{number}", principal.slug);
+    Html(format!(
+        r##"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit card | Rizzy</title><link rel="stylesheet" href="/assets/lexxy/lexxy.css"><link rel="stylesheet" href="/assets/lexxy/rizzy-dark.css"><script type="importmap">{{"imports":{{"@rails/activestorage":"/assets/lexxy/activestorage.esm.js"}}}}</script><script type="module" src="/assets/lexxy/lexxy.js"></script><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#1b1b1b;color:#f5f0e8}}*{{box-sizing:border-box}}body{{margin:0}}main{{max-width:900px;margin:30px auto;padding:24px;border-radius:16px;background:#292826}}a{{color:#e7bd61}}textarea,lexxy-editor{{display:block;width:100%;margin:12px 0;border:1px solid #666158;border-radius:9px;padding:12px;background:#34322f;color:#f5f0e8;font:inherit}}textarea{{min-height:70px}}lexxy-editor{{min-height:180px}}button{{padding:10px 15px;border:0;border-radius:9px;background:#e7bd61;color:#201b12;font:inherit;font-weight:700;cursor:pointer}}</style></head><body><main><p><a href="{path}">← Back to card</a></p><turbo-frame id="edit_card_{card_id}"><turbo-stream action="update" target="card_closure_toggle_card_{card_id}"><template><button type="submit" form="edit_form_card_{card_id}">Save changes</button></template></turbo-stream><form id="edit_form_card_{card_id}" action="{path}" method="post"><input type="hidden" name="_method" value="patch"><h1 class="card__title"><label for="card_title">Name it…</label><textarea id="card_title" name="card[title]" maxlength="255" required autofocus>{title}</textarea></h1><lexxy-editor id="card_description" name="card[description]" value="{description}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename"><lexxy-prompt trigger="@" src="/{account}/prompts/boards/{board_id}/users" name="mention"></lexxy-prompt><lexxy-prompt trigger="#" src="/{account}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt></lexxy-editor><button type="submit">Save changes</button><a href="{path}">Close editor and discard changes</a><p role="alert" id="edit-error"></p></form></turbo-frame></main><script>document.getElementById('edit_form_card_{card_id}').addEventListener('submit',async e=>{{e.preventDefault();const form=e.currentTarget;const editor=document.getElementById('card_description');const response=await fetch(form.action,{{method:'PATCH',headers:{{'Content-Type':'application/json','Accept':'application/json'}},body:JSON.stringify({{card:{{title:document.getElementById('card_title').value,description:editor.value}}}})}});if(response.ok)location.href='{path}';else document.getElementById('edit-error').textContent='Could not save changes'}})</script></body></html>"##,
+        path = path,
+        card_id = escape(&card_id),
+        title = escape(&title),
+        description = escape(&description),
+        account = principal.slug,
+        board_id = escape(&board_id)
+    ))
+}
+
 pub(super) fn render_template(template: &str, values: &HashMap<&str, String>) -> String {
     let mut result = String::with_capacity(template.len() + 2048);
     let mut rest = template;

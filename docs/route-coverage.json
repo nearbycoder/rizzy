@@ -944,7 +944,7 @@
       "path": "/cards/:id/edit(.:format)",
       "controller": "cards",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -2145,6 +2145,10 @@
     {
       "method": "GET",
       "path": "/{account}/cards/{number}/draft"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/edit"
     },
     {
       "method": "GET",

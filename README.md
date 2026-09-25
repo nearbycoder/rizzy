@@ -39,6 +39,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
 - A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
 - An account navigation menu for boards, people, tags, saved views, settings, and shortcuts, with conditional ETag responses.
+- A dedicated card edit route with title and Lexxy description fields, alongside the card page's inline editor.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
 ## Parity still required
@@ -89,6 +90,7 @@ python3 tests/users_events_html_parity.py
 python3 tests/user_profile_html_parity.py
 python3 tests/session_transfer_parity.py
 python3 tests/my_menu_parity.py
+python3 tests/card_edit_html_parity.py
 python3 tests/email_change_html_parity.py
 python3 tests/email_confirmation_html_parity.py
 python3 tests/search_rich_text_parity.py
