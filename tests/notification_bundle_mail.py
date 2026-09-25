@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Generate a notification through the API and deliver its due bundle by sendmail."""
 import hashlib
+from email import policy
+from email.parser import BytesParser
 import os
 import pathlib
 import re
@@ -40,7 +42,7 @@ def main():
                 db.execute("insert into access_tokens(id,identity_id,token_hash,description,permission,created_at) values('mail-token','mail-identity',?,'Test','write',datetime('now'))", (hashlib.sha256(b'mail-token').hexdigest(),))
             call(port, f'/{account}/boards/{board_id}', 'PUT', {'user_ids': [owner_id, 'mail-user']}, bearer=owner_token)
             call(port, f'/{account}/boards/{board_id}/involvement', 'PUT', {'involvement': 'watching'}, bearer='mail-token', status=204)
-            card, _ = call(port, f'/{account}/boards/{board_id}/cards', 'POST', {'card': {'title': 'Bundle card'}}, bearer=owner_token, status=201)
+            card, _ = call(port, f'/{account}/boards/{board_id}/cards', 'POST', {'card': {'title': 'Bundle `card` & <test>'}}, bearer=owner_token, status=201)
             notices, _ = call(port, f'/{account}/notifications', bearer='mail-token')
             assert len(notices) == 1
             with sqlite3.connect(database) as db:
@@ -60,7 +62,18 @@ def main():
             assert 'Delivered 1 notification bundles' in run.stdout, (run.stdout, run.stderr)
             mail = mailbox.read_text()
             assert 'To: mail-recipient@example.test' in mail and 'Subject: Rizzy: New notifications' in mail
-            assert 'Bundle card' in mail and 'Mail board' in mail and 'List-Unsubscribe:' in mail
+            assert 'Mail board' in mail and 'List-Unsubscribe:' in mail
+            message = BytesParser(policy=policy.default).parsebytes(mailbox.read_bytes())
+            assert message.get_content_type() == 'multipart/alternative', (message.items(), repr(mailbox.read_bytes()[:250]))
+            assert {part.get_content_type() for part in message.iter_parts()} == {'text/plain', 'text/html'}
+            plain = message.get_body(preferencelist=('plain',)).get_content()
+            html = message.get_body(preferencelist=('html',)).get_content()
+            assert 'Bundle `card` & <test>' in plain and 'Moved to Done by' in plain, plain
+            assert f'/{account}/notifications/{notices[0]["id"]}' in plain
+            assert '<h2 class="notification__board">' in html and 'Mail board' in html
+            assert 'Bundle <code>card</code> &amp; &lt;test&gt;' in html, html
+            assert '<span class="avatar" style="background-color: #' in html
+            assert 'Moved to Done by' in html and '<script>' not in html
             with sqlite3.connect(database) as db:
                 assert db.execute("select status from notification_bundles where user_id='mail-user'").fetchone()[0] == 2
                 link_token = db.execute("select token from notification_unsubscribe_tokens where user_id='mail-user'").fetchone()[0]
