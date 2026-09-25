@@ -1,0 +1,158 @@
+{
+  "fixture_cards": 500,
+  "fixture_comments": 500,
+  "reused_existing_fixture": true,
+  "runs": {
+    "fizzy": [
+      {
+        "ready_seconds": 0.891,
+        "download_seconds": 0.01,
+        "zip_bytes": 1383738,
+        "entries": 3507,
+        "storage_files": 0,
+        "groups": {
+          "account.json": 1,
+          "users": 2,
+          "user_settings": 1,
+          "boards": 1,
+          "entropies": 1,
+          "accesses": 1,
+          "cards": 500,
+          "comments": 500,
+          "watches": 500,
+          "events": 1000,
+          "action_text_rich_texts": 1000
+        }
+      },
+      {
+        "ready_seconds": 0.549,
+        "download_seconds": 0.007,
+        "zip_bytes": 1383738,
+        "entries": 3507,
+        "storage_files": 0,
+        "groups": {
+          "account.json": 1,
+          "users": 2,
+          "user_settings": 1,
+          "boards": 1,
+          "entropies": 1,
+          "accesses": 1,
+          "cards": 500,
+          "comments": 500,
+          "watches": 500,
+          "events": 1000,
+          "action_text_rich_texts": 1000
+        }
+      },
+      {
+        "ready_seconds": 0.749,
+        "download_seconds": 0.009,
+        "zip_bytes": 1383738,
+        "entries": 3507,
+        "storage_files": 0,
+        "groups": {
+          "account.json": 1,
+          "users": 2,
+          "user_settings": 1,
+          "boards": 1,
+          "entropies": 1,
+          "accesses": 1,
+          "cards": 500,
+          "comments": 500,
+          "watches": 500,
+          "events": 1000,
+          "action_text_rich_texts": 1000
+        }
+      }
+    ],
+    "rizzy": [
+      {
+        "ready_seconds": 0.081,
+        "download_seconds": 0.004,
+        "zip_bytes": 1240922,
+        "entries": 3507,
+        "storage_files": 0,
+        "groups": {
+          "account.json": 1,
+          "users": 2,
+          "user_settings": 1,
+          "boards": 1,
+          "entropies": 1,
+          "accesses": 1,
+          "cards": 500,
+          "comments": 500,
+          "watches": 500,
+          "events": 1000,
+          "action_text_rich_texts": 1000
+        }
+      },
+      {
+        "ready_seconds": 0.053,
+        "download_seconds": 0.002,
+        "zip_bytes": 1240739,
+        "entries": 3507,
+        "storage_files": 0,
+        "groups": {
+          "account.json": 1,
+          "users": 2,
+          "user_settings": 1,
+          "boards": 1,
+          "entropies": 1,
+          "accesses": 1,
+          "cards": 500,
+          "comments": 500,
+          "watches": 500,
+          "events": 1000,
+          "action_text_rich_texts": 1000
+        }
+      },
+      {
+        "ready_seconds": 0.054,
+        "download_seconds": 0.003,
+        "zip_bytes": 1240955,
+        "entries": 3507,
+        "storage_files": 0,
+        "groups": {
+          "account.json": 1,
+          "users": 2,
+          "user_settings": 1,
+          "boards": 1,
+          "entropies": 1,
+          "accesses": 1,
+          "cards": 500,
+          "comments": 500,
+          "watches": 500,
+          "events": 1000,
+          "action_text_rich_texts": 1000
+        }
+      }
+    ]
+  },
+  "comparable_record_counts": {
+    "cards": {
+      "fizzy": 500,
+      "rizzy": 500
+    },
+    "comments": {
+      "fizzy": 500,
+      "rizzy": 500
+    },
+    "events": {
+      "fizzy": 1000,
+      "rizzy": 1000
+    },
+    "watches": {
+      "fizzy": 500,
+      "rizzy": 500
+    },
+    "action_text_rich_texts": {
+      "fizzy": 1000,
+      "rizzy": 1000
+    }
+  },
+  "record_count_parity": true,
+  "median_ready_seconds": {
+    "fizzy": 0.749,
+    "rizzy": 0.054
+  }
+}

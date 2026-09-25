@@ -1,6 +1,6 @@
 //! Fizzy's account transfer ZIP layout for records represented in Rizzy.
-//! Account export routes remain disabled until this serializer also covers
-//! rich-text blob references and has been checked through Fizzy's importer.
+//! The generated archive covers Rizzy's current records and the tested Fizzy
+//! import workflow; it does not yet contain every Fizzy record type.
 use super::*;
 use crate::exports::{ArchiveEntry, export_path, write_archive};
 use futures_util::TryStreamExt;

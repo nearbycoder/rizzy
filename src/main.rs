@@ -38,6 +38,7 @@ struct App {
     db: SqlitePool,
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
+    export_notify: tokio::sync::Notify,
 }
 type Shared = State<Arc<App>>;
 type Result<T> = std::result::Result<T, ApiError>;
@@ -1084,6 +1085,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    backfill_system_users(&db).await?;
     let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
         .fetch_all(&db)
         .await?;
@@ -1283,6 +1285,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         db,
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
+        export_notify: tokio::sync::Notify::new(),
     });
     let plain_search_backfilled: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_plain_v2'")
@@ -1764,6 +1767,8 @@ async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Er
     let account_id = id();
     let identity_id = id();
     let user_id = id();
+    let system_identity = id();
+    let system_id = id();
     let token_id = id();
     let timestamp = now();
     let slug: i64 =
@@ -1790,9 +1795,45 @@ async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Er
         .execute(&mut *tx)
         .await?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)").bind(&user_id).bind(&account_id).bind(&identity_id).bind(name).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+        .bind(&system_identity)
+        .bind(format!("system+{account_id}@rizzy.invalid"))
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
+        .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
+        .execute(&mut *tx).await?;
     sqlx::query("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES(?,?,?,?,?,?)").bind(&token_id).bind(&identity_id).bind(hash(&token)).bind("Bootstrap token").bind("write").bind(&timestamp).execute(&mut *tx).await?;
     tx.commit().await?;
     println!("Account: {slug}\nBearer token: {token}");
+    Ok(())
+}
+
+async fn backfill_system_users(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+    let accounts = sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM users u WHERE u.account_id=a.id AND u.role='system')")
+        .fetch_all(db).await?;
+    for account in accounts {
+        let account_id: String = account.get("id");
+        let timestamp = now();
+        let email = format!("system+{account_id}@rizzy.invalid");
+        let mut tx = db.begin().await?;
+        sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+            .bind(id())
+            .bind(&email)
+            .bind(&timestamp)
+            .execute(&mut *tx)
+            .await?;
+        let identity_id: String =
+            sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
+                .bind(&email)
+                .fetch_one(&mut *tx)
+                .await?;
+        sqlx::query("INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
+            .bind(id()).bind(&account_id).bind(identity_id).bind(&timestamp)
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
+    }
     Ok(())
 }
 

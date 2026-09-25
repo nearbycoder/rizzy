@@ -171,12 +171,14 @@ pub(super) async fn create_user(
             .fetch_one(&app.db)
             .await
             .map_err(db_err)?;
+        app.export_notify.notify_one();
         return Ok((
             StatusCode::CREATED,
             Json(export_view(&row, &base(&headers), p.slug)),
         )
             .into_response());
     }
+    app.export_notify.notify_one();
     Ok((
         StatusCode::SEE_OTHER,
         [(header::LOCATION, format!("/{account}/users/{user}"))],
@@ -255,12 +257,14 @@ pub(super) async fn create_account(
             .fetch_one(&app.db)
             .await
             .map_err(db_err)?;
+        app.export_notify.notify_one();
         return Ok((
             StatusCode::CREATED,
             Json(export_view(&row, &base(&headers), p.slug)),
         )
             .into_response());
     }
+    app.export_notify.notify_one();
     Ok((
         StatusCode::FOUND,
         [(header::LOCATION, format!("/{account}/account/settings"))],
@@ -579,9 +583,14 @@ pub(super) async fn worker(app: Arc<App>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     let mut ticks = 0_u64;
     loop {
-        interval.tick().await;
-        ticks += 1;
-        if ticks == 1 || ticks.is_multiple_of(60) {
+        let timer_tick = tokio::select! {
+            _ = interval.tick() => true,
+            _ = app.export_notify.notified() => false,
+        };
+        if timer_tick {
+            ticks += 1;
+        }
+        if timer_tick && (ticks == 1 || ticks.is_multiple_of(60)) {
             let stale = (Utc::now() - chrono::Duration::minutes(5))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             if let Err(error) = sqlx::query(
@@ -594,7 +603,7 @@ pub(super) async fn worker(app: Arc<App>) {
                 eprintln!("export recovery failed: {error}");
             }
         }
-        if ticks == 1 || ticks.is_multiple_of(3600) {
+        if timer_tick && (ticks == 1 || ticks.is_multiple_of(3600)) {
             let expired = (Utc::now() - chrono::Duration::hours(24))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             if let Ok(rows) = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
@@ -684,5 +693,6 @@ pub(super) async fn worker(app: Arc<App>) {
                     .await;
             }
         }
+        app.export_notify.notify_one();
     }
 }
