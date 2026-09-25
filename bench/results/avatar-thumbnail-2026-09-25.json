@@ -1,0 +1,53 @@
+{
+  "fixture": "806x926 PNG resized to 256x256",
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.02,
+        "requests": 5000,
+        "errors": {},
+        "rps": 996.0,
+        "p50_ms": 30.96,
+        "p95_ms": 45.06,
+        "p99_ms": 55.28
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.04,
+        "requests": 4923,
+        "errors": {},
+        "rps": 976.3,
+        "p50_ms": 63.73,
+        "p95_ms": 90.35,
+        "p99_ms": 102.86
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 8938,
+        "errors": {},
+        "rps": 1784.5,
+        "p50_ms": 17.51,
+        "p95_ms": 25.61,
+        "p99_ms": 29.92
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.02,
+        "requests": 8997,
+        "errors": {},
+        "rps": 1791.1,
+        "p50_ms": 34.54,
+        "p95_ms": 51.64,
+        "p99_ms": 58.94
+      }
+    ]
+  },
+  "thumbnail_bytes": {
+    "fizzy": 70367,
+    "rizzy": 38294
+  }
+}

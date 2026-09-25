@@ -1303,6 +1303,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::delete(delete_token),
         )
         .route("/{account}/my/identity", get(my_identity))
+        .route("/assets/system_user.png", get(storage::system_avatar))
         .route(
             "/{account}/rails/active_storage/direct_uploads",
             post(storage::direct_upload),
@@ -1318,6 +1319,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/rails/active_storage/blobs/redirect/{signed_id}/{filename}",
             get(storage::show_blob),
+        )
+        .route(
+            "/{account}/rails/active_storage/representations/redirect/{signed_id}/thumb/{filename}",
+            get(storage::show_avatar_representation),
+        )
+        .route(
+            "/{account}/rails/active_storage/disk/thumb/{token}/{filename}",
+            get(storage::download_avatar_thumbnail),
         )
         .route(
             "/{account}/my/timezone",
@@ -1381,6 +1390,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .put(update_user)
                 .patch(update_user)
                 .delete(delete_user),
+        )
+        .route(
+            "/{account}/users/{id}/avatar",
+            get(storage::show_avatar).delete(storage::delete_avatar),
         )
         .route(
             "/{account}/users/{id}/role",
@@ -2346,16 +2359,30 @@ async fn update_user(
     p.write()?;
     let u = active_user(&app, &p, &id).await?;
     can_change_user(&p, &u)?;
-    let name = string(nested(&body, "user"), "name").unwrap_or_else(|| u.get("name"));
+    let values = nested(&body, "user");
+    let name = string(values, "name").unwrap_or_else(|| u.get("name"));
     if name.trim().is_empty() {
         return Err(bad("name is required"));
     }
+    let avatar = if let Some(value) = values.get("avatar") {
+        Some(storage::prepare_user_avatar(&app, &p, value).await?)
+    } else {
+        None
+    };
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE users SET name=? WHERE id=?")
         .bind(name)
         .bind(&id)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    let removed = if let Some(blob_id) = avatar {
+        storage::attach_user_avatar_tx(&mut tx, &p, &id, blob_id.as_deref()).await?
+    } else {
+        Vec::new()
+    };
+    tx.commit().await.map_err(db_err)?;
+    storage::remove_files(removed).await;
     Ok(Json(user_json(&app, &p, &id, &base(&headers)).await?))
 }
 async fn delete_user(

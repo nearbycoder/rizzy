@@ -21,7 +21,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Basic event notifications and read controls | No |
-| Attachments and Action Text rich text | Card background image direct uploads, authorized serving, replacement, and removal | No |
+| Attachments and Action Text rich text | Card image and user avatar direct uploads, authorized serving, 256px avatar thumbnails, replacement, and removal | No |
 | Imports, exports, account lifecycle | Asynchronous user card ZIP exports, authenticated download, and expiry | No |
 | API response shape and pagination parity | Partial | No |
 | SQLite and MySQL deployment parity | SQLite only | No |
@@ -48,6 +48,8 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 
 `tests/draft_workflow_parity.py` signs in through magic links on both servers and compares browser draft creation and resumption, draft redirects, JSON editing, publication, search indexing, activity creation, and creating another draft. The Rust draft page's save/publish controls and direct board/card links were exercised in a browser. Its HTML design and interaction details are still much simpler than Fizzy's, and its cookie writes do not yet implement Fizzy's CSRF protection.
 
-`tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. Other Action Text embeds, avatars, variants, file export, and the original image controls in the browser interface remain to be built.
+`tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. Other Action Text embeds, file export, and the original image controls in the browser interface remain to be built.
+
+`tests/avatar_parity.py` compares public initials and conditional responses, direct-upload attachment, public original blob and 256px JPEG/PNG thumbnail access, replacement, invalid SVG rejection, and removal. Rizzy's thumbnail encoder produces different bytes from Fizzy's libvips output, and GIF/WebP variants have not been cross-checked. Identity avatars, rich-text embeds, exports with attachments, and the original browser upload controls are still missing.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

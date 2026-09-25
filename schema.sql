@@ -175,6 +175,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS storage_card_image_unique
   ON storage_attachments(record_id) WHERE record_type='Card' AND name='image';
 CREATE UNIQUE INDEX IF NOT EXISTS storage_card_image_blob_unique
   ON storage_attachments(blob_id) WHERE record_type='Card' AND name='image';
+CREATE UNIQUE INDEX IF NOT EXISTS storage_user_avatar_unique
+  ON storage_attachments(record_id) WHERE record_type='User' AND name='avatar';
+CREATE UNIQUE INDEX IF NOT EXISTS storage_user_avatar_blob_unique
+  ON storage_attachments(blob_id) WHERE record_type='User' AND name='avatar';
 CREATE INDEX IF NOT EXISTS storage_attachments_record ON storage_attachments(record_type,record_id);
 CREATE TABLE IF NOT EXISTS storage_download_tokens (
   token_hash TEXT PRIMARY KEY,

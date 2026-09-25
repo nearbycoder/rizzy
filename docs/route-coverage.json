@@ -125,14 +125,14 @@
       "path": "/users/:user_id/avatar(.:format)",
       "controller": "users/avatars",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
       "path": "/users/:user_id/avatar(.:format)",
       "controller": "users/avatars",
       "action": "destroy",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PATCH",
@@ -1527,6 +1527,10 @@
       "path": "/{account}/my/identity"
     },
     {
+      "method": "GET",
+      "path": "/assets/system_user.png"
+    },
+    {
       "method": "POST",
       "path": "/{account}/rails/active_storage/direct_uploads"
     },
@@ -1541,6 +1545,14 @@
     {
       "method": "GET",
       "path": "/{account}/rails/active_storage/blobs/redirect/{signed_id}/{filename}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/rails/active_storage/representations/redirect/{signed_id}/thumb/{filename}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/rails/active_storage/disk/thumb/{token}/{filename}"
     },
     {
       "method": "PUT",
@@ -1661,6 +1673,14 @@
     {
       "method": "DELETE",
       "path": "/{account}/users/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/{id}/avatar"
+    },
+    {
+      "method": "DELETE",
+      "path": "/{account}/users/{id}/avatar"
     },
     {
       "method": "PUT",
