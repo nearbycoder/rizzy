@@ -1,0 +1,65 @@
+{
+  "workload": "card create with post-run card and activity count checks",
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "target_seconds": 3.0,
+        "actual_seconds": 3.26,
+        "board_id": "03gxls8go9471zof99w2nqdmx",
+        "created": 337,
+        "verified_cards": 337,
+        "verified_activity_events": 337,
+        "errors": [],
+        "rps": 103.5,
+        "p50_ms": 281.18,
+        "p95_ms": 513.9,
+        "p99_ms": 695.1
+      },
+      {
+        "concurrency": 64,
+        "target_seconds": 3.0,
+        "actual_seconds": 3.61,
+        "board_id": "03gxls97edxlth3zsnh1zj14j",
+        "created": 359,
+        "verified_cards": 359,
+        "verified_activity_events": 359,
+        "errors": [],
+        "rps": 99.5,
+        "p50_ms": 584.41,
+        "p95_ms": 902.82,
+        "p99_ms": 1263.94
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "target_seconds": 3.0,
+        "actual_seconds": 3.01,
+        "board_id": "03gxls8uma646p4uzb9rqkej8",
+        "created": 9162,
+        "verified_cards": 9162,
+        "verified_activity_events": 9162,
+        "errors": [],
+        "rps": 3044.5,
+        "p50_ms": 10.47,
+        "p95_ms": 12.18,
+        "p99_ms": 13.34
+      },
+      {
+        "concurrency": 64,
+        "target_seconds": 3.0,
+        "actual_seconds": 3.02,
+        "board_id": "03gxls9mucfrt2ga4fbefli1l",
+        "created": 9133,
+        "verified_cards": 9133,
+        "verified_activity_events": 9133,
+        "errors": [],
+        "rps": 3020.2,
+        "p50_ms": 21.67,
+        "p95_ms": 24.94,
+        "p99_ms": 26.22
+      }
+    ]
+  }
+}

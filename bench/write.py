@@ -37,8 +37,15 @@ def run(target, count, concurrency):
     durations = [duration for _, duration, error in outcomes if not error]
     errors = [error for _, _, error in outcomes if error]
     numbers = [number for number, _, error in outcomes if not error]
+    cards, card_headers = request(target, f"/cards?board_ids%5B%5D={board_id}", with_headers=True)
+    activities, activity_headers = request(target, f"/activities?board_ids%5B%5D={board_id}", with_headers=True)
+    card_count = int(card_headers["X-Total-Count"])
+    activity_count = int(activity_headers["X-Total-Count"])
+    assert card_count == len(numbers) and activity_count == len(numbers), (card_count, activity_count, len(numbers))
+    assert cards and activities and activities[0]["action"] == "card_published"
     return {"concurrency": concurrency, "count": count, "seconds": round(elapsed, 2),
             "created": len(numbers), "unique_numbers": len(set(numbers)), "errors": errors[:20],
+            "board_id": board_id, "verified_cards": card_count, "verified_activity_events": activity_count,
             "rps": round(len(numbers)/elapsed, 1), "p50_ms": percentile(durations, .5),
             "p95_ms": percentile(durations, .95), "p99_ms": percentile(durations, .99)}
 

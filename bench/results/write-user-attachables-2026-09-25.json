@@ -1,0 +1,38 @@
+{
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "count": 200,
+        "seconds": 1.97,
+        "created": 200,
+        "unique_numbers": 200,
+        "errors": [],
+        "board_id": "03gxls02jk3xxjckutycsv56a",
+        "verified_cards": 200,
+        "verified_activity_events": 200,
+        "rps": 101.8,
+        "p50_ms": 285.27,
+        "p95_ms": 507.92,
+        "p99_ms": 605.65
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "count": 200,
+        "seconds": 0.09,
+        "created": 200,
+        "unique_numbers": 200,
+        "errors": [],
+        "board_id": "03gxls0b16imlwefkmumv33vu",
+        "verified_cards": 200,
+        "verified_activity_events": 200,
+        "rps": 2337.3,
+        "p50_ms": 11.88,
+        "p95_ms": 13.33,
+        "p99_ms": 17.41
+      }
+    ]
+  }
+}
