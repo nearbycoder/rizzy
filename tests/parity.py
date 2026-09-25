@@ -44,6 +44,8 @@ def run(target):
 
     identity = step("identity_show", "/my/identity")
     step("account_show","/account/settings")
+    join_code=step("account_join_code","/account/join_code")
+    result["account_join_code_defaults"]=[join_code["usage_count"],join_code["usage_limit"],join_code["active"]]
     result["account_entropy_days"]=step("account_entropy", "/account/entropy", "PUT", {"entropy":{"auto_postpone_period_in_days":7}})["auto_postpone_period_in_days"]
     users = step("users_list", "/users")
     result["users_list"]["count"] = len(users)
@@ -54,6 +56,13 @@ def run(target):
     board = step("board_create", "/boards", "POST", {"board": {"name": "Parity " + str(time.time_ns())}})
     board_id = board["id"]
     result["inherited_board_days"]=board["auto_postpone_period_in_days"]
+    accesses=step("board_accesses",f"/boards/{board_id}/accesses")
+    result["board_accesses_count"]=len(accesses["users"])
+    result["creator_involvement"]=next(user["involvement"] for user in accesses["users"] if user["id"]==users[0]["id"])
+    step("board_involvement_access_only",f"/boards/{board_id}/involvement","PUT",{"involvement":"access_only"})
+    changed_accesses=step("board_accesses_after_involvement",f"/boards/{board_id}/accesses")
+    result["involvement_access_only"]=next(user["involvement"] for user in changed_accesses["users"] if user["id"]==users[0]["id"])
+    step("board_involvement_watching",f"/boards/{board_id}/involvement","PUT",{"involvement":"watching"})
     step("board_show", f"/boards/{board_id}")
     column = step("column_create", f"/boards/{board_id}/columns", "POST", {"column": {"name": "Doing"}})
     column_id = column["id"]

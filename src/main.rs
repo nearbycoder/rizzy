@@ -72,6 +72,37 @@ fn hash(token: &str) -> String {
 fn random_token() -> String {
     hex::encode(rand::random::<[u8; 32]>())
 }
+fn join_code() -> String {
+    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut rng = rand::rng();
+    let chars: String = (0..12)
+        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+        .collect();
+    format!("{}-{}-{}", &chars[..4], &chars[4..8], &chars[8..])
+}
+async fn insert_join_code_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+) -> std::result::Result<(), sqlx::Error> {
+    loop {
+        let timestamp = now();
+        let inserted = sqlx::query("INSERT OR IGNORE INTO account_join_codes(id,account_id,code,created_at,updated_at) VALUES(?,?,?,?,?)")
+            .bind(id()).bind(account_id).bind(join_code()).bind(&timestamp).bind(&timestamp)
+            .execute(&mut **tx).await?;
+        if inserted.rows_affected() == 1 {
+            return Ok(());
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM account_join_codes WHERE account_id=?)",
+        )
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if exists != 0 {
+            return Ok(());
+        }
+    }
+}
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
@@ -239,7 +270,7 @@ async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Princip
     })
 }
 async fn board(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
-    sqlx::query("SELECT b.* FROM boards b WHERE b.id=? AND b.account_id=? AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?))")
+    sqlx::query("SELECT b.* FROM boards b WHERE b.id=? AND b.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)")
         .bind(id.trim_end_matches(".json")).bind(&p.account_id).bind(&p.user_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)
 }
 async fn card(app: &App, p: &Principal, number: &str) -> Result<SqliteRow> {
@@ -247,7 +278,7 @@ async fn card(app: &App, p: &Principal, number: &str) -> Result<SqliteRow> {
         .trim_end_matches(".json")
         .parse()
         .map_err(|_| missing())?;
-    sqlx::query("SELECT c.* FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.number=? AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?))")
+    sqlx::query("SELECT c.* FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.number=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)")
         .bind(&p.account_id).bind(n).bind(&p.user_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)
 }
 async fn user_json(app: &App, p: &Principal, id: &str, host: &str) -> Result<Value> {
@@ -531,6 +562,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
+    let access_columns = sqlx::query("PRAGMA table_info(accesses)")
+        .fetch_all(&db)
+        .await?;
+    if !access_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "involvement")
+    {
+        sqlx::query(
+            "ALTER TABLE accesses ADD COLUMN involvement TEXT NOT NULL DEFAULT 'access_only'",
+        )
+        .execute(&db)
+        .await?;
+        sqlx::query("UPDATE accesses SET involvement='watching' WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=accesses.board_id AND b.creator_id=accesses.user_id)")
+            .execute(&db).await?;
+    }
+    sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT b.id,u.id,CASE WHEN b.creator_id=u.id THEN 'watching' ELSE 'access_only' END FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.all_access=1 AND u.active=1 AND u.role!='system'")
+        .execute(&db).await?;
     let account_columns = sqlx::query("PRAGMA table_info(accounts)")
         .fetch_all(&db)
         .await?;
@@ -546,6 +594,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )
     .execute(&db)
     .await?;
+    let missing_join_codes=sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
+        .fetch_all(&db).await?;
+    for account in missing_join_codes {
+        let mut tx = db.begin().await?;
+        insert_join_code_tx(&mut tx, &account.get::<String, _>("id")).await?;
+        tx.commit().await?;
+    }
     if env::args().nth(1).as_deref() == Some("seed") {
         seed(&db).await?;
         return Ok(());
@@ -616,6 +671,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::put(update_account_entropy).patch(update_account_entropy),
         )
         .route(
+            "/{account}/account/join_code",
+            get(show_join_code)
+                .put(update_join_code)
+                .patch(update_join_code)
+                .delete(reset_join_code),
+        )
+        .route(
+            "/{account}/join/{code}",
+            get(join_page).post(redeem_join_code),
+        )
+        .route("/{account}/users/joins", post(complete_join))
+        .route(
             "/{account}/users/{id}",
             get(show_user)
                 .put(update_user)
@@ -627,6 +694,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::put(update_user_role).patch(update_user_role),
         )
         .route("/{account}/boards", get(list_boards).post(create_board))
+        .route("/{account}/boards/{id}/accesses", get(list_board_accesses))
+        .route(
+            "/{account}/boards/{id}/involvement",
+            axum::routing::put(update_board_involvement).patch(update_board_involvement),
+        )
         .route(
             "/{account}/boards/{id}/publication",
             post(publish_board).delete(unpublish_board),
@@ -782,6 +854,7 @@ async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Er
         .bind(&timestamp)
         .execute(&mut *tx)
         .await?;
+    insert_join_code_tx(&mut tx, &account_id).await?;
     sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
         .bind(&identity_id)
         .bind(email)
@@ -1210,6 +1283,9 @@ async fn complete_signup(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    insert_join_code_tx(&mut tx, &account_id)
+        .await
+        .map_err(db_err)?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,?,'owner',?)")
         .bind(&user_id).bind(&account_id).bind(&identity_id)
         .bind(&name).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
@@ -1501,6 +1577,239 @@ async fn show_account(
     let p = principal(&app, &headers, &account).await?;
     Ok(Json(account_json(&app, &p).await?))
 }
+async fn show_join_code(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    let row = sqlx::query(
+        "SELECT code,usage_count,usage_limit FROM account_join_codes WHERE account_id=?",
+    )
+    .bind(&p.account_id)
+    .fetch_one(&app.db)
+    .await
+    .map_err(db_err)?;
+    let code: String = row.get("code");
+    let count: i64 = row.get("usage_count");
+    let limit: i64 = row.get("usage_limit");
+    Ok(Json(
+        json!({"code":code,"usage_count":count,"usage_limit":limit,
+        "url":format!("{}/{}/join/{}",base(&headers),p.slug,code),"active":count<limit}),
+    ))
+}
+async fn update_join_code(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    p.account_admin()?;
+    let v = nested(&body, "account_join_code");
+    let limit = v
+        .get("usage_limit")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+        .ok_or_else(|| bad("usage_limit is invalid"))?;
+    if !(0..=10_000_000_000).contains(&limit) {
+        return Err(bad(
+            "usage_limit cannot be larger than the population of the planet",
+        ));
+    }
+    sqlx::query("UPDATE account_join_codes SET usage_limit=?,updated_at=? WHERE account_id=?")
+        .bind(limit)
+        .bind(now())
+        .bind(&p.account_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn reset_join_code(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    p.account_admin()?;
+    loop {
+        let result=sqlx::query("UPDATE OR IGNORE account_join_codes SET code=?,usage_count=0,updated_at=? WHERE account_id=?")
+            .bind(join_code()).bind(now()).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
+        if result.rows_affected() == 1 {
+            break;
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM account_join_codes WHERE account_id=?)",
+        )
+        .bind(&p.account_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+        if exists == 0 {
+            return Err(missing());
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn join_page(
+    State(app): Shared,
+    Path((account, code)): Path<(String, String)>,
+) -> Result<Response> {
+    let slug: i64 = account.parse().map_err(|_| missing())?;
+    let row=sqlx::query("SELECT a.name,j.usage_count,j.usage_limit FROM account_join_codes j JOIN accounts a ON a.id=j.account_id WHERE a.external_account_id=? AND j.code=?")
+        .bind(slug).bind(&code).fetch_optional(&app.db).await.map_err(db_err)?;
+    let Some(row) = row else {
+        return Ok((
+            StatusCode::NOT_FOUND,
+            Html("<h1>Invite link not found</h1>"),
+        )
+            .into_response());
+    };
+    if row.get::<i64, _>("usage_count") >= row.get::<i64, _>("usage_limit") {
+        return Ok((StatusCode::GONE, Html("<h1>That code is all used up</h1>")).into_response());
+    }
+    let page = include_str!("../static/join.html")
+        .replace("{{ACCOUNT_NAME}}", &escape(&row.get::<String, _>("name")));
+    Ok(Html(page).into_response())
+}
+async fn redeem_join_code(
+    State(app): Shared,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path((account, code)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response> {
+    let slug: i64 = account.parse().map_err(|_| missing())?;
+    let email = required(&body, "email_address")?.trim().to_lowercase();
+    if !valid_email(&email) {
+        return Err(bad("Invalid email address"));
+    }
+    let existing=sqlx::query("SELECT a.id,j.usage_count,j.usage_limit FROM account_join_codes j JOIN accounts a ON a.id=j.account_id WHERE a.external_account_id=? AND j.code=?")
+        .bind(slug).bind(&code).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    if existing.get::<i64, _>("usage_count") >= existing.get::<i64, _>("usage_limit") {
+        return Err(err(StatusCode::GONE, "That code is all used up"));
+    }
+    let account_id: String = existing.get("id");
+    {
+        let _auth_guard = app.auth_lock.lock().await;
+        auth_attempt(
+            &app,
+            &format!("join:{}", peer.ip()),
+            10,
+            3,
+            "Try again later.",
+        )
+        .await?;
+    }
+    let current = identity_auth(&app, &headers)
+        .await
+        .ok()
+        .and_then(|(identity, permission)| {
+            if permission == "write" {
+                Some(identity)
+            } else {
+                None
+            }
+        });
+    let _writer = app.write_lock.lock().await;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let claimed=sqlx::query("UPDATE account_join_codes SET usage_count=usage_count+1,updated_at=? WHERE account_id=? AND code=? AND usage_count<usage_limit")
+        .bind(now()).bind(&account_id).bind(&code).execute(&mut *tx).await.map_err(db_err)?;
+    if claimed.rows_affected() == 0 {
+        return Err(err(StatusCode::GONE, "That code is all used up"));
+    }
+    sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+        .bind(id())
+        .bind(&email)
+        .bind(now())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let identity_id: String = sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
+        .bind(&email)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let inserted=sqlx::query("INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,active,created_at) VALUES(?,?,?,?,'member',1,?)")
+        .bind(id()).bind(&account_id).bind(&identity_id).bind(&email).bind(now())
+        .execute(&mut *tx).await.map_err(db_err)?;
+    if inserted.rows_affected() == 1 {
+        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT b.id,u.id FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.account_id=? AND b.all_access=1 AND u.identity_id=?")
+            .bind(&account_id).bind(&identity_id).execute(&mut *tx).await.map_err(db_err)?;
+    } else {
+        sqlx::query("UPDATE account_join_codes SET usage_count=usage_count-1 WHERE account_id=?")
+            .bind(&account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    let member = sqlx::query("SELECT name,active FROM users WHERE account_id=? AND identity_id=?")
+        .bind(&account_id)
+        .bind(&identity_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if member.get::<i64, _>("active") == 0 {
+        return Err(missing());
+    }
+    let requires_name = member.get::<String, _>("name") == email;
+    tx.commit().await.map_err(db_err)?;
+    drop(_writer);
+    if current.as_deref() == Some(identity_id.as_str()) {
+        return Ok(Json(
+            json!({"joined":true,"requires_name":requires_name,"account_slug":format!("/{slug}")}),
+        )
+        .into_response());
+    }
+    if let Some(session) = cookie_value(&headers, "session_token") {
+        sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+            .bind(hash(&session))
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+    }
+    let mut response = request_magic_link_inner(
+        &app,
+        peer,
+        headers.clone(),
+        json!({"email_address":email}),
+        false,
+    )
+    .await?;
+    if current.is_some() {
+        set_cookie(
+            response.headers_mut(),
+            "session_token",
+            "",
+            0,
+            secure_request(&headers),
+        );
+    }
+    Ok(response)
+}
+async fn complete_join(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let name = required(nested(&body, "user"), "name")?;
+    sqlx::query("UPDATE users SET name=? WHERE id=? AND account_id=?")
+        .bind(name)
+        .bind(&p.user_id)
+        .bind(&p.account_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
 async fn update_account(
     State(app): Shared,
     Path(account): Path<String>,
@@ -1560,7 +1869,7 @@ async fn list_boards(
     let p = principal(&app, &headers, &account).await?;
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
-    let scope = " FROM boards b WHERE b.account_id=? AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?))";
+    let scope = " FROM boards b WHERE b.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)";
     let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){scope}"))
         .bind(&p.account_id)
         .bind(&p.user_id)
@@ -1593,6 +1902,70 @@ async fn show_board(
     let r = board(&app, &p, &id).await?;
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?))
 }
+async fn list_board_accesses(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(query): Query<PageQuery>,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &id).await?;
+    let page = query.page.unwrap_or(1).max(1);
+    let (offset, limit) = page_window(page);
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE account_id=? AND active=1 AND role!='system'",
+    )
+    .bind(&p.account_id)
+    .fetch_one(&app.db)
+    .await
+    .map_err(db_err)?;
+    let rows=sqlx::query("SELECT u.*,i.email_address,x.involvement FROM users u JOIN identities i ON i.id=u.identity_id LEFT JOIN accesses x ON x.user_id=u.id AND x.board_id=? WHERE u.account_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id LIMIT ? OFFSET ?")
+        .bind(&id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
+    let host = base(&headers);
+    let users: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let mut value = user_json_row(&p, r, &host);
+            let involvement: Option<String> = r.get("involvement");
+            value["has_access"] = json!(involvement.is_some());
+            value["involvement"] = json!(involvement);
+            value
+        })
+        .collect();
+    Ok(paginated(
+        json!({"board_id":id,"all_access":b.get::<i64,_>("all_access")!=0,"users":users}),
+        total,
+        page,
+        &uri,
+        &headers,
+    ))
+}
+async fn update_board_involvement(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    board(&app, &p, &id).await?;
+    let involvement = required(&body, "involvement")?;
+    if !["access_only", "watching"].contains(&involvement.as_str()) {
+        return Err(bad("Invalid involvement"));
+    }
+    let changed = sqlx::query("UPDATE accesses SET involvement=? WHERE board_id=? AND user_id=?")
+        .bind(&involvement)
+        .bind(&id)
+        .bind(&p.user_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    if changed.rows_affected() == 0 {
+        return Err(missing());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
 async fn create_board(
     State(app): Shared,
     Path(account): Path<String>,
@@ -1620,13 +1993,15 @@ async fn create_board(
     let public_description = string(v, "public_description").unwrap_or_default();
     sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,auto_postpone_period_in_days,entropy_override,public_description,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(&p.user_id).bind(name).bind(all as i64).bind(days).bind(requested_days.is_some() as i64).bind(public_description).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-    if !all {
-        sqlx::query("INSERT INTO accesses(board_id,user_id) VALUES(?,?)")
-            .bind(&id)
-            .bind(&p.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+    sqlx::query("INSERT INTO accesses(board_id,user_id,involvement) VALUES(?,?,'watching')")
+        .bind(&id)
+        .bind(&p.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if all {
+        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
+            .bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
     let r = board(&app, &p, &id).await?;
@@ -1664,19 +2039,44 @@ async fn update_board(
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE boards SET name=?,all_access=?,auto_postpone_period_in_days=?,entropy_override=?,public_description=?,updated_at=? WHERE id=?")
         .bind(name).bind(all as i64).bind(days).bind(override_days as i64).bind(public_description).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+    if all && b.get::<i64, _>("all_access") == 0 {
+        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
+            .bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+    }
     if let Some(ids) = body
         .get("user_ids")
         .or_else(|| v.get("user_ids"))
         .and_then(Value::as_array)
     {
-        sqlx::query("DELETE FROM accesses WHERE board_id=?")
-            .bind(&id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        let wanted: HashSet<&str> = ids.iter().filter_map(Value::as_str).collect();
         for user in ids.iter().filter_map(Value::as_str) {
-            sqlx::query("INSERT INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE id=? AND account_id=?")
+            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE id=? AND account_id=? AND active=1 AND role!='system'")
                 .bind(&id).bind(user).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+        }
+        if !all {
+            let current_users: Vec<String> =
+                sqlx::query_scalar("SELECT user_id FROM accesses WHERE board_id=?")
+                    .bind(&id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            for user in current_users
+                .iter()
+                .filter(|user| !wanted.contains(user.as_str()))
+            {
+                sqlx::query("DELETE FROM accesses WHERE board_id=? AND user_id=?")
+                    .bind(&id)
+                    .bind(user)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                sqlx::query("DELETE FROM watches WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+                sqlx::query("DELETE FROM pins WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+                sqlx::query("DELETE FROM assignments WHERE assignee_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+            }
         }
     }
     tx.commit().await.map_err(db_err)?;
@@ -1998,7 +2398,7 @@ fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBui
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id="
     ));
-    builder.push_bind(&p.account_id).push(" AND c.status='published' AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=").push_bind(&p.user_id).push("))");
+    builder.push_bind(&p.account_id).push(" AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=").push_bind(&p.user_id).push(")");
     if q.indexed_by.as_deref() != Some("closed") && q.card_ids.is_empty() {
         builder.push(" AND c.closed=0");
     }
@@ -2129,7 +2529,7 @@ async fn search_cards(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let filter = " FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.status='published' AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)) AND (c.number=? OR (c.title LIKE ? ESCAPE '\\' OR c.description LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM comments m WHERE m.card_id=c.id AND m.body LIKE ? ESCAPE '\\')))";
+    let filter = " FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) AND (c.number=? OR (c.title LIKE ? ESCAPE '\\' OR c.description LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM comments m WHERE m.card_id=c.id AND m.body LIKE ? ESCAPE '\\')))";
     let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){filter}"))
         .bind(&p.account_id)
         .bind(&p.user_id)
@@ -2192,8 +2592,8 @@ fn activities_query<'a>(
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=c.board_id WHERE e.account_id="
     ));
-    builder.push_bind(&p.account_id).push(" AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=")
-        .push_bind(&p.user_id).push(")) AND (e.eventable_type='Card' OR EXISTS (SELECT 1 FROM comments m WHERE m.id=e.eventable_id AND m.card_id=c.id))");
+    builder.push_bind(&p.account_id).push(" AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=")
+        .push_bind(&p.user_id).push(") AND (e.eventable_type='Card' OR EXISTS (SELECT 1 FROM comments m WHERE m.id=e.eventable_id AND m.card_id=c.id))");
     for (field, values) in [("e.creator_id", &q.creators), ("c.board_id", &q.boards)] {
         if !values.is_empty() {
             builder.push(" AND ").push(field).push(" IN (");
@@ -3299,7 +3699,7 @@ async fn toggle_assignment(
     let assignee_id = required(&body, "assignee_id")?;
     let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
-    let assignee=sqlx::query("SELECT u.id,u.name FROM users u JOIN boards b ON b.id=? WHERE u.id=? AND u.account_id=? AND u.active=1 AND u.role!='system' AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=u.id))")
+    let assignee=sqlx::query("SELECT u.id,u.name FROM users u JOIN boards b ON b.id=? WHERE u.id=? AND u.account_id=? AND u.active=1 AND u.role!='system' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=u.id)")
         .bind(&board_id).bind(&assignee_id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     let existed: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM assignments WHERE card_id=? AND assignee_id=?")
@@ -3434,7 +3834,7 @@ async fn list_pins(
     headers: HeaderMap,
 ) -> Result<Json<Value>> {
     let p = principal(&app, &headers, &account).await?;
-    let rows=sqlx::query("SELECT c.* FROM pins pin JOIN cards c ON c.id=pin.card_id JOIN boards b ON b.id=c.board_id WHERE pin.user_id=? AND pin.account_id=? AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)) ORDER BY pin.created_at DESC,pin.id DESC LIMIT 100")
+    let rows=sqlx::query("SELECT c.* FROM pins pin JOIN cards c ON c.id=pin.card_id JOIN boards b ON b.id=c.board_id WHERE pin.user_id=? AND pin.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) ORDER BY pin.created_at DESC,pin.id DESC LIMIT 100")
         .bind(&p.user_id).bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db).await.map_err(db_err)?;
     let host = base(&headers);
     let mut out = Vec::new();

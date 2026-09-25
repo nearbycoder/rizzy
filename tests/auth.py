@@ -127,6 +127,8 @@ def main():
             identity, _ = call(port, "/my/identity", cookies=[session])
             assert len(identity["accounts"]) == 1
             assert identity["accounts"][0]["user"]["name"] == "New Owner"
+            join_code, _ = call(port, identity["accounts"][0]["slug"] + "/account/join_code", cookies=[session])
+            assert join_code["active"] and join_code["usage_count"] == 0
             call(port, "/signup/completion", "POST", {"signup": {"full_name": "Again"}}, [session], 403)
             call(port, "/session", "DELETE", cookies=[session], status=204)
             _, headers = call(port, "/signup", "POST", {"signup": {"email_address": "new@example.com"}}, status=201)

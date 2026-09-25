@@ -7,6 +7,15 @@ CREATE TABLE IF NOT EXISTS accounts (
   auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_join_codes (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  usage_count INTEGER NOT NULL DEFAULT 0,
+  usage_limit INTEGER NOT NULL DEFAULT 10,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS identities (
   id TEXT PRIMARY KEY,
   email_address TEXT NOT NULL UNIQUE,
@@ -80,8 +89,10 @@ CREATE INDEX IF NOT EXISTS boards_account ON boards(account_id, created_at DESC)
 CREATE TABLE IF NOT EXISTS accesses (
   board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  involvement TEXT NOT NULL DEFAULT 'access_only' CHECK(involvement IN ('access_only','watching')),
   PRIMARY KEY(board_id, user_id)
 );
+CREATE INDEX IF NOT EXISTS accesses_user_board ON accesses(user_id,board_id);
 CREATE TABLE IF NOT EXISTS columns (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
