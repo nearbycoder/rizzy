@@ -14,9 +14,9 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Sign up, magic links, sessions, passkeys | Magic links, sessions, and initial signup | No |
 | Users, roles, invitations, board involvement | User listing/editing, roles, and join links | No |
 | Assignments, reactions, pins, watches | ✓ | No |
-| Card filters, tag listing, basic search | ✓ | No |
+| Card filters, tag listing, basic search | FTS5 card and comment index | No |
 | Activities and core event side effects | ✓ | No |
-| Saved filters and full text search | — | No |
+| Saved filters and full text search | FTS5 index; saved filters absent | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Basic event notifications and read controls | No |

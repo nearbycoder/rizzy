@@ -829,6 +829,112 @@ async fn card_json(
     Ok(out)
 }
 
+async fn cards_json_batch(
+    app: &App,
+    p: &Principal,
+    cards: &[SqliteRow],
+    host: &str,
+) -> Result<Vec<Value>> {
+    if cards.is_empty() {
+        return Ok(Vec::new());
+    }
+    let card_ids = unique_ids(cards.iter().map(|c| c.get::<String, _>("id")));
+    let board_ids = unique_ids(cards.iter().map(|c| c.get::<String, _>("board_id")));
+    let column_ids = unique_ids(
+        cards
+            .iter()
+            .filter_map(|c| c.get::<Option<String>, _>("column_id")),
+    );
+    let (boards, columns, assignments, tags) = tokio::try_join!(
+        rows_for_ids(app, "SELECT * FROM boards WHERE id IN (", &board_ids),
+        rows_for_ids(app, "SELECT * FROM columns WHERE id IN (", &column_ids),
+        assignment_rows_for_cards(app, &card_ids),
+        rows_for_ids(
+            app,
+            "SELECT g.card_id,t.title FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",
+            &card_ids
+        )
+    )?;
+    let user_ids = unique_ids(
+        cards
+            .iter()
+            .map(|c| c.get::<String, _>("creator_id"))
+            .chain(boards.iter().map(|b| b.get::<String, _>("creator_id")))
+            .chain(
+                assignments
+                    .iter()
+                    .map(|a| a.get::<String, _>("assignee_id")),
+            ),
+    );
+    let users=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
+    let users: HashMap<String, Value> = users
+        .iter()
+        .map(|u| (u.get::<String, _>("id"), user_json_row(p, u, host)))
+        .collect();
+    let mut board_values = HashMap::new();
+    for board in &boards {
+        let creator = users
+            .get(&board.get::<String, _>("creator_id"))
+            .cloned()
+            .ok_or_else(missing)?;
+        board_values.insert(
+            board.get::<String, _>("id"),
+            board_json_row(p, board, host, creator),
+        );
+    }
+    let column_values: HashMap<String, Value> = columns
+        .iter()
+        .map(|c| (c.get::<String, _>("id"), column_json(p, c, host)))
+        .collect();
+    let mut tag_values: HashMap<String, Vec<String>> = HashMap::new();
+    for tag in &tags {
+        tag_values
+            .entry(tag.get("card_id"))
+            .or_default()
+            .push(tag.get("title"));
+    }
+    for tags in tag_values.values_mut() {
+        tags.sort();
+    }
+    let mut assignee_values: HashMap<String, Vec<String>> = HashMap::new();
+    for assignment in &assignments {
+        assignee_values
+            .entry(assignment.get("card_id"))
+            .or_default()
+            .push(assignment.get("assignee_id"));
+    }
+    let mut out = Vec::with_capacity(cards.len());
+    for card in cards {
+        let card_id: String = card.get("id");
+        let board_id: String = card.get("board_id");
+        let number: i64 = card.get("number");
+        let description: String = card.get("description");
+        let assigned = assignee_values.get(&card_id).cloned().unwrap_or_default();
+        let assignees: Vec<Value> = assigned
+            .iter()
+            .take(5)
+            .filter_map(|id| users.get(id).cloned())
+            .collect();
+        let mut value = json!({"id":card_id,"number":number,"title":card.get::<String,_>("title"),"status":card.get::<String,_>("status"),
+            "description":description,"description_html":rich_html(&description),"image_url":null,"has_attachments":false,
+            "tags":tag_values.get(&card_id).cloned().unwrap_or_default(),"closed":card.get::<i64,_>("closed")!=0,
+            "postponed":card.get::<i64,_>("postponed")!=0,"golden":card.get::<i64,_>("golden")!=0,
+            "last_active_at":card.get::<String,_>("last_active_at"),"created_at":card.get::<String,_>("created_at"),
+            "url":format!("{host}/{}/cards/{number}",p.slug),"board":board_values.get(&board_id).cloned().ok_or_else(missing)?,
+            "creator":users.get(&card.get::<String,_>("creator_id")).cloned().ok_or_else(missing)?,
+            "assignees":assignees,"has_more_assignees":assigned.len()>5,
+            "comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),
+            "reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
+        if let Some(column_id) = card.get::<Option<String>, _>("column_id") {
+            if let Some(column) = column_values.get(&column_id) {
+                value["column"] = column.clone();
+            }
+        }
+        out.push(value);
+    }
+    Ok(out)
+}
+
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let url =
@@ -854,6 +960,27 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    let search_backfilled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_v1'")
+            .fetch_one(&db)
+            .await?;
+    if search_backfilled == 0 {
+        let mut tx = db.begin().await?;
+        sqlx::query("DELETE FROM card_search")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM comment_search")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,description FROM cards WHERE status='published'")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.body FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT OR IGNORE INTO search_migrations(key) VALUES('fts_v1')")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
     let webhook_columns = sqlx::query("PRAGMA table_info(webhooks)")
         .fetch_all(&db)
         .await?;
@@ -3186,6 +3313,43 @@ struct SearchQuery {
     q: Option<String>,
     page: Option<i64>,
 }
+fn fts_query(raw: &str) -> Option<String> {
+    let balanced = raw.chars().filter(|ch| *ch == '"').count() % 2 == 0;
+    let sanitized: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch == '_' || (balanced && ch == '"') {
+                ch
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let mut quoted = false;
+    let mut token = String::new();
+    let mut tokens = Vec::new();
+    for ch in sanitized.chars().chain(std::iter::once(' ')) {
+        if ch == '"' {
+            if !token.trim().is_empty() {
+                tokens.push(format!("\"{}\"", token.trim()));
+            }
+            token.clear();
+            quoted = !quoted;
+        } else if ch.is_whitespace() && !quoted {
+            if !token.trim().is_empty() {
+                tokens.push(format!("\"{}\"", token.trim()));
+            }
+            token.clear();
+        } else {
+            token.push(ch);
+        }
+    }
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join(" "))
+    }
+}
 async fn search_cards(
     State(app): Shared,
     Path(account): Path<String>,
@@ -3210,20 +3374,15 @@ async fn search_cards(
             return Ok(paginated(json!(items), 1, page, &uri, &headers));
         }
     }
-    let pattern = format!(
-        "%{}%",
-        term.replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_")
-    );
-    let filter = " FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) AND (c.number=? OR (c.title LIKE ? ESCAPE '\\' OR c.description LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM comments m WHERE m.card_id=c.id AND m.body LIKE ? ESCAPE '\\')))";
+    let Some(search) = fts_query(term) else {
+        return Ok(paginated(json!([]), 0, page, &uri, &headers));
+    };
+    let filter = " FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) AND (c.rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ?) OR c.id IN (SELECT m.card_id FROM comments m WHERE m.rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ?)))";
     let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){filter}"))
         .bind(&p.account_id)
         .bind(&p.user_id)
-        .bind(number)
-        .bind(&pattern)
-        .bind(&pattern)
-        .bind(&pattern)
+        .bind(&search)
+        .bind(&search)
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
@@ -3232,20 +3391,14 @@ async fn search_cards(
     ))
     .bind(&p.account_id)
     .bind(&p.user_id)
-    .bind(number)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
+    .bind(&search)
+    .bind(&search)
     .bind(limit)
     .bind(offset)
     .fetch_all(&app.db)
     .await
     .map_err(db_err)?;
-    let host = base(&headers);
-    let mut items = Vec::new();
-    for row in &rows {
-        items.push(card_json(&app, &p, row, &host, false).await?);
-    }
+    let items = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(items), total, page, &uri, &headers))
 }
 #[derive(Default)]
@@ -3845,11 +3998,7 @@ async fn list_cards(
         .push(" OFFSET ")
         .push_bind(offset);
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
-    let host = base(&headers);
-    let mut out = Vec::new();
-    for r in &rows {
-        out.push(card_json(&app, &p, r, &host, false).await?);
-    }
+    let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, query.page, &uri, &headers))
 }
 async fn column_cards(
@@ -3880,11 +4029,7 @@ async fn column_cards(
     .fetch_all(&app.db)
     .await
     .map_err(db_err)?;
-    let host = base(&headers);
-    let mut out = Vec::new();
-    for r in &rows {
-        out.push(card_json(&app, &p, r, &host, false).await?);
-    }
+    let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, page, &uri, &headers))
 }
 async fn show_card(

@@ -1,0 +1,50 @@
+{
+  "fixture_cards": 100,
+  "sample_shape_parity": true,
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.08,
+        "requests": 3671,
+        "errors": {},
+        "rps": 722.1,
+        "p50_ms": 38.35,
+        "p95_ms": 89.76,
+        "p99_ms": 122.12
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.12,
+        "requests": 3525,
+        "errors": {},
+        "rps": 688.9,
+        "p50_ms": 88.5,
+        "p95_ms": 163.13,
+        "p99_ms": 204.39
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 10287,
+        "errors": {},
+        "rps": 2051.8,
+        "p50_ms": 15.65,
+        "p95_ms": 17.65,
+        "p99_ms": 18.68
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.03,
+        "requests": 10335,
+        "errors": {},
+        "rps": 2055.9,
+        "p50_ms": 31.27,
+        "p95_ms": 33.79,
+        "p99_ms": 34.99
+      }
+    ]
+  }
+}
