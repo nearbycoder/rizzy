@@ -2421,7 +2421,8 @@ async fn list_boards(
     let p = principal(&app, &headers, &account).await?;
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
-    let scope = " FROM boards b WHERE b.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)";
+    let scope =
+        " FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=?";
     let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){scope}"))
         .bind(&p.account_id)
         .bind(&p.user_id)
@@ -2429,7 +2430,7 @@ async fn list_boards(
         .await
         .map_err(db_err)?;
     let rows = sqlx::query(&format!(
-        "SELECT b.*{scope} ORDER BY b.updated_at DESC LIMIT ? OFFSET ?"
+        "SELECT b.*{scope} ORDER BY x.accessed_at DESC,b.created_at DESC LIMIT ? OFFSET ?"
     ))
     .bind(&p.account_id)
     .bind(&p.user_id)

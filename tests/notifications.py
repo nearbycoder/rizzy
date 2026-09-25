@@ -60,6 +60,10 @@ def main():
             call(port, card_reading, "POST", bearer=member_token, status=201)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT accessed_at FROM accesses WHERE board_id=? AND user_id='notice-member'", (board_id,)).fetchone()[0]
+            second_board, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "Second", "all_access": False}}, bearer=owner_token, status=201)
+            call(port, f"/{account}/boards/{second_board['id']}", "PUT", {"user_ids": [owner_id, "notice-member"]}, bearer=owner_token)
+            boards, _ = call(port, f"/{account}/boards", bearer=member_token)
+            assert boards[0]["id"] == board_id
             notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
             assert notices[0]["read"] and notices[0]["unread_count"] == 0
             call(port, card_reading, "DELETE", bearer=member_token, status=204)
