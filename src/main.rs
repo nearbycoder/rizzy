@@ -1318,6 +1318,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/boards/{board}/cards", post(create_card))
         .route("/{account}/cards", get(list_cards))
+        .route("/{account}/filters", post(create_filter))
+        .route(
+            "/{account}/filters/{id}",
+            axum::routing::delete(delete_filter).post(delete_filter),
+        )
         .route("/{account}/tags", get(list_tags))
         .route("/{account}/search", get(search_cards))
         .route("/{account}/notifications", get(list_notifications))
@@ -4392,6 +4397,245 @@ async fn list_cards(
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
     let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, query.page, &uri, &headers))
+}
+fn filter_params(headers: &HeaderMap, body: &Bytes) -> Result<Value> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let raw: Value = if form {
+        let mut fields = serde_json::Map::new();
+        for (key, value) in url::form_urlencoded::parse(body) {
+            let key = if let Some(inner) = key.strip_prefix("filter[") {
+                if let Some(inner) = inner.strip_suffix("][]") {
+                    format!("{inner}[]")
+                } else {
+                    inner.strip_suffix(']').unwrap_or(inner).to_owned()
+                }
+            } else {
+                key.into_owned()
+            };
+            if let Some(key) = key.strip_suffix("[]") {
+                let entry = fields.entry(key.to_string()).or_insert_with(|| json!([]));
+                if let Some(array) = entry.as_array_mut() {
+                    array.push(json!(value.into_owned()));
+                } else {
+                    *entry = json!([value.into_owned()]);
+                }
+            } else {
+                fields.insert(key.to_string(), json!(value.into_owned()));
+            }
+        }
+        Value::Object(fields)
+    } else {
+        serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))?
+    };
+    let input = raw.get("filter").unwrap_or(&raw);
+    let mut params = serde_json::Map::new();
+    for key in [
+        "assignment_status",
+        "indexed_by",
+        "sorted_by",
+        "creation",
+        "closure",
+    ] {
+        let Some(value) = input
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        else {
+            continue;
+        };
+        if (key == "indexed_by" && value == "all") || (key == "sorted_by" && value == "latest") {
+            continue;
+        }
+        params.insert(key.into(), json!(value));
+    }
+    for key in [
+        "card_ids",
+        "column_ids",
+        "assignee_ids",
+        "creator_ids",
+        "closer_ids",
+        "board_ids",
+        "tag_ids",
+        "terms",
+    ] {
+        let Some(values) = input.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        let mut normalized = Vec::new();
+        for value in values {
+            let Some(value) = value.as_str().filter(|v| !v.is_empty()) else {
+                continue;
+            };
+            if key == "column_ids" || key.ends_with("_ids") && key != "card_ids" {
+                if normalized.iter().any(|item: &String| item == value) {
+                    continue;
+                }
+            }
+            normalized.push(value.to_owned());
+        }
+        if !normalized.is_empty() {
+            params.insert(key.into(), json!(normalized));
+        }
+    }
+    Ok(Value::Object(params))
+}
+fn filter_turbo(inner: String) -> Response {
+    let html = format!(
+        "<turbo-stream action=\"replace\" target=\"filter-settings-save-toggle\"><template><div id=\"filter-settings-save-toggle\">{inner}</div></template></turbo-stream>"
+    );
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/vnd.turbo-stream.html; charset=utf-8",
+        )],
+        html,
+    )
+        .into_response()
+}
+fn filter_save_button(slug: i64, params: &Value) -> String {
+    let mut inputs = String::new();
+    if let Some(fields) = params.as_object() {
+        for (key, value) in fields {
+            if let Some(values) = value.as_array() {
+                for item in values {
+                    if let Some(item) = item.as_str() {
+                        inputs.push_str(&format!(
+                            "<input type=hidden name=\"{}[]\" value=\"{}\">",
+                            escape(key),
+                            escape(item)
+                        ));
+                    }
+                }
+            } else if let Some(value) = value.as_str() {
+                inputs.push_str(&format!(
+                    "<input type=hidden name=\"{}\" value=\"{}\">",
+                    escape(key),
+                    escape(value)
+                ));
+            }
+        }
+    }
+    format!(
+        "<form method=post action=\"/{slug}/filters\">{inputs}<button type=submit aria-label=\"Save custom view\">Save custom view</button></form>"
+    )
+}
+async fn validate_filter_resources(app: &App, p: &Principal, params: &Value) -> Result<()> {
+    for (key, sql) in [
+        (
+            "tag_ids",
+            "SELECT EXISTS(SELECT 1 FROM tags WHERE id=? AND account_id=?)",
+        ),
+        (
+            "board_ids",
+            "SELECT EXISTS(SELECT 1 FROM boards b JOIN accesses a ON a.board_id=b.id WHERE b.id=? AND b.account_id=? AND a.user_id=?)",
+        ),
+        (
+            "assignee_ids",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND account_id=?)",
+        ),
+        (
+            "creator_ids",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND account_id=?)",
+        ),
+        (
+            "closer_ids",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND account_id=?)",
+        ),
+    ] {
+        if let Some(ids) = params.get(key).and_then(Value::as_array) {
+            for id in ids.iter().filter_map(Value::as_str) {
+                let mut query = sqlx::query_scalar::<_, i64>(sql)
+                    .bind(id)
+                    .bind(&p.account_id);
+                if key == "board_ids" {
+                    query = query.bind(&p.user_id);
+                }
+                if query.fetch_one(&app.db).await.map_err(db_err)? == 0 {
+                    return Err(missing());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+async fn create_filter(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let params = filter_params(&headers, &body)?;
+    validate_filter_resources(&app, &p, &params).await?;
+    let fields = params.to_string();
+    let digest = hash(&fields);
+    let filter_id = id();
+    let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let saved_id: String = sqlx::query_scalar("INSERT INTO filters(id,account_id,creator_id,fields,params_digest,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(creator_id,params_digest) DO UPDATE SET updated_at=excluded.updated_at RETURNING id")
+        .bind(filter_id).bind(&p.account_id).bind(&p.user_id).bind(&fields).bind(digest)
+        .bind(&timestamp).bind(&timestamp).fetch_one(&mut *tx).await.map_err(db_err)?;
+    for (key, table, column) in [
+        ("tag_ids", "filters_tags", "tag_id"),
+        ("board_ids", "boards_filters", "board_id"),
+        ("assignee_ids", "assignees_filters", "assignee_id"),
+        ("creator_ids", "creators_filters", "creator_id"),
+        ("closer_ids", "closers_filters", "closer_id"),
+    ] {
+        if let Some(ids) = params.get(key).and_then(Value::as_array) {
+            let statement =
+                format!("INSERT OR IGNORE INTO {table}(filter_id,{column}) VALUES(?,?)");
+            for resource_id in ids.iter().filter_map(Value::as_str) {
+                sqlx::query(&statement)
+                    .bind(&saved_id)
+                    .bind(resource_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
+        }
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(filter_turbo(format!(
+        "<form method=post action=\"/{}/filters/{}\"><input type=hidden name=_method value=delete><button type=submit aria-label=\"Delete custom view\">Delete custom view</button></form>",
+        p.slug, saved_id
+    )))
+}
+async fn delete_filter(
+    State(app): Shared,
+    Path((account, filter_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let fields: String = sqlx::query_scalar(
+        "SELECT fields FROM filters WHERE id=? AND creator_id=? AND account_id=?",
+    )
+    .bind(&filter_id)
+    .bind(&p.user_id)
+    .bind(&p.account_id)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?
+    .ok_or_else(missing)?;
+    let result = sqlx::query("DELETE FROM filters WHERE id=? AND creator_id=? AND account_id=?")
+        .bind(&filter_id)
+        .bind(&p.user_id)
+        .bind(&p.account_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    if result.rows_affected() == 0 {
+        return Err(missing());
+    }
+    let params = serde_json::from_str(&fields)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
+    Ok(filter_turbo(filter_save_button(p.slug, &params)))
 }
 async fn column_cards(
     State(app): Shared,

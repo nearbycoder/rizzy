@@ -1077,14 +1077,14 @@
       "path": "/filters(.:format)",
       "controller": "filters",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
       "path": "/filters/:id(.:format)",
       "controller": "filters",
       "action": "destroy",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1777,6 +1777,18 @@
     {
       "method": "GET",
       "path": "/{account}/cards"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/filters"
+    },
+    {
+      "method": "DELETE",
+      "path": "/{account}/filters/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/filters/{id}"
     },
     {
       "method": "GET",

@@ -238,6 +238,42 @@ CREATE TABLE IF NOT EXISTS user_timezones (
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   timezone_name TEXT
 );
+CREATE TABLE IF NOT EXISTS filters (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  fields TEXT NOT NULL DEFAULT '{}',
+  params_digest TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(creator_id,params_digest)
+);
+CREATE INDEX IF NOT EXISTS filters_account_creator ON filters(account_id,creator_id);
+CREATE TABLE IF NOT EXISTS filters_tags (
+  filter_id TEXT NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+  tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  PRIMARY KEY(filter_id,tag_id)
+);
+CREATE TABLE IF NOT EXISTS boards_filters (
+  filter_id TEXT NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+  board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  PRIMARY KEY(filter_id,board_id)
+);
+CREATE TABLE IF NOT EXISTS assignees_filters (
+  filter_id TEXT NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+  assignee_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY(filter_id,assignee_id)
+);
+CREATE TABLE IF NOT EXISTS creators_filters (
+  filter_id TEXT NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY(filter_id,creator_id)
+);
+CREATE TABLE IF NOT EXISTS closers_filters (
+  filter_id TEXT NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+  closer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY(filter_id,closer_id)
+);
 CREATE TABLE IF NOT EXISTS webhooks (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

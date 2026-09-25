@@ -27,6 +27,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings.
 - Board, column, and card create/read/update/delete JSON routes; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions.
 - Tag listing, selected card filters, and SQLite FTS5 card and comment search with indexed edits and deletes.
+- Initial saved filter create/delete routes with per-user deduplication and Turbo Stream toggle responses.
 - Board publishing and unpublishing with unauthenticated public board and card pages.
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
 - A basic browser interface for boards, columns, cards, description editing, and completion.
@@ -34,7 +35,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 
 ## Parity still required
 
-The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filters and complete search behavior, the complete activity timeline, complete public board views, rich text and attachments, push, specialized webhook payloads, imports and exports, background jobs, and the complete Hotwire UI. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
+The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, rich text and attachments, push, specialized webhook payloads, imports and exports, background jobs, and the complete Hotwire UI. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
 
 ## Verification and benchmarks
 
@@ -44,6 +45,7 @@ python3 tests/smoke.py
 python3 tests/auth.py
 python3 tests/join.py
 python3 tests/verification.py
+python3 tests/filters.py
 python3 tests/email_change.py
 python3 tests/client_settings.py
 python3 tests/cluster_writes.py
