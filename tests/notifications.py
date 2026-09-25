@@ -65,6 +65,22 @@ def main():
             pending, code = request_code(port, "notice@example.com")
             _, session_headers = session_call(port, "/session/magic_link", "POST", {"code": code}, [pending])
             member_session = cookie(session_headers, "session_token")
+            status, content_type, body = browser_request(
+                port, f"/{account}/notifications", "GET", member_session, "text/html")
+            assert status == 200 and content_type == "text/html"
+            assert all(marker in body for marker in (
+                b"New for you", b"notifications_list", b"First alert", b"Added by Owner",
+                f'id="notification_{notice["id"]}"'.encode(), b"Mark all as read", b"Notification settings"))
+            assert b'id="read_section"' not in body.split(b"</main>", 1)[0]
+            status, content_type, body = browser_request(
+                port, f"/{account}/notifications/tray", "GET", member_session, "text/html")
+            assert status == 200 and content_type == "text/html"
+            assert b'<turbo-frame id="notifications">' in body and f'notification_{notice["id"]}'.encode() in body
+            status, content_type, body = browser_request(
+                port, f"/{account}/notifications?page=1", "GET", member_session,
+                "text/vnd.turbo-stream.html")
+            assert status == 200 and content_type == "text/vnd.turbo-stream.html"
+            assert b'append" target="notifications_list_read' in body and b'replace" target="next_page' in body
             card_reading = f"/{account}/cards/{number}/reading"
             status, content_type, body = browser_request(
                 port, card_reading, "POST", member_session, "text/vnd.turbo-stream.html")
@@ -112,6 +128,18 @@ def main():
             assert not notices[0]["read"] and notices[0]["unread_count"] == 1
             path = f"/{account}/notifications/{notice['id']}/reading"
             call(port, path, "POST", bearer=owner_token, status=404)
+            status, content_type, body = browser_request(
+                port, path, "POST", member_session, "text/vnd.turbo-stream.html")
+            assert status == 200 and content_type == "text/vnd.turbo-stream.html"
+            assert f'action="remove" target="notification_{notice["id"]}"'.encode() in body
+            assert b'action="prepend" target="notifications_list_read"' in body and b"Previously seen" not in body
+            status, _, body = browser_request(
+                port, f"/{account}/notifications", "GET", member_session, "text/html")
+            assert b"Previously seen" in body and f'notification_{notice["id"]}'.encode() in body
+            status, content_type, body = browser_request(
+                port, path, "DELETE", member_session, "text/vnd.turbo-stream.html")
+            assert status == 200 and content_type == "text/vnd.turbo-stream.html"
+            assert b'action="prepend" target="notifications_list"' in body
             call(port, path, "POST", bearer=member_token, status=204)
             tray, _ = call(port, f"/{account}/notifications/tray", bearer=member_token)
             assert tray == []
@@ -121,6 +149,13 @@ def main():
             tray, _ = call(port, f"/{account}/notifications/tray", bearer=member_token)
             assert len(tray) == 1 and not tray[0]["read"]
             call(port, f"/{account}/notifications/bulk_reading", "POST", bearer=member_token, status=204)
+            call(port, path, "DELETE", bearer=member_token, status=204)
+            status, _, body = browser_request(
+                port, f"/{account}/notifications/bulk_reading?from_tray=true",
+                "POST", member_session, "text/html")
+            assert status == 200 and not body
+            tray, _ = call(port, f"/{account}/notifications/tray", bearer=member_token)
+            assert tray == []
             call(port, f"/{account}/boards/{board_id}", "PUT", {"user_ids": [owner_id]}, bearer=owner_token)
             notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
             assert notices == []

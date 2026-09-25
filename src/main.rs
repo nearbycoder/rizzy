@@ -48,6 +48,7 @@ mod imports;
 mod join_code_page;
 mod my_menu;
 mod notification_mail;
+mod notification_page;
 mod passkeys;
 mod push_delivery;
 mod push_subscriptions;
@@ -6727,8 +6728,15 @@ async fn list_notifications(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    let unread=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL ORDER BY updated_at DESC LIMIT 100")
-        .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let json_request = headers.contains_key("x-rizzy-json-request");
+    let show_unread = query.page.is_none();
+    let unread_limit = if json_request { 100 } else { 500 };
+    let unread = if show_unread {
+        sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL ORDER BY updated_at DESC LIMIT ?")
+            .bind(&p.user_id).bind(&p.account_id).bind(unread_limit).fetch_all(&app.db).await.map_err(db_err)?
+    } else {
+        Vec::new()
+    };
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let total:i64=sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NOT NULL")
@@ -6736,12 +6744,44 @@ async fn list_notifications(
     let read=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NOT NULL ORDER BY read_at DESC,updated_at DESC LIMIT ? OFFSET ?")
         .bind(&p.user_id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
     let host = base(&headers);
-    let mut items = if page == 1 {
-        notification_items(&app, &p, unread, &host).await?
-    } else {
-        Vec::new()
-    };
-    items.extend(notification_items(&app, &p, read, &host).await?);
+    let unread_items = notification_items(&app, &p, unread, &host).await?;
+    let read_items = notification_items(&app, &p, read, &host).await?;
+    if wants_turbo_stream(&headers) && !json_request {
+        if !show_unread {
+            let stream = notification_page::next_page_stream(
+                p.slug,
+                &read_items,
+                page,
+                offset + limit < total,
+            );
+            return Ok((
+                [(
+                    header::CONTENT_TYPE,
+                    "text/vnd.turbo-stream.html; charset=utf-8",
+                )],
+                stream,
+            )
+                .into_response());
+        }
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    if !json_request {
+        let unread_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL")
+            .bind(&p.user_id).bind(&p.account_id).fetch_one(&app.db).await.map_err(db_err)?;
+        return Ok(Html(notification_page::index(
+            p.slug,
+            &unread_items,
+            &read_items,
+            page,
+            total,
+            offset + limit,
+            (unread_total - unread_limit).max(0),
+            show_unread,
+        ))
+        .into_response());
+    }
+    let mut items = unread_items;
+    items.extend(read_items);
     Ok(paginated(json!(items), total, page, &uri, &headers))
 }
 
@@ -6754,7 +6794,7 @@ async fn notification_tray(
     Path(account): Path<String>,
     headers: HeaderMap,
     Query(query): Query<NotificationTrayQuery>,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let unread=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL ORDER BY updated_at DESC LIMIT 100")
         .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
@@ -6765,48 +6805,100 @@ async fn notification_tray(
             .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
         items.extend(notification_items(&app, &p, read, &host).await?);
     }
-    Ok(Json(json!(items)))
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(Json(json!(items)).into_response())
+    } else {
+        Ok(Html(notification_page::tray(p.slug, &items)).into_response())
+    }
+}
+async fn set_notification_reading(
+    app: &App,
+    p: &Principal,
+    id: &str,
+    headers: &HeaderMap,
+    read: bool,
+) -> Result<Response> {
+    p.write()?;
+    let id = id.trim_end_matches(".json");
+    let timestamp = now();
+    let result = if read {
+        sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE id=? AND user_id=? AND account_id=?")
+            .bind(&timestamp).bind(&timestamp).bind(id).bind(&p.user_id).bind(&p.account_id)
+            .execute(&app.db).await.map_err(db_err)?
+    } else {
+        sqlx::query("UPDATE notifications SET read_at=NULL,unread_count=1,updated_at=? WHERE id=? AND user_id=? AND account_id=?")
+            .bind(&timestamp).bind(id).bind(&p.user_id).bind(&p.account_id)
+            .execute(&app.db).await.map_err(db_err)?
+    };
+    if result.rows_affected() == 0 {
+        return Err(missing());
+    }
+    if wants_turbo_stream(headers) {
+        let row =
+            sqlx::query("SELECT * FROM notifications WHERE id=? AND user_id=? AND account_id=?")
+                .bind(id)
+                .bind(&p.user_id)
+                .bind(&p.account_id)
+                .fetch_one(&app.db)
+                .await
+                .map_err(db_err)?;
+        let notice = notification_json(app, p, &row, &base(headers)).await?;
+        let stream = notification_page::reading_stream(p.slug, &notice, read);
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 async fn read_notification(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    p.write()?;
-    let result=sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE id=? AND user_id=? AND account_id=?")
-        .bind(now()).bind(now()).bind(id.trim_end_matches(".json")).bind(&p.user_id).bind(&p.account_id)
-        .execute(&app.db).await.map_err(db_err)?;
-    if result.rows_affected() == 0 {
-        return Err(missing());
-    }
-    Ok(StatusCode::NO_CONTENT)
+    set_notification_reading(&app, &p, &id, &headers, true).await
 }
 async fn unread_notification(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    p.write()?;
-    let result=sqlx::query("UPDATE notifications SET read_at=NULL,unread_count=1,updated_at=? WHERE id=? AND user_id=? AND account_id=?")
-        .bind(now()).bind(id.trim_end_matches(".json")).bind(&p.user_id).bind(&p.account_id)
-        .execute(&app.db).await.map_err(db_err)?;
-    if result.rows_affected() == 0 {
-        return Err(missing());
-    }
-    Ok(StatusCode::NO_CONTENT)
+    set_notification_reading(&app, &p, &id, &headers, false).await
 }
 async fn read_all_notifications(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+    RawQuery(raw): RawQuery,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE user_id=? AND account_id=? AND read_at IS NULL")
         .bind(now()).bind(now()).bind(&p.user_id).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    let from_tray = raw.as_deref().is_some_and(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes()).any(|(key, _)| key == "from_tray")
+    });
+    if from_tray {
+        Ok(StatusCode::OK.into_response())
+    } else {
+        Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/notifications"))],
+        )
+            .into_response())
+    }
 }
 
 async fn list_activities(
