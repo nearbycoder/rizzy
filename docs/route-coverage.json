@@ -580,7 +580,7 @@
       "path": "/cards/:card_id/board/edit(.:format)",
       "controller": "cards/boards",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PATCH",
@@ -2229,6 +2229,14 @@
     {
       "method": "PATCH",
       "path": "/{account}/cards/{number}/board"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/cards/{number}/board"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/board/edit"
     },
     {
       "method": "POST",

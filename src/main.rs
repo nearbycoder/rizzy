@@ -35,6 +35,7 @@ mod account_transfer;
 mod board_page;
 mod board_settings;
 mod board_views;
+mod card_board_page;
 mod card_column_page;
 mod card_controls;
 mod card_page;
@@ -1924,8 +1925,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/board",
-            axum::routing::put(move_card).patch(move_card),
+            axum::routing::put(move_card).patch(move_card).post(move_card),
         )
+        .route("/{account}/cards/{number}/board/edit", get(card_board_page::edit))
         .route("/{account}/cards/{number}/taggings", post(toggle_tag))
         .route(
             "/{account}/cards/{number}/assignments",
@@ -7899,28 +7901,83 @@ async fn move_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    RawQuery(raw_query): RawQuery,
+    method: Method,
+    raw_body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
+    if method == Method::POST
+        && (!form
+            || !url::form_urlencoded::parse(&raw_body)
+                .any(|(key, value)| key == "_method" && value == "patch"))
+    {
+        return Err(missing());
+    }
+    let body: Value = if form || raw_body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice(&raw_body).map_err(|_| bad("Invalid JSON"))?
+    };
+    let query_board = raw_query.as_deref().and_then(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .find(|(key, _)| key == "board_id")
+            .map(|(_, value)| value.into_owned())
+    });
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let destination = required(&body, "board_id")?;
+    let destination = query_board
+        .or_else(|| string(&body, "board_id"))
+        .ok_or_else(|| bad("board_id is required"))?;
     let old_board = board(&app, &p, &c.get::<String, _>("board_id")).await?;
     let new_board = board(&app, &p, &destination).await?;
-    sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")
-        .bind(&destination)
-        .bind(now())
-        .bind(c.get::<String, _>("id"))
-        .execute(&app.db)
-        .await
-        .map_err(db_err)?;
     if c.get::<String, _>("board_id") != destination {
-        sqlx::query("UPDATE events SET board_id=? WHERE card_id=?")
+        let card_id = c.get::<String, _>("id");
+        let mut tx = app.db.begin().await.map_err(db_err)?;
+        sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")
             .bind(&destination)
-            .bind(c.get::<String, _>("id"))
-            .execute(&app.db)
+            .bind(now())
+            .bind(&card_id)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
+        sqlx::query("UPDATE events SET board_id=? WHERE card_id=?")
+            .bind(&destination)
+            .bind(&card_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        if new_board.get::<i64, _>("all_access") == 0
+            && p.admin(&new_board.get::<String, _>("creator_id")).is_ok()
+        {
+            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT ?,a.assignee_id,'access_only' FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
+                .bind(&destination)
+                .bind(&card_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
+        for table in ["pins", "watches", "notifications"] {
+            let query = format!(
+                "DELETE FROM {table} WHERE card_id=? AND user_id NOT IN (SELECT user_id FROM accesses WHERE board_id=?)"
+            );
+            sqlx::query(&query)
+                .bind(&card_id)
+                .bind(&destination)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
+        sqlx::query("DELETE FROM assignments WHERE card_id=? AND assignee_id NOT IN (SELECT user_id FROM accesses WHERE board_id=?)")
+            .bind(&card_id)
+            .bind(&destination)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
         record_event(&app,&p,&destination,&c.get::<String,_>("id"),"Card",&c.get::<String,_>("id"),"card_board_changed",json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")})).await?;
         let who = escape(&actor_name(&app, &p).await?);
         system_comment(
@@ -7936,7 +7993,14 @@ async fn move_card(
         .await?;
     }
     let c = card(&app, &p, &number).await?;
-    Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?))
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/cards/{number}"))],
+        )
+            .into_response());
+    }
+    Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
 }
 async fn toggle_tag(
     State(app): Shared,
