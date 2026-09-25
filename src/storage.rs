@@ -9,7 +9,7 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
-fn storage_dir() -> PathBuf {
+pub(super) fn storage_dir() -> PathBuf {
     env::var_os("RIZZY_STORAGE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data/storage/files"))

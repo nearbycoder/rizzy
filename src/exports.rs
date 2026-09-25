@@ -2,6 +2,7 @@ use super::*;
 use axum::body::Body;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tokio_util::io::ReaderStream;
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
@@ -30,6 +31,72 @@ fn iso(value: &str) -> String {
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
         })
         .unwrap_or_else(|_| value.to_owned())
+}
+
+struct ExportBlob {
+    sgid: String,
+    filename: String,
+    content_type: String,
+    archive_path: String,
+    storage_path: PathBuf,
+}
+
+fn archive_filename(filename: &str) -> String {
+    filename.replace(['/', '\\'], "_")
+}
+
+fn export_rich_text(raw: &str, blobs: &HashMap<String, &ExportBlob>) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+    static TAG: OnceLock<regex::Regex> = OnceLock::new();
+    static SGID: OnceLock<regex::Regex> = OnceLock::new();
+    let tag = TAG.get_or_init(|| {
+        regex::Regex::new(r"(?is)<action-text-attachment\b([^>]*)>.*?</action-text-attachment>")
+            .expect("attachment pattern")
+    });
+    let sgid = SGID.get_or_init(|| {
+        regex::Regex::new(r#"(?i)\bsgid\s*=\s*["']([^"']+)["']"#).expect("sgid pattern")
+    });
+    let mut input = String::new();
+    let mut replacements = Vec::new();
+    let mut offset = 0;
+    for (index, matched) in tag.captures_iter(raw).enumerate() {
+        let whole = matched.get(0).expect("whole attachment");
+        input.push_str(&raw[offset..whole.start()]);
+        let sgid = matched
+            .get(1)
+            .and_then(|attrs| sgid.captures(attrs.as_str()))
+            .and_then(|captures| captures.get(1))
+            .map(|value| value.as_str())
+            .unwrap_or("");
+        let replacement = if let Some(blob) = blobs.get(sgid) {
+            let path = escape(&blob.archive_path);
+            let filename = escape(&blob.filename);
+            if blob.content_type.starts_with("image/") {
+                format!("<img src=\"{path}\" alt=\"{filename}\">")
+            } else {
+                format!("<a href=\"{path}\">{filename}</a>")
+            }
+        } else {
+            "☒".to_owned()
+        };
+        let token = format!("RIZZYEXPORTATTACHMENT{index}END");
+        input.push_str(&token);
+        replacements.push((token, replacement));
+        offset = whole.end();
+    }
+    input.push_str(&raw[offset..]);
+    let html = rich_text::html(&input);
+    let mut inner = html
+        .strip_prefix("<div class=\"action-text-content\">\n  ")
+        .and_then(|value| value.strip_suffix("\n</div>\n"))
+        .unwrap_or(&html)
+        .to_owned();
+    for (token, replacement) in replacements {
+        inner = inner.replace(&token, &replacement);
+    }
+    inner
 }
 
 fn export_view(row: &SqliteRow, host: &str, slug: i64) -> Value {
@@ -191,8 +258,33 @@ pub(super) async fn download(
         .into_response())
 }
 
-async fn export_card(app: &App, row: &SqliteRow) -> std::result::Result<Value, sqlx::Error> {
+async fn export_card(
+    app: &App,
+    row: &SqliteRow,
+) -> std::result::Result<(Value, Vec<ExportBlob>), sqlx::Error> {
     let card_id: String = row.get("id");
+    let number: i64 = row.get("number");
+    let attachment_rows = sqlx::query("SELECT b.attachable_sgid,b.filename,b.content_type,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND a.name='embed' AND ((a.record_type='Card' AND a.record_id=?) OR (a.record_type='Comment' AND a.record_id IN (SELECT id FROM comments WHERE card_id=?))) GROUP BY b.id ORDER BY b.id")
+        .bind(row.get::<String, _>("account_id"))
+        .bind(&card_id)
+        .bind(&card_id)
+        .fetch_all(&app.db).await?;
+    let blobs: Vec<ExportBlob> = attachment_rows
+        .iter()
+        .map(|blob| {
+            let key: String = blob.get("storage_key");
+            let filename: String = blob.get("filename");
+            ExportBlob {
+                sgid: blob.get("attachable_sgid"),
+                archive_path: format!("{number}/{key}_{}", archive_filename(&filename)),
+                storage_path: storage::storage_dir().join(&key),
+                filename,
+                content_type: blob.get("content_type"),
+            }
+        })
+        .collect();
+    let blob_map: HashMap<String, &ExportBlob> =
+        blobs.iter().map(|blob| (blob.sgid.clone(), blob)).collect();
     let creator = json!({
         "id": row.get::<String, _>("creator_id"),
         "name": row.get::<String, _>("creator_name"),
@@ -208,46 +300,74 @@ async fn export_card(app: &App, row: &SqliteRow) -> std::result::Result<Value, s
     };
     let comments = sqlx::query("SELECT c.id,c.body,c.created_at,u.id creator_id,u.name creator_name,u.role creator_role,CASE WHEN u.role='system' THEN NULL ELSE i.email_address END creator_email FROM comments c JOIN users u ON u.id=c.creator_id LEFT JOIN identities i ON i.id=u.identity_id WHERE c.card_id=? ORDER BY c.created_at ASC,c.rowid ASC")
         .bind(card_id).fetch_all(&app.db).await?;
-    let comments = comments.iter().map(|c| {
-        let body: String = c.get("body");
-        json!({
-            "id":c.get::<String,_>("id"),
-            "body":if body.is_empty() { String::new() } else if c.get::<String,_>("creator_role") == "system" { body } else { escape(&body) },
-            "creator":{
-                "id":c.get::<String,_>("creator_id"),
-                "name":c.get::<String,_>("creator_name"),
-                "email":c.get::<Option<String>,_>("creator_email")
-            },
-            "created_at":iso(&c.get::<String,_>("created_at"))
+    let comments = comments
+        .iter()
+        .map(|c| {
+            let body: String = c.get("body");
+            json!({
+                "id":c.get::<String,_>("id"),
+                "body":export_rich_text(&body, &blob_map),
+                "creator":{
+                    "id":c.get::<String,_>("creator_id"),
+                    "name":c.get::<String,_>("creator_name"),
+                    "email":c.get::<Option<String>,_>("creator_email")
+                },
+                "created_at":iso(&c.get::<String,_>("created_at"))
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
     let description: String = row.get("description");
-    Ok(json!({
-        "number":row.get::<i64,_>("number"),
-        "title":row.get::<String,_>("title"),
-        "board":row.get::<String,_>("board_name"),
-        "status":status,
-        "creator":creator,
-        "description":if description.is_empty() { String::new() } else { escape(&rich_text::plain_text(&description)) },
-        "created_at":iso(&row.get::<String,_>("created_at")),
-        "updated_at":iso(&row.get::<String,_>("updated_at")),
-        "comments":comments
-    }))
+    Ok((
+        json!({
+            "number":number,
+            "title":row.get::<String,_>("title"),
+            "board":row.get::<String,_>("board_name"),
+            "status":status,
+            "creator":creator,
+            "description":export_rich_text(&description, &blob_map),
+            "created_at":iso(&row.get::<String,_>("created_at")),
+            "updated_at":iso(&row.get::<String,_>("updated_at")),
+            "comments":comments
+        }),
+        blobs,
+    ))
+}
+
+#[derive(Debug)]
+enum ArchiveEntry {
+    Json(String, Vec<u8>),
+    Blob(String, PathBuf),
 }
 
 fn write_archive(
     path: PathBuf,
-    mut receiver: tokio::sync::mpsc::Receiver<(String, Vec<u8>)>,
+    mut receiver: tokio::sync::mpsc::Receiver<ArchiveEntry>,
 ) -> std::io::Result<()> {
     let temporary = path.with_extension("zip.tmp");
     let result = (|| {
         std::fs::create_dir_all(path.parent().expect("export parent"))?;
         let file = std::fs::File::create(&temporary)?;
         let mut writer = ZipWriter::new(file);
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        while let Some((name, data)) = receiver.blocking_recv() {
-            writer.start_file(name, options)?;
-            writer.write_all(&data)?;
+        while let Some(entry) = receiver.blocking_recv() {
+            match entry {
+                ArchiveEntry::Json(name, data) => {
+                    let options = SimpleFileOptions::default()
+                        .compression_method(CompressionMethod::Deflated);
+                    writer.start_file(name, options)?;
+                    writer.write_all(&data)?;
+                }
+                ArchiveEntry::Blob(name, path) => {
+                    let mut source = match std::fs::File::open(path) {
+                        Ok(file) => file,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(error) => return Err(error),
+                    };
+                    let options =
+                        SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+                    writer.start_file(name, options)?;
+                    std::io::copy(&mut source, &mut writer)?;
+                }
+            }
         }
         writer.finish()?;
         std::fs::rename(&temporary, &path)?;
@@ -280,10 +400,13 @@ async fn build_user(
         sqlx::query("UPDATE exports SET updated_at=? WHERE id=?")
             .bind(now()).bind(&export_id).execute(&app.db).await?;
         for card in &rows {
-            let value = export_card(app, card).await?;
+            let (value, blobs) = export_card(app, card).await?;
             let number: i64 = card.get("number");
             let bytes = serde_json::to_vec_pretty(&value)?;
-            sender.send((format!("{number}.json"),bytes)).await?;
+            sender.send(ArchiveEntry::Json(format!("{number}.json"),bytes)).await?;
+            for blob in blobs {
+                sender.send(ArchiveEntry::Blob(blob.archive_path, blob.storage_path)).await?;
+            }
         }
         }
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())

@@ -101,7 +101,9 @@ fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Reque
     request
 }
 async fn mark_request_format(mut request: Request, next: Next) -> Response {
-    let json = request.uri().path().ends_with(".json")
+    let path = request.uri().path();
+    let json = path.ends_with(".json")
+        || (path.contains("/exports/") && path.ends_with("/download"))
         || request
             .headers()
             .get(header::ACCEPT)

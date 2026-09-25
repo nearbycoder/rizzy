@@ -37,7 +37,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 
 ## Parity still required
 
-The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, remote and media-rich embeds, push, specialized webhook payloads, account imports and exports, background jobs, and the complete Hotwire UI. User exports currently include accessible cards and comments but omit stored attachments. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
+The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, remote and media-rich embeds, push, specialized webhook payloads, account imports and exports, background jobs, and the complete Hotwire UI. User exports include accessible cards, comments, and their uploaded rich-text attachments; account exports and imports remain missing. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
 
 ## Verification and benchmarks
 
@@ -69,6 +69,7 @@ python3 tests/card_image_parity.py
 python3 tests/avatar_parity.py
 python3 tests/rich_text_parity.py
 python3 tests/embed_parity.py
+python3 tests/export_attachment_parity.py
 python3 tests/search_rich_text_parity.py
 ```
 
