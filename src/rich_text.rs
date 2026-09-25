@@ -143,7 +143,10 @@ fn line_break(out: &mut String, count: usize) {
 
 fn walk(node: &NodeRef, out: &mut String) {
     if let Some(text) = node.as_text() {
-        out.push_str(&text.borrow());
+        let value = text.borrow();
+        if !value.trim().is_empty() || !value.contains('\n') {
+            out.push_str(&value);
+        }
         return;
     }
     let tag = node
@@ -157,7 +160,28 @@ fn walk(node: &NodeRef, out: &mut String) {
         line_break(out, 1);
         return;
     }
+    if tag == "p"
+        && node.children().any(|child| {
+            child
+                .as_element()
+                .is_some_and(|element| element.name.local.as_ref() == "br")
+        })
+        && node.children().all(|child| {
+            child
+                .as_text()
+                .is_some_and(|text| text.borrow().trim().is_empty())
+                || child
+                    .as_element()
+                    .is_some_and(|element| element.name.local.as_ref() == "br")
+        })
+    {
+        line_break(out, 4);
+        return;
+    }
     if tag == "ul" || tag == "ol" {
+        if tag == "ol" && out.is_empty() {
+            out.push('\n');
+        }
         if !out.is_empty() && !out.ends_with('\n') {
             line_break(out, 2);
         }
@@ -171,14 +195,14 @@ fn walk(node: &NodeRef, out: &mut String) {
                     line_break(out, 1);
                 }
                 if tag == "ol" {
-                    out.push_str(&format!("{index}. "));
+                    out.push_str(&format!("  {index}. "));
                 } else {
                     out.push_str("• ");
                 }
                 for item in child.children() {
                     walk(&item, out);
                 }
-                line_break(out, 1);
+                line_break(out, if tag == "ol" { 2 } else { 1 });
                 index += 1;
             } else {
                 walk(&child, out);

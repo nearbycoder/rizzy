@@ -42,6 +42,7 @@ mod imports;
 mod join_code_page;
 mod rich_text;
 mod signup_page;
+mod signup_seed;
 mod storage;
 mod user_page;
 
@@ -2721,6 +2722,9 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
         .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
+    signup_seed::playground(&mut tx, &account_id, &user_id, &timestamp)
+        .await
+        .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     Ok(if form {
         (

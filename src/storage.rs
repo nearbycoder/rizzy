@@ -163,6 +163,51 @@ fn embed_html(blob: &SqliteRow, sgid: &str, slug: i64, in_paragraph: bool) -> St
     }
 }
 
+fn external_attachment(attributes: &str) -> Option<(String, String)> {
+    static ATTRIBUTE: OnceLock<regex::Regex> = OnceLock::new();
+    let attribute = ATTRIBUTE.get_or_init(|| {
+        regex::Regex::new(r#"(?i)([a-z][a-z-]*)\s*=\s*["']([^"']*)["']"#)
+            .expect("attachment attribute pattern")
+    });
+    let fields: HashMap<String, String> = attribute
+        .captures_iter(attributes)
+        .map(|capture| (capture[1].to_ascii_lowercase(), capture[2].to_owned()))
+        .collect();
+    let raw_url = fields.get("url")?;
+    let parsed = url::Url::parse(raw_url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let content_type = fields.get("content-type").map(String::as_str).unwrap_or("");
+    let caption = fields
+        .get("caption")
+        .or_else(|| fields.get("filename"))
+        .map(String::as_str)
+        .unwrap_or("Attachment");
+    let filename = fields.get("filename").map(String::as_str).unwrap_or("");
+    let safe_url = escape(raw_url);
+    let safe_type = escape(content_type);
+    let safe_caption = escape(caption);
+    let safe_filename = escape(filename);
+    let figure = if content_type.starts_with("video/") {
+        format!(
+            "<figure class=\"attachment attachment--preview attachment--video\"><video controls=\"controls\"><source src=\"{safe_url}\" type=\"{safe_type}\"></video><figcaption class=\"attachment__caption\">{safe_caption}</figcaption></figure>"
+        )
+    } else if content_type.starts_with("image/") {
+        format!(
+            "<figure class=\"attachment attachment--preview\"><img src=\"{safe_url}\" alt=\"{safe_caption}\"><figcaption class=\"attachment__caption\">{safe_caption}</figcaption></figure>"
+        )
+    } else {
+        format!("<a class=\"attachment attachment--file\" href=\"{safe_url}\">{safe_caption}</a>")
+    };
+    Some((
+        format!("[{caption}]"),
+        format!(
+            "<action-text-attachment content-type=\"{safe_type}\" url=\"{safe_url}\" filename=\"{safe_filename}\" caption=\"{safe_caption}\">{figure}</action-text-attachment>"
+        ),
+    ))
+}
+
 pub(super) async fn render_rich_text(
     app: &App,
     account_id: &str,
@@ -190,15 +235,28 @@ pub(super) async fn render_rich_text(
         let whole = matched.get(0).expect("whole attachment");
         plain_input.push_str(&raw[offset..whole.start()]);
         html_input.push_str(&raw[offset..whole.start()]);
-        let value = matched
-            .get(1)
-            .and_then(|attributes| sgid.captures(attributes.as_str()))
+        let attributes = matched.get(1).map(|value| value.as_str()).unwrap_or("");
+        let value = sgid
+            .captures(attributes)
             .and_then(|captures| captures.get(1))
             .map(|value| value.as_str())
             .unwrap_or("");
+        let token = format!("RIZZYEMBEDPLACEHOLDER{index}END");
+        if value.is_empty() {
+            if let Some((plain, markup)) = external_attachment(attributes) {
+                if plain_input.ends_with('\n') {
+                    plain_input.pop();
+                }
+                plain_input.push_str(&plain);
+                replacements.push((token.clone(), format!("</p>{markup}<p>"), markup));
+                attached = true;
+                html_input.push_str(&token);
+                offset = whole.end();
+                continue;
+            }
+        }
         let blob = sqlx::query("SELECT * FROM storage_blobs WHERE attachable_sgid=? AND account_id=? AND uploaded_at IS NOT NULL")
             .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
-        let token = format!("RIZZYEMBEDPLACEHOLDER{index}END");
         if let Some(blob) = blob {
             let filename: String = blob.get("filename");
             plain_input.push_str(&format!("[{}]", filename));
