@@ -2,11 +2,10 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 205. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 208. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
-| `notifications/unsubscribes` | 3 | 0 |
 | `client_configurations` | 1 | 0 |
 | `account/cancellations` | 1 | 1 |
 | `account/entropies` | 2 | 2 |
@@ -71,6 +70,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `notifications/readings` | 2 | 2 |
 | `notifications/settings` | 3 | 3 |
 | `notifications/trays` | 1 | 1 |
+| `notifications/unsubscribes` | 3 | 3 |
 | `prompts/boards/users` | 1 | 1 |
 | `prompts/cards` | 1 | 1 |
 | `prompts/users` | 1 | 1 |

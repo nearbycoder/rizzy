@@ -414,6 +414,13 @@ CREATE TABLE IF NOT EXISTS notification_settings (
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   bundle_email_frequency TEXT NOT NULL DEFAULT 'never' CHECK(bundle_email_frequency IN ('never','every_few_hours','daily','weekly'))
 );
+CREATE TABLE IF NOT EXISTS notification_unsubscribe_tokens (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notification_unsubscribe_tokens_expiry ON notification_unsubscribe_tokens(expires_at);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

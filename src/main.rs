@@ -57,6 +57,7 @@ mod signup_page;
 mod signup_seed;
 mod storage;
 mod tagging_page;
+mod unsubscribes;
 mod user_page;
 mod webhook_page;
 
@@ -1544,6 +1545,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     &expiration,
                 ),
                 (
+                    "DELETE FROM notification_unsubscribe_tokens WHERE expires_at<?",
+                    &expiration,
+                ),
+                (
                     "DELETE FROM storage_download_tokens WHERE expires_at<?",
                     &expiration,
                 ),
@@ -1904,6 +1909,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .put(update_notification_settings)
                 .patch(update_notification_settings),
         )
+        .route("/{account}/notifications/unsubscribe/new", get(unsubscribes::new))
+        .route("/{account}/notifications/unsubscribe", get(unsubscribes::show).post(unsubscribes::create))
         .route("/{account}/notifications/tray", get(notification_tray))
         .route(
             "/{account}/notifications/bulk_reading",
@@ -6357,7 +6364,10 @@ async fn update_notification_settings(
         return Err(bad("Invalid bundle email frequency"));
     }
     sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
-        .bind(&p.user_id).bind(&p.account_id).bind(frequency).execute(&app.db).await.map_err(db_err)?;
+        .bind(&p.user_id).bind(&p.account_id).bind(&frequency).execute(&app.db).await.map_err(db_err)?;
+    if frequency != "never" {
+        unsubscribes::ensure_token(&app, &p.user_id).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -20,7 +20,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue and JSON delivery | No |
-| Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, and push subscription storage/validation | No |
+| Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, push subscription storage/validation, and expiring unsubscribe links | No |
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, and common formatted text | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
@@ -39,6 +39,8 @@ The source's parameterized client configuration route appears missing in that no
 `tests/pwa_parity.py` compares the authenticated service worker script against live Fizzy after normalizing its bundled asset URL, then checks Rizzy's manifest, icons, and local offline bundle. Automatic worker registration on every browser page and installation behavior remain unverified.
 
 `tests/push_subscription_parity.py` compares JSON creation, duplicate requests, forbidden endpoints, persisted key fields, and deletion against both apps. Rizzy also rejects DNS results outside public address ranges. Push message delivery, notification permission UI, and browser registration are still missing.
+
+`tests/unsubscribe.py` checks anonymous new/confirmation pages, a valid POST changing the setting to `never`, invalid/expired/cross-account tokens, and pending bundle cleanup. The pinned source's unsubscribe controller suite passed 5 tests and 26 assertions. Rizzy issues a token when email frequency is enabled, but does not yet send notification bundle emails containing that link, so end-to-end delivery parity remains incomplete.
 
 `tests/my_menu_parity.py` checks the account navigation menu's main sections, ETag reuse, board addition invalidation, and HTML-only response against Fizzy. Rizzy links to the menu from its board, card, and activity views. Its saved-view labels, styling, keyboard behavior, and conditional caching inputs are still simpler than Fizzy's.
 

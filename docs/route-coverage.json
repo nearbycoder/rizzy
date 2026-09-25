@@ -1007,21 +1007,21 @@
       "path": "/notifications/unsubscribe/new(.:format)",
       "controller": "notifications/unsubscribes",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/notifications/unsubscribe(.:format)",
       "controller": "notifications/unsubscribes",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/notifications/unsubscribe(.:format)",
       "controller": "notifications/unsubscribes",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -2189,6 +2189,18 @@
     {
       "method": "PATCH",
       "path": "/{account}/notifications/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/notifications/unsubscribe/new"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/notifications/unsubscribe"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/notifications/unsubscribe"
     },
     {
       "method": "GET",
