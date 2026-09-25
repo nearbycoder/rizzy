@@ -11,6 +11,22 @@ use super::{
 
 const TEMPLATE: &str = include_str!("../static/cards.html");
 
+fn author_label(name: &str) -> (String, String) {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let initials = words
+        .iter()
+        .take(2)
+        .filter_map(|word| word.chars().next())
+        .collect::<String>()
+        .to_uppercase();
+    let familiar = match words.as_slice() {
+        [] => String::new(),
+        [first] => (*first).to_owned(),
+        [first, .., last] => format!("{} {}.", first, last.chars().next().unwrap_or_default()),
+    };
+    (initials, familiar)
+}
+
 #[derive(Default)]
 struct PreviewMeta {
     tags: Vec<String>,
@@ -97,6 +113,7 @@ pub(super) async fn previews(
         let title: String = card.get("title");
         let board_name: String = card.get("board_name");
         let creator_name: Option<String> = card.get("creator_name");
+        let (initials, familiar_name) = author_label(creator_name.as_deref().unwrap_or(""));
         let column_name: Option<String> = card.get("column_name");
         let column_color: Option<String> = card.get("column_color");
         let closed = card.get::<i64, _>("closed") != 0;
@@ -180,7 +197,7 @@ pub(super) async fn previews(
         };
         let _ = write!(
             html,
-            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{tags}{steps}{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\"><span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\">{}</time></span><span class=\"card__meta-text card__meta-text--author\">{}</span><span class=\"card__meta-text card__meta-text--updated\">Updated <time datetime=\"{}\">{}</time></span>{assignees}</div><div class=\"card__counts\">{counts}</div></footer></article>",
+            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{tags}{steps}{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\"><span class=\"card__avatar\" aria-hidden=\"true\">{}</span><span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\" data-relative-date>{}</time></span><span class=\"card__meta-text card__meta-text--updated\">↻ <time datetime=\"{}\" data-relative-date>{}</time></span><span class=\"card__meta-text card__meta-text--author\">{}</span>{assignees}</div><div class=\"card__counts\">{counts}</div></footer></article>",
             escape(&id),
             class,
             color,
@@ -190,11 +207,12 @@ pub(super) async fn previews(
             escape(&title),
             escape(&board_name),
             escape(&title),
+            escape(&initials),
             escape(&created_at),
             escape(created_at.get(..10).unwrap_or(&created_at)),
-            escape(creator_name.as_deref().unwrap_or("")),
             escape(&last_active_at),
-            escape(last_active_at.get(..10).unwrap_or(&last_active_at))
+            escape(last_active_at.get(..10).unwrap_or(&last_active_at)),
+            escape(&familiar_name)
         );
     }
     Ok(html)
@@ -430,13 +448,28 @@ pub(super) async fn show(
         String::new()
     };
     let form = format!(
-        "<form class=\"filter-form\" action=\"/{}/cards\" method=\"get\"><label>Filter these cards<input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\"></label>{board_control}<label>Status<select name=\"indexed_by\">{status_options}</select></label><label>Sort<select name=\"sorted_by\">{sort_options}</select></label><details class=\"more-filters\"><summary>More filters</summary><div class=\"more-filters__fields\">{tag_control}{assignee_control}{creator_control}{closer_control}<label>Assignment<select name=\"assignment_status\">{assignment_options}</select></label><label>Created<input name=\"creation\" value=\"{}\" placeholder=\"This week\"></label><label>Closed<input name=\"closure\" value=\"{}\" placeholder=\"This month\"></label></div></details>{preserved}<button type=\"submit\">Apply filters</button><a class=\"clear-link\" href=\"/{}/cards\">Clear all</a></form>",
+        "<form class=\"filter-form\" action=\"/{}/cards\" method=\"get\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{board_control}<details class=\"more-filters\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"more-filters__fields\"><label>Status<select name=\"indexed_by\">{status_options}</select></label><label>Sort<select name=\"sorted_by\">{sort_options}</select></label>{tag_control}{assignee_control}{creator_control}{closer_control}<label>Assignment<select name=\"assignment_status\">{assignment_options}</select></label><label>Created<input name=\"creation\" value=\"{}\" placeholder=\"This week\"></label><label>Closed<input name=\"closure\" value=\"{}\" placeholder=\"This month\"></label><button type=\"submit\">Apply filters</button></div></details>{preserved}<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all filters\" title=\"Clear all filters\">×</a></form>",
         principal.slug,
         escape(query.terms.first().map(String::as_str).unwrap_or("")),
         escape(query.creation.as_deref().unwrap_or("")),
         escape(query.closure.as_deref().unwrap_or("")),
         principal.slug
     );
+    let settings_link = query
+        .board_ids
+        .first()
+        .filter(|_| query.board_ids.len() == 1)
+        .filter(|id| boards.iter().any(|board| board.get::<String, _>("id") == id.as_str()))
+        .map(|id| {
+            format!(
+                "<a class=\"settings-link\" href=\"/{}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙</a>",
+                principal.slug,
+                escape(id),
+                escape(&title),
+                escape(&title)
+            )
+        })
+        .unwrap_or_default();
     let values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("TITLE", escape(&title)),
@@ -444,6 +477,7 @@ pub(super) async fn show(
         ("CARDS", list),
         ("COUNT", total.to_string()),
         ("PREVIOUS", previous),
+        ("SETTINGS_LINK", settings_link),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))
 }
