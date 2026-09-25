@@ -68,6 +68,9 @@ def main():
             params = {"indexed_by": "closed", "assignment_status": "unassigned", "tag_ids[]": [tag_id],
                       "assignee_ids[]": ["filter-user"], "board_ids[]": [board["id"]]}
             path = f"/{account}/filters"
+            refresh = path + "/settings_refresh"
+            html = turbo(port, refresh, "filter-owner-cookie", params=params)
+            assert "Save custom view" in html
             turbo(port, path, None, status=406)
             turbo(port, path, None, bearer=owner_token, status=401)
             html = turbo(port, path, "filter-owner-cookie", params=params)
@@ -79,6 +82,13 @@ def main():
                                   "tag_ids": [tag_id], "assignee_ids": ["filter-user"], "board_ids": [board["id"]]}
                 for table in ("filters_tags", "assignees_filters", "boards_filters"):
                     assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE filter_id=?", (filter_id,)).fetchone()[0] == 1
+            html = turbo(port, refresh, "filter-owner-cookie", params=params)
+            assert "Delete custom view" in html and filter_id in html
+            html = turbo(port, refresh, "filter-owner-cookie", params={"filter_id": filter_id})
+            assert "Delete custom view" in html and filter_id in html
+            turbo(port, refresh, "filter-member-cookie", params={"filter_id": filter_id}, status=404)
+            html = turbo(port, refresh, "filter-member-cookie", params=params)
+            assert "Save custom view" in html
             turbo(port, path, "filter-owner-cookie", params={**params, "sorted_by": "latest"})
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM filters WHERE creator_id=?", (owner_id,)).fetchone()[0] == 1
@@ -91,6 +101,8 @@ def main():
                 assert db.execute("SELECT COUNT(*) FROM filters").fetchone()[0] == 2
             turbo(port, path + "/" + filter_id, "filter-member-cookie", method="DELETE", status=404)
             html = turbo(port, path + "/" + filter_id, "filter-owner-cookie", method="DELETE")
+            assert "Save custom view" in html
+            html = turbo(port, refresh, "filter-owner-cookie", params=params)
             assert "Save custom view" in html
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM filters WHERE id=?", (filter_id,)).fetchone()[0] == 0

@@ -17,7 +17,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pins, watches | No |
 | Card filters, tag listing, basic search | Saved IDs, terms, dates, closures, activity spikes, and FTS5 index | No |
 | Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, and column pages | No |
-| Saved filters and full text search | Plain-text FTS5 index for cards/comments; saved filter persistence and Turbo toggles | No |
+| Saved filters and full text search | Plain-text FTS5 index for cards/comments; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, and access cleanup | No |
@@ -30,6 +30,8 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
 [ROUTE_COVERAGE.md](ROUTE_COVERAGE.md) inventories source controller actions and Rizzy method/path declarations. Route presence does not establish functional parity.
+
+The filter settings refresh route returns a Turbo Stream save or delete toggle for the current filter without changing it. `tests/filters.py` checks unsaved, saved, and account-scoped filters. The live source returned the same status, content type, target, and save/delete state for unsaved and saved requests; exact markup and the complete filter settings UI have not been matched.
 
 The local `tests/parity.py` scenario currently passes 142 comparisons against the running reference server using fresh accounts. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, account and board entropy, join-code metadata, board access and involvement, webhook management, basic notification routes and settings, card reading, publication, activity events and descriptions, event deletion, and system comment count. `tests/auth.py`, `tests/join.py`, `tests/email_change.py`, `tests/verification.py`, `tests/webhooks.py`, and `tests/notifications.py` exercise Rust authentication, join, email change, verification, webhook, and notification flows with disposable accounts; they are not yet cross-implementation comparisons. Neither test replaces the full upstream test suite.
 

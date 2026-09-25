@@ -1824,6 +1824,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(drop_card_column),
         )
         .route("/{account}/filters", post(create_filter))
+        .route("/{account}/filters/settings_refresh", post(refresh_filter_settings))
         .route(
             "/{account}/filters/{id}",
             axum::routing::delete(delete_filter).post(delete_filter),
@@ -6564,6 +6565,67 @@ fn filter_save_button(slug: i64, params: &Value) -> String {
     format!(
         "<form method=post action=\"/{slug}/filters\">{inputs}<button type=submit aria-label=\"Save custom view\">Save custom view</button></form>"
     )
+}
+async fn refresh_filter_settings(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let filter_id = if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded")
+    {
+        url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "filter_id")
+            .map(|(_, value)| value.into_owned())
+    } else {
+        serde_json::from_slice::<Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("filter_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+    };
+    let fields = if let Some(filter_id) = filter_id.filter(|value| !value.is_empty()) {
+        sqlx::query_scalar::<_, String>(
+            "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
+        )
+        .bind(filter_id)
+        .bind(&p.account_id)
+        .bind(&p.user_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?
+    } else {
+        filter_params(&headers, &body)?.to_string()
+    };
+    let digest = hash(&fields);
+    let saved_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM filters WHERE account_id=? AND creator_id=? AND params_digest=?",
+    )
+    .bind(&p.account_id)
+    .bind(&p.user_id)
+    .bind(digest)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?;
+    Ok(if let Some(saved_id) = saved_id {
+        filter_turbo(format!(
+            "<form method=post action=\"/{}/filters/{}\"><input type=hidden name=_method value=delete><button type=submit aria-label=\"Delete custom view\">Delete custom view</button></form>",
+            p.slug, saved_id
+        ))
+    } else {
+        let params: Value = serde_json::from_str(&fields)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
+        filter_turbo(filter_save_button(p.slug, &params))
+    })
 }
 async fn validate_filter_resources(app: &App, p: &Principal, params: &Value) -> Result<()> {
     for (key, sql) in [

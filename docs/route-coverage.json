@@ -1070,7 +1070,7 @@
       "path": "/filters/settings_refresh(.:format)",
       "controller": "filters/settings_refreshes",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -2029,6 +2029,10 @@
     {
       "method": "POST",
       "path": "/{account}/filters"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/filters/settings_refresh"
     },
     {
       "method": "DELETE",
