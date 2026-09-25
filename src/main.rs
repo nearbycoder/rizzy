@@ -42,6 +42,7 @@ mod events_page;
 mod exports;
 mod imports;
 mod join_code_page;
+mod my_menu;
 mod rich_text;
 mod session_transfer;
 mod signup_page;
@@ -1590,6 +1591,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(show_token).post(delete_token).delete(delete_token),
         )
         .route("/{account}/my/identity", get(my_identity))
+        .route("/{account}/my/menu", get(my_menu::show))
         .route("/{account}/transfer_token", post(session_transfer::create))
         .route("/{account}/qr_codes/{token}", get(session_transfer::qr_code))
         .route("/assets/system_user.png", get(storage::system_avatar))

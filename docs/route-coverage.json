@@ -1385,7 +1385,7 @@
       "path": "/my/menu(.:format)",
       "controller": "my/menus",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1589,6 +1589,10 @@
     {
       "method": "GET",
       "path": "/{account}/my/identity"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/my/menu"
     },
     {
       "method": "POST",

@@ -67,7 +67,7 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 </head>
 <body data-account="{{ACCOUNT}}" data-board="{{BOARD_ID}}">
 <a class="skip" href="#main">Skip to main content</a>
-<header class="site"><details class="site-menu"><summary><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy<span class="site-caret">⌄</span></summary><nav><a href="{{HOME_PATH}}">All boards</a><a href="/{{ACCOUNT}}/cards">All cards</a></nav></details></header>
+<header class="site"><details class="site-menu"><summary><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy<span class="site-caret">⌄</span></summary><nav><a href="/{{ACCOUNT}}/my/menu">Explore</a><a href="{{HOME_PATH}}">All boards</a><a href="/{{ACCOUNT}}/cards">All cards</a></nav></details></header>
 <main class="board" id="main">
   <div class="board__header"><h1>{{BOARD_NAME}}</h1><div class="board__actions">{{SETTINGS_LINK}}</div></div>
   {{FILTER_FORM}}

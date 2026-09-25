@@ -31,7 +31,7 @@ main{max-width:1400px;margin:auto;padding:0 clamp(18px,3vw,38px) 90px}
 </head>
 <body data-account="{{ACCOUNT}}">
 <a class="skip" href="#main">Skip to main content</a>
-<header class="site"><details class="site-menu"><summary><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy<span class="site-caret">⌄</span></summary><nav><a href="/{{ACCOUNT}}/boards">All boards</a><a href="/{{ACCOUNT}}/cards">All cards</a></nav></details></header>
+<header class="site"><details class="site-menu"><summary><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy<span class="site-caret">⌄</span></summary><nav><a href="/{{ACCOUNT}}/my/menu">Explore</a><a href="/{{ACCOUNT}}/boards">All boards</a><a href="/{{ACCOUNT}}/cards">All cards</a></nav></details></header>
 <main id="main"><div class="title-row"><h1>{{TITLE}}</h1>{{SETTINGS_LINK}}</div><p class="for-screen-reader">{{COUNT}} cards</p>
 {{FILTER_FORM}}
 <turbo-frame id="cards_container"><section class="cards cards--grid"><div class="cards__list" id="cards_paginated_container">{{CARDS}}</div></section></turbo-frame>
