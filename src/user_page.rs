@@ -80,10 +80,33 @@ pub(super) fn edit(
         .map(|message| format!("<p class=\"form-error\">{}</p>", escape(message)))
         .unwrap_or_default();
     let content = format!(
-        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" value=\"{}\" readonly></label><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form></div>",
+        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form></div>",
         escape(&name),
         escape(&name),
         escape(email)
     );
     page("Edit your profile", principal.slug, content)
+}
+
+pub(super) fn new_email(principal: &Principal, user_id: &str) -> Html<String> {
+    let path = format!(
+        "/{}/users/{}/email_addresses",
+        principal.slug,
+        escape(user_id)
+    );
+    let content = format!(
+        "<a href=\"/{}/users/{}/edit\">← My profile</a><div class=\"profile-card\"><h1>Change your email</h1><form class=\"profile-form\" method=\"post\" action=\"{path}\"><label>New email address<input type=\"email\" name=\"email_address\" placeholder=\"New email address\" autocomplete=\"email\" required autofocus></label><p>Enter your new email address, then check your email to confirm the change.</p><button class=\"button\" type=\"submit\">Continue</button></form></div>",
+        principal.slug,
+        escape(user_id)
+    );
+    page("Change your email", principal.slug, content)
+}
+
+pub(super) fn email_sent(principal: &Principal, user_id: &str, email: &str) -> Html<String> {
+    let edit = format!("/{}/users/{}/edit", principal.slug, escape(user_id));
+    let content = format!(
+        "<a href=\"{edit}\">← My profile</a><div class=\"profile-card\"><h1>Check your email</h1><p>We just sent an email to <strong>{}</strong></p><p>Hit the link in the email to confirm this is the email address you want to use with Rizzy going forward.</p><a class=\"button\" href=\"{edit}\">Done</a></div>",
+        escape(email)
+    );
+    page("Confirm your new email address", principal.slug, content)
 }

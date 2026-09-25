@@ -1657,6 +1657,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(request_email_change),
         )
         .route(
+            "/{account}/users/{id}/email_addresses/new",
+            get(new_email_change),
+        )
+        .route(
             "/{account}/users/{id}/email_addresses/{token}/confirmation",
             get(show_email_change_confirmation).post(confirm_email_change),
         )
@@ -3168,13 +3172,47 @@ async fn deliver_email_change(email: &str, link: &str) -> Result<()> {
     }
     Ok(())
 }
+async fn new_email_change(
+    State(app): Shared,
+    Path((account, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Html<String>> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let p = principal(&app, &headers, &account).await?;
+    if p.user_id != user_id {
+        return Err(missing());
+    }
+    active_user(&app, &p, &user_id).await?;
+    Ok(user_page::new_email(&p, &user_id))
+}
+fn email_change_error(form: bool, p: &Principal, user_id: &str, message: &str) -> Response {
+    if form {
+        (
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("/{}/users/{user_id}/email_addresses/new", p.slug),
+            )],
+        )
+            .into_response()
+    } else {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error":message})),
+        )
+            .into_response()
+    }
+}
 async fn request_email_change(
     State(app): Shared,
     Path((account, user_id)): Path<(String, String)>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
+    let (body, form) = session_body(&headers, &body)?;
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     if p.user_id != user_id {
@@ -3189,11 +3227,12 @@ async fn request_email_change(
     };
     let email = raw.trim().to_lowercase();
     if !valid_email(&email) {
-        return Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({"error":"Please enter a valid email address"})),
-        )
-            .into_response());
+        return Ok(email_change_error(
+            form,
+            &p,
+            &user_id,
+            "Please enter a valid email address",
+        ));
     }
     let _guard = app.auth_lock.lock().await;
     auth_attempt(
@@ -3211,22 +3250,22 @@ async fn request_email_change(
         .get::<String, _>("email_address")
         .eq_ignore_ascii_case(&email)
     {
-        return Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({"error":"That is already your email address"})),
-        )
-            .into_response());
+        return Ok(email_change_error(
+            form,
+            &p,
+            &user_id,
+            "That is already your email address",
+        ));
     }
     let already:i64=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.account_id=? AND lower(i.email_address)=?)")
         .bind(&p.account_id).bind(&email).fetch_one(&app.db).await.map_err(db_err)?;
     if already != 0 {
-        return Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(
-                json!({"error":"You already have a user in this account with that email address"}),
-            ),
-        )
-            .into_response());
+        return Ok(email_change_error(
+            form,
+            &p,
+            &user_id,
+            "You already have a user in this account with that email address",
+        ));
     }
     let token = random_token();
     sqlx::query("INSERT INTO email_change_requests(token_hash,account_id,user_id,old_identity_id,new_email_address,expires_at,created_at) VALUES(?,?,?,?,?,?,?)")
@@ -3245,7 +3284,11 @@ async fn request_email_change(
             .map_err(db_err)?;
         return Err(error);
     }
-    let mut response = StatusCode::CREATED.into_response();
+    let mut response = if form {
+        user_page::email_sent(&p, &user_id, &email).into_response()
+    } else {
+        StatusCode::CREATED.into_response()
+    };
     if dev_magic_links() {
         response.headers_mut().insert(
             "x-email-change-token",
