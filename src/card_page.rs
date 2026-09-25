@@ -2,7 +2,10 @@ use axum::response::Html;
 use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
-use super::{App, Principal, Result, board, comment_edit_page, db_err, escape, storage, wrap_html};
+use super::{
+    App, Principal, Result, assignment_page, board, comment_edit_page, db_err, escape, storage,
+    wrap_html,
+};
 
 const TEMPLATE: &str = include_str!("../static/card.html");
 const NEW_COMMENT: &str = include_str!("../static/new_comment.html");
@@ -72,11 +75,6 @@ pub(super) async fn show(
     let (_, description_html, _) =
         storage::render_rich_text(app, &principal.account_id, principal.slug, &description).await?;
     let board_name: String = board(app, principal, &board_id).await?.get("name");
-    let creator_name: String = sqlx::query_scalar("SELECT name FROM users WHERE id=?")
-        .bind(card.get::<String, _>("creator_id"))
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
     let steps = sqlx::query(
         "SELECT id,content,completed FROM steps WHERE card_id=? ORDER BY created_at,id",
     )
@@ -224,8 +222,7 @@ pub(super) async fn show(
         ("TITLE", escape(&title)),
         ("DESCRIPTION_HTML", description_html),
         ("DESCRIPTION_VALUE", escape(&description)),
-        ("CREATOR_NAME", escape(&creator_name)),
-        ("CREATED_AT", escape(&card.get::<String, _>("created_at"))),
+        ("ASSIGNMENT_META", assignment_page::meta(app, card).await?),
         ("COMMENTS", comment_html),
         ("NEW_COMMENT_FORM", new_comment_form(principal, card)),
         ("STEPS", step_html),

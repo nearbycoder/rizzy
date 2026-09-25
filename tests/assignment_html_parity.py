@@ -36,7 +36,16 @@ def check(target):
                                  {"card":{"title":"Assignment picker"}}, bearer=True)
         assert status == 201, (target["name"], "card", status)
         number = json.loads(raw)["number"]
+        card_id = json.loads(raw)["id"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/publish", "POST", b"", bearer=True)
+        assert status == 201, (target["name"], "publish", status)
         path = f"/{account}/cards/{number}/assignments"
+        status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200 and f"meta_card_{card_id}".encode() in card_html, (target["name"], status, card_id, re.findall(rb'id="[^"]*meta[^"]*"', card_html)[:12])
+        if target["name"] == "rizzy":
+            assert b'id="assignment-dialog"' in card_html
+        csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', card_html)
+        csrf = csrf_match.group(1).decode() if csrf_match else None
         status, headers, body = request(target, path + "/new", accept="text/html")
         assert status == 200 and headers.get("ETag"), (target["name"], "picker", status)
         for marker in (b"turbo-frame", b"Assign this to", b"Filter", b"Me", b"Maximum 100 assignees"):
@@ -46,20 +55,31 @@ def check(target):
                                path + "/new", accept="text/html")
         assert status == 304, (target["name"], "cache", status)
         assert request(target, path + "/new.json", bearer=True)[0] == 406
+        assert request(target, path + "/new", accept="text/vnd.turbo-stream.html")[0] == 406
         status, _, raw = request(target, path, "POST", {"assignee_id":owner_id}, bearer=True)
         assert status == 204, (target["name"], "assign", status, raw[:160])
         status, _, body = request(target, path + "/new", accept="text/html")
         assert status == 200 and re.search(rb'aria-checked="true"', body)
-        if target["name"] == "rizzy":
-            status, headers, _ = request(target, path + f"?assignee_id={owner_id}", "POST",
-                                         b"", accept="text/html")
-            assert status == 302 and headers["Location"] == f"/{account}/cards/{number}"
-        else:
-            status, _, _ = request(target, path, "POST", {"assignee_id":owner_id}, bearer=True)
-            assert status == 204
+        def turbo_toggle(toggle_path):
+            status, headers, stream = request(target, toggle_path, "POST", b"",
+                                              accept="text/vnd.turbo-stream.html", csrf=csrf)
+            assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], status, stream[:200])
+            assert b'action="replace"' in stream and f'meta_card_{card_id}'.encode() in stream
+            assert f'assignment_card_{card_id}'.encode() in stream
+            return stream
+        stream = turbo_toggle(path + f"?assignee_id={owner_id}")
+        assert b"Not assigned" in stream
         status, _, raw = request(target, f"/{account}/cards/{number}", bearer=True)
         assert status == 200 and not json.loads(raw)["assignees"], (target["name"], "unassign", status)
-        return {"picker":200,"cache":304,"json_picker":406,"toggle":204}
+        stream = turbo_toggle(f"/{account}/cards/{number}/self_assignment")
+        assert b"Assigned to" in stream
+        status, _, raw = request(target, f"/{account}/cards/{number}", bearer=True)
+        assert status == 200 and any(user["id"] == owner_id for user in json.loads(raw)["assignees"])
+        status, _, body = request(target, path + "/new", accept="text/html")
+        assert status == 200 and re.search(rb'aria-checked="true"', body)
+        status, _, _ = request(target, f"/{account}/cards/{number}/self_assignment", "POST", b"", bearer=True)
+        assert status == 204
+        return {"picker":200,"cache":304,"json_picker":406,"toggle":204,"turbo_toggle":200,"self_assignment":200}
     finally:
         for board_id in boards:
             status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
@@ -74,7 +94,7 @@ def main():
     os.environ["FIZZY_EMAIL"] = email
     source, rust = check(target("FIZZY")), check(target("RIZZY"))
     assert source == rust
-    print("Assignment picker parity matched: choices, cache, JSON toggle, selected state")
+    print("Assignment picker parity matched: choices, cache, JSON and Turbo toggles, in-place metadata, self-assignment")
 
 
 if __name__ == "__main__":

@@ -8974,7 +8974,16 @@ async fn toggle_assignment(
         let json: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
         required(&json, "assignee_id")?
     };
-    toggle_assignment_to(&app, &p, &c, &assignee_id).await?;
+    match toggle_assignment_to(&app, &p, &c, &assignee_id).await {
+        Ok(_) => {}
+        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _)) if wants_turbo_stream(&headers) => {
+            return assignment_stream(&app, &p, &c).await;
+        }
+        Err(error) => return Err(error),
+    }
+    if wants_turbo_stream(&headers) {
+        return assignment_stream(&app, &p, &c).await;
+    }
     if form {
         return Ok((
             StatusCode::FOUND,
@@ -8989,11 +8998,42 @@ async fn toggle_self_assignment(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    toggle_assignment_to(&app, &p, &c, &p.user_id).await
+    match toggle_assignment_to(&app, &p, &c, &p.user_id).await {
+        Ok(_) => {}
+        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _)) if wants_turbo_stream(&headers) => {
+            return assignment_stream(&app, &p, &c).await;
+        }
+        Err(error) => return Err(error),
+    }
+    if wants_turbo_stream(&headers) {
+        assignment_stream(&app, &p, &c).await
+    } else if headers.contains_key("x-rizzy-json-request") {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
+    }
+}
+
+async fn assignment_stream(app: &App, p: &Principal, c: &SqliteRow) -> Result<Response> {
+    let card_id: String = c.get("id");
+    let meta = assignment_page::meta(app, c).await?;
+    let picker = assignment_page::picker(app, p, c).await?;
+    let stream = format!(
+        "<turbo-stream action=\"replace\" method=\"morph\" target=\"meta_card_{}\"><template>{meta}</template></turbo-stream>{picker}",
+        escape(&card_id)
+    );
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/vnd.turbo-stream.html; charset=utf-8",
+        )],
+        stream,
+    )
+        .into_response())
 }
 
 async fn toggle_assignment_to(
