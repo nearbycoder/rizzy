@@ -11,7 +11,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
 | Full board and card HTML interface | Rust-rendered board columns with immediate Maybe cards and lazy loading for other columns, board-level filtered card grid and pagination, all-cards browser grid with automatic preview pages, drag and drop, draft navigation, and column creation; published card page with rich description, steps, comments, edit, comment, watch, pin, column selection, and completion controls; Lexxy draft and card editors | No |
-| Sign up, magic links, sessions, passkeys | Magic links, sessions, browser email/code entry, signup/completion forms, and initial Playground data | No |
+| Sign up, magic links, sessions, passkeys | Magic links, sessions, browser email/code entry, signup/completion forms, device transfer links with QR codes, and initial Playground data | No |
 | Users, roles, invitations, board involvement | JSON users, browser profile and name edit, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
 | Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pins, watches | No |
@@ -30,6 +30,8 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
 [ROUTE_COVERAGE.md](ROUTE_COVERAGE.md) inventories source controller actions and Rizzy method/path declarations. Route presence does not establish functional parity.
+
+`tests/session_transfer_parity.py` compares profile link generation, replacement of an older link, public QR image rendering and decoded destination, anonymous transfer pages, PUT/PATCH redemption, and replay rejection on both apps. It also checks Rust's four-hour expiry and simultaneous redemption from two requests. Rizzy renders QR images only while the transfer remains active; Fizzy's signed QR URL continues to render its encoded destination after the sign-in link has expired. The profile's broader layout, passkey controls, and CSRF behavior still differ.
 
 The filter settings refresh route returns a Turbo Stream save or delete toggle for the current filter without changing it. `tests/filters.py` checks unsaved, saved, and account-scoped filters. The live source returned the same status, content type, target, and save/delete state for unsaved and saved requests; exact markup and the complete filter settings UI have not been matched.
 

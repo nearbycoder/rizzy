@@ -265,7 +265,7 @@
       "path": "/transfer_token(.:format)",
       "controller": "transfer_tokens",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1119,7 +1119,7 @@
       "path": "/qr_codes/:id(.:format)",
       "controller": "qr_codes",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1168,21 +1168,21 @@
       "path": "/session/transfers/:id(.:format)",
       "controller": "sessions/transfers",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PATCH",
       "path": "/session/transfers/:id(.:format)",
       "controller": "sessions/transfers",
       "action": "update",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PUT",
       "path": "/session/transfers/:id(.:format)",
       "controller": "sessions/transfers",
       "action": "update",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1508,6 +1508,22 @@
     },
     {
       "method": "GET",
+      "path": "/session/transfers/{token}"
+    },
+    {
+      "method": "PUT",
+      "path": "/session/transfers/{token}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/session/transfers/{token}"
+    },
+    {
+      "method": "POST",
+      "path": "/session/transfers/{token}"
+    },
+    {
+      "method": "GET",
       "path": "/session/magic_link"
     },
     {
@@ -1573,6 +1589,14 @@
     {
       "method": "GET",
       "path": "/{account}/my/identity"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/transfer_token"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/qr_codes/{token}"
     },
     {
       "method": "GET",

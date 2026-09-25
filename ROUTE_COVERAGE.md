@@ -2,13 +2,12 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 175. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 180. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
 | `my/passkeys` | 6 | 0 |
 | `notifications/unsubscribes` | 3 | 0 |
-| `sessions/transfers` | 3 | 0 |
 | `users/push_subscriptions` | 3 | 0 |
 | `cards` | 8 | 6 |
 | `webhooks` | 8 | 6 |
@@ -24,9 +23,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `my/menus` | 1 | 0 |
 | `my/passkey_challenges` | 1 | 0 |
 | `pwa` | 1 | 0 |
-| `qr_codes` | 1 | 0 |
 | `sessions/passkeys` | 1 | 0 |
-| `transfer_tokens` | 1 | 0 |
 | `account/cancellations` | 1 | 1 |
 | `account/entropies` | 2 | 2 |
 | `account/exports` | 2 | 2 |
@@ -87,13 +84,16 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `public/boards/columns/not_nows` | 1 | 1 |
 | `public/boards/columns/streams` | 1 | 1 |
 | `public/cards` | 1 | 1 |
+| `qr_codes` | 1 | 1 |
 | `searches` | 1 | 1 |
 | `sessions` | 3 | 3 |
 | `sessions/magic_links` | 2 | 2 |
 | `sessions/menus` | 1 | 1 |
+| `sessions/transfers` | 3 | 3 |
 | `signups` | 2 | 2 |
 | `signups/completions` | 2 | 2 |
 | `tags` | 1 | 1 |
+| `transfer_tokens` | 1 | 1 |
 | `users` | 6 | 6 |
 | `users/avatars` | 2 | 2 |
 | `users/data_exports` | 2 | 2 |

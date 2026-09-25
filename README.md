@@ -23,6 +23,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Bearer token and cookie session authentication with SHA-256 token hashes, single-use email codes, browser email and code entry, initial signup, account scoping, read versus write permission, token management, identity listing, user listing and editing, role changes, and private board access checks.
 - Account join links with browser email/code/name flow, usage limits, reset, member name setup, user verification, and atomic redemption across Rust processes. Account settings can promote, demote, and remove people; a removed person can rejoin with a new user record.
 - User email changes with validation, a 30-minute one-use confirmation token, session switch, and delivery through the configured sendmail executable.
+- Single-use device sign-in links on the user's profile, including a scannable QR code, four-hour expiry, regeneration that revokes older links, and atomic redemption across concurrent requests.
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
 - Special board column JSON lists (Maybe?, Not now, Done) and public pages for those lists and named columns. The public board page links to each view.
@@ -85,6 +86,7 @@ python3 tests/step_read_parity.py
 python3 tests/events_html_parity.py
 python3 tests/users_events_html_parity.py
 python3 tests/user_profile_html_parity.py
+python3 tests/session_transfer_parity.py
 python3 tests/email_change_html_parity.py
 python3 tests/email_confirmation_html_parity.py
 python3 tests/search_rich_text_parity.py

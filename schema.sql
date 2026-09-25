@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS identities (
   email_address TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS identity_transfers (
+  id TEXT PRIMARY KEY,
+  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS identity_transfers_identity_created ON identity_transfers(identity_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),

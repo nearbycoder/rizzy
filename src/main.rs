@@ -43,6 +43,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod rich_text;
+mod session_transfer;
 mod signup_page;
 mod signup_seed;
 mod storage;
@@ -1512,6 +1513,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let expiration = now();
             let attempts_cutoff = (Utc::now() - chrono::Duration::minutes(15))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let transfer_cutoff = (Utc::now() - chrono::Duration::hours(4))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             for (statement, cutoff) in [
                 ("DELETE FROM magic_links WHERE expires_at<?", &expiration),
                 (
@@ -1533,6 +1536,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 (
                     "DELETE FROM access_token_reveals WHERE expires_at<?",
                     &expiration,
+                ),
+                (
+                    "DELETE FROM identity_transfers WHERE created_at<?",
+                    &transfer_cutoff,
                 ),
             ] {
                 if let Err(error) = sqlx::query(statement)
@@ -1561,6 +1568,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/session", post(request_magic_link).delete(logout_session))
         .route("/session/new", get(new_session))
         .route("/session/menu", get(account_cancellation::menu))
+        .route(
+            "/session/transfers/{token}",
+            get(session_transfer::show)
+                .put(session_transfer::redeem)
+                .patch(session_transfer::redeem)
+                .post(session_transfer::redeem),
+        )
         .route("/session/magic_link", get(show_magic_link).post(complete_magic_link))
         .route("/signup", get(|| async { (StatusCode::FOUND,[(header::LOCATION,"/signup/new")]) }).post(request_signup))
         .route("/signup/new", get(new_signup))
@@ -1576,6 +1590,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(show_token).post(delete_token).delete(delete_token),
         )
         .route("/{account}/my/identity", get(my_identity))
+        .route("/{account}/transfer_token", post(session_transfer::create))
+        .route("/{account}/qr_codes/{token}", get(session_transfer::qr_code))
         .route("/assets/system_user.png", get(storage::system_avatar))
         .route("/assets/lexxy/{filename}", get(lexxy_asset))
         .route(

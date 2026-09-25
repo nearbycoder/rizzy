@@ -2,7 +2,10 @@ use axum::{http::HeaderMap, response::Html};
 use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
-use super::{App, Principal, Result, card_page::render_template, db_err, escape, events_page};
+use super::{
+    App, Principal, Result, base, card_page::render_template, db_err, escape, events_page,
+    session_transfer,
+};
 
 const TEMPLATE: &str = include_str!("../static/user.html");
 
@@ -62,13 +65,27 @@ pub(super) async fn show(
     } else {
         String::new()
     };
+    let devices = if self_profile {
+        let identity_id: String = user.get("identity_id");
+        let transfer = session_transfer::active_token(app, &identity_id).await?;
+        let current = transfer.map(|token| {
+            let url = format!("{}/session/transfers/{token}", base(headers));
+            format!("<input type=\"text\" id=\"session_transfer_url\" value=\"{}\" aria-labelledby=\"session_transfer_label\" readonly><button type=\"button\" class=\"button button--secondary\" id=\"show-transfer-qr\">Display auto-login QR code</button><button type=\"button\" class=\"button button--secondary\" id=\"copy-transfer\">Copy auto-login link</button><dialog id=\"transfer-qr-dialog\"><p><strong>Scan this code to instantly log in on another device:</strong></p><img src=\"/{}/qr_codes/{}\" alt=\"QR Code\" width=\"280\" height=\"280\"><form method=\"dialog\"><button class=\"button\">Done</button></form></dialog>",escape(&url),principal.slug,escape(&token))
+        }).unwrap_or_default();
+        format!(
+            "<section class=\"profile-card\"><h2>Devices</h2><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
+            principal.slug
+        )
+    } else {
+        String::new()
+    };
     let timeline = if user.get::<Option<String>, _>("verified_at").is_some() {
         events_page::user_fragment(app, principal, user, headers, None).await?
     } else {
         String::new()
     };
     let content = format!(
-        "<div class=\"profile-card\"><div class=\"profile-card__actions\">{edit}</div><img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><h1>{}</h1><div class=\"profile-email\">{email_html}</div>{sign_out}</div>{developer}{timeline}",
+        "<div class=\"profile-card\"><div class=\"profile-card__actions\">{edit}</div><img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><h1>{}</h1><div class=\"profile-email\">{email_html}</div>{sign_out}</div>{devices}{developer}{timeline}",
         escape(&name),
         escape(&name)
     );
