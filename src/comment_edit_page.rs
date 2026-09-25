@@ -8,6 +8,7 @@ pub(super) fn comment_frame(
     creator_name: &str,
     created_at: &str,
     content: &str,
+    reactions: &str,
     editable: bool,
 ) -> String {
     let id = escape(id);
@@ -18,7 +19,7 @@ pub(super) fn comment_frame(
         String::new()
     };
     format!(
-        "<turbo-frame id=\"container_comment_{id}\"><article id=\"comment_{id}\" class=\"comment\" data-creator-id=\"{}\"><h3><a href=\"/{account}/users/{}\">{}</a> <a href=\"{path}\"><time>{}</time></a>{edit} <a href=\"{path}/reactions/new\">React</a></h3><div class=\"comment__body lexxy-content\" data-turbo-permanent>{content}</div></article></turbo-frame>",
+        "<turbo-frame id=\"container_comment_{id}\"><article id=\"comment_{id}\" class=\"comment\" data-creator-id=\"{}\"><h3><a href=\"/{account}/users/{}\">{}</a> <a href=\"{path}\"><time>{}</time></a>{edit}</h3><div class=\"comment__body lexxy-content\" data-turbo-permanent>{content}</div>{reactions}</article></turbo-frame>",
         escape(creator_id),
         escape(creator_id),
         escape(creator_name),
@@ -47,6 +48,9 @@ pub(super) async fn rendered_comment_frame(
             .await?
             .1
     };
+    let reactions =
+        reaction_page::reactions_html(app, principal, card, Some(&comment.get::<String, _>("id")))
+            .await?;
     Ok(comment_frame(
         principal.slug,
         card.get("number"),
@@ -55,6 +59,7 @@ pub(super) async fn rendered_comment_frame(
         &creator.get::<String, _>("name"),
         &comment.get::<String, _>("created_at"),
         &content,
+        &reactions,
         creator_id == principal.user_id,
     ))
 }

@@ -9216,12 +9216,29 @@ async fn reactions_for(
     }
     Ok(json!(out))
 }
+fn reaction_body(headers: &HeaderMap, body: &Bytes) -> Result<Value> {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+    {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(body)
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        Ok(
+            json!({"reaction":{"content":fields.get("reaction[content]").or_else(||fields.get("content"))}}),
+        )
+    } else {
+        serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))
+    }
+}
 async fn create_reaction(
     app: &App,
     p: &Principal,
     c: &SqliteRow,
     comment: Option<&str>,
     host: &str,
+    headers: &HeaderMap,
     body: Value,
 ) -> Result<Response> {
     p.write()?;
@@ -9237,7 +9254,7 @@ async fn create_reaction(
     };
     let id = id();
     sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(kind).bind(target).bind(&p.user_id).bind(content).bind(now()).execute(&app.db).await.map_err(db_err)?;
+        .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content).bind(now()).execute(&app.db).await.map_err(db_err)?;
     let r = sqlx::query("SELECT * FROM reactions WHERE id=?")
         .bind(&id)
         .fetch_one(&app.db)
@@ -9249,6 +9266,25 @@ async fn create_reaction(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
+    if wants_turbo_stream(headers) {
+        let html = reaction_page::reactions_html(app, p, c, comment).await?;
+        let target = escape(&target);
+        let kind = kind.to_lowercase();
+        let stream = format!(
+            "<turbo-stream action=\"replace\" target=\"reacting_{kind}_{target}\"><template>{html}</template></turbo-stream>"
+        );
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok((
         StatusCode::CREATED,
         Json(reaction_json(app, p, &r, host, c.get("number"), comment).await?),
@@ -9261,7 +9297,8 @@ async fn delete_reaction(
     c: &SqliteRow,
     comment: Option<&str>,
     reaction: &str,
-) -> Result<StatusCode> {
+    headers: &HeaderMap,
+) -> Result<Response> {
     p.write()?;
     let (kind, target) = if let Some(id) = comment {
         let r = comment_row(app, c, id).await?;
@@ -9279,65 +9316,100 @@ async fn delete_reaction(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    if wants_turbo_stream(headers) {
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            format!(
+                "<turbo-stream action=\"remove\" target=\"reaction_{}\"></turbo-stream>",
+                escape(reaction)
+            ),
+        )
+            .into_response());
+    }
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
+    }
 }
 async fn list_card_reactions(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
     h: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
-    Ok(Json(reactions_for(&app, &p, &c, None, &base(&h)).await?))
+    if h.contains_key("x-rizzy-json-request") {
+        Ok(Json(reactions_for(&app, &p, &c, None, &base(&h)).await?).into_response())
+    } else {
+        Ok(Html(reaction_page::reactions_html(&app, &p, &c, None).await?).into_response())
+    }
 }
 async fn create_card_reaction(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
     h: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
-    create_reaction(&app, &p, &c, None, &base(&h), body).await
+    create_reaction(&app, &p, &c, None, &base(&h), &h, reaction_body(&h, &body)?).await
 }
 async fn delete_card_reaction(
     State(app): Shared,
     Path((a, n, r)): Path<(String, String, String)>,
     h: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
-    delete_reaction(&app, &p, &c, None, &r).await
+    delete_reaction(&app, &p, &c, None, &r, &h).await
 }
 async fn list_comment_reactions(
     State(app): Shared,
     Path((a, n, comment)): Path<(String, String, String)>,
     h: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
-    Ok(Json(
-        reactions_for(&app, &p, &c, Some(&comment), &base(&h)).await?,
-    ))
+    if h.contains_key("x-rizzy-json-request") {
+        Ok(Json(reactions_for(&app, &p, &c, Some(&comment), &base(&h)).await?).into_response())
+    } else {
+        Ok(
+            Html(reaction_page::reactions_html(&app, &p, &c, Some(&comment)).await?)
+                .into_response(),
+        )
+    }
 }
 async fn create_comment_reaction(
     State(app): Shared,
     Path((a, n, comment)): Path<(String, String, String)>,
     h: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
-    create_reaction(&app, &p, &c, Some(&comment), &base(&h), body).await
+    create_reaction(
+        &app,
+        &p,
+        &c,
+        Some(&comment),
+        &base(&h),
+        &h,
+        reaction_body(&h, &body)?,
+    )
+    .await
 }
 async fn delete_comment_reaction(
     State(app): Shared,
     Path((a, n, comment, reaction)): Path<(String, String, String, String)>,
     h: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
-    delete_reaction(&app, &p, &c, Some(&comment), &reaction).await
+    delete_reaction(&app, &p, &c, Some(&comment), &reaction, &h).await
 }
 
 async fn landing(

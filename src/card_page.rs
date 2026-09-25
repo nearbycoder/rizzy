@@ -3,8 +3,8 @@ use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
 use super::{
-    App, Principal, Result, assignment_page, board, comment_edit_page, db_err, escape, storage,
-    tagging_page, wrap_html,
+    App, Principal, Result, assignment_page, board, comment_edit_page, db_err, escape,
+    reaction_page, storage, tagging_page, wrap_html,
 };
 
 const TEMPLATE: &str = include_str!("../static/card.html");
@@ -104,8 +104,32 @@ pub(super) async fn show(
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
+    let rows = sqlx::query("SELECT r.id,r.content,r.reacter_id,r.reactable_id,u.name FROM reactions r JOIN users u ON u.id=r.reacter_id WHERE r.account_id=? AND ((r.reactable_type='Card' AND r.reactable_id=?) OR (r.reactable_type='Comment' AND r.reactable_id IN (SELECT id FROM comments WHERE card_id=?))) ORDER BY r.created_at,r.id")
+        .bind(&principal.account_id)
+        .bind(&card_id)
+        .bind(&card_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut reaction_rows = HashMap::<String, Vec<SqliteRow>>::new();
+    for row in rows {
+        reaction_rows
+            .entry(row.get::<String, _>("reactable_id"))
+            .or_default()
+            .push(row);
+    }
+    let card_reactions = reaction_page::reaction_frame(
+        principal,
+        card,
+        None,
+        reaction_rows
+            .get(&card_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    );
     let mut comment_html = String::new();
     for comment in comments {
+        let comment_id: String = comment.get("id");
         let body: String = comment.get("body");
         let content = if comment.get::<String, _>("creator_role") == "system" {
             wrap_html(&body)
@@ -114,14 +138,24 @@ pub(super) async fn show(
                 .await?
                 .1
         };
+        let reactions = reaction_page::reaction_frame(
+            principal,
+            card,
+            Some(&comment_id),
+            reaction_rows
+                .get(&comment_id)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        );
         comment_html.push_str(&comment_edit_page::comment_frame(
             principal.slug,
             number,
-            &comment.get::<String, _>("id"),
+            &comment_id,
             &comment.get::<String, _>("creator_id"),
             &comment.get::<String, _>("creator_name"),
             &comment.get::<String, _>("created_at"),
             &content,
+            &reactions,
             comment.get::<String, _>("creator_id") == principal.user_id,
         ));
     }
@@ -197,6 +231,7 @@ pub(super) async fn show(
         ("DESCRIPTION_VALUE", escape(&description)),
         ("ASSIGNMENT_META", assignment_page::meta(app, card).await?),
         ("COMMENTS", comment_html),
+        ("REACTIONS", card_reactions),
         ("NEW_COMMENT_FORM", new_comment_form(principal, card)),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
