@@ -1709,9 +1709,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/steps/{step}",
-            axum::routing::put(update_step)
+            get(show_step)
+                .put(update_step)
                 .patch(update_step)
                 .delete(delete_step),
+        )
+        .route(
+            "/{account}/cards/{number}/steps/{step}/edit",
+            get(edit_step),
         )
         .route(
             "/{account}/cards/{number}/comments",
@@ -6091,6 +6096,70 @@ async fn list_steps(
         .await
         .map_err(db_err)?;
     Ok(Json(json!(rows.iter().map(|r|json!({"id":r.get::<String,_>("id"),"content":r.get::<String,_>("content"),"completed":r.get::<i64,_>("completed")!=0})).collect::<Vec<_>>())))
+}
+async fn step_row(app: &App, card_id: &str, step: &str) -> Result<SqliteRow> {
+    sqlx::query("SELECT * FROM steps WHERE id=? AND card_id=?")
+        .bind(step)
+        .bind(card_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)
+}
+fn step_value(row: &SqliteRow) -> Value {
+    json!({"id":row.get::<String,_>("id"),"content":row.get::<String,_>("content"),"completed":row.get::<i64,_>("completed")!=0})
+}
+async fn show_step(
+    State(app): Shared,
+    Path((account, number, step)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let c = card(&app, &p, &number).await?;
+    let row = step_row(&app, &c.get::<String, _>("id"), &step).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(Json(step_value(&row)).into_response());
+    }
+    let step_id = escape(&row.get::<String, _>("id"));
+    let content = escape(&row.get::<String, _>("content"));
+    let checked = if row.get::<i64, _>("completed") != 0 {
+        " checked"
+    } else {
+        ""
+    };
+    let path = format!("/{account}/cards/{number}/steps/{step_id}");
+    let html = format!(
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Step | Rizzy</title></head><body><main><turbo-frame id="step_{step_id}"><li class="step"><form class="step" id="step-form"><input type="checkbox" id="step-completed" name="step[completed]" class="checkbox"{checked}><a class="step__content" href="{path}/edit">{content}</a></form></li></turbo-frame></main><script>document.getElementById('step-completed').addEventListener('change',async event => {{const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{completed:event.target.checked}}}})}});if(!response.ok) event.target.checked=!event.target.checked;}});</script></body></html>"#
+    );
+    Ok(Html(html).into_response())
+}
+async fn edit_step(
+    State(app): Shared,
+    Path((account, number, step)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let c = card(&app, &p, &number).await?;
+    let row = step_row(&app, &c.get::<String, _>("id"), &step).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok((
+            StatusCode::NOT_ACCEPTABLE,
+            Json(json!({"status":406,"error":"Not Acceptable"})),
+        )
+            .into_response());
+    }
+    let step_id = escape(&row.get::<String, _>("id"));
+    let content = escape(&row.get::<String, _>("content"));
+    let checked = if row.get::<i64, _>("completed") != 0 {
+        " checked"
+    } else {
+        ""
+    };
+    let path = format!("/{account}/cards/{number}/steps/{step_id}");
+    let html = format!(
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Edit step | Rizzy</title></head><body><main><turbo-frame id="step_{step_id}"><div class="flex align-center gap-half"><form class="step" id="step-edit"><input type="checkbox" class="checkbox" disabled{checked}><input type="text" name="step[content]" class="input step__content step__content--edit hide-focus-ring" placeholder="Name this step…" required autofocus autocomplete="off" value="{content}"><button type="submit" class="btn btn--positive txt-xx-small">Save changes</button><a href="{path}">Cancel changes</a></form><button type="button" id="step-delete" class="btn btn--negative txt-xx-small">Delete this step</button></div></turbo-frame></main><script>document.getElementById('step-edit').addEventListener('submit',async event => {{event.preventDefault();const content=event.target.elements['step[content]'].value;const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{content}}}})}});if(response.ok) location.href='{path}';}});document.getElementById('step-delete').addEventListener('click',async () => {{const response=await fetch('{path}',{{method:'DELETE',headers:{{'Accept':'application/json'}}}});if(response.ok) location.href='/{account}/cards/{number}';}});</script></body></html>"#
+    );
+    Ok(Html(html).into_response())
 }
 async fn create_step(
     State(app): Shared,

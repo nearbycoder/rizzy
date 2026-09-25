@@ -70,6 +70,7 @@ python3 tests/avatar_parity.py
 python3 tests/rich_text_parity.py
 python3 tests/embed_parity.py
 python3 tests/export_attachment_parity.py
+python3 tests/step_read_parity.py
 python3 tests/search_rich_text_parity.py
 ```
 

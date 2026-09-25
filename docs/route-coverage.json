@@ -804,14 +804,14 @@
       "path": "/cards/:card_id/steps/:id/edit(.:format)",
       "controller": "cards/steps",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/cards/:card_id/steps/:id(.:format)",
       "controller": "cards/steps",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "PATCH",
@@ -1552,6 +1552,10 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/rails/active_storage/representations/redirect/{signed_id}/preview/{filename}"
+    },
+    {
+      "method": "GET",
       "path": "/{account}/rails/active_storage/disk/thumb/{token}/{filename}"
     },
     {
@@ -2051,6 +2055,10 @@
       "path": "/{account}/cards/{number}/steps"
     },
     {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/steps/{step}"
+    },
+    {
       "method": "PUT",
       "path": "/{account}/cards/{number}/steps/{step}"
     },
@@ -2061,6 +2069,10 @@
     {
       "method": "DELETE",
       "path": "/{account}/cards/{number}/steps/{step}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/steps/{step}/edit"
     },
     {
       "method": "GET",

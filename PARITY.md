@@ -44,6 +44,8 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 
 `tests/json_suffix_parity.py` compares selected collection and item `.json` URLs, a configuration route, pagination links, token denial, and board creation/deletion with an HTML Accept header. `tests/column_position_parity.py` compares left and right column moves, no-op boundary moves, and an unknown ID using disposable boards. These checks cover selected JSON paths only; format handling and column reordering in the full browser interface remain incomplete.
 
+`tests/step_read_parity.py` compares step detail JSON, edit JSON rejection, session-backed step and edit pages, updates, and missing-step responses against Fizzy. The Rust edit form was exercised in a browser. Its page layout and Turbo behavior are still much simpler than Fizzy's.
+
 `tests/self_assignment_parity.py` compares assignment and unassignment of the current user, including the card's returned assignee list and an unknown card response.
 
 `tests/draft_workflow_parity.py` signs in through magic links on both servers and compares browser draft creation and resumption, draft redirects, JSON editing, publication, search indexing, activity creation, and creating another draft. The Rust draft page's save/publish controls and direct board/card links were exercised in a browser. Its HTML design and interaction details are still much simpler than Fizzy's, and its cookie writes do not yet implement Fizzy's CSRF protection.

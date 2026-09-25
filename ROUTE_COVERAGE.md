@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 141. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 143. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -14,7 +14,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `account/exports` | 2 | 0 |
 | `boards` | 8 | 6 |
 | `cards` | 8 | 6 |
-| `cards/steps` | 7 | 5 |
 | `my/access_tokens` | 5 | 3 |
 | `webhooks` | 8 | 6 |
 | `account/cancellations` | 1 | 0 |
@@ -75,6 +74,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `cards/publishes` | 1 | 1 |
 | `cards/readings` | 4 | 4 |
 | `cards/self_assignments` | 1 | 1 |
+| `cards/steps` | 7 | 7 |
 | `cards/triages` | 2 | 2 |
 | `columns/left_positions` | 1 | 1 |
 | `columns/right_positions` | 1 | 1 |
