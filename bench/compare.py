@@ -4,9 +4,10 @@
 Example:
   FIZZY_URL=http://127.0.0.1:3006 FIZZY_ACCOUNT=123 FIZZY_TOKEN=... \
   RIZZY_URL=http://127.0.0.1:3007 RIZZY_ACCOUNT=1 RIZZY_TOKEN=... \
-  python3 bench/compare.py --cards 100 --seconds 10
+  python3 bench/compare.py --cards 100 --seconds 10 --workload scoped
 """
 import argparse
+import atexit
 import concurrent.futures
 import json
 import os
@@ -39,9 +40,11 @@ def shape(value):
     return type(value).__name__
 
 
-def fixture(target, count):
+def fixture(target, count, on_board=None):
     board = request(target, "/boards", "POST", {"board": {"name": f"Rizzy benchmark {int(time.time())}"}})
     board_id = board["id"]
+    if on_board:
+        on_board(board_id)
     card_number = None
     for n in range(count):
         card = request(target, f"/boards/{board_id}/cards", "POST", {"card": {"title": f"Benchmark card {n}", "description": "The same workload on each application."}})
@@ -89,6 +92,8 @@ def main():
     parser.add_argument("--cards", type=int, default=100)
     parser.add_argument("--seconds", type=float, default=10)
     parser.add_argument("--concurrency", default="1,8,32")
+    parser.add_argument("--workload", choices=("mixed", "scoped"), default="mixed",
+                        help="scoped excludes the account-wide board list")
     args = parser.parse_args()
     targets = {}
     for name in ("FIZZY", "RIZZY"):
@@ -101,14 +106,26 @@ def main():
         targets[name.lower()] = {field.lower(): os.environ[f"{name}_{field}"] for field in ("URL", "ACCOUNT", "TOKEN")}
     if not targets:
         parser.error("Set at least one complete FIZZY_* or RIZZY_* target")
-    results = {"fixture_cards": args.cards, "runs": {}}
+    results = {"fixture_cards": args.cards, "workload": args.workload, "runs": {}}
     paths = {}
     samples = {}
+    created_boards = []
+
+    def cleanup():
+        for target, board_id in reversed(created_boards):
+            try:
+                request(target, f"/boards/{board_id}", "DELETE")
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
+                pass
+
+    atexit.register(cleanup)
     for name, target in targets.items():
-        board, number = fixture(target, args.cards)
+        board, number = fixture(target, args.cards, lambda board_id: created_boards.append((target, board_id)))
         filtered_cards = f"/cards?board_ids%5B%5D={board}"
         activities = f"/activities?board_ids%5B%5D={board}"
-        paths[name] = ["/boards", f"/boards/{board}", f"/cards/{number}", filtered_cards, activities]
+        paths[name] = [f"/boards/{board}", f"/cards/{number}", filtered_cards, activities]
+        if args.workload == "mixed":
+            paths[name].insert(0, "/boards")
         # Verify each app actually returns the seeded objects before timing it.
         board_sample = request(target, f"/boards/{board}")
         card_sample = request(target, f"/cards/{number}")

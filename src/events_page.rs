@@ -15,6 +15,7 @@ const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card
 #[derive(Default)]
 struct Params {
     day: Option<String>,
+    filter_id: Option<String>,
     boards: Vec<String>,
     creators: Vec<String>,
 }
@@ -26,6 +27,7 @@ fn params(raw: Option<String>) -> Params {
             match key.as_ref() {
                 "day" => result.day = Some(value.into_owned()),
                 "day[]" => result.day = Some("invalid day array".to_owned()),
+                "filter_id" if !value.is_empty() => result.filter_id = Some(value.into_owned()),
                 "board_ids[]" if !value.is_empty() => result.boards.push(value.into_owned()),
                 "creator_ids[]" if !value.is_empty() => result.creators.push(value.into_owned()),
                 _ => {}
@@ -33,6 +35,18 @@ fn params(raw: Option<String>) -> Params {
         }
     }
     result
+}
+
+async fn resolved_params(app: &App, p: &Principal, raw: Option<String>) -> Result<Params> {
+    let mut result = params(raw.clone());
+    if result.filter_id.is_some() {
+        // Day timelines use only the board and creator scopes of a saved card
+        // filter. The source ignores other query filters when filter_id is set.
+        let filter = super::resolved_card_query(app, p, raw).await?;
+        result.boards = filter.board_ids;
+        result.creators = filter.creator_ids;
+    }
+    Ok(result)
 }
 
 fn timezone(headers: &HeaderMap) -> Tz {
@@ -231,6 +245,10 @@ async fn timeline(app: &App, p: &Principal, params: &Params, tz: Tz) -> Result<T
 
 fn filter_query(params: &Params) -> String {
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(filter_id) = &params.filter_id {
+        serializer.append_pair("filter_id", filter_id);
+        return serializer.finish();
+    }
     for board in &params.boards {
         serializer.append_pair("board_ids[]", board);
     }
@@ -396,7 +414,7 @@ pub(super) async fn index(
     RawQuery(raw): RawQuery,
 ) -> Result<Html<String>> {
     let p = principal(&app, &headers, &account).await?;
-    let params = params(raw);
+    let params = resolved_params(&app, &p, raw).await?;
     let tz = timezone(&headers);
     let timeline = timeline(&app, &p, &params, tz).await?;
     let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? ORDER BY lower(b.name),b.id")
@@ -432,7 +450,11 @@ pub(super) async fn index(
         ));
     }
     let title = if boards.len() > 1 {
-        "Activity across"
+        if params.boards.is_empty() {
+            "Activity across"
+        } else {
+            "Activity in"
+        }
     } else {
         "Latest Activity"
     };
@@ -455,7 +477,7 @@ pub(super) async fn days(
     RawQuery(raw): RawQuery,
 ) -> Result<Html<String>> {
     let p = principal(&app, &headers, &account).await?;
-    let params = params(raw);
+    let params = resolved_params(&app, &p, raw).await?;
     let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
     Ok(Html(render_day(&timeline, p.slug, &params, "events/days")))
 }
@@ -479,7 +501,8 @@ pub(super) async fn user_fragment(
     raw: Option<String>,
 ) -> Result<String> {
     let id: String = user.get("id");
-    let mut params = params(raw);
+    let mut params = resolved_params(app, p, raw).await?;
+    params.filter_id = None;
     params.boards.clear();
     params.creators = vec![id.clone()];
     let timeline = timeline(app, p, &params, timezone(headers)).await?;
@@ -509,7 +532,7 @@ pub(super) async fn column(
         return Err(err(StatusCode::NOT_FOUND, "Not found"));
     }
     let p = principal(&app, &headers, &account).await?;
-    let params = params(raw);
+    let params = resolved_params(&app, &p, raw).await?;
     let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
     let selected = timeline
         .columns
