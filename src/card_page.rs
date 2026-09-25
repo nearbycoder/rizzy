@@ -90,7 +90,7 @@ pub(super) async fn show(
             ));
     }
     step_html.push_str("</ul><form class=\"steps__form\" id=\"step-form\"><label><span aria-hidden=\"true\">□</span><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" aria-label=\"Add a step\"></label></form></section>");
-    let comments = sqlx::query("SELECT c.body,c.created_at,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
+    let comments = sqlx::query("SELECT c.id,c.body,c.created_at,c.creator_id,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
         .bind(&card_id)
         .fetch_all(&app.db)
         .await
@@ -108,8 +108,17 @@ pub(super) async fn show(
                 .await?
                 .1
         };
+        let edit = if comment.get::<String, _>("creator_id") == principal.user_id {
+            format!(
+                " <a href=\"/{}/cards/{number}/comments/{}/edit\">Edit</a>",
+                principal.slug,
+                escape(&comment.get::<String, _>("id"))
+            )
+        } else {
+            String::new()
+        };
         comment_html.push_str(&format!(
-            "<article class=\"comment\"><h3>{} <time>{}</time></h3><div class=\"comment__body lexxy-content\">{content}</div></article>",
+            "<article class=\"comment\"><h3>{} <time>{}</time>{edit}</h3><div class=\"comment__body lexxy-content\">{content}</div></article>",
             escape(&comment.get::<String, _>("creator_name")),
             escape(&comment.get::<String, _>("created_at")),
         ));

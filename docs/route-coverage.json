@@ -895,7 +895,7 @@
       "path": "/cards/:card_id/comments/:id/edit(.:format)",
       "controller": "cards/comments",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -2339,8 +2339,16 @@
       "path": "/{account}/cards/{number}/comments/{comment}"
     },
     {
+      "method": "POST",
+      "path": "/{account}/cards/{number}/comments/{comment}"
+    },
+    {
       "method": "DELETE",
       "path": "/{account}/cards/{number}/comments/{comment}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/comments/{comment}/edit"
     },
     {
       "method": "GET",

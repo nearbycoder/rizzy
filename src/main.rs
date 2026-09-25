@@ -40,6 +40,7 @@ mod card_column_page;
 mod card_controls;
 mod card_page;
 mod cards_page;
+mod comment_edit_page;
 mod events_page;
 mod exports;
 mod imports;
@@ -1982,7 +1983,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(show_comment)
                 .put(update_comment)
                 .patch(update_comment)
+                .post(update_or_delete_comment_form)
                 .delete(delete_comment),
+        )
+        .route(
+            "/{account}/cards/{number}/comments/{comment}/edit",
+            get(comment_edit_page::edit),
         )
         .route(
             "/{account}/cards/{number}/comments/{comment}/reactions",
@@ -8365,6 +8371,67 @@ async fn update_comment(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>> {
+    Ok(Json(
+        update_comment_data(&app, &account, &number, &id, &headers, &body).await?,
+    ))
+}
+
+async fn update_or_delete_comment_form(
+    State(app): Shared,
+    Path((account, number, id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
+    if !form {
+        return Err(missing());
+    }
+    let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    match fields.get("_method").map(String::as_str) {
+        Some("patch") => {
+            let content = fields
+                .get("comment[body]")
+                .ok_or_else(|| bad("body is required"))?;
+            update_comment_data(
+                &app,
+                &account,
+                &number,
+                &id,
+                &headers,
+                &json!({"comment":{"body":content}}),
+            )
+            .await?;
+        }
+        Some("delete") => {
+            delete_comment(
+                State(app),
+                Path((account.clone(), number.clone(), id)),
+                headers,
+            )
+            .await?;
+        }
+        _ => return Err(missing()),
+    }
+    Ok((
+        StatusCode::FOUND,
+        [(header::LOCATION, format!("/{account}/cards/{number}"))],
+    )
+        .into_response())
+}
+
+async fn update_comment_data(
+    app: &App,
+    account: &str,
+    number: &str,
+    id: &str,
+    headers: &HeaderMap,
+    body: &Value,
+) -> Result<Value> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
@@ -8399,7 +8466,7 @@ async fn update_comment(
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
     let r = comment_row(&app, &c, &id).await?;
-    Ok(Json(comment_json(&app, &p, &c, &r, &base(&headers)).await?))
+    comment_json(&app, &p, &c, &r, &base(&headers)).await
 }
 async fn delete_comment(
     State(app): Shared,
