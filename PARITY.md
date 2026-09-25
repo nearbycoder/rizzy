@@ -51,6 +51,8 @@ The first fidelity gate is to run each upstream API controller test against an e
 
 `tests/reaction_html_parity.py` compares card and comment reaction forms, emoji choices, JSON reaction creation, and subsequent listings against Fizzy. Rizzy's form submits JSON from browser JavaScript and returns to the card; Fizzy uses Turbo Stream frame updates. The local production Fizzy instance returned 500 for the reaction `new.json` routes because the action renders a missing JSON template; Rizzy returns 406 for that unsupported format, and the cross-app check excludes it.
 
+A Chromium check followed the card's Assign link and assigned the current user, selected 👍 in the reaction form and submitted it, edited a comment through Lexxy, and created a tag through the tag picker. Each action returned to the card without console errors. This covers one owner, one card, and a desktop viewport; it does not establish full interaction or visual parity.
+
 `tests/account_card_create_parity.py` checks Fizzy's account level `POST /cards` route with JSON creation on a specified board and a browser form request that redirects to the card's draft. Rizzy routes it through the same card creation and draft logic used by its board nested route.
 
 The filter settings refresh route returns a Turbo Stream save or delete toggle for the current filter without changing it. `tests/filters.py` checks unsaved, saved, and account-scoped filters. The live source returned the same status, content type, target, and save/delete state for unsaved and saved requests; exact markup and the complete filter settings UI have not been matched.
