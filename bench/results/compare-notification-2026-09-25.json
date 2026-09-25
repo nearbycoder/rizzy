@@ -1,0 +1,97 @@
+{
+  "fixture_cards": 100,
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 5.01,
+        "requests": 470,
+        "errors": {},
+        "rps": 93.9,
+        "p50_ms": 8.17,
+        "p95_ms": 19.8,
+        "p99_ms": 26.37
+      },
+      {
+        "concurrency": 8,
+        "seconds": 5.01,
+        "requests": 3601,
+        "errors": {},
+        "rps": 718.4,
+        "p50_ms": 8.47,
+        "p95_ms": 21.27,
+        "p99_ms": 27.83
+      },
+      {
+        "concurrency": 32,
+        "seconds": 5.08,
+        "requests": 5443,
+        "errors": {},
+        "rps": 1071.1,
+        "p50_ms": 25.29,
+        "p95_ms": 66.24,
+        "p99_ms": 94.03
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 5.0,
+        "requests": 7249,
+        "errors": {},
+        "rps": 1449.5,
+        "p50_ms": 0.56,
+        "p95_ms": 1.54,
+        "p99_ms": 1.79
+      },
+      {
+        "concurrency": 8,
+        "seconds": 5.0,
+        "requests": 16064,
+        "errors": {},
+        "rps": 3211.0,
+        "p50_ms": 2.22,
+        "p95_ms": 4.89,
+        "p99_ms": 6.22
+      },
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 18275,
+        "errors": {},
+        "rps": 3648.2,
+        "p50_ms": 8.22,
+        "p95_ms": 15.06,
+        "p99_ms": 18.29
+      }
+    ]
+  },
+  "sample_parity": {
+    "board_shape": true,
+    "card_shape": true,
+    "activity_shape": true,
+    "description_html": true,
+    "first_page_count": true,
+    "first_page_bytes": {
+      "fizzy": 24645,
+      "rizzy": 24375
+    }
+  },
+  "comparison": [
+    {
+      "concurrency": 1,
+      "rps_ratio_rizzy_over_fizzy": 15.437,
+      "p95_ratio_fizzy_over_rizzy": 12.857
+    },
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 4.47,
+      "p95_ratio_fizzy_over_rizzy": 4.35
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 3.406,
+      "p95_ratio_fizzy_over_rizzy": 4.398
+    }
+  ]
+}
