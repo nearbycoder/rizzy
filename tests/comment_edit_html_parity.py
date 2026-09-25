@@ -40,6 +40,11 @@ def check(target):
         assert status == 201, (target["name"], "comment", status)
         comment_id = json.loads(raw)["id"]
         path = f"/{account}/cards/{number}/comments/{comment_id}"
+        index_path = f"/{account}/cards/{number}/comments"
+        status, _, raw = request(target, index_path, bearer=True)
+        assert status == 200 and any(comment["id"] == comment_id for comment in json.loads(raw))
+        assert request(target, index_path, accept="text/html")[0] == 406
+        assert request(target, path, accept="text/vnd.turbo-stream.html")[0] == 406
         status, _, body = request(target, path + "/edit", accept="text/html")
         assert status == 200, (target["name"], "edit", status)
         csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', body)
@@ -65,6 +70,12 @@ def check(target):
         assert status == 201
         saved_time = json.loads(raw)["created_at"].replace('Z', '+00:00')
         assert datetime.datetime.fromisoformat(saved_time) == datetime.datetime.fromisoformat(backdated.replace('Z', '+00:00'))
+        status, _, raw = request(target, index_path, "POST", {"body":"Flat JSON comment"}, bearer=True)
+        assert status == 201 and json.loads(raw)["body"]["plain_text"] == "Flat JSON comment"
+        flat_id = json.loads(raw)["id"]
+        status, _, raw = request(target, f"{index_path}/{flat_id}", "PUT",
+                                 {"body":"Flat JSON update"}, bearer=True)
+        assert status == 200 and json.loads(raw)["body"]["plain_text"] == "Flat JSON update"
         for marker in (b"turbo-frame", b"Original comment", b"comment[body]", b"Save", b"Cancel", b"Delete", b"lexxy-editor"):
             assert marker in body, (target["name"], marker)
         status, _, _ = request(target, path + "/edit.json", bearer=True)
@@ -121,6 +132,7 @@ def check(target):
             assert status == 302 and headers["Location"] == f"/{account}/cards/{number}"
             assert request(target, form_path, bearer=True)[0] == 404
         return {"edit":200,"json_edit":406,"json_update":200,"browser_card":200,
+                "json_index":200,"html_index":406,"turbo_show":406,"flat_json":200,
                 "turbo_create":200,"turbo_form_create":200,"backdated_create":201,
                 "html_show":200,"turbo_update":200,"turbo_form":200,
                 "turbo_destroy":200,"html_delete":406}
@@ -138,7 +150,7 @@ def main():
     os.environ["FIZZY_EMAIL"] = email
     source, rust = check(target("FIZZY")), check(target("RIZZY"))
     assert source == rust
-    print("Comment parity matched: Turbo create/edit/delete, HTML frames, JSON timestamps, and HTML delete side effect")
+    print("Comment parity matched: supported formats, flat JSON params, Turbo create/edit/delete, HTML frames, JSON timestamps, and HTML delete side effect")
 
 
 if __name__ == "__main__":

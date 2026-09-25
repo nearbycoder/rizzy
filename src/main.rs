@@ -8571,6 +8571,9 @@ async fn list_comments(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let c = card(&app, &p, &number).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let card_id: String = c.get("id");
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
@@ -8708,6 +8711,9 @@ async fn show_comment(
     let p = principal(&app, &headers, &account).await?;
     let c = card(&app, &p, &number).await?;
     let r = comment_row(&app, &c, &id).await?;
+    if wants_turbo_stream(&headers) && !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     if !headers.contains_key("x-rizzy-json-request") {
         return Ok(
             Html(comment_edit_page::rendered_comment_frame(&app, &p, &c, &r).await?)
