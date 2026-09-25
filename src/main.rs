@@ -1842,7 +1842,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(move_column_right),
         )
         .route("/{account}/boards/{board}/cards", post(create_card))
-        .route("/{account}/cards", get(list_cards))
+        .route("/{account}/cards", get(list_cards).post(create_account_card))
         .route(
             "/{account}/columns/cards/{card_id}/drops/closure",
             post(drop_card_closure),
@@ -7178,6 +7178,31 @@ async fn create_card(
         format!("/{account}/cards/{number}.json"),
         card_json(&app, &p, &c, &base(&headers), true).await?,
     ))
+}
+async fn create_account_card(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    RawQuery(raw_query): RawQuery,
+    body: Bytes,
+) -> Result<Response> {
+    let query_board = raw_query.as_deref().and_then(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .find(|(key, _)| key == "board_id")
+            .map(|(_, value)| value.into_owned())
+    });
+    let board_id = if let Some(board_id) = query_board {
+        board_id
+    } else if headers.contains_key("x-rizzy-json-request") {
+        let value: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
+        required(&value, "board_id")?
+    } else {
+        url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "board_id")
+            .map(|(_, value)| value.into_owned())
+            .ok_or_else(|| bad("board_id is required"))?
+    };
+    create_card(State(app), Path((account, board_id)), headers, body).await
 }
 async fn create_or_resume_draft(
     app: &App,

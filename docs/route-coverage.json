@@ -937,7 +937,7 @@
       "path": "/cards(.:format)",
       "controller": "cards",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -2048,6 +2048,10 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/cards"
+    },
+    {
+      "method": "POST",
       "path": "/{account}/cards"
     },
     {
