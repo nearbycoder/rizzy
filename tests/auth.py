@@ -48,7 +48,7 @@ def start(env):
         port = sock.getsockname()[1]
     server = subprocess.Popen(
         [BINARY], cwd=ROOT,
-        env={**env, "RIZZY_BIND": f"127.0.0.1:{port}", "RIZZY_DEV_MAGIC_LINKS": "1"},
+        env={**env, "RIZZY_BIND": f"127.0.0.1:{port}", "RIZZY_DEV_MAGIC_LINKS": env.get("RIZZY_DEV_MAGIC_LINKS", "1")},
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
     for _ in range(60):

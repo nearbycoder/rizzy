@@ -49,6 +49,16 @@ CREATE TABLE IF NOT EXISTS magic_links (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS magic_links_expiration ON magic_links(expires_at);
+CREATE TABLE IF NOT EXISTS email_change_requests (
+  token_hash TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  old_identity_id TEXT NOT NULL REFERENCES identities(id),
+  new_email_address TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS email_change_requests_expiration ON email_change_requests(expires_at);
 CREATE TABLE IF NOT EXISTS pending_authentications (
   token_hash TEXT PRIMARY KEY,
   email_address TEXT NOT NULL,

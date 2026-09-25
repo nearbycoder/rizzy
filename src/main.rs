@@ -1134,6 +1134,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for (statement, cutoff) in [
                 ("DELETE FROM magic_links WHERE expires_at<?", &expiration),
                 (
+                    "DELETE FROM email_change_requests WHERE expires_at<?",
+                    &expiration,
+                ),
+                (
                     "DELETE FROM pending_authentications WHERE expires_at<?",
                     &expiration,
                 ),
@@ -1205,6 +1209,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/users/{id}/role",
             axum::routing::put(update_user_role).patch(update_user_role),
+        )
+        .route(
+            "/{account}/users/{id}/email_addresses",
+            post(request_email_change),
+        )
+        .route(
+            "/{account}/users/{id}/email_addresses/{token}/confirmation",
+            get(show_email_change_confirmation).post(confirm_email_change),
         )
         .route("/{account}/boards", get(list_boards).post(create_board))
         .route("/{account}/boards/{id}/accesses", get(list_board_accesses))
@@ -2104,6 +2116,241 @@ async fn update_user_role(
         .await
         .map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
+}
+fn email_change_invalid() -> Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({"error":"Token is invalid or has expired"})),
+    )
+        .into_response()
+}
+async fn deliver_email_change(email: &str, link: &str) -> Result<()> {
+    if dev_magic_links() {
+        return Ok(());
+    }
+    let path = env::var("RIZZY_SENDMAIL").map_err(|_| {
+        err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Mail delivery is not configured",
+        )
+    })?;
+    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
+    if !valid_email(email) || from.contains(['\r', '\n']) {
+        return Err(bad("invalid email address"));
+    }
+    let message = format!(
+        "From: {from}\nTo: {email}\nSubject: Confirm your Rizzy email address\nContent-Type: text/plain; charset=UTF-8\n\nConfirm your new email address within 30 minutes:\n{link}\n"
+    );
+    let mut child = Command::new(path)
+        .arg("-t")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
+    };
+    stdin
+        .write_all(message.as_bytes())
+        .await
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
+    drop(stdin);
+    let status = child
+        .wait()
+        .await
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
+    if !status.success() {
+        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
+    }
+    Ok(())
+}
+async fn request_email_change(
+    State(app): Shared,
+    Path((account, user_id)): Path<(String, String)>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    if p.user_id != user_id {
+        return Err(missing());
+    }
+    let Some(raw) = body
+        .get("email_address")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    };
+    let email = raw.trim().to_lowercase();
+    if !valid_email(&email) {
+        return Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error":"Please enter a valid email address"})),
+        )
+            .into_response());
+    }
+    let _guard = app.auth_lock.lock().await;
+    auth_attempt(
+        &app,
+        &format!("email-change:{}", peer.ip()),
+        5,
+        60,
+        "Try again later.",
+    )
+    .await?;
+    let old=sqlx::query("SELECT u.identity_id,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=? AND u.account_id=? AND u.active=1")
+        .bind(&p.user_id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    let old_identity: String = old.get("identity_id");
+    if old
+        .get::<String, _>("email_address")
+        .eq_ignore_ascii_case(&email)
+    {
+        return Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error":"That is already your email address"})),
+        )
+            .into_response());
+    }
+    let already:i64=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.account_id=? AND lower(i.email_address)=?)")
+        .bind(&p.account_id).bind(&email).fetch_one(&app.db).await.map_err(db_err)?;
+    if already != 0 {
+        return Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(
+                json!({"error":"You already have a user in this account with that email address"}),
+            ),
+        )
+            .into_response());
+    }
+    let token = random_token();
+    sqlx::query("INSERT INTO email_change_requests(token_hash,account_id,user_id,old_identity_id,new_email_address,expires_at,created_at) VALUES(?,?,?,?,?,?,?)")
+        .bind(hash(&token)).bind(&p.account_id).bind(&p.user_id).bind(old_identity).bind(&email)
+        .bind(future_minutes(30)).bind(now()).execute(&app.db).await.map_err(db_err)?;
+    let link = format!(
+        "{}/{}/users/{user_id}/email_addresses/{token}/confirmation",
+        base(&headers),
+        p.slug
+    );
+    if let Err(error) = deliver_email_change(&email, &link).await {
+        sqlx::query("DELETE FROM email_change_requests WHERE token_hash=?")
+            .bind(hash(&token))
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+        return Err(error);
+    }
+    let mut response = StatusCode::CREATED.into_response();
+    if dev_magic_links() {
+        response.headers_mut().insert(
+            "x-email-change-token",
+            HeaderValue::from_str(&token).expect("hex token"),
+        );
+    }
+    Ok(response)
+}
+async fn show_email_change_confirmation(
+    State(app): Shared,
+    Path((account, user_id, token)): Path<(String, String, String)>,
+) -> Result<Html<String>> {
+    let slug: i64 = account.parse().map_err(|_| missing())?;
+    let exists:i64=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.id=? AND u.active=1 AND a.external_account_id=?)")
+        .bind(&user_id).bind(slug).fetch_one(&app.db).await.map_err(db_err)?;
+    if exists == 0 {
+        return Err(missing());
+    }
+    Ok(Html(format!(
+        "<!doctype html><html><head><title>Confirm email address</title></head><body><h1>Confirm email address</h1><form method=\"post\" action=\"/{slug}/users/{}/email_addresses/{}/confirmation\"><button type=\"submit\">Confirm email address</button></form></body></html>",
+        escape(&user_id),
+        escape(&token)
+    )))
+}
+async fn confirm_email_change(
+    State(app): Shared,
+    Path((account, user_id, token)): Path<(String, String, String)>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let slug: i64 = account.parse().map_err(|_| missing())?;
+    let user=sqlx::query("SELECT u.id,u.account_id,u.identity_id FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.id=? AND u.active=1 AND a.external_account_id=?")
+        .bind(&user_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    let _guard = app.auth_lock.lock().await;
+    auth_attempt(
+        &app,
+        &format!("email-confirm:{}", peer.ip()),
+        5,
+        60,
+        "Try again later.",
+    )
+    .await?;
+    let Some(request)=sqlx::query("SELECT old_identity_id,new_email_address FROM email_change_requests WHERE token_hash=? AND user_id=? AND account_id=? AND expires_at>?")
+        .bind(hash(&token)).bind(&user_id).bind(user.get::<String,_>("account_id")).bind(now())
+        .fetch_optional(&app.db).await.map_err(db_err)? else {return Ok(email_change_invalid());};
+    let old_identity: String = request.get("old_identity_id");
+    if old_identity != user.get::<String, _>("identity_id") {
+        return Ok(email_change_invalid());
+    }
+    let new_email: String = request.get("new_email_address");
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+        .bind(id())
+        .bind(&new_email)
+        .bind(now())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let new_identity: String =
+        sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
+            .bind(&new_email)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    let changed=sqlx::query("UPDATE OR IGNORE users SET identity_id=? WHERE id=? AND account_id=? AND identity_id=? AND active=1")
+        .bind(&new_identity).bind(&user_id).bind(user.get::<String,_>("account_id")).bind(&old_identity)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    if changed.rows_affected() == 0 {
+        return Ok(email_change_invalid());
+    }
+    sqlx::query("DELETE FROM email_change_requests WHERE user_id=? AND account_id=?")
+        .bind(&user_id)
+        .bind(user.get::<String, _>("account_id"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if let Some(session) = cookie_value(&headers, "session_token") {
+        sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+            .bind(hash(&session))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    let session = random_token();
+    sqlx::query("INSERT INTO sessions(id,identity_id,token_hash,user_agent,signup_pending,created_at) VALUES(?,?,?,?,0,?)")
+        .bind(id()).bind(&new_identity).bind(hash(&session))
+        .bind(headers.get(header::USER_AGENT).and_then(|v|v.to_str().ok()))
+        .bind(now()).execute(&mut *tx).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    let wants_json = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|accept| accept.contains("json"));
+    let mut response = if wants_json {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::SEE_OTHER,
+            [(header::LOCATION, format!("/{account}/users/{user_id}"))],
+        )
+            .into_response()
+    };
+    set_cookie(
+        response.headers_mut(),
+        "session_token",
+        &session,
+        31536000,
+        secure_request(&headers),
+    );
+    Ok(response)
 }
 fn valid_entropy(days: i64) -> Result<i64> {
     if [3, 7, 11, 30, 90, 365].contains(&days) {

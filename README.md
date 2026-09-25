@@ -15,12 +15,13 @@ RIZZY_DEV_MAGIC_LINKS=1 cargo run --release
 
 The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`.
 
-For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and `RIZZY_MAIL_FROM` to its sender address. `RIZZY_DEV_MAGIC_LINKS=1` exposes codes in the sign-in response and is intended only for local testing. Without either delivery option, email sign-in returns 503; the seeded API token can still be entered through **Use an API token**. On a fresh database, the first email-code sign-in can create an account. Set `RIZZY_MULTI_TENANT=1` to allow additional accounts.
+For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and `RIZZY_MAIL_FROM` to its sender address. `RIZZY_DEV_MAGIC_LINKS=1` exposes sign-in codes and email-change tokens in response headers for local testing. Without either delivery option, email sign-in returns 503; the seeded API token can still be entered through **Use an API token**. On a fresh database, the first email-code sign-in can create an account. Set `RIZZY_MULTI_TENANT=1` to allow additional accounts.
 
 ## Implemented now
 
 - Bearer token and cookie session authentication with SHA-256 token hashes, single-use email codes, initial signup, account scoping, read versus write permission, token management, identity listing, user listing and editing, role changes, and private board access checks.
 - Account join links with usage limits, reset, member name setup, and atomic redemption across Rust processes.
+- User email changes with validation, a 30-minute one-use confirmation token, session switch, and delivery through the configured sendmail executable.
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
 - Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings.
@@ -42,6 +43,7 @@ cargo test
 python3 tests/smoke.py
 python3 tests/auth.py
 python3 tests/join.py
+python3 tests/email_change.py
 python3 tests/webhooks.py
 python3 tests/notifications.py
 python3 tests/search.py
