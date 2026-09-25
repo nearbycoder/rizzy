@@ -104,6 +104,10 @@ def run(archive_path):
                          if name.startswith("data/active_storage_blobs/")]
         bundles = [json.loads(z.read(name)) for name in z.namelist()
                    if name.startswith("data/notification_bundles/")]
+        rich_texts = [json.loads(z.read(name)) for name in z.namelist()
+                      if name.startswith("data/action_text_rich_texts/")]
+        user_gid = f'gid="gid://fizzy/User/{owner["id"]}"'
+        has_user_mention = any(user_gid in rich.get("body", "") for rich in rich_texts)
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
         dated_cards = [json.loads(z.read(name)) for name in z.namelist()
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
@@ -186,10 +190,15 @@ def run(archive_path):
                     description = db.execute("SELECT description FROM cards WHERE account_id=? LIMIT 1",
                                              (imported_id,)).fetchone()[0]
                     assert 'sgid="' in description and ' gid="' not in description
+                    if has_user_mention:
+                        assert f'sgid="gid://fizzy/User/{owner["id"]}"' in description
                     card_number = db.execute("SELECT number FROM cards WHERE account_id=? LIMIT 1",
                                              (imported_id,)).fetchone()[0]
                     status, card = call(url, token, f"/{created['account']}/cards/{card_number}")
                     assert status == 200 and card["has_attachments"] and card["image_url"]
+                    if has_user_mention:
+                        assert owner["name"].split()[0] in card["description"]
+                        assert 'class="mention"' in card["description_html"]
             status, boards = call(url, token, f"/{created['account']}/boards")
             assert status == 200 and len(boards) == counts["boards"], (status, boards)
             if counts["notifications"]:
@@ -197,6 +206,9 @@ def run(archive_path):
                 assert status == 200 and any(notice["source_type"] == "mention"
                                              and notice["title"] == f"{owner['name'].split()[0]} @mentioned you"
                                              and "Hello world" in notice["body"] for notice in notices), notices
+                if has_user_mention:
+                    assert any(owner["name"].split()[0] in notice["body"]
+                               for notice in notices if notice["source_type"] == "mention"), notices
             status, export = call(url, token, f"/{created['account']}/account/exports", "POST")
             assert status == 201 and export["status"] == "pending", (status, export)
             for _ in range(300):
@@ -230,6 +242,9 @@ def run(archive_path):
                     bundle = json.loads(z.read(f"data/notification_bundles/{source_bundle['id']}.json"))
                     expected = source_bundle["status"] if isinstance(source_bundle["status"], str) else ("pending", "processing", "delivered")[source_bundle["status"]]
                     assert bundle["status"] == expected
+                if has_user_mention:
+                    assert any(user_gid in json.loads(z.read(name)).get("body", "")
+                               for name in names if name.startswith("data/action_text_rich_texts/"))
             duplicate = upload(url, token, archive)
             conflict = await_result(url, token, duplicate)
             assert conflict["status"] == "failed" and conflict["failure_reason"] == "conflict", conflict

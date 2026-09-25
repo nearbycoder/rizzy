@@ -32,7 +32,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Board publishing and unpublishing with unauthenticated public board and card pages.
 - Direct uploads for card images, user avatars, and uploaded image/file embeds in card descriptions and comments, with private/public blob access and cached image previews.
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
-- Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, and notification bundles.
+- Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
 - A basic browser interface for boards, columns, cards, description editing, and completion.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 

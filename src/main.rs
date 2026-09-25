@@ -4897,13 +4897,12 @@ async fn notification_json(app: &App, p: &Principal, row: &SqliteRow, host: &str
             }
         };
         let first = name.split_whitespace().next().unwrap_or(name);
+        let (plain_body, _, _) =
+            storage::render_rich_text(app, &p.account_id, p.slug, &source_body).await?;
         (
             "mention",
             format!("{first} @mentioned you"),
-            rich_text::plain_text(&source_body)
-                .chars()
-                .take(200)
-                .collect::<String>(),
+            plain_body.chars().take(200).collect::<String>(),
         )
     } else {
         if source_kind != "Event" {

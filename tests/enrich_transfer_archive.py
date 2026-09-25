@@ -25,8 +25,13 @@ def main():
         card = json.loads(source.read(card_path))
         blob_path = next(name for name in names if name.startswith("data/active_storage_blobs/"))
         blob = json.loads(source.read(blob_path))
+        rich_path = next(name for name in names if name.startswith("data/action_text_rich_texts/")
+                         and json.loads(source.read(name)).get("record_type") == "Card")
+        rich = json.loads(source.read(rich_path))
         card["due_on"] = "2026-10-15"
         blob["metadata"] = {"analyzed": True, "width": 806, "height": 926}
+        rich["body"] += (f'<p><action-text-attachment gid="gid://fizzy/User/{owner["id"]}" '
+                         'content-type="application/vnd.actiontext.mention"></action-text-attachment></p>')
         created = card["created_at"]
         ending = (datetime.fromisoformat(created.replace("Z", "+00:00")) + timedelta(hours=1))
         ends_at = ending.isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -65,6 +70,8 @@ def main():
                     data = json.dumps(card).encode()
                 elif info.filename == blob_path:
                     data = json.dumps(blob).encode()
+                elif info.filename == rich_path:
+                    data = json.dumps(rich).encode()
                 output.writestr(info, data)
             for name, record in additions.items():
                 output.writestr(name, json.dumps(record).encode(), compress_type=zipfile.ZIP_DEFLATED)

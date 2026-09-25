@@ -208,6 +208,32 @@ pub(super) async fn render_rich_text(
                 embed_html(&blob, value, slug, false),
             ));
             attached = true;
+        } else if let Some(user_id) = value.strip_prefix("gid://fizzy/User/") {
+            let user = sqlx::query("SELECT name FROM users WHERE id=? AND account_id=?")
+                .bind(user_id)
+                .bind(account_id)
+                .fetch_optional(&app.db)
+                .await
+                .map_err(db_err)?;
+            if let Some(user) = user {
+                let name: String = user.get("name");
+                let first_name = name.split_whitespace().next().unwrap_or(&name);
+                plain_input.push_str(first_name);
+                let markup = format!(
+                    "<action-text-attachment sgid=\"{}\" content-type=\"application/vnd.actiontext.mention\"><span class=\"mention\">{}</span></action-text-attachment>",
+                    escape(value),
+                    escape(first_name)
+                );
+                replacements.push((token.clone(), markup.clone(), markup));
+                attached = true;
+            } else {
+                plain_input.push('☒');
+                let invalid = format!(
+                    "<action-text-attachment sgid=\"{}\">☒</action-text-attachment>",
+                    escape(value)
+                );
+                replacements.push((token.clone(), invalid.clone(), invalid));
+            }
         } else {
             plain_input.push('☒');
             let invalid = format!(

@@ -258,14 +258,11 @@ fn portable_rich_text(raw: &str, blobs: &HashMap<String, String>) -> String {
         let Some(value) = sgid.captures(original) else {
             return original.to_owned();
         };
-        let Some(blob_id) = value.get(1).and_then(|value| blobs.get(value.as_str())) else {
+        let Some(gid) = value.get(1).and_then(|value| blobs.get(value.as_str())) else {
             return original.to_owned();
         };
-        sgid.replace(
-            original,
-            format!("gid=\"gid://fizzy/ActiveStorage::Blob/{blob_id}\""),
-        )
-        .into_owned()
+        sgid.replace(original, format!("gid=\"{gid}\""))
+            .into_owned()
     })
     .into_owned()
 }
@@ -352,9 +349,15 @@ pub(crate) async fn build(app: &App, export: &SqliteRow) -> BuildResult<()> {
         emit_account(app, &sender, &account_id).await?;
         let blob_rows = sqlx::query("SELECT id,attachable_sgid FROM storage_blobs WHERE account_id=?")
             .bind(&account_id).fetch_all(&app.db).await?;
-        let blob_ids: HashMap<String, String> = blob_rows.iter().map(|row| {
-            (row.get("attachable_sgid"), row.get("id"))
+        let mut blob_ids: HashMap<String, String> = blob_rows.iter().map(|row| {
+            (row.get("attachable_sgid"), format!("gid://fizzy/ActiveStorage::Blob/{}", row.get::<String,_>("id")))
         }).collect();
+        let user_ids = sqlx::query("SELECT id FROM users WHERE account_id=?")
+            .bind(&account_id).fetch_all(&app.db).await?;
+        for user in user_ids {
+            let user_id: String = user.get("id");
+            blob_ids.insert(format!("gid://fizzy/User/{user_id}"), format!("gid://fizzy/User/{user_id}"));
+        }
         for record_set in RECORD_SETS {
             emit_record_set(app, &sender, &account_id, record_set, &blob_ids).await?;
             sqlx::query("UPDATE exports SET updated_at=? WHERE id=?")

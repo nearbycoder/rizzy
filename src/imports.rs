@@ -945,21 +945,35 @@ async fn apply_archive(
     {
         return Err("Storage file has no blob metadata".into());
     }
-    let gid = regex::Regex::new(r#"gid=["']gid://fizzy/ActiveStorage::Blob/([^"']+)["']"#)
+    let gid = regex::Regex::new(r#"gid=["']gid://fizzy/(ActiveStorage::Blob|User)/([^"']+)["']"#)
         .map_err(|e| e.to_string())?;
     for rich in records(&archive, "action_text_rich_texts") {
         let original = maybe_field(rich, "body").unwrap_or("");
         for capture in gid.captures_iter(original) {
-            if !blob_sgids.contains_key(&capture[1]) {
-                return Err("Rich text references unknown blob".into());
+            let valid = match &capture[1] {
+                "ActiveStorage::Blob" => blob_sgids.contains_key(&capture[2]),
+                "User" => archive.groups.get("users").is_some_and(|users| {
+                    users
+                        .iter()
+                        .any(|user| maybe_field(user, "id") == Some(&capture[2]))
+                }),
+                _ => false,
+            };
+            if !valid {
+                return Err("Rich text references unknown attachment".into());
             }
         }
         let body = gid
             .replace_all(original, |capture: &regex::Captures<'_>| {
-                format!(
-                    "sgid=\"{}\"",
-                    blob_sgids.get(&capture[1]).expect("checked blob")
-                )
+                let sgid = if &capture[1] == "User" {
+                    format!("gid://fizzy/User/{}", &capture[2])
+                } else {
+                    blob_sgids
+                        .get(&capture[2])
+                        .expect("checked blob")
+                        .to_owned()
+                };
+                format!("sgid=\"{sgid}\"")
             })
             .into_owned();
         let search = search_content(rich_text::plain_text(&body));
