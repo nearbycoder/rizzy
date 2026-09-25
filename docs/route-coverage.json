@@ -230,7 +230,7 @@
       "path": "/users/:id/edit(.:format)",
       "controller": "users",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",

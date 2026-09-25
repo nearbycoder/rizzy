@@ -12,7 +12,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Tags, steps, comments | ✓ | No |
 | Full board and card HTML interface | Rust-rendered board columns with immediate Maybe cards and lazy loading for other columns, board-level filtered card grid and pagination, drag and drop, draft navigation, and column creation; published card page with rich description, steps, comments, edit, comment, watch, pin, and completion controls; Lexxy draft and card editors | No |
 | Sign up, magic links, sessions, passkeys | Magic links, sessions, initial signup, and browser email/code entry | No |
-| Users, roles, invitations, board involvement | User listing/editing, roles, join links, email changes, verification, and name entry | No |
+| Users, roles, invitations, board involvement | JSON users, browser profile and name edit, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
 | Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pins, watches | No |
 | Card filters, tag listing, basic search | Saved IDs, terms, dates, closures, activity spikes, and FTS5 index | No |
@@ -48,7 +48,7 @@ The board HTML now switches to a filtered grid when Fizzy's filter-active condit
 
 `tests/events_html_parity.py` checks the account home timeline, board-filtered events, three activity columns, local-hour placement with a New York timezone cookie, day fragments, column pages, next-day links, and invalid day/column responses against live Fizzy. A browser flow created and published a card, then opened its Added event. Rizzy uses a bounded 301-event day read; busy days fall back to exact counts and at most 100 events per column. The event cards, filters, and page layout remain simplified, and saved filter IDs and complete event descriptions are still missing.
 
-`tests/users_events_html_parity.py` checks the user activity Turbo frame against live Fizzy: the self heading, a newly published event, a next-day link back to the user route, and invalid user/day inputs. The full user profile page that loads this frame is still missing from Rizzy's browser UI.
+`tests/users_events_html_parity.py` checks the user activity Turbo frame against live Fizzy: the self heading, a newly published event, a next-day link back to the user route, and invalid user/day inputs. `tests/user_profile_html_parity.py` checks the browser profile, edit form, name-change redirect, invalid name, and JSON name after saving. Chromium loaded both pages with the user timeline and no error overlay. Profile avatar upload, email change, passkey controls, theme/transfer panels, and exact Turbo behavior are still incomplete; the existing JSON avatar flow passed its cross-app regression check after form updates were added.
 
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified and passkey sign-in is still absent. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 

@@ -468,11 +468,21 @@ pub(super) async fn user_events(
 ) -> Result<Html<String>> {
     let p = principal(&app, &headers, &account).await?;
     let user = active_user(&app, &p, &user_id).await?;
+    Ok(Html(user_fragment(&app, &p, &user, &headers, raw).await?))
+}
+
+pub(super) async fn user_fragment(
+    app: &App,
+    p: &Principal,
+    user: &SqliteRow,
+    headers: &HeaderMap,
+    raw: Option<String>,
+) -> Result<String> {
     let id: String = user.get("id");
     let mut params = params(raw);
     params.boards.clear();
     params.creators = vec![id.clone()];
-    let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
+    let timeline = timeline(app, p, &params, timezone(headers)).await?;
     let heading = if p.user_id == id {
         "What have you been up to?".to_owned()
     } else {
@@ -483,10 +493,10 @@ pub(super) async fn user_events(
         )
     };
     let path = format!("users/{}/events", escape(&id));
-    Ok(Html(format!(
+    Ok(format!(
         "<turbo-frame id=\"user_events\"><h1>{heading}</h1><div class=\"events\" id=\"activity\" data-controller=\"pagination\">{}</div></turbo-frame>",
         render_day(&timeline, p.slug, &params, &path)
-    )))
+    ))
 }
 
 pub(super) async fn column(

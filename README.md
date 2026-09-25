@@ -35,7 +35,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
 - An account home activity timeline with Added, Updated, and Done columns, board and person filters, timezone grouping, day pagination, column detail pages, and a user activity frame.
 - Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
-- A basic browser interface for boards, columns, cards, description editing, and completion.
+- A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
 ## Parity still required
@@ -83,6 +83,7 @@ python3 tests/account_export_parity.py
 python3 tests/step_read_parity.py
 python3 tests/events_html_parity.py
 python3 tests/users_events_html_parity.py
+python3 tests/user_profile_html_parity.py
 python3 tests/search_rich_text_parity.py
 ```
 

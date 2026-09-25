@@ -10,7 +10,7 @@ if (activity && 'IntersectionObserver' in window) {
         if (!response.ok) throw new Error('Could not load activity');
         const fragment = document.createElement('div');
         fragment.innerHTML = await response.text();
-        const frame = fragment.querySelector('turbo-frame');
+        const frame = fragment.querySelector(`turbo-frame[id="${link.dataset.frame}"]`);
         if (!frame) throw new Error('Activity page was unavailable');
         link.closest('turbo-frame').after(frame);
         link.remove();

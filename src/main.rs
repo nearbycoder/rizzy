@@ -38,6 +38,7 @@ mod exports;
 mod imports;
 mod rich_text;
 mod storage;
+mod user_page;
 
 struct App {
     db: SqlitePool,
@@ -1636,10 +1637,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/users/{id}",
             get(show_user)
+                .post(update_user)
                 .put(update_user)
                 .patch(update_user)
                 .delete(delete_user),
         )
+        .route("/{account}/users/{id}/edit", get(edit_user))
         .route(
             "/{account}/users/{id}/avatar",
             get(storage::show_avatar).delete(storage::delete_avatar),
@@ -2941,12 +2944,36 @@ async fn show_user(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let u = active_user(&app, &p, &id).await?;
-    Ok(Json(
-        user_json(&app, &p, &u.get::<String, _>("id"), &base(&headers)).await?,
-    ))
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(
+            Json(user_json(&app, &p, &u.get::<String, _>("id"), &base(&headers)).await?)
+                .into_response(),
+        )
+    } else {
+        Ok(user_page::show(&app, &p, &u, &headers)
+            .await?
+            .into_response())
+    }
+}
+async fn edit_user(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Html<String>> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let p = principal(&app, &headers, &account).await?;
+    let u = active_user(&app, &p, &id).await?;
+    let email: String = sqlx::query_scalar("SELECT email_address FROM identities WHERE id=?")
+        .bind(u.get::<String, _>("identity_id"))
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(user_page::edit(&p, &u, &email, None))
 }
 fn can_change_user(p: &Principal, u: &SqliteRow) -> Result<()> {
     if p.user_id == u.get::<String, _>("id")
@@ -2961,8 +2988,41 @@ async fn update_user(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
+    let (body, form) = if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded")
+    {
+        let mut user = serde_json::Map::new();
+        let mut fields = serde_json::Map::new();
+        for (key, value) in url::form_urlencoded::parse(&body) {
+            match key.as_ref() {
+                "user[name]" => {
+                    user.insert("name".into(), json!(value.into_owned()));
+                }
+                "_method" => {
+                    fields.insert("_method".into(), json!(value.into_owned()));
+                }
+                _ => {}
+            }
+        }
+        fields.insert("user".into(), Value::Object(user));
+        (Value::Object(fields), true)
+    } else {
+        (
+            serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?,
+            false,
+        )
+    };
+    if method == Method::POST
+        && (!form || body.get("_method").and_then(Value::as_str) != Some("patch"))
+    {
+        return Err(missing());
+    }
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let u = active_user(&app, &p, &id).await?;
@@ -2970,6 +3030,19 @@ async fn update_user(
     let values = nested(&body, "user");
     let name = string(values, "name").unwrap_or_else(|| u.get("name"));
     if name.trim().is_empty() {
+        if form {
+            let email: String =
+                sqlx::query_scalar("SELECT email_address FROM identities WHERE id=?")
+                    .bind(u.get::<String, _>("identity_id"))
+                    .fetch_one(&app.db)
+                    .await
+                    .map_err(db_err)?;
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                user_page::edit(&p, &u, &email, Some("Name can't be blank")),
+            )
+                .into_response());
+        }
         return Err(bad("name is required"));
     }
     let avatar = if let Some(value) = values.get("avatar") {
@@ -2991,7 +3064,15 @@ async fn update_user(
     };
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(removed).await;
-    Ok(Json(user_json(&app, &p, &id, &base(&headers)).await?))
+    if form {
+        Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/users/{id}"))],
+        )
+            .into_response())
+    } else {
+        Ok(Json(user_json(&app, &p, &id, &base(&headers)).await?).into_response())
+    }
 }
 async fn delete_user(
     State(app): Shared,
