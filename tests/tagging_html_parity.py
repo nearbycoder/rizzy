@@ -3,6 +3,7 @@
 import http.cookiejar
 import json
 import os
+import re
 import sqlite3
 import time
 import urllib.parse
@@ -34,7 +35,14 @@ def check(target):
                                  {"card":{"title":"Tag picker"}}, bearer=True)
         assert status == 201, (target["name"], "card", status)
         number = json.loads(raw)["number"]
+        card_id = json.loads(raw)["id"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/publish", "POST", b"", bearer=True)
+        assert status == 201, (target["name"], "publish", status)
         path = f"/{account}/cards/{number}/taggings"
+        status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200 and f"tags_card_{card_id}".encode() in card_html
+        csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', card_html)
+        csrf = csrf_match.group(1).decode() if csrf_match else None
         status, headers, body = request(target, path + "/new", accept="text/html")
         assert status == 200 and headers.get("ETag"), (target["name"], "picker", status)
         for marker in (b"turbo-frame", b"Tag this", b"tag_title", b"Create tag"):
@@ -43,20 +51,24 @@ def check(target):
                                path + "/new", accept="text/html")
         assert status == 304, (target["name"], "cache", status)
         assert request(target, path + "/new.json", bearer=True)[0] == 406
+        assert request(target, path + "/new", accept="text/vnd.turbo-stream.html")[0] == 406
         status, _, _ = request(target, path, "POST", {"tag_title":title}, bearer=True)
         assert status == 204, (target["name"], "add tag", status)
         status, _, body = request(target, path + "/new", accept="text/html")
         assert status == 200 and f"#{title}".encode() in body and b'aria-checked="true"' in body
-        if target["name"] == "rizzy":
-            status, headers, _ = request(target, path + "?" + urllib.parse.urlencode({"tag_title":title}),
-                                         "POST", b"", accept="text/html")
-            assert status == 302 and headers["Location"] == f"/{account}/cards/{number}"
-        else:
-            status, _, _ = request(target, path, "POST", {"tag_title":title}, bearer=True)
-            assert status == 204
+        status, headers, stream = request(target, path + "?" + urllib.parse.urlencode({"tag_title":title}),
+                                          "POST", b"", accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], status, stream[:180])
+        assert b'action="replace"' in stream and f"tags_card_{card_id}".encode() in stream
+        assert f"tagging_card_{card_id}".encode() in stream
         status, _, raw = request(target, f"/{account}/cards/{number}", bearer=True)
         assert status == 200 and not json.loads(raw)["tags"], (target["name"], "remove tag", status)
-        return {"picker":200,"cache":304,"json_picker":406,"toggle":204}
+        status, headers, stream = request(target, path, "POST", b"tag_title=%23" + title.encode(),
+                                          accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and f"tags_card_{card_id}".encode() in stream
+        status, _, raw = request(target, f"/{account}/cards/{number}", bearer=True)
+        assert status == 200 and title in json.loads(raw)["tags"]
+        return {"picker":200,"cache":304,"json_picker":406,"toggle":204,"turbo_toggle":200}
     finally:
         for board_id in boards:
             status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
@@ -74,7 +86,7 @@ def main():
     os.environ["FIZZY_EMAIL"] = email
     source, rust = check(target("FIZZY")), check(target("RIZZY"))
     assert source == rust
-    print("Tag picker parity matched: frame, cache, JSON toggle, selected state")
+    print("Tag picker parity matched: frame, cache, JSON and Turbo toggles, in-place tag block")
 
 
 if __name__ == "__main__":

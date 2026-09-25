@@ -8349,18 +8349,34 @@ async fn toggle_tag(
             .map_err(db_err)?;
     if exists == 0 {
         sqlx::query("INSERT INTO taggings(card_id,tag_id) VALUES(?,?)")
-            .bind(card_id)
-            .bind(tag_id)
+            .bind(&card_id)
+            .bind(&tag_id)
             .execute(&app.db)
             .await
             .map_err(db_err)?;
     } else {
         sqlx::query("DELETE FROM taggings WHERE card_id=? AND tag_id=?")
-            .bind(card_id)
-            .bind(tag_id)
+            .bind(&card_id)
+            .bind(&tag_id)
             .execute(&app.db)
             .await
             .map_err(db_err)?;
+    }
+    if wants_turbo_stream(&headers) {
+        let tags = tagging_page::tags(&app, &p, &c).await?;
+        let picker = tagging_page::picker(&app, &p, &c).await?;
+        let stream = format!(
+            "<turbo-stream action=\"replace\" method=\"morph\" target=\"tags_card_{}\"><template>{tags}</template></turbo-stream>{picker}",
+            escape(&card_id)
+        );
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
     }
     if form {
         return Ok((

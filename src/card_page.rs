@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     App, Principal, Result, assignment_page, board, comment_edit_page, db_err, escape, storage,
-    wrap_html,
+    tagging_page, wrap_html,
 };
 
 const TEMPLATE: &str = include_str!("../static/card.html");
@@ -155,34 +155,7 @@ pub(super) async fn show(
         "<label class=\"side-action side-action--image\" title=\"Add background image\"><span class=\"for-screen-reader\">Add background image</span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><circle cx=\"8\" cy=\"9\" r=\"2\"/><path d=\"m3 18 6-6 4 4 3-3 5 5M18 1v6M15 4h6\"/></svg><input id=\"image-upload\" type=\"file\" accept=\"image/png,image/jpeg,image/webp\" aria-label=\"Add background image\"></label>".to_owned()
     };
     let closed = card.get::<i64, _>("closed") != 0;
-    let tags = sqlx::query("SELECT t.id,t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title")
-        .bind(&card_id)
-        .fetch_all(&app.db)
-        .await
-        .map_err(db_err)?;
-    let mut tag_list = String::new();
-    let mut tag_choices = String::new();
-    for tag in tags {
-        let id: String = tag.get("id");
-        let title: String = tag.get("title");
-        tag_list.push_str(&format!("<a class=\"card-tags__link\" href=\"/{}/cards?board_ids%5B%5D={}&amp;tag_ids%5B%5D={}\">{}</a>",principal.slug,escape(&board_id),escape(&id),escape(&title)));
-        tag_choices.push_str(&format!(
-            "<button type=\"button\" data-tag-title=\"{}\">Remove #{}</button>",
-            escape(&title),
-            escape(&title)
-        ));
-    }
-    let picker = if closed {
-        String::new()
-    } else {
-        format!(
-            "<details><summary aria-label=\"Add a tag\" title=\"Add a tag\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 11V4h7l11 11-7 7L3 11Z\"/><circle cx=\"8\" cy=\"8\" r=\"1\"/></svg></summary><div class=\"card-tags__picker\"><a href=\"/{}/cards/{number}/taggings/new\">Open tag picker</a><form id=\"tag-form\"><label for=\"tag-title\">Tag name</label><input id=\"tag-title\" name=\"tag_title\" placeholder=\"#tag\" autocomplete=\"off\"><button type=\"submit\">Toggle tag</button></form>{tag_choices}</div></details>",
-            principal.slug
-        )
-    };
-    let tag_control = format!(
-        "<div class=\"card-tags\">{picker}<div class=\"card-tags__list\">{tag_list}</div></div>"
-    );
+    let tag_control = tagging_page::tags(app, principal, card).await?;
     let postponed = card.get::<i64, _>("postponed") != 0;
     let column_id: Option<String> = card.get("column_id");
     let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
