@@ -28,6 +28,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
+mod account_settings;
 mod account_transfer;
 mod board_page;
 mod board_settings;
@@ -36,6 +37,7 @@ mod card_page;
 mod events_page;
 mod exports;
 mod imports;
+mod join_code_page;
 mod rich_text;
 mod storage;
 mod user_page;
@@ -1610,19 +1612,21 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/exports/{id}/download", get(exports::download))
         .route(
             "/{account}/account/settings",
-            get(show_account).put(update_account).patch(update_account),
+            get(show_account).post(update_account).put(update_account).patch(update_account),
         )
         .route(
             "/{account}/account/entropy",
-            axum::routing::put(update_account_entropy).patch(update_account_entropy),
+            post(update_account_entropy).put(update_account_entropy).patch(update_account_entropy),
         )
         .route(
             "/{account}/account/join_code",
             get(show_join_code)
+                .post(update_join_code)
                 .put(update_join_code)
                 .patch(update_join_code)
                 .delete(reset_join_code),
         )
+        .route("/{account}/account/join_code/edit", get(edit_join_code))
         .route(
             "/{account}/join/{code}",
             get(join_page).post(redeem_join_code),
@@ -3429,15 +3433,21 @@ async fn show_account(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    Ok(Json(account_json(&app, &p).await?))
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(Json(account_json(&app, &p).await?).into_response())
+    } else {
+        Ok(account_settings::show(&app, &p, None)
+            .await?
+            .into_response())
+    }
 }
 async fn show_join_code(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let row = sqlx::query(
         "SELECT code,usage_count,usage_limit FROM account_join_codes WHERE account_id=?",
@@ -3449,17 +3459,65 @@ async fn show_join_code(
     let code: String = row.get("code");
     let count: i64 = row.get("usage_count");
     let limit: i64 = row.get("usage_limit");
-    Ok(Json(
-        json!({"code":code,"usage_count":count,"usage_limit":limit,
-        "url":format!("{}/{}/join/{}",base(&headers),p.slug,code),"active":count<limit}),
+    let url = format!("{}/{}/join/{}", base(&headers), p.slug, code);
+    if headers.contains_key("x-rizzy-json-request") {
+        Ok(
+            Json(json!({"code":code,"usage_count":count,"usage_limit":limit,
+        "url":url,"active":count<limit}))
+            .into_response(),
+        )
+    } else {
+        Ok(join_code_page::show(&p, &url, count, limit).into_response())
+    }
+}
+async fn edit_join_code(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Html<String>> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let p = principal(&app, &headers, &account).await?;
+    let row =
+        sqlx::query("SELECT usage_count,usage_limit FROM account_join_codes WHERE account_id=?")
+            .bind(&p.account_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    Ok(join_code_page::edit(
+        &p,
+        row.get("usage_count"),
+        row.get("usage_limit"),
+        None,
     ))
 }
 async fn update_join_code(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        if method == Method::POST && fields.get("_method").map(String::as_str) != Some("patch") {
+            return Err(missing());
+        }
+        json!({"account_join_code":{"usage_limit":fields.get("account_join_code[usage_limit]").cloned().unwrap_or_default()}})
+    } else {
+        if method == Method::POST {
+            return Err(missing());
+        }
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     p.account_admin()?;
@@ -3470,8 +3528,59 @@ async fn update_join_code(
             v.as_i64()
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })
-        .ok_or_else(|| bad("usage_limit is invalid"))?;
+        .ok_or_else(|| bad("usage_limit is invalid"));
+    let limit = match limit {
+        Ok(limit) => limit,
+        Err(_) if form => {
+            let row = sqlx::query(
+                "SELECT usage_count,usage_limit FROM account_join_codes WHERE account_id=?",
+            )
+            .bind(&p.account_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+            let message = if v
+                .get("usage_limit")
+                .and_then(Value::as_str)
+                .is_some_and(|raw| raw.len() > 11 && raw.bytes().all(|byte| byte.is_ascii_digit()))
+            {
+                "Usage limit cannot be larger than the population of the planet"
+            } else {
+                "Usage limit is invalid"
+            };
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                join_code_page::edit(
+                    &p,
+                    row.get("usage_count"),
+                    row.get("usage_limit"),
+                    Some(message),
+                ),
+            )
+                .into_response());
+        }
+        Err(error) => return Err(error),
+    };
     if !(0..=10_000_000_000).contains(&limit) {
+        if form {
+            let row = sqlx::query(
+                "SELECT usage_count,usage_limit FROM account_join_codes WHERE account_id=?",
+            )
+            .bind(&p.account_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                join_code_page::edit(
+                    &p,
+                    row.get("usage_count"),
+                    row.get("usage_limit"),
+                    Some("Usage limit cannot be larger than the population of the planet"),
+                ),
+            )
+                .into_response());
+        }
         return Err(bad(
             "usage_limit cannot be larger than the population of the planet",
         ));
@@ -3483,13 +3592,21 @@ async fn update_join_code(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if form {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/account/join_code"))],
+        )
+            .into_response()
+    } else {
+        StatusCode::NO_CONTENT.into_response()
+    })
 }
 async fn reset_join_code(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     p.account_admin()?;
@@ -3510,7 +3627,15 @@ async fn reset_join_code(
             return Err(missing());
         }
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if headers.contains_key("x-rizzy-json-request") {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/account/join_code"))],
+        )
+            .into_response()
+    })
 }
 async fn join_page(
     State(app): Shared,
@@ -3730,34 +3855,100 @@ async fn update_account(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        if method == Method::POST && fields.get("_method").map(String::as_str) != Some("put") {
+            return Err(missing());
+        }
+        json!({"account":{"name":fields.get("account[name]").cloned().unwrap_or_default()}})
+    } else {
+        if method == Method::POST {
+            return Err(missing());
+        }
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     p.account_admin()?;
-    let name = required(nested(&body, "account"), "name")?;
+    let name = string(nested(&body, "account"), "name").unwrap_or_default();
+    if name.trim().is_empty() {
+        if form {
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                account_settings::show(&app, &p, Some("Name can't be blank")).await?,
+            )
+                .into_response());
+        }
+        return Err(bad("name is required"));
+    }
     sqlx::query("UPDATE accounts SET name=? WHERE id=?")
         .bind(name)
         .bind(&p.account_id)
         .execute(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if form {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/account/settings"))],
+        )
+            .into_response()
+    } else {
+        StatusCode::NO_CONTENT.into_response()
+    })
 }
 async fn update_account_entropy(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        if method == Method::POST && fields.get("_method").map(String::as_str) != Some("put") {
+            return Err(missing());
+        }
+        json!({"entropy":{"auto_postpone_period_in_days":fields.get("entropy[auto_postpone_period_in_days]").and_then(|value| value.parse::<i64>().ok())}})
+    } else {
+        if method == Method::POST {
+            return Err(missing());
+        }
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     p.account_admin()?;
     let days = nested(&body, "entropy")
         .get("auto_postpone_period_in_days")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| bad("auto_postpone_period_in_days is required"))?;
-    let days = valid_entropy(days)?;
+        .and_then(Value::as_i64);
+    let days = match days {
+        Some(days) => days,
+        None if form => return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
+        None => return Err(bad("auto_postpone_period_in_days is required")),
+    };
+    let days = match valid_entropy(days) {
+        Ok(days) => days,
+        Err(_) if form => return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
+        Err(error) => return Err(error),
+    };
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE accounts SET auto_postpone_period_in_days=? WHERE id=?")
         .bind(days)
@@ -3768,7 +3959,15 @@ async fn update_account_entropy(
     sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,updated_at=? WHERE account_id=? AND entropy_override=0")
         .bind(days).bind(now()).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
-    Ok(Json(account_json(&app, &p).await?))
+    Ok(if form {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/account/settings"))],
+        )
+            .into_response()
+    } else {
+        Json(account_json(&app, &p).await?).into_response()
+    })
 }
 
 #[derive(Deserialize, Default)]

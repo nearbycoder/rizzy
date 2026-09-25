@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 164. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 165. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -14,7 +14,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `my/access_tokens` | 5 | 3 |
 | `webhooks` | 8 | 6 |
 | `account/cancellations` | 1 | 0 |
-| `account/join_codes` | 5 | 4 |
 | `cards/assignments` | 2 | 1 |
 | `cards/boards` | 3 | 2 |
 | `cards/columns` | 1 | 0 |
@@ -26,9 +25,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `cards/taggings` | 2 | 1 |
 | `cards/watches` | 3 | 2 |
 | `client_configurations` | 1 | 0 |
-| `events` | 2 | 2 |
-| `events/day_timeline/columns` | 1 | 1 |
-| `events/days` | 1 | 1 |
 | `filters/settings_refreshes` | 1 | 0 |
 | `landings` | 1 | 0 |
 | `my/menus` | 1 | 0 |
@@ -40,12 +36,10 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `signups` | 2 | 1 |
 | `signups/completions` | 2 | 1 |
 | `transfer_tokens` | 1 | 0 |
-| `users` | 6 | 6 |
-| `users/email_addresses` | 2 | 2 |
-| `users/events` | 1 | 1 |
 | `account/entropies` | 2 | 2 |
 | `account/exports` | 2 | 2 |
 | `account/imports` | 3 | 3 |
+| `account/join_codes` | 5 | 5 |
 | `account/settings` | 3 | 3 |
 | `activities` | 1 | 1 |
 | `boards` | 8 | 8 |
@@ -74,6 +68,9 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `columns/cards/drops/streams` | 1 | 1 |
 | `columns/left_positions` | 1 | 1 |
 | `columns/right_positions` | 1 | 1 |
+| `events` | 2 | 2 |
+| `events/day_timeline/columns` | 1 | 1 |
+| `events/days` | 1 | 1 |
 | `filters` | 2 | 2 |
 | `join_codes` | 2 | 2 |
 | `my/identities` | 1 | 1 |
@@ -97,9 +94,12 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `sessions` | 3 | 3 |
 | `sessions/magic_links` | 2 | 2 |
 | `tags` | 1 | 1 |
+| `users` | 6 | 6 |
 | `users/avatars` | 2 | 2 |
 | `users/data_exports` | 2 | 2 |
+| `users/email_addresses` | 2 | 2 |
 | `users/email_addresses/confirmations` | 2 | 2 |
+| `users/events` | 1 | 1 |
 | `users/joins` | 2 | 2 |
 | `users/roles` | 2 | 2 |
 | `users/verifications` | 2 | 2 |

@@ -34,7 +34,7 @@
       "path": "/account/join_code/edit(.:format)",
       "controller": "account/join_codes",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1651,12 +1651,20 @@
       "path": "/{account}/account/settings"
     },
     {
+      "method": "POST",
+      "path": "/{account}/account/settings"
+    },
+    {
       "method": "PUT",
       "path": "/{account}/account/settings"
     },
     {
       "method": "PATCH",
       "path": "/{account}/account/settings"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/account/entropy"
     },
     {
       "method": "PUT",
@@ -1671,6 +1679,10 @@
       "path": "/{account}/account/join_code"
     },
     {
+      "method": "POST",
+      "path": "/{account}/account/join_code"
+    },
+    {
       "method": "PUT",
       "path": "/{account}/account/join_code"
     },
@@ -1681,6 +1693,10 @@
     {
       "method": "DELETE",
       "path": "/{account}/account/join_code"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/account/join_code/edit"
     },
     {
       "method": "GET",
@@ -1711,6 +1727,10 @@
       "path": "/{account}/users/{id}"
     },
     {
+      "method": "POST",
+      "path": "/{account}/users/{id}"
+    },
+    {
       "method": "PUT",
       "path": "/{account}/users/{id}"
     },
@@ -1724,11 +1744,19 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/users/{id}/edit"
+    },
+    {
+      "method": "GET",
       "path": "/{account}/users/{id}/avatar"
     },
     {
       "method": "DELETE",
       "path": "/{account}/users/{id}/avatar"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/{id}/events"
     },
     {
       "method": "PUT",
@@ -1741,6 +1769,10 @@
     {
       "method": "POST",
       "path": "/{account}/users/{id}/email_addresses"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/{id}/email_addresses/new"
     },
     {
       "method": "GET",
@@ -1997,6 +2029,18 @@
     {
       "method": "GET",
       "path": "/{account}/activities"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/events"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/events/days"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/events/day_timeline/columns/{id}"
     },
     {
       "method": "GET",

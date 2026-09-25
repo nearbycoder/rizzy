@@ -32,7 +32,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Initial saved filter create/delete routes with per-user deduplication and Turbo Stream toggle responses.
 - Board publishing and unpublishing with unauthenticated public board and card pages.
 - Direct uploads for card images, user avatars, and uploaded image/file embeds in card descriptions and comments, with private/public blob access and cached image previews.
-- Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
+- Account settings and entropy with browser forms, people listing, invite-link and usage-limit pages, board entropy overrides, and an activity feed backed by card and comment events.
 - An account home activity timeline with Added, Updated, and Done columns, board and person filters, timezone grouping, day pagination, column detail pages, and a user activity frame.
 - Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
 - A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
