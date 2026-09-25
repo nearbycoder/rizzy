@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 136. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 138. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -25,11 +25,9 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `cards/columns` | 1 | 0 |
 | `cards/comments` | 7 | 6 |
 | `cards/comments/reactions` | 4 | 3 |
-| `cards/drafts` | 1 | 0 |
 | `cards/images` | 1 | 0 |
 | `cards/pins` | 3 | 2 |
 | `cards/previews` | 1 | 0 |
-| `cards/publishes` | 1 | 0 |
 | `cards/reactions` | 4 | 3 |
 | `cards/taggings` | 2 | 1 |
 | `cards/watches` | 3 | 2 |
@@ -72,8 +70,10 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `boards/involvements` | 2 | 2 |
 | `boards/publications` | 2 | 2 |
 | `cards/closures` | 2 | 2 |
+| `cards/drafts` | 1 | 1 |
 | `cards/goldnesses` | 2 | 2 |
 | `cards/not_nows` | 1 | 1 |
+| `cards/publishes` | 1 | 1 |
 | `cards/readings` | 4 | 4 |
 | `cards/self_assignments` | 1 | 1 |
 | `cards/triages` | 2 | 2 |

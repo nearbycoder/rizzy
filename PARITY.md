@@ -7,10 +7,10 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Account scoped routing, bearer tokens, identity, user listing and settings | ✓ | No |
 | Boards CRUD and access control | CRUD, access records, and involvement | No |
 | Columns CRUD and card listings | Named and special board column listings, position swaps, and public pages | No |
-| Cards CRUD and card numbering | JSON CRUD, explicit timestamps, and account numbering | No |
+| Cards CRUD and card numbering | JSON CRUD, browser draft creation/resumption and publication, explicit timestamps, and account numbering | No |
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
-| Full board and card HTML interface | Basic UI | No |
+| Full board and card HTML interface | Basic UI with direct board/card URLs and a draft editor | No |
 | Sign up, magic links, sessions, passkeys | Magic links, sessions, initial signup, and sign-in entry page | No |
 | Users, roles, invitations, board involvement | User listing/editing, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
@@ -45,5 +45,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 `tests/json_suffix_parity.py` compares selected collection and item `.json` URLs, a configuration route, pagination links, token denial, and board creation/deletion with an HTML Accept header. `tests/column_position_parity.py` compares left and right column moves, no-op boundary moves, and an unknown ID using disposable boards. These checks cover selected JSON paths only; format handling and column reordering in the full browser interface remain incomplete.
 
 `tests/self_assignment_parity.py` compares assignment and unassignment of the current user, including the card's returned assignee list and an unknown card response.
+
+`tests/draft_workflow_parity.py` signs in through magic links on both servers and compares browser draft creation and resumption, draft redirects, JSON editing, publication, search indexing, activity creation, and creating another draft. The Rust draft page's save/publish controls and direct board/card links were exercised in a browser. Its HTML design and interaction details are still much simpler than Fizzy's, and its cookie writes do not yet implement Fizzy's CSRF protection.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

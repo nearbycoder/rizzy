@@ -1500,6 +1500,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .patch(update_card)
                 .delete(delete_card),
         )
+        .route("/{account}/cards/{number}/draft", get(show_draft))
+        .route("/{account}/cards/{number}/publish", post(publish_card))
         .route(
             "/{account}/cards/{number}/closure",
             post(close_card).delete(open_card),
@@ -3017,10 +3019,13 @@ async fn show_board(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let r = board(&app, &p, &id).await?;
-    Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?))
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok(Html(include_str!("../static/index.html")).into_response());
+    }
+    Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
 }
 async fn list_board_accesses(
     State(app): Shared,
@@ -5077,20 +5082,38 @@ async fn show_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let c = card(&app, &p, &number).await?;
-    Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?))
+    if c.get::<String, _>("status") == "drafted" {
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/{account}/cards/{number}/draft", base(&headers)),
+            )],
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok(Html(include_str!("../static/index.html")).into_response());
+    }
+    Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
 }
 async fn create_card(
     State(app): Shared,
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     board(&app, &p, &board_id).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return create_or_resume_draft(&app, &p, &account, &board_id, &headers, false).await;
+    }
+    let body: Value =
+        serde_json::from_slice(&body).map_err(|_| err(StatusCode::BAD_REQUEST, "Invalid JSON"))?;
     let v = nested(&body, "card");
     let title = string(v, "title")
         .filter(|s| !s.trim().is_empty())
@@ -5151,6 +5174,218 @@ async fn create_card(
         card_json(&app, &p, &c, &base(&headers), true).await?,
     ))
 }
+async fn create_or_resume_draft(
+    app: &App,
+    p: &Principal,
+    account: &str,
+    board_id: &str,
+    headers: &HeaderMap,
+    force_new: bool,
+) -> Result<Response> {
+    let _guard = app.write_lock.lock().await;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let existing: Option<i64> = if force_new {
+        None
+    } else {
+        sqlx::query_scalar(
+            "SELECT number FROM cards WHERE board_id=? AND creator_id=? AND status='drafted' ORDER BY created_at,id LIMIT 1",
+        )
+        .bind(board_id)
+        .bind(&p.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+    };
+    let timestamp = now();
+    let number = if let Some(number) = existing {
+        sqlx::query("UPDATE cards SET created_at=?,updated_at=?,last_active_at=? WHERE account_id=? AND number=?")
+            .bind(&timestamp).bind(&timestamp).bind(&timestamp).bind(&p.account_id).bind(number)
+            .execute(&mut *tx).await.map_err(db_err)?;
+        number
+    } else {
+        let number: i64 = sqlx::query_scalar(
+            "UPDATE accounts SET cards_count=cards_count+1 WHERE id=? RETURNING cards_count",
+        )
+        .bind(&p.account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        let card_id = id();
+        sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,status,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,'','','drafted',?,?,?)")
+            .bind(&card_id).bind(&p.account_id).bind(board_id).bind(&p.user_id).bind(number)
+            .bind(&timestamp).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
+            .bind(card_id)
+            .bind(&p.user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        number
+    };
+    tx.commit().await.map_err(db_err)?;
+    Ok((
+        StatusCode::FOUND,
+        [(
+            header::LOCATION,
+            format!("{}/{account}/cards/{number}/draft", base(headers)),
+        )],
+    )
+        .into_response())
+}
+
+async fn show_draft(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let c = card(&app, &p, &number).await?;
+    if c.get::<String, _>("status") != "drafted" {
+        return Ok((
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/{account}/cards/{number}", base(&headers)),
+            )],
+        )
+            .into_response());
+    }
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok((
+            StatusCode::NOT_ACCEPTABLE,
+            Json(json!({"status":406,"error":"Not Acceptable"})),
+        )
+            .into_response());
+    }
+    let title = escape(&c.get::<String, _>("title"));
+    let description = escape(&c.get::<String, _>("description"));
+    let board_id: String = c.get("board_id");
+    let board_name = escape(&board(&app, &p, &board_id).await?.get::<String, _>("name"));
+    let creator_name: String = sqlx::query_scalar("SELECT name FROM users WHERE id=?")
+        .bind(c.get::<String, _>("creator_id"))
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let creator_name = escape(&creator_name);
+    let html = format!(
+        r##"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>New card | Rizzy</title>
+<style>
+:root{{font:16px/1.5 system-ui,sans-serif;background:#1b1b1b;color:#f5f0e8}}
+*{{box-sizing:border-box}}body{{margin:0}}a{{color:inherit}}button,textarea{{font:inherit}}
+.skip{{position:absolute;left:-9999px}}.skip:focus{{left:16px;top:12px;z-index:10}}
+header{{height:70px;display:flex;align-items:center;padding:0 max(20px,4vw);border-bottom:1px solid #383735}}
+header a{{font-size:29px;font-weight:800;letter-spacing:-.055em;text-decoration:none}}
+main{{width:min(900px,calc(100% - 32px));margin:36px auto 70px}}
+nav a{{color:#d6c9b5;text-decoration:none;font-weight:650}}nav a:hover{{text-decoration:underline}}
+.card-perma{{margin-top:24px;background:#292826;border:1px solid #46433d;border-radius:18px;box-shadow:0 14px 40px #0005;overflow:hidden}}
+.card-head{{padding:18px 28px 15px;border-bottom:1px solid #45433e;color:#bbb5aa;font-size:14px}}
+.card-head strong{{display:block;color:#f5f0e8;font-size:16px;margin-top:4px}}
+.card-body{{padding:24px 28px 28px}}label{{display:block;color:#bdb7ac;font-size:14px;font-weight:600;margin:0 0 22px}}
+textarea{{display:block;resize:vertical;width:100%;margin-top:8px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px;outline:none}}
+textarea:focus{{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}}
+#title{{min-height:58px;font-size:25px;font-weight:750;line-height:1.3}}#description{{min-height:180px}}
+.card-foot{{padding:18px 28px;background:#242320;border-top:1px solid #45433e;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}}
+.byline{{color:#afa89d;font-size:14px}}.actions{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
+button{{border:1px solid #d5a94c;background:#e7bd61;color:#201b12;border-radius:9px;padding:9px 15px;font-weight:700;cursor:pointer}}
+button:hover{{background:#f0ca77}}button.secondary{{border-color:#666158;background:#393733;color:#f6f0e8}}button.secondary:hover{{background:#4a463f}}
+form{{display:inline}}@media(max-width:600px){{main{{margin-top:22px}}.card-body,.card-head,.card-foot{{padding-left:18px;padding-right:18px}}}}
+</style></head>
+<body><a class="skip" href="#main">Skip to main content</a><header><a href="/">Rizzy</a></header>
+<main id="main"><nav><a href="/{account}/boards/{board_id}">← Back to {board_name}</a></nav>
+<article class="card-perma card-perma--draft"><div class="card-head">Card number {number}<strong>{board_name}</strong></div>
+<div class="card-body"><label>Name it<textarea id="title" maxlength="255" placeholder="Name it…">{title}</textarea></label>
+<label>Add some notes, context, pictures, or video<textarea id="description" placeholder="Add some notes, context, pictures, or video about this…">{description}</textarea></label></div>
+<div class="card-foot"><span class="byline">Drafted · By {creator_name}</span><div class="actions">
+<button id="save" type="button" class="secondary">Save draft</button>
+<form action="/{account}/cards/{number}/publish" method="post"><button type="submit">Create card</button></form>
+<form action="/{account}/cards/{number}/publish" method="post"><input type="hidden" name="creation_type" value="add_another"><button type="submit" class="secondary">Create and add another</button></form>
+</div></div></article></main>
+<script>
+async function saveDraft() {{
+  const response = await fetch('/{account}/cards/{number}', {{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{card:{{title:document.getElementById('title').value,description:document.getElementById('description').value}}}})}});
+  if (!response.ok) {{ alert('Could not save draft'); return false; }}
+  return true;
+}}
+document.getElementById('save').onclick = saveDraft;
+document.querySelectorAll('form').forEach(form => form.addEventListener('submit', async event => {{
+  event.preventDefault();
+  if (await saveDraft()) form.submit();
+}}));
+</script></body></html>"##
+    );
+    Ok(Html(html).into_response())
+}
+
+async fn publish_card(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let c = card(&app, &p, &number).await?;
+    let board_id: String = c.get("board_id");
+    let card_id: String = c.get("id");
+    let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("UPDATE cards SET status='published',title=CASE WHEN trim(title)='' THEN 'Untitled' ELSE title END,created_at=?,updated_at=? WHERE id=?")
+        .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
+    let event_id = id();
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")
+        .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&card_id).bind(&p.user_id)
+        .bind(&card_id).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    queue_webhooks(
+        &mut tx,
+        &p.account_id,
+        &board_id,
+        &event_id,
+        "card_published",
+        &timestamp,
+    )
+    .await?;
+    queue_notifications(
+        &mut tx,
+        &p,
+        &board_id,
+        &card_id,
+        &event_id,
+        "Card",
+        "card_published",
+        &json!({}),
+        &timestamp,
+    )
+    .await?;
+    tx.commit().await.map_err(db_err)?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(StatusCode::CREATED.into_response());
+    }
+    let add_another = url::form_urlencoded::parse(&body)
+        .any(|(key, value)| key == "creation_type" && value == "add_another");
+    if add_another {
+        return create_new_draft(&app, &p, &account, &board_id, &headers).await;
+    }
+    Ok((
+        StatusCode::FOUND,
+        [(
+            header::LOCATION,
+            format!("{}/{account}/boards/{board_id}", base(&headers)),
+        )],
+    )
+        .into_response())
+}
+
+async fn create_new_draft(
+    app: &App,
+    p: &Principal,
+    account: &str,
+    board_id: &str,
+    headers: &HeaderMap,
+) -> Result<Response> {
+    // Publishing with "add another" creates a fresh draft even if one remains.
+    create_or_resume_draft(app, p, account, board_id, headers, true).await
+}
 async fn update_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
@@ -5161,17 +5396,16 @@ async fn update_card(
     p.write()?;
     let c = card(&app, &p, &number).await?;
     let v = nested(&body, "card");
-    let title = string(v, "title").unwrap_or_else(|| c.get("title"));
+    let mut title = string(v, "title").unwrap_or_else(|| c.get("title"));
     let old_title: String = c.get("title");
-    let old_status: String = c.get("status");
+    let status: String = c.get("status");
+    if status == "published" && title.trim().is_empty() {
+        title = "Untitled".into();
+    }
     let description = string(v, "description").unwrap_or_else(|| c.get("description"));
-    let status = string(v, "status").unwrap_or_else(|| c.get("status"));
     let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
     let custom_last_active_at = timestamp_param(v, "last_active_at")?;
     let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
-    if !["drafted", "published"].contains(&status.as_str()) {
-        return Err(bad("invalid status"));
-    }
     sqlx::query(
         "UPDATE cards SET title=?,description=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
     )
@@ -5185,7 +5419,7 @@ async fn update_card(
     .execute(&app.db)
     .await
     .map_err(db_err)?;
-    if title != old_title && !old_title.is_empty() {
+    if status == "published" && title != old_title && !old_title.is_empty() {
         record_event(
             &app,
             &p,
@@ -5207,19 +5441,6 @@ async fn update_card(
                 escape(&old_title),
                 escape(&title)
             ),
-        )
-        .await?;
-    }
-    if old_status == "drafted" && status == "published" {
-        record_event(
-            &app,
-            &p,
-            &c.get::<String, _>("board_id"),
-            &c.get::<String, _>("id"),
-            "Card",
-            &c.get::<String, _>("id"),
-            "card_published",
-            json!({}),
         )
         .await?;
     }

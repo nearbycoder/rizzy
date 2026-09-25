@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise saved and ad hoc card filters, FTS terms, and closure windows."""
 import os
+import hashlib
 import re
 import sqlite3
 import subprocess
@@ -21,6 +22,10 @@ def main():
         seed = subprocess.run([BINARY, "seed"], cwd=ROOT, env=env, capture_output=True, text=True, check=True)
         account = re.search(r"Account: (\d+)", seed.stdout).group(1)
         token = re.search(r"Bearer token: (\w+)", seed.stdout).group(1)
+        with sqlite3.connect(database) as db:
+            owner_identity = db.execute("SELECT identity_id FROM users WHERE role='owner'").fetchone()[0]
+            db.execute("INSERT INTO sessions(id,identity_id,token_hash,signup_pending,created_at) VALUES('filter-results-session',?,?,0,'2026-01-01T00:00:00Z')",
+                       (owner_identity, hashlib.sha256(b'filter-results-cookie').hexdigest()))
         port, server = start(env)
         try:
             board, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "Filter results"}}, bearer=token, status=201)
@@ -49,7 +54,7 @@ def main():
             assert titles({"closer_ids[]": [owner_id]}) == {"haggis neeps"}
             assert titles({"indexed_by": "closed"}) == {"haggis neeps"}
             assert titles({"indexed_by": "draft"}) == set()
-            turbo(port, f"/{account}/filters", token, params={"indexed_by": "closed", "board_ids[]": [board["id"]], "terms[]": ["haggis"]})
+            turbo(port, f"/{account}/filters", "filter-results-cookie", params={"indexed_by": "closed", "board_ids[]": [board["id"]], "terms[]": ["haggis"]})
             with sqlite3.connect(database) as db:
                 filter_id = db.execute("SELECT id FROM filters").fetchone()[0]
             assert titles({"filter_id": filter_id}) == {"haggis neeps"}

@@ -13,6 +13,8 @@
 const app=document.querySelector('#app'); const dlg=document.querySelector('#detail');
 let slug=localStorage.getItem('rizzyAccount')||'';let token=localStorage.getItem('rizzyToken')||'';
 let currentBoard=null;
+let deepLinkBoard=location.pathname.match(/^\/\d+\/boards\/([^/]+)$/)?.[1]||null;
+let deepLinkCard=location.pathname.match(/^\/\d+\/cards\/(\d+)$/)?.[1]||null;
 function node(tag,attrs={},children=[]){const el=document.createElement(tag);for(const [k,v] of Object.entries(attrs)){if(k==='text')el.textContent=v;else if(k==='onclick')el.addEventListener('click',v);else el.setAttribute(k,v)}for(const c of children)el.append(c);return el}
 async function request(path,method='GET',body){const headers={'Content-Type':'application/json',Accept:'application/json'};if(token)headers.Authorization='Bearer '+token;const r=await fetch(path,{method,headers,credentials:'same-origin',body:body?JSON.stringify(body):undefined});if(!r.ok){let d={};try{d=await r.json()}catch{}throw Error(d.message||r.statusText)}return r}
 async function api(path,method='GET',body){const r=await request('/'+slug+path,method,body);return r.status===204?null:r.json()}
@@ -23,7 +25,24 @@ function codeLogin(email,devCode){app.replaceChildren(node('section',{class:'log
 function signup(){app.replaceChildren(node('section',{class:'login'},[node('h1',{text:'Welcome to Rizzy'}),node('p',{class:'muted',text:'Add your name to create your account.'}),node('form',{},[node('label',{text:'Full name'}),node('input',{name:'name',autocomplete:'name',required:''}),node('button',{text:'Create account',type:'submit'})])]));app.querySelector('form').onsubmit=async e=>{e.preventDefault();try{await request('/signup/completion','POST',{signup:{full_name:new FormData(e.target).get('name')}});signedIn()}catch(x){error(x)}}}
 function tokenLogin(){app.replaceChildren(node('section',{class:'login'},[node('h1',{text:'Connect with API token'}),node('form',{},[node('label',{text:'Account number'}),node('input',{name:'account',value:slug,required:''}),node('label',{text:'Bearer token'}),node('input',{name:'token',required:'',type:'password'}),node('button',{text:'Open boards',type:'submit'})]),node('button',{class:'text-button',text:'Sign in with email',onclick:login})]));app.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);slug=f.get('account');token=f.get('token');try{await api('/boards');localStorage.setItem('rizzyAccount',slug);localStorage.setItem('rizzyToken',token);boards()}catch(x){error(x)}}}
 async function signedIn(){try{const identity=await(await request('/my/identity')).json();if(!identity.accounts.length){signup();return}const chosen=identity.accounts.find(a=>a.slug.slice(1)===slug);if(identity.accounts.length>1&&!chosen){app.replaceChildren(node('section',{class:'login'},[node('h1',{text:'Choose an account'}),...identity.accounts.map(a=>node('button',{text:a.name,onclick:()=>{slug=a.slug.slice(1);localStorage.setItem('rizzyAccount',slug);boards()}}))]));return}slug=(chosen||identity.accounts[0]).slug.slice(1);localStorage.setItem('rizzyAccount',slug);boards()}catch(e){login()}}
-async function boards(){try{const data=await allPages('/boards');document.querySelector('#logout').style.display='block';app.replaceChildren(node('div',{class:'top'},[node('h1',{text:'Boards'}),node('button',{text:'New board',onclick:async()=>{const name=prompt('Board name');if(name){try{await api('/boards','POST',{board:{name}});boards()}catch(e){error(e)}}}})]),node('div',{class:'boards'},data.map(b=>node('div',{class:'boardlink',text:b.name,onclick:()=>openBoard(b)}))))}catch(e){login();error(e)}}
+async function boards(){
+  try{
+    const data=await allPages('/boards');
+    document.querySelector('#logout').style.display='block';
+    app.replaceChildren(node('div',{class:'top'},[node('h1',{text:'Boards'}),node('button',{text:'New board',onclick:async()=>{const name=prompt('Board name');if(name){try{await api('/boards','POST',{board:{name}});boards()}catch(e){error(e)}}}})]),node('div',{class:'boards'},data.map(b=>node('div',{class:'boardlink',text:b.name,onclick:()=>openBoard(b)}))));
+    if(deepLinkBoard){
+      const board=data.find(b=>b.id===deepLinkBoard);
+      deepLinkBoard=null;
+      if(board) await openBoard(board);
+    }
+    if(deepLinkCard){
+      const card=await api('/cards/'+deepLinkCard);
+      deepLinkCard=null;
+      await openBoard(card.board);
+      await showCard(card);
+    }
+  }catch(e){login();error(e)}
+}
 async function openBoard(b){currentBoard=b;try{const [columns,mine]=await Promise.all([api('/boards/'+b.id+'/columns'),allPages('/cards?board_ids%5B%5D='+encodeURIComponent(b.id))]);const groups=[{id:null,name:'Maybe?',color:'var(--color-card-default)'},...columns,{id:'done',name:'Done'}];app.replaceChildren(node('div',{class:'top'},[node('h1',{text:b.name}),node('button',{text:'All boards',onclick:boards})]),node('div',{class:'columns'},groups.map(col=>{const list=mine.filter(c=>col.id==='done'?c.closed:col.id===null?!c.column&&!c.closed&&!c.postponed:c.column?.id===col.id&&!c.closed);const box=node('section',{class:'column'},[node('h2',{text:col.name+'  '+list.length}),...list.map(c=>node('div',{class:'card',onclick:()=>showCard(c)},[node('strong',{text:c.title}),node('small',{text:'#'+c.number})]))]);if(col.id===null)box.append(node('form',{class:'form'},[node('input',{name:'title',placeholder:'New card title',required:''}),node('button',{text:'Add',type:'submit'})]));if(col.id===null)box.querySelector('form').onsubmit=async e=>{e.preventDefault();const title=new FormData(e.target).get('title');try{await api('/boards/'+b.id+'/cards','POST',{card:{title}});openBoard(b)}catch(x){error(x)}};return box})),node('button',{text:'Add column',onclick:async()=>{const name=prompt('Column name');if(name){try{await api('/boards/'+b.id+'/columns','POST',{column:{name}});openBoard(b)}catch(e){error(e)}}}}))}catch(e){error(e)}}
 async function showCard(card){try{const c=await api('/cards/'+card.number);const body=document.querySelector('#detail-body');body.replaceChildren(node('h1',{text:c.title}),node('p',{class:'muted',text:'#'+c.number+' · '+c.board.name}),node('p',{text:c.description||'No description yet'}),node('textarea',{placeholder:'Description'}),node('button',{text:'Save description',onclick:async()=>{try{await api('/cards/'+c.number,'PUT',{card:{description:body.querySelector('textarea').value}});dlg.close();openBoard(currentBoard)}catch(e){alert(e.message)}}}),node('button',{text:c.closed?'Reopen':'Mark done',onclick:async()=>{try{await api('/cards/'+c.number+'/closure',c.closed?'DELETE':'POST');dlg.close();openBoard(currentBoard)}catch(e){alert(e.message)}}}));body.querySelector('textarea').value=c.description;dlg.showModal()}catch(e){error(e)}}
 document.querySelector('#logout').onclick=async()=>{try{await request('/session','DELETE')}catch{}localStorage.removeItem('rizzyToken');token='';login()};signedIn();

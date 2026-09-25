@@ -573,7 +573,7 @@
       "path": "/cards/:card_id/draft(.:format)",
       "controller": "cards/drafts",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -671,7 +671,7 @@
       "path": "/cards/:card_id/publish(.:format)",
       "controller": "cards/publishes",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -1901,6 +1901,14 @@
     {
       "method": "DELETE",
       "path": "/{account}/cards/{number}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/draft"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/cards/{number}/publish"
     },
     {
       "method": "POST",
