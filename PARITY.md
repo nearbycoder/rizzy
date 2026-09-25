@@ -11,7 +11,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
 | Full board and card HTML interface | Rust-rendered board columns with immediate Maybe cards and lazy loading for other columns, board-level filtered card grid and pagination, drag and drop, draft navigation, and column creation; published card page with rich description, steps, comments, edit, comment, watch, pin, and completion controls; Lexxy draft and card editors | No |
-| Sign up, magic links, sessions, passkeys | Magic links, sessions, initial signup, and browser email/code entry | No |
+| Sign up, magic links, sessions, passkeys | Magic links, sessions, browser email/code entry, and signup/completion forms | No |
 | Users, roles, invitations, board involvement | JSON users, browser profile and name edit, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
 | Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pins, watches | No |
@@ -64,7 +64,9 @@ The board HTML now switches to a filtered grid when Fizzy's filter-active condit
 
 `tests/access_token_html_parity.py` compares the profile link, personal access token index, new form, browser creation redirect, short-lived reveal, list without the secret, and browser revocation against live Fizzy. It also verifies that a revealed read token works and stops working after revocation. Rust retains token hashes for authorization; a separate reveal record holds the new token for ten seconds, is bound to the creating identity, and is removed after expiry. The page styling remains simpler than Fizzy's.
 
-`tests/session_html.py` checks the local browser form flow from email entry through a development magic code to the board landing page. The same flow was exercised in Chromium without console errors. JSON session requests remain supported. Signup completion and passkey presentation are still incomplete.
+`tests/session_html.py` checks the local browser form flow from email entry through a development magic code to the board landing page. The same flow was exercised in Chromium without console errors. JSON session requests remain supported. The sign-in pages still have simplified styling, and passkey presentation remains absent.
+
+`tests/signup_html.py` checks the browser signup route, sign-in page link, email form, magic-code redirect, completion form validation, account creation, and landing redirect on a fresh Rust database. The pinned source's targeted signup, completion, and magic-link controller tests passed (23 runs, 94 assertions); the live production source remains in single-tenant mode, so this new browser flow has not yet been compared end to end against a multi-tenant Fizzy server. `tests/auth.py` also checks that an authenticated identity can create another account through completion, as the source controller permits. Rizzy's signup layout and initial account seeding remain simpler than Fizzy's.
 
 `tests/json_suffix_parity.py` compares selected collection and item `.json` URLs, a configuration route, pagination links, token denial, and board creation/deletion with an HTML Accept header. `tests/column_position_parity.py` compares left and right column moves, no-op boundary moves, and an unknown ID using disposable boards. These checks cover selected JSON paths only; format handling and column reordering in the full browser interface remain incomplete.
 

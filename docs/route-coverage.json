@@ -1238,7 +1238,7 @@
       "path": "/signup/completion/new(.:format)",
       "controller": "signups/completions",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1252,7 +1252,7 @@
       "path": "/signup/new(.:format)",
       "controller": "signups",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1515,12 +1515,24 @@
       "path": "/session/magic_link"
     },
     {
-      "method": "POST",
+      "method": "GET",
       "path": "/signup"
     },
     {
       "method": "POST",
+      "path": "/signup"
+    },
+    {
+      "method": "GET",
+      "path": "/signup/new"
+    },
+    {
+      "method": "POST",
       "path": "/signup/completion"
+    },
+    {
+      "method": "GET",
+      "path": "/signup/completion/new"
     },
     {
       "method": "GET",

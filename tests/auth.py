@@ -123,13 +123,17 @@ def main():
             session = cookie(headers, "session_token")
             identity, _ = call(port, "/my/identity", cookies=[session])
             assert identity["accounts"] == []
+            invalid, _ = call(port, "/signup/completion", "POST", {"signup": {"full_name": ""}}, [session], 422)
+            assert invalid == {"errors": ["Full name can't be blank"]}
             call(port, "/signup/completion", "POST", {"signup": {"full_name": "New Owner"}}, [session], 201)
             identity, _ = call(port, "/my/identity", cookies=[session])
             assert len(identity["accounts"]) == 1
             assert identity["accounts"][0]["user"]["name"] == "New Owner"
             join_code, _ = call(port, identity["accounts"][0]["slug"] + "/account/join_code", cookies=[session])
             assert join_code["active"] and join_code["usage_count"] == 0
-            call(port, "/signup/completion", "POST", {"signup": {"full_name": "Again"}}, [session], 403)
+            call(port, "/signup/completion", "POST", {"signup": {"full_name": "Again"}}, [session], 201)
+            identity, _ = call(port, "/my/identity", cookies=[session])
+            assert len(identity["accounts"]) == 2
             call(port, "/session", "DELETE", cookies=[session], status=204)
             _, headers = call(port, "/signup", "POST", {"signup": {"email_address": "new@example.com"}}, status=201)
             second_pending = cookie(headers, "pending_authentication_token")
@@ -139,7 +143,7 @@ def main():
             second_session = cookie(headers, "session_token")
             call(port, "/signup/completion", "POST", {"signup": {"full_name": "New Owner"}}, [second_session], 201)
             identity, _ = call(port, "/my/identity", cookies=[second_session])
-            assert len(identity["accounts"]) == 2
+            assert len(identity["accounts"]) == 3
         finally:
             stop(server)
     print("Auth passed: sign-in, code consumption, isolation, sign-out, signup")

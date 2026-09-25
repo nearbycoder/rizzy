@@ -41,6 +41,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod rich_text;
+mod signup_page;
 mod storage;
 mod user_page;
 
@@ -1558,8 +1559,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/session/new", get(new_session))
         .route("/session/menu", get(account_cancellation::menu))
         .route("/session/magic_link", get(show_magic_link).post(complete_magic_link))
-        .route("/signup", post(request_signup))
+        .route("/signup", get(|| async { (StatusCode::FOUND,[(header::LOCATION,"/signup/new")]) }).post(request_signup))
+        .route("/signup/new", get(new_signup))
         .route("/signup/completion", post(complete_signup))
+        .route("/signup/completion/new", get(new_signup_completion))
         .route("/my/identity", get(my_identity))
         .route("/account/imports/new", get(imports::new))
         .route("/account/imports", post(imports::create).layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)))
@@ -2304,17 +2307,77 @@ async fn show_magic_link(State(app): Shared, headers: HeaderMap) -> Result<Respo
     };
     Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Check your email | Rizzy</title></head><body><main><h1>Check your email</h1><p>Enter the verification code sent to <strong>{}</strong>.</p><form method=\"post\" action=\"/session/magic_link\"><label>Verification code<input name=\"code\" autocomplete=\"one-time-code\" maxlength=\"6\" required autofocus></label><button type=\"submit\">Continue</button></form>{code_hint}</main></body></html>",escape(&email))).into_response())
 }
+async fn new_signup(State(app): Shared, headers: HeaderMap) -> Result<Response> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    if identity_auth(&app, &headers).await.is_ok() {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, "/signup/completion/new")],
+        )
+            .into_response());
+    }
+    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    if accounts > 0 && env::var("RIZZY_MULTI_TENANT").as_deref() != Ok("1") {
+        return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
+    }
+    Ok(signup_page::new().into_response())
+}
+async fn new_signup_completion(State(app): Shared, headers: HeaderMap) -> Result<Response> {
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    identity_auth(&app, &headers).await?;
+    Ok(signup_page::completion(None).into_response())
+}
 async fn request_signup(
     State(app): Shared,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     if identity_auth(&app, &headers).await.is_ok() {
-        return Err(err(StatusCode::FORBIDDEN, "Already signed in"));
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, "/signup/completion/new")],
+        )
+            .into_response());
     }
-    let email = required(nested(&body, "signup"), "email_address")?;
-    request_magic_link_inner(&app, peer, headers, json!({"email_address":email}), true).await
+    let (body, form) = session_body(&headers, &body)?;
+    let email = if form {
+        string(&body, "signup[email_address]").unwrap_or_default()
+    } else {
+        required(nested(&body, "signup"), "email_address")?
+    };
+    if !valid_email(&email) {
+        return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response());
+    }
+    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    if accounts > 0 && env::var("RIZZY_MULTI_TENANT").as_deref() != Ok("1") {
+        return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
+    }
+    let mut response =
+        request_magic_link_inner(&app, peer, headers, json!({"email_address":email}), true).await?;
+    if form {
+        *response.status_mut() = StatusCode::FOUND;
+        response.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_static("/session/magic_link"),
+        );
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        *response.body_mut() = Body::empty();
+    }
+    Ok(response)
 }
 async fn request_magic_link_inner(
     app: &App,
@@ -2532,7 +2595,11 @@ async fn complete_magic_link(
     );
     if form {
         *response.status_mut() = StatusCode::FOUND;
-        let destination = join_return_to(&headers).unwrap_or_else(|| "/".into());
+        let destination = if purpose == "sign_up" {
+            "/signup/completion/new".into()
+        } else {
+            join_return_to(&headers).unwrap_or_else(|| "/".into())
+        };
         response.headers_mut().insert(
             header::LOCATION,
             HeaderValue::from_str(&destination).expect("safe join destination"),
@@ -2575,47 +2642,48 @@ async fn logout_session(State(app): Shared, headers: HeaderMap) -> Result<Respon
     );
     Ok(response)
 }
-async fn complete_signup(
-    State(app): Shared,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
-    let token = cookie_value(&headers, "session_token")
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
-    let session = sqlx::query("SELECT identity_id,signup_pending FROM sessions WHERE token_hash=?")
-        .bind(hash(&token))
-        .fetch_optional(&app.db)
-        .await
-        .map_err(db_err)?
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
-    if session.get::<i64, _>("signup_pending") == 0 {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Signup completion is not pending",
-        ));
+async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) -> Result<Response> {
+    let (identity_id, permission) = identity_auth(&app, &headers).await?;
+    if permission != "write" {
+        return Err(err(StatusCode::FORBIDDEN, "Write permission required"));
     }
-    let name = required(nested(&body, "signup"), "full_name")?;
-    if name.chars().count() > 240 {
-        return Err(bad("full_name is too long"));
+    let (body, form) = session_body(&headers, &body)?;
+    let name = if form {
+        string(&body, "signup[full_name]").unwrap_or_default()
+    } else {
+        string(nested(&body, "signup"), "full_name").unwrap_or_default()
+    };
+    let validation_error = if name.trim().is_empty() {
+        Some("Full name can't be blank")
+    } else if name.chars().count() > 240 {
+        Some("Full name is too long (maximum is 240 characters)")
+    } else {
+        None
+    };
+    if let Some(message) = validation_error {
+        return Ok(if form {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                signup_page::completion(Some(message)),
+            )
+                .into_response()
+        } else {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"errors":[message]})),
+            )
+                .into_response()
+        });
     }
     let _writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let identity_id: String = session.get("identity_id");
-    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    if accounts > 0 && env::var("RIZZY_MULTI_TENANT").as_deref() != Ok("1") {
-        return Err(err(StatusCode::FORBIDDEN, "Signup is closed"));
-    }
-    let consumed =
-        sqlx::query("UPDATE sessions SET signup_pending=0 WHERE token_hash=? AND signup_pending=1")
+    if let Some(token) = cookie_value(&headers, "session_token") {
+        sqlx::query("UPDATE sessions SET signup_pending=0 WHERE token_hash=? AND identity_id=?")
             .bind(hash(&token))
+            .bind(&identity_id)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-    if consumed.rows_affected() == 0 {
-        return Err(err(StatusCode::FORBIDDEN, "Signup is already complete"));
     }
     let slug: i64 =
         sqlx::query_scalar("SELECT COALESCE(MAX(external_account_id),0)+1 FROM accounts")
@@ -2654,7 +2722,15 @@ async fn complete_signup(
         .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
-    Ok(StatusCode::CREATED)
+    Ok(if form {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{slug}/landing"))],
+        )
+            .into_response()
+    } else {
+        StatusCode::CREATED.into_response()
+    })
 }
 
 async fn identity_auth(app: &App, headers: &HeaderMap) -> Result<(String, String)> {
@@ -2694,22 +2770,31 @@ async fn identity_auth(app: &App, headers: &HeaderMap) -> Result<(String, String
     }
     Ok((r.get("identity_id"), r.get("permission")))
 }
-async fn new_session(headers: HeaderMap) -> Response {
+async fn new_session(State(app): Shared, headers: HeaderMap) -> Result<Response> {
     let accept = headers
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     if accept.contains("application/json") {
-        return (
+        return Ok((
             StatusCode::NOT_ACCEPTABLE,
             Json(json!({"status":406,"error":"Not Acceptable"})),
         )
-            .into_response();
+            .into_response());
     }
     if accept.contains("text/vnd.turbo-stream.html") {
-        return StatusCode::NOT_ACCEPTABLE.into_response();
+        return Ok(StatusCode::NOT_ACCEPTABLE.into_response());
     }
-    Html("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enter your email | Rizzy</title></head><body><main><h1>Get into Rizzy</h1><form method=\"post\" action=\"/session\"><label>Enter your email address<input type=\"email\" name=\"email_address\" autocomplete=\"username webauthn\" required autofocus></label><button type=\"submit\">Let's go</button></form></main></body></html>").into_response()
+    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let signup_link = if accounts == 0 || env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1") {
+        "<p><strong>New here?</strong> <a href=\"/signup/new\">Sign up</a> to create an account.</p>"
+    } else {
+        ""
+    };
+    Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enter your email | Rizzy</title></head><body><main><h1>Get into Rizzy</h1><form method=\"post\" action=\"/session\"><label>Enter your email address<input type=\"email\" name=\"email_address\" autocomplete=\"username webauthn\" required autofocus></label><button type=\"submit\">Let's go</button></form>{signup_link}</main></body></html>")).into_response())
 }
 async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
     let mut parts = uri.path().trim_start_matches('/').split('/');
