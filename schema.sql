@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS cards (
   description TEXT NOT NULL DEFAULT '',
   search_text TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'published',
+  due_on TEXT,
   closed INTEGER NOT NULL DEFAULT 0,
   postponed INTEGER NOT NULL DEFAULT 0,
   golden INTEGER NOT NULL DEFAULT 0,
@@ -168,6 +169,7 @@ CREATE TABLE IF NOT EXISTS storage_blobs (
   content_type TEXT NOT NULL,
   byte_size INTEGER NOT NULL,
   checksum TEXT NOT NULL,
+  metadata TEXT NOT NULL DEFAULT '{}',
   signed_id TEXT NOT NULL UNIQUE,
   attachable_sgid TEXT NOT NULL UNIQUE,
   upload_token_hash TEXT NOT NULL UNIQUE,
@@ -176,6 +178,13 @@ CREATE TABLE IF NOT EXISTS storage_blobs (
   width INTEGER,
   height INTEGER,
   created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS storage_variant_records (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  blob_id TEXT NOT NULL REFERENCES storage_blobs(id) ON DELETE CASCADE,
+  variation_digest TEXT NOT NULL,
+  UNIQUE(blob_id,variation_digest)
 );
 CREATE TABLE IF NOT EXISTS storage_attachments (
   id TEXT PRIMARY KEY,
@@ -281,6 +290,18 @@ CREATE TABLE IF NOT EXISTS reactions (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reactions_target ON reactions(reactable_type,reactable_id,created_at);
+CREATE TABLE IF NOT EXISTS mentions (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  mentionee_id TEXT NOT NULL REFERENCES users(id),
+  mentioner_id TEXT NOT NULL REFERENCES users(id),
+  source_type TEXT NOT NULL CHECK(source_type IN ('Card','Comment')),
+  source_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mentions_source ON mentions(source_type,source_id);
+CREATE INDEX IF NOT EXISTS mentions_mentionee ON mentions(mentionee_id);
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
@@ -302,7 +323,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   creator_id TEXT NOT NULL REFERENCES users(id),
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-  source_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
   source_type TEXT NOT NULL DEFAULT 'Event',
   unread_count INTEGER NOT NULL DEFAULT 1,
   read_at TEXT,
@@ -311,6 +332,29 @@ CREATE TABLE IF NOT EXISTS notifications (
   UNIQUE(user_id,card_id)
 );
 CREATE INDEX IF NOT EXISTS notifications_user_read ON notifications(user_id,read_at,updated_at DESC);
+CREATE TRIGGER IF NOT EXISTS notifications_event_delete AFTER DELETE ON events BEGIN
+  DELETE FROM notifications WHERE source_type='Event' AND source_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS notifications_mention_delete AFTER DELETE ON mentions BEGIN
+  DELETE FROM notifications WHERE source_type='Mention' AND source_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS mentions_card_delete AFTER DELETE ON cards BEGIN
+  DELETE FROM mentions WHERE source_type='Card' AND source_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS mentions_comment_delete AFTER DELETE ON comments BEGIN
+  DELETE FROM mentions WHERE source_type='Comment' AND source_id=OLD.id;
+END;
+CREATE TABLE IF NOT EXISTS notification_bundles (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  starts_at TEXT NOT NULL,
+  ends_at TEXT NOT NULL,
+  status INTEGER NOT NULL DEFAULT 0 CHECK(status IN (0,1,2)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notification_bundles_due ON notification_bundles(status,ends_at);
 CREATE TABLE IF NOT EXISTS notification_settings (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

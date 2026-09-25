@@ -277,12 +277,15 @@ fn load_archive(path: &PathBuf) -> ImportResult<Archive> {
                 | "watches"
                 | "pins"
                 | "reactions"
+                | "mentions"
                 | "filters"
                 | "webhook_delinquency_trackers"
                 | "events"
                 | "notifications"
+                | "notification_bundles"
                 | "webhook_deliveries"
                 | "active_storage_blobs"
+                | "active_storage_variant_records"
                 | "active_storage_attachments"
                 | "action_text_rich_texts"
         ) {
@@ -395,6 +398,16 @@ fn validate_references(archive: &Archive) -> ImportResult<()> {
                     };
                     check(record, "reactable_id", target)?;
                 }
+                "mentions" => {
+                    check(record, "mentionee_id", "users")?;
+                    check(record, "mentioner_id", "users")?;
+                    let target = match field(record, "source_type")? {
+                        "Card" => "cards",
+                        "Comment" => "comments",
+                        _ => return Err("Unsupported mention source".into()),
+                    };
+                    check(record, "source_id", target)?;
+                }
                 "filters" => check(record, "creator_id", "users")?,
                 "webhook_delinquency_trackers" => check(record, "webhook_id", "webhooks")?,
                 "events" => {
@@ -411,11 +424,14 @@ fn validate_references(archive: &Archive) -> ImportResult<()> {
                     check(record, "user_id", "users")?;
                     check(record, "creator_id", "users")?;
                     check(record, "card_id", "cards")?;
-                    if maybe_field(record, "source_type") != Some("Event") {
-                        return Err("Unsupported notification source".into());
-                    }
-                    check(record, "source_id", "events")?;
+                    let source = match field(record, "source_type")? {
+                        "Event" => "events",
+                        "Mention" => "mentions",
+                        _ => return Err("Unsupported notification source".into()),
+                    };
+                    check(record, "source_id", source)?;
                 }
+                "notification_bundles" => check(record, "user_id", "users")?,
                 "webhook_deliveries" => {
                     check(record, "webhook_id", "webhooks")?;
                     check(record, "event_id", "events")?;
@@ -428,9 +444,13 @@ fn validate_references(archive: &Archive) -> ImportResult<()> {
                         "Card" => "cards",
                         "Comment" => "comments",
                         "ActionText::RichText" => "action_text_rich_texts",
+                        "ActiveStorage::VariantRecord" => "active_storage_variant_records",
                         _ => return Err("Unsupported attachment target".into()),
                     };
                     check(record, "record_id", target)?;
+                }
+                "active_storage_variant_records" => {
+                    check(record, "blob_id", "active_storage_blobs")?
                 }
                 "action_text_rich_texts" => {
                     let target = match field(record, "record_type")? {
@@ -474,6 +494,19 @@ fn integer(value: &Value, key: &str, default: i64) -> i64 {
 
 fn boolean(value: &Value, key: &str, default: bool) -> i64 {
     value.get(key).and_then(Value::as_bool).unwrap_or(default) as i64
+}
+
+fn bundle_status(value: &Value) -> ImportResult<i64> {
+    match value.get("status") {
+        Some(Value::String(value)) if value == "pending" => Ok(0),
+        Some(Value::String(value)) if value == "processing" => Ok(1),
+        Some(Value::String(value)) if value == "delivered" => Ok(2),
+        Some(Value::Number(value)) => value
+            .as_i64()
+            .filter(|value| (0..=2).contains(value))
+            .ok_or_else(|| "Invalid notification bundle status".into()),
+        _ => Err("Invalid notification bundle status".into()),
+    }
 }
 
 fn records<'a>(archive: &'a Archive, group: &str) -> &'a [Value] {
@@ -671,13 +704,15 @@ async fn apply_archive(
         .map_err(|e| e.to_string())?;
     }
     for card in records(&archive, "cards") {
-        if card.get("due_on").is_some_and(|value| !value.is_null()) {
-            return Err("Card due dates are not represented in Rizzy yet".into());
+        if let Some(due_on) = maybe_field(card, "due_on") {
+            chrono::NaiveDate::parse_from_str(due_on, "%Y-%m-%d")
+                .map_err(|_| "Invalid card due date")?;
         }
-        sqlx::query("INSERT INTO cards(id,account_id,board_id,column_id,creator_id,number,title,status,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO cards(id,account_id,board_id,column_id,creator_id,number,title,status,due_on,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(field(card,"id")?).bind(account_id).bind(field(card,"board_id")?)
             .bind(maybe_field(card,"column_id")).bind(field(card,"creator_id")?)
             .bind(integer(card,"number",0)).bind(field(card,"title")?).bind(field(card,"status")?)
+            .bind(maybe_field(card,"due_on"))
             .bind(field(card,"created_at")?).bind(field(card,"updated_at")?)
             .bind(field(card,"last_active_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
@@ -776,6 +811,13 @@ async fn apply_archive(
             .bind(field(reaction,"content")?).bind(field(reaction,"created_at")?)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
+    for mention in records(&archive, "mentions") {
+        sqlx::query("INSERT INTO mentions(id,account_id,mentionee_id,mentioner_id,source_type,source_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
+            .bind(field(mention,"id")?).bind(account_id).bind(field(mention,"mentionee_id")?)
+            .bind(field(mention,"mentioner_id")?).bind(field(mention,"source_type")?)
+            .bind(field(mention,"source_id")?).bind(field(mention,"created_at")?)
+            .bind(field(mention,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    }
     for filter in records(&archive, "filters") {
         let fields = serde_json::to_string(filter.get("fields").ok_or("Missing filter fields")?)
             .map_err(|e| e.to_string())?;
@@ -821,6 +863,13 @@ async fn apply_archive(
             .bind(integer(notification,"unread_count",1)).bind(maybe_field(notification,"read_at"))
             .bind(field(notification,"created_at")?).bind(field(notification,"updated_at")?)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    }
+    for bundle in records(&archive, "notification_bundles") {
+        sqlx::query("INSERT INTO notification_bundles(id,account_id,user_id,starts_at,ends_at,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
+            .bind(field(bundle,"id")?).bind(account_id).bind(field(bundle,"user_id")?)
+            .bind(field(bundle,"starts_at")?).bind(field(bundle,"ends_at")?)
+            .bind(bundle_status(bundle)?).bind(field(bundle,"created_at")?)
+            .bind(field(bundle,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for delivery in records(&archive, "webhook_deliveries") {
         let request = delivery
@@ -868,17 +917,26 @@ async fn apply_archive(
         let signed_id = random_token();
         let sgid = random_token();
         let upload_hash = hash(&random_token());
+        let metadata = serde_json::to_string(blob.get("metadata").unwrap_or(&json!({})))
+            .map_err(|e| e.to_string())?;
         let path = storage::storage_dir().join(&new_key);
         tokio::fs::write(&path, bytes)
             .await
             .map_err(|e| e.to_string())?;
         files.0.push(path);
-        sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,metadata,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(blob_id).bind(account_id).bind(new_key).bind(field(blob,"filename")?)
             .bind(field(blob,"content_type")?).bind(bytes.len() as i64).bind(checksum)
+            .bind(metadata)
             .bind(signed_id).bind(&sgid).bind(upload_hash).bind(now()).bind(now())
             .bind(field(blob,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         blob_sgids.insert(blob_id.to_owned(), sgid);
+    }
+    for variant in records(&archive, "active_storage_variant_records") {
+        sqlx::query("INSERT INTO storage_variant_records(id,account_id,blob_id,variation_digest) VALUES(?,?,?,?)")
+            .bind(field(variant,"id")?).bind(account_id).bind(field(variant,"blob_id")?)
+            .bind(field(variant,"variation_digest")?)
+            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     if archive
         .storage

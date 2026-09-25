@@ -74,7 +74,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "cards",
-        query: "SELECT id,account_id,board_id,column_id,created_at,creator_id,NULL due_on,last_active_at,number,status,title,updated_at FROM cards WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,board_id,column_id,created_at,creator_id,due_on,last_active_at,number,status,title,updated_at FROM cards WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
@@ -145,6 +145,12 @@ const RECORD_SETS: &[RecordSet] = &[
         json_fields: &[],
     },
     RecordSet {
+        directory: "mentions",
+        query: "SELECT id,account_id,created_at,mentionee_id,mentioner_id,source_id,source_type,updated_at FROM mentions WHERE account_id=? ORDER BY id",
+        booleans: &[],
+        json_fields: &[],
+    },
+    RecordSet {
         directory: "filters",
         query: "SELECT id,account_id,created_at,creator_id,fields,params_digest,updated_at FROM filters WHERE account_id=? ORDER BY id",
         booleans: &[],
@@ -169,6 +175,12 @@ const RECORD_SETS: &[RecordSet] = &[
         json_fields: &[],
     },
     RecordSet {
+        directory: "notification_bundles",
+        query: "SELECT id,account_id,created_at,ends_at,starts_at,status,updated_at,user_id FROM notification_bundles WHERE account_id=? ORDER BY id",
+        booleans: &[],
+        json_fields: &[],
+    },
+    RecordSet {
         directory: "webhook_deliveries",
         query: "SELECT id,account_id,created_at,event_id,request,response,state,updated_at,webhook_id FROM webhook_deliveries WHERE account_id=? ORDER BY id",
         booleans: &[],
@@ -176,9 +188,15 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "active_storage_blobs",
-        query: "SELECT id,account_id,byte_size,checksum,content_type,created_at,filename,storage_key key,'{}' metadata FROM storage_blobs WHERE account_id=? AND uploaded_at IS NOT NULL ORDER BY id",
+        query: "SELECT id,account_id,byte_size,checksum,content_type,created_at,filename,storage_key key,metadata FROM storage_blobs WHERE account_id=? AND uploaded_at IS NOT NULL ORDER BY id",
         booleans: &[],
         json_fields: &["metadata"],
+    },
+    RecordSet {
+        directory: "active_storage_variant_records",
+        query: "SELECT id,account_id,blob_id,variation_digest FROM storage_variant_records WHERE account_id=? ORDER BY id",
+        booleans: &[],
+        json_fields: &[],
     },
     RecordSet {
         directory: "active_storage_attachments",
@@ -270,6 +288,14 @@ async fn emit_record_set(
             if let Some(body) = value["body"].as_str() {
                 value["body"] = json!(portable_rich_text(body, blobs));
             }
+        }
+        if record_set.directory == "notification_bundles" {
+            value["status"] = json!(match value["status"].as_i64() {
+                Some(0) => "pending",
+                Some(1) => "processing",
+                Some(2) => "delivered",
+                _ => return Err("Invalid notification bundle status".into()),
+            });
         }
         let record_id = value["id"].as_str().ok_or("missing record ID")?;
         sender

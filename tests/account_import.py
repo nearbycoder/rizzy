@@ -96,11 +96,17 @@ def run(archive_path):
                   for group in ("boards", "columns", "tags", "cards", "comments", "steps",
                                 "assignments", "taggings", "closures", "card_goldnesses",
                                 "card_not_nows", "card_activity_spikes", "watches", "pins",
-                                "reactions", "events", "webhooks", "board_publications",
-                                "active_storage_blobs", "active_storage_attachments")}
+                                "reactions", "mentions", "events", "notifications",
+                                "notification_bundles", "webhooks", "board_publications",
+                                "active_storage_blobs", "active_storage_variant_records",
+                                "active_storage_attachments")}
         blob_metadata = [json.loads(z.read(name)) for name in z.namelist()
                          if name.startswith("data/active_storage_blobs/")]
+        bundles = [json.loads(z.read(name)) for name in z.namelist()
+                   if name.startswith("data/notification_bundles/")]
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
+        dated_cards = [json.loads(z.read(name)) for name in z.namelist()
+                       if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "rizzy.sqlite3"
@@ -147,6 +153,7 @@ def run(archive_path):
                     "watches": "SELECT COUNT(*) FROM watches w JOIN cards c ON c.id=w.card_id WHERE c.account_id=?",
                     "board_publications": "SELECT COUNT(*) FROM boards WHERE account_id=? AND publication_key IS NOT NULL",
                     "active_storage_blobs": "SELECT COUNT(*) FROM storage_blobs WHERE account_id=?",
+                    "active_storage_variant_records": "SELECT COUNT(*) FROM storage_variant_records WHERE account_id=?",
                     "active_storage_attachments": "SELECT COUNT(*) FROM storage_attachments WHERE account_id=?",
                 }
                 for group, expected in counts.items():
@@ -164,6 +171,17 @@ def run(archive_path):
                     key = db.execute("SELECT storage_key FROM storage_blobs WHERE id=? AND account_id=?",
                                      (blob_id, imported_id)).fetchone()[0]
                     assert (storage / key).read_bytes() == source_bytes
+                for blob in blob_metadata:
+                    actual = json.loads(db.execute("SELECT metadata FROM storage_blobs WHERE id=?",
+                                                   (blob["id"],)).fetchone()[0])
+                    assert actual == blob["metadata"]
+                for card in dated_cards:
+                    due_on = db.execute("SELECT due_on FROM cards WHERE id=?", (card["id"],)).fetchone()[0]
+                    assert due_on == card["due_on"]
+                for bundle in bundles:
+                    status_value = db.execute("SELECT status FROM notification_bundles WHERE id=?", (bundle["id"],)).fetchone()[0]
+                    expected = {"pending": 0, "processing": 1, "delivered": 2}.get(bundle["status"], bundle["status"])
+                    assert status_value == expected
                 if original_bytes:
                     description = db.execute("SELECT description FROM cards WHERE account_id=? LIMIT 1",
                                              (imported_id,)).fetchone()[0]
@@ -174,6 +192,11 @@ def run(archive_path):
                     assert status == 200 and card["has_attachments"] and card["image_url"]
             status, boards = call(url, token, f"/{created['account']}/boards")
             assert status == 200 and len(boards) == counts["boards"], (status, boards)
+            if counts["notifications"]:
+                status, notices = call(url, token, f"/{created['account']}/notifications")
+                assert status == 200 and any(notice["source_type"] == "mention"
+                                             and notice["title"] == f"{owner['name'].split()[0]} @mentioned you"
+                                             and "Hello world" in notice["body"] for notice in notices), notices
             status, export = call(url, token, f"/{created['account']}/account/exports", "POST")
             assert status == 201 and export["status"] == "pending", (status, export)
             for _ in range(300):
@@ -197,6 +220,16 @@ def run(archive_path):
                 for blob_id, source_bytes in original_bytes.items():
                     blob = json.loads(z.read(f"data/active_storage_blobs/{blob_id}.json"))
                     assert z.read(f"storage/{blob['key']}") == source_bytes
+                for source_blob in blob_metadata:
+                    blob = json.loads(z.read(f"data/active_storage_blobs/{source_blob['id']}.json"))
+                    assert blob["metadata"] == source_blob["metadata"]
+                for source_card in dated_cards:
+                    card = json.loads(z.read(f"data/cards/{source_card['id']}.json"))
+                    assert card["due_on"] == source_card["due_on"]
+                for source_bundle in bundles:
+                    bundle = json.loads(z.read(f"data/notification_bundles/{source_bundle['id']}.json"))
+                    expected = source_bundle["status"] if isinstance(source_bundle["status"], str) else ("pending", "processing", "delivered")[source_bundle["status"]]
+                    assert bundle["status"] == expected
             duplicate = upload(url, token, archive)
             conflict = await_result(url, token, duplicate)
             assert conflict["status"] == "failed" and conflict["failure_reason"] == "conflict", conflict

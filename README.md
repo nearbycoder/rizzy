@@ -25,14 +25,14 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
 - Special board column JSON lists (Maybe?, Not now, Done) and public pages for those lists and named columns. The public board page links to each view.
-- Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings.
+- Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings. Imported Mention notifications can be read, though creating mentions and delivering their notifications is still incomplete.
 - Board, column, and card create/read/update/delete JSON routes; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions. Card JSON accepts explicit creation and last activity timestamps.
 - Tag listing, card filters for saved views, terms, dates, closures, stalled activity, assignments, boards, columns and tags, and SQLite FTS5 card and comment search over visible plain text with indexed edits and deletes.
 - Initial saved filter create/delete routes with per-user deduplication and Turbo Stream toggle responses.
 - Board publishing and unpublishing with unauthenticated public board and card pages.
 - Direct uploads for card images, user avatars, and uploaded image/file embeds in card descriptions and comments, with private/public blob access and cached image previews.
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
-- Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files.
+- Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, and notification bundles.
 - A basic browser interface for boards, columns, cards, description editing, and completion.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
@@ -61,6 +61,7 @@ python3 tests/search.py
 python3 tests/exports.py
 python3 tests/account_transfer.py
 python3 tests/account_import.py
+python3 tests/notification_source_migration.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:
 python3 tests/parity.py
 python3 tests/filter_parity.py

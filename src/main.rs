@@ -1087,21 +1087,37 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    migrate_notification_sources(&db).await?;
     backfill_system_users(&db).await?;
     let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
         .fetch_all(&db)
         .await?;
-    for column in ["width", "height"] {
+    for (column, definition) in [
+        ("width", "INTEGER"),
+        ("height", "INTEGER"),
+        ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+    ] {
         if !blob_columns
             .iter()
             .any(|row| row.get::<String, _>("name") == column)
         {
             sqlx::query(&format!(
-                "ALTER TABLE storage_blobs ADD COLUMN {column} INTEGER"
+                "ALTER TABLE storage_blobs ADD COLUMN {column} {definition}"
             ))
             .execute(&db)
             .await?;
         }
+    }
+    let card_columns = sqlx::query("PRAGMA table_info(cards)")
+        .fetch_all(&db)
+        .await?;
+    if !card_columns
+        .iter()
+        .any(|row| row.get::<String, _>("name") == "due_on")
+    {
+        sqlx::query("ALTER TABLE cards ADD COLUMN due_on TEXT")
+            .execute(&db)
+            .await?;
     }
     let download_columns = sqlx::query("PRAGMA table_info(storage_download_tokens)")
         .fetch_all(&db)
@@ -1841,6 +1857,53 @@ async fn backfill_system_users(db: &SqlitePool) -> std::result::Result<(), sqlx:
             .execute(&mut *tx).await?;
         tx.commit().await?;
     }
+    Ok(())
+}
+
+async fn migrate_notification_sources(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+    let mut connection = db.acquire().await?;
+    let foreign_keys = sqlx::query("PRAGMA foreign_key_list(notifications)")
+        .fetch_all(&mut *connection)
+        .await?;
+    if !foreign_keys
+        .iter()
+        .any(|row| row.get::<String, _>("from") == "source_id")
+    {
+        return Ok(());
+    }
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&mut *connection)
+        .await?;
+    let migration: std::result::Result<(),sqlx::Error> = async {
+        sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await?;
+        sqlx::query("CREATE TABLE notifications_source_v2 (id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,creator_id TEXT NOT NULL REFERENCES users(id),card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,source_id TEXT NOT NULL,source_type TEXT NOT NULL DEFAULT 'Event',unread_count INTEGER NOT NULL DEFAULT 1,read_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(user_id,card_id))")
+            .execute(&mut *connection).await?;
+        sqlx::query("INSERT INTO notifications_source_v2 SELECT id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,read_at,created_at,updated_at FROM notifications")
+            .execute(&mut *connection).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS notifications_event_delete")
+            .execute(&mut *connection).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS notifications_mention_delete")
+            .execute(&mut *connection).await?;
+        sqlx::query("DROP TABLE notifications").execute(&mut *connection).await?;
+        sqlx::query("ALTER TABLE notifications_source_v2 RENAME TO notifications")
+            .execute(&mut *connection).await?;
+        sqlx::query("CREATE INDEX notifications_user_read ON notifications(user_id,read_at,updated_at DESC)")
+            .execute(&mut *connection).await?;
+        sqlx::query("CREATE TRIGGER notifications_event_delete AFTER DELETE ON events BEGIN DELETE FROM notifications WHERE source_type='Event' AND source_id=OLD.id; END")
+            .execute(&mut *connection).await?;
+        sqlx::query("CREATE TRIGGER notifications_mention_delete AFTER DELETE ON mentions BEGIN DELETE FROM notifications WHERE source_type='Mention' AND source_id=OLD.id; END")
+            .execute(&mut *connection).await?;
+        sqlx::query("COMMIT").execute(&mut *connection).await?;
+        Ok(())
+    }.await;
+    if migration.is_err() {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+    }
+    let restored = sqlx::query("PRAGMA foreign_keys=ON")
+        .execute(&mut *connection)
+        .await;
+    migration?;
+    restored?;
     Ok(())
 }
 
@@ -4803,67 +4866,114 @@ async fn notification_json(app: &App, p: &Principal, row: &SqliteRow, host: &str
     } else {
         None
     };
-    let source = sqlx::query("SELECT * FROM events WHERE id=?")
-        .bind(row.get::<String, _>("source_id"))
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
-    let action: String = source.get("action");
-    let title = card.get::<String, _>("title");
-    let title = if title.trim().is_empty() {
+    let card_title = card.get::<String, _>("title");
+    let card_title = if card_title.trim().is_empty() {
         format!("Card {}", card.get::<i64, _>("number"))
     } else {
-        title
+        card_title
     };
     let name = creator["name"].as_str().unwrap_or("");
-    let particulars: Value =
-        serde_json::from_str(&source.get::<String, _>("particulars")).unwrap_or(json!({}));
-    let body = match action.as_str() {
-        "card_assigned" => {
-            let assignee = particulars["assignee_ids"]
-                .as_array()
-                .and_then(|ids| ids.first())
-                .and_then(Value::as_str);
-            if let Some(assignee) = assignee {
-                let assignee_name = sqlx::query_scalar::<_, String>(
-                    "SELECT name FROM users WHERE id=? AND account_id=?",
-                )
-                .bind(assignee)
+    let source_kind: String = row.get("source_type");
+    let (source_type, title, body) = if source_kind == "Mention" {
+        let mention =
+            sqlx::query("SELECT source_type,source_id FROM mentions WHERE id=? AND account_id=?")
+                .bind(row.get::<String, _>("source_id"))
                 .bind(&p.account_id)
-                .fetch_optional(&app.db)
+                .fetch_one(&app.db)
                 .await
                 .map_err(db_err)?;
-                format!(
-                    "Assigned to {}",
-                    assignee_name.unwrap_or_else(|| "self".into())
-                )
-            } else {
-                "Assigned to self".into()
+        let source_body = match mention.get::<String, _>("source_type").as_str() {
+            "Card" => card.get::<String, _>("description"),
+            "Comment" => sqlx::query_scalar::<_, String>("SELECT body FROM comments WHERE id=?")
+                .bind(mention.get::<String, _>("source_id"))
+                .fetch_one(&app.db)
+                .await
+                .map_err(db_err)?,
+            _ => {
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unsupported mention source",
+                ));
             }
+        };
+        let first = name.split_whitespace().next().unwrap_or(name);
+        (
+            "mention",
+            format!("{first} @mentioned you"),
+            rich_text::plain_text(&source_body)
+                .chars()
+                .take(200)
+                .collect::<String>(),
+        )
+    } else {
+        if source_kind != "Event" {
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Unsupported notification source",
+            ));
         }
-        "card_published" => format!("Added by {name}"),
-        "card_closed" => format!("Moved to Done by {name}"),
-        "card_reopened" => format!("Reopened by {name}"),
-        "card_postponed" => format!("Moved to Not Now by {name}"),
-        "card_unassigned" => format!("Unassigned by {name}"),
-        "card_board_changed" => format!("Moved by {name}"),
-        "card_sent_back_to_triage" => format!("Moved back to Maybe? by {name}"),
-        "comment_created" => {
-            let comment = sqlx::query_scalar::<_, String>("SELECT body FROM comments WHERE id=?")
-                .bind(source.get::<String, _>("eventable_id"))
-                .fetch_optional(&app.db)
-                .await
-                .map_err(db_err)?;
-            comment.unwrap_or_default().chars().take(200).collect()
-        }
-        _ => name.to_owned(),
+        let source = sqlx::query("SELECT * FROM events WHERE id=?")
+            .bind(row.get::<String, _>("source_id"))
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+        let action: String = source.get("action");
+        let particulars: Value =
+            serde_json::from_str(&source.get::<String, _>("particulars")).unwrap_or(json!({}));
+        let body = match action.as_str() {
+            "card_assigned" => {
+                let assignee = particulars["assignee_ids"]
+                    .as_array()
+                    .and_then(|ids| ids.first())
+                    .and_then(Value::as_str);
+                if let Some(assignee) = assignee {
+                    let assignee_name = sqlx::query_scalar::<_, String>(
+                        "SELECT name FROM users WHERE id=? AND account_id=?",
+                    )
+                    .bind(assignee)
+                    .bind(&p.account_id)
+                    .fetch_optional(&app.db)
+                    .await
+                    .map_err(db_err)?;
+                    format!(
+                        "Assigned to {}",
+                        assignee_name.unwrap_or_else(|| "self".into())
+                    )
+                } else {
+                    "Assigned to self".into()
+                }
+            }
+            "card_published" => format!("Added by {name}"),
+            "card_closed" => format!("Moved to Done by {name}"),
+            "card_reopened" => format!("Reopened by {name}"),
+            "card_postponed" => format!("Moved to Not Now by {name}"),
+            "card_unassigned" => format!("Unassigned by {name}"),
+            "card_board_changed" => format!("Moved by {name}"),
+            "card_sent_back_to_triage" => format!("Moved back to Maybe? by {name}"),
+            "comment_created" => {
+                let comment =
+                    sqlx::query_scalar::<_, String>("SELECT body FROM comments WHERE id=?")
+                        .bind(source.get::<String, _>("eventable_id"))
+                        .fetch_optional(&app.db)
+                        .await
+                        .map_err(db_err)?;
+                comment.unwrap_or_default().chars().take(200).collect()
+            }
+            _ => name.to_owned(),
+        };
+        let title = if action == "comment_created" {
+            format!("RE: {card_title}")
+        } else {
+            card_title
+        };
+        ("event", title, body)
     };
     let number: i64 = card.get("number");
     let read_at: Option<String> = row.get("read_at");
     Ok(
         json!({"id":row.get::<String,_>("id"),"unread_count":row.get::<i64,_>("unread_count"),
         "read":read_at.is_some(),"read_at":read_at,"created_at":row.get::<String,_>("created_at"),
-        "source_type":"event","title":if action=="comment_created" {format!("RE: {title}")} else {title},
+        "source_type":source_type,"title":title,
         "body":body,"creator":creator,"card":{"id":card_id,"number":number,
         "title":card.get::<String,_>("title"),"status":card.get::<String,_>("status"),
         "board_name":card.get::<String,_>("board_name"),"closed":card.get::<i64,_>("closed")!=0,
