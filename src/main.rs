@@ -37,6 +37,7 @@ mod board_settings;
 mod board_views;
 mod card_column_page;
 mod card_page;
+mod cards_page;
 mod events_page;
 mod exports;
 mod imports;
@@ -5453,6 +5454,8 @@ fn parse_card_query(raw: Option<String>) -> CardQuery {
     if let Some(raw) = raw {
         for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
             match key.as_ref() {
+                "page" => q.page = value.parse::<i64>().unwrap_or(1).max(1),
+                _ if value.trim().is_empty() => {}
                 "filter_id" => q.filter_id = Some(value.into_owned()),
                 "indexed_by" => q.indexed_by = Some(value.into_owned()),
                 "sorted_by" => q.sorted_by = Some(value.into_owned()),
@@ -5467,7 +5470,6 @@ fn parse_card_query(raw: Option<String>) -> CardQuery {
                 "card_ids[]" => q.card_ids.push(value.into_owned()),
                 "terms[]" => q.terms.push(value.into_owned()),
                 "assignment_status" => q.assignment_status = Some(value.into_owned()),
-                "page" => q.page = value.parse::<i64>().unwrap_or(1).max(1),
                 _ => {}
             }
         }
@@ -6426,7 +6428,7 @@ async fn list_cards(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    let query = resolved_card_query(&app, &p, raw).await?;
+    let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
     let order = match query.sorted_by.as_deref() {
         Some("oldest") => "c.created_at ASC",
@@ -6439,13 +6441,20 @@ async fn list_cards(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let mut builder = cards_query("SELECT c.*", &p, &query);
+    let mut builder = cards_query("SELECT c.*,b.name AS board_name", &p, &query);
     builder
         .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
         .push_bind(limit)
         .push(" OFFSET ")
         .push_bind(offset);
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok(
+            cards_page::show(&app, &p, &rows, total, &query, raw.as_deref())
+                .await?
+                .into_response(),
+        );
+    }
     let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, query.page, &uri, &headers))
 }
@@ -6485,41 +6494,20 @@ async fn card_previews(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let mut builder = cards_query("SELECT c.*", &p, &query);
+    let mut builder = cards_query("SELECT c.*,b.name AS board_name", &p, &query);
     builder
         .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
         .push_bind(limit)
         .push(" OFFSET ")
         .push_bind(offset);
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
-    let mut cards = String::new();
-    for card in &rows {
-        let id: String = card.get("id");
-        let number: i64 = card.get("number");
-        let title = escape(&card.get::<String, _>("title"));
-        cards.push_str(&format!(
-            "<article id=\"article_card_{id}\" class=\"card\" data-id=\"{number}\"><a class=\"card__link\" href=\"/{}/cards/{number}\"><h3 class=\"card__title\">{title}</h3></a></article>",
-            p.slug
-        ));
-    }
+    let mut cards = cards_page::previews(&p, &rows);
     if offset + (rows.len() as i64) < total {
-        let mut params = url::form_urlencoded::Serializer::new(String::new());
-        for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
-            if key != "page" {
-                params.append_pair(&key, &value);
-            }
-        }
-        params.append_pair("page", &(query.page + 1).to_string());
-        let next = format!(
-            "/{}/cards/previews.turbo_stream?{}",
-            p.slug,
-            params.finish()
-        );
-        cards.push_str(&format!(
-            "<a id=\"{}-load-page-{}\" href=\"{}\" data-turbo-stream=\"true\">Load more cards</a>",
-            escape(&target),
+        cards.push_str(&cards_page::next_link(
+            &p,
+            &target,
             query.page + 1,
-            escape(&next)
+            raw.as_deref(),
         ));
     }
     let html = format!(

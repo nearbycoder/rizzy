@@ -53,7 +53,7 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 </head>
 <body data-account="{{ACCOUNT}}" data-board="{{BOARD_ID}}">
 <a class="skip" href="#main">Skip to main content</a>
-<header class="site"><a class="site__brand" href="{{HOME_PATH}}">Rizzy</a><a class="site__back" href="{{HOME_PATH}}">All boards</a></header>
+<header class="site"><a class="site__brand" href="{{HOME_PATH}}">Rizzy</a><a class="site__back" href="{{HOME_PATH}}">All boards</a><a class="site__back" href="/{{ACCOUNT}}/cards">All cards</a></header>
 <main class="board" id="main">
   <div class="board__header"><h1>{{BOARD_NAME}}</h1><div class="board__actions">{{SETTINGS_LINK}}{{ADD_COLUMN}}</div></div>
   {{FILTER_FORM}}
