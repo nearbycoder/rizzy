@@ -6,7 +6,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Utc;
+use chrono::{Datelike, Utc};
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -150,6 +150,21 @@ fn required(v: &Value, key: &str) -> Result<String> {
     string(v, key)
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| bad(&format!("{key} is required")))
+}
+fn timestamp_param(v: &Value, key: &str) -> Result<Option<String>> {
+    match v.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(raw)) => chrono::DateTime::parse_from_rfc3339(raw)
+            .map(|value| {
+                Some(
+                    value
+                        .with_timezone(&Utc)
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                )
+            })
+            .map_err(|_| bad(&format!("Invalid {key}"))),
+        Some(_) => Err(bad(&format!("Invalid {key}"))),
+    }
 }
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -385,13 +400,21 @@ async fn record_event(
         &timestamp,
     )
     .await?;
-    sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
+    sqlx::query("UPDATE cards SET last_active_at=?,updated_at=? WHERE id=?")
+        .bind(&timestamp)
         .bind(&timestamp)
         .bind(card_id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
+async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Result<()> {
+    let timestamp = now();
+    sqlx::query("INSERT INTO card_activity_spikes(card_id,account_id,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at")
+        .bind(card_id).bind(account_id).bind(&timestamp).bind(&timestamp)
+        .execute(&app.db).await.map_err(db_err)?;
     Ok(())
 }
 async fn queue_webhooks(
@@ -961,6 +984,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    sqlx::query("INSERT OR IGNORE INTO closures(card_id,user_id,created_at) SELECT c.id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id),COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
+        .execute(&db).await?;
     let user_columns = sqlx::query("PRAGMA table_info(users)")
         .fetch_all(&db)
         .await?;
@@ -3570,14 +3595,19 @@ async fn delete_column(
 
 #[derive(Default)]
 struct CardQuery {
+    filter_id: Option<String>,
     indexed_by: Option<String>,
     sorted_by: Option<String>,
+    creation: Option<String>,
+    closure: Option<String>,
     board_ids: Vec<String>,
     column_ids: Vec<String>,
     tag_ids: Vec<String>,
     assignee_ids: Vec<String>,
     creator_ids: Vec<String>,
+    closer_ids: Vec<String>,
     card_ids: Vec<String>,
+    terms: Vec<String>,
     assignment_status: Option<String>,
     page: i64,
 }
@@ -3589,14 +3619,19 @@ fn parse_card_query(raw: Option<String>) -> CardQuery {
     if let Some(raw) = raw {
         for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
             match key.as_ref() {
+                "filter_id" => q.filter_id = Some(value.into_owned()),
                 "indexed_by" => q.indexed_by = Some(value.into_owned()),
                 "sorted_by" => q.sorted_by = Some(value.into_owned()),
+                "creation" => q.creation = Some(value.into_owned()),
+                "closure" => q.closure = Some(value.into_owned()),
                 "board_ids[]" => q.board_ids.push(value.into_owned()),
                 "column_ids[]" => q.column_ids.push(value.into_owned()),
                 "tag_ids[]" => q.tag_ids.push(value.into_owned()),
                 "assignee_ids[]" => q.assignee_ids.push(value.into_owned()),
                 "creator_ids[]" => q.creator_ids.push(value.into_owned()),
+                "closer_ids[]" => q.closer_ids.push(value.into_owned()),
                 "card_ids[]" => q.card_ids.push(value.into_owned()),
+                "terms[]" => q.terms.push(value.into_owned()),
                 "assignment_status" => q.assignment_status = Some(value.into_owned()),
                 "page" => q.page = value.parse::<i64>().unwrap_or(1).max(1),
                 _ => {}
@@ -3605,12 +3640,74 @@ fn parse_card_query(raw: Option<String>) -> CardQuery {
     }
     q
 }
+fn card_query_from_filter(fields: &Value, page: i64) -> CardQuery {
+    let scalar = |key: &str| fields.get(key).and_then(Value::as_str).map(str::to_owned);
+    let array = |key: &str| {
+        fields
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    CardQuery {
+        indexed_by: scalar("indexed_by"),
+        sorted_by: scalar("sorted_by"),
+        creation: scalar("creation"),
+        closure: scalar("closure"),
+        assignment_status: scalar("assignment_status"),
+        board_ids: array("board_ids"),
+        column_ids: array("column_ids"),
+        tag_ids: array("tag_ids"),
+        assignee_ids: array("assignee_ids"),
+        creator_ids: array("creator_ids"),
+        closer_ids: array("closer_ids"),
+        card_ids: array("card_ids"),
+        terms: array("terms"),
+        page,
+        ..Default::default()
+    }
+}
+fn time_window(input: &str) -> Option<(String, String)> {
+    let key = input.to_ascii_lowercase().replace([' ', '_', '-'], "");
+    let today = Utc::now().date_naive();
+    let week = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
+    let month = today.with_day(1)?;
+    let year = today.with_month(1)?.with_day(1)?;
+    let (start, end) = match key.as_str() {
+        "today" => (today, today + chrono::Duration::days(1)),
+        "yesterday" => (today - chrono::Duration::days(1), today),
+        "thisweek" => (week, week + chrono::Duration::days(7)),
+        "lastweek" => (week - chrono::Duration::days(7), week),
+        "thismonth" => (month, month.checked_add_months(chrono::Months::new(1))?),
+        "lastmonth" => (month.checked_sub_months(chrono::Months::new(1))?, month),
+        "thisyear" => (year, year.with_year(year.year() + 1)?),
+        "lastyear" => (year.with_year(year.year() - 1)?, year),
+        _ => return None,
+    };
+    let format = |date: chrono::NaiveDate| {
+        date.and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    };
+    Some((format(start), format(end)))
+}
 fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBuilder<'a, Sqlite> {
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id="
     ));
     builder.push_bind(&p.account_id).push(" AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=").push_bind(&p.user_id).push(")");
-    if q.indexed_by.as_deref() != Some("closed") && q.card_ids.is_empty() {
+    if q.indexed_by.as_deref() != Some("closed")
+        && q.closure.as_deref().and_then(time_window).is_none()
+        && q.closer_ids.is_empty()
+        && q.card_ids.is_empty()
+    {
         builder.push(" AND c.closed=0");
     }
     if q.indexed_by.as_deref() != Some("not_now") && q.card_ids.is_empty() {
@@ -3628,6 +3725,20 @@ fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBui
         }
         Some("golden") => {
             builder.push(" AND c.golden=1");
+        }
+        Some("postponing_soon") => {
+            builder.push(" AND julianday(c.last_active_at)>julianday('now')-b.auto_postpone_period_in_days AND julianday(c.last_active_at)<=julianday('now')-b.auto_postpone_period_in_days*0.75");
+        }
+        Some("stalled") => {
+            let cutoff = (Utc::now() - chrono::Duration::days(14))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            builder.push(" AND c.closed=0 AND c.postponed=0 AND c.updated_at<=")
+                .push_bind(cutoff.clone())
+                .push(" AND EXISTS(SELECT 1 FROM card_activity_spikes s WHERE s.card_id=c.id AND s.updated_at<=")
+                .push_bind(cutoff).push(")");
+        }
+        Some("draft") => {
+            builder.push(" AND 1=0");
         }
         _ => {}
     }
@@ -3678,6 +3789,42 @@ fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBui
     }
     if q.assignment_status.as_deref() == Some("unassigned") {
         builder.push(" AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.card_id=c.id)");
+    }
+    if let Some((start, end)) = q.creation.as_deref().and_then(time_window) {
+        builder
+            .push(" AND c.created_at>=")
+            .push_bind(start)
+            .push(" AND c.created_at<")
+            .push_bind(end);
+    }
+    if let Some((start, end)) = q.closure.as_deref().and_then(time_window) {
+        builder
+            .push(" AND EXISTS (SELECT 1 FROM closures z WHERE z.card_id=c.id AND z.created_at>=")
+            .push_bind(start)
+            .push(" AND z.created_at<")
+            .push_bind(end)
+            .push(")");
+    }
+    if !q.closer_ids.is_empty() {
+        builder
+            .push(" AND EXISTS (SELECT 1 FROM closures z WHERE z.card_id=c.id AND z.user_id IN (");
+        let mut separated = builder.separated(",");
+        for id in &q.closer_ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated("))");
+    }
+    if !q.terms.is_empty() {
+        let searches: Option<Vec<String>> = q.terms.iter().map(|term| fts_query(term)).collect();
+        if let Some(searches) = searches {
+            let search = searches.join(" AND ");
+            builder.push(" AND (c.rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ")
+                .push_bind(search.clone())
+                .push(") OR c.id IN (SELECT m.card_id FROM comments m WHERE m.rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ")
+                .push_bind(search).push(")))");
+        } else {
+            builder.push(" AND 1=0");
+        }
     }
     builder
 }
@@ -4375,7 +4522,22 @@ async fn list_cards(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    let query = parse_card_query(raw);
+    let mut query = parse_card_query(raw);
+    if let Some(filter_id) = query.filter_id.as_deref() {
+        let fields: String = sqlx::query_scalar(
+            "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
+        )
+        .bind(filter_id)
+        .bind(&p.account_id)
+        .bind(&p.user_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
+        let stored: Value = serde_json::from_str(&fields)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
+        query = card_query_from_filter(&stored, query.page);
+    }
     let (offset, limit) = page_window(query.page);
     let order = match query.sorted_by.as_deref() {
         Some("oldest") => "c.created_at ASC",
@@ -4694,6 +4856,9 @@ async fn create_card(
     let event_id = id();
     let id = id();
     let timestamp = now();
+    let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| timestamp.clone());
+    let last_active_at =
+        timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
     let writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let number: i64 = sqlx::query_scalar(
@@ -4704,7 +4869,7 @@ async fn create_card(
     .await
     .map_err(db_err)?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(description).bind(&timestamp).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(description).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
     sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
         .bind(&id)
         .bind(&p.user_id)
@@ -4758,17 +4923,21 @@ async fn update_card(
     let old_status: String = c.get("status");
     let description = string(v, "description").unwrap_or_else(|| c.get("description"));
     let status = string(v, "status").unwrap_or_else(|| c.get("status"));
+    let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
+    let custom_last_active_at = timestamp_param(v, "last_active_at")?;
+    let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
     if !["drafted", "published"].contains(&status.as_str()) {
         return Err(bad("invalid status"));
     }
     sqlx::query(
-        "UPDATE cards SET title=?,description=?,status=?,updated_at=?,last_active_at=? WHERE id=?",
+        "UPDATE cards SET title=?,description=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
     )
     .bind(&title)
     .bind(description)
     .bind(&status)
+    .bind(&created_at)
     .bind(now())
-    .bind(now())
+    .bind(&last_active_at)
     .bind(c.get::<String, _>("id"))
     .execute(&app.db)
     .await
@@ -4810,6 +4979,14 @@ async fn update_card(
             json!({}),
         )
         .await?;
+    }
+    if let Some(last_active_at) = custom_last_active_at {
+        sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
+            .bind(last_active_at)
+            .bind(c.get::<String, _>("id"))
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
     }
     let c = card(&app, &p, &number).await?;
     Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?))
@@ -4860,14 +5037,38 @@ async fn set_flag(
         _ => return Err(bad("invalid flag")),
     };
     let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query(sql)
         .bind(value)
         .bind(&timestamp)
         .bind(&timestamp)
         .bind(c.get::<String, _>("id"))
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    if flag == "closed" && value == 1 {
+        sqlx::query("INSERT OR IGNORE INTO closures(card_id,user_id,created_at) VALUES(?,?,?)")
+            .bind(c.get::<String, _>("id"))
+            .bind(&p.user_id)
+            .bind(&timestamp)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    } else if (flag == "closed" && value == 0) || (flag == "postponed" && value == 1) {
+        sqlx::query("DELETE FROM closures WHERE card_id=?")
+            .bind(c.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    if flag == "postponed" && value == 1 {
+        sqlx::query("DELETE FROM card_activity_spikes WHERE card_id=?")
+            .bind(c.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
     let card_id: String = c.get("id");
     if flag == "closed" && (c.get::<i64, _>("closed") != value) {
         let action = if value == 1 {
@@ -4893,6 +5094,9 @@ async fn set_flag(
             format!("<strong>Reopened</strong> by {who}")
         };
         system_comment(app, p, &card_id, &body).await?;
+        if value == 0 {
+            record_activity_spike(app, &p.account_id, &card_id).await?;
+        }
     } else if flag == "postponed" && value == 1 {
         record_event(
             app,
@@ -5034,8 +5238,17 @@ async fn triage_card(
     let column = required(&body, "column_id")?;
     let col = checked_column(&app, &p, &c.get::<String, _>("board_id"), &column).await?;
     let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE cards SET column_id=?,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
-        .bind(column).bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&app.db).await.map_err(db_err)?;
+        .bind(column).bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&mut *tx).await.map_err(db_err)?;
+    for table in ["closures", "card_activity_spikes"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE card_id=?"))
+            .bind(c.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
     record_event(
         &app,
         &p,
@@ -5069,8 +5282,17 @@ async fn untriage_card(
     p.write()?;
     let c = card(&app, &p, &number).await?;
     let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE cards SET column_id=NULL,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
-        .bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&app.db).await.map_err(db_err)?;
+        .bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&mut *tx).await.map_err(db_err)?;
+    for table in ["closures", "card_activity_spikes"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE card_id=?"))
+            .bind(c.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
     record_event(
         &app,
         &p,
@@ -5380,6 +5602,20 @@ async fn create_comment(
         json!({}),
     )
     .await?;
+    let period: i64 =
+        sqlx::query_scalar("SELECT auto_postpone_period_in_days FROM boards WHERE id=?")
+            .bind(c.get::<String, _>("board_id"))
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    let cutoff = (Utc::now() - chrono::Duration::seconds(period * 24 * 60 * 60 * 33 / 100))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let counts = sqlx::query("SELECT COUNT(*) AS comments,COUNT(DISTINCT creator_id) AS people FROM comments WHERE card_id=? AND created_at>=?")
+        .bind(c.get::<String, _>("id")).bind(cutoff)
+        .fetch_one(&app.db).await.map_err(db_err)?;
+    if counts.get::<i64, _>("comments") >= 3 && counts.get::<i64, _>("people") >= 2 {
+        record_activity_spike(&app, &p.account_id, &c.get::<String, _>("id")).await?;
+    }
     let r = comment_row(&app, &c, &id).await?;
     Ok(created(
         format!("/{account}/cards/{number}/comments/{id}.json"),
@@ -5543,6 +5779,7 @@ async fn toggle_assignment(
             &format!("{who} <strong>assigned</strong> this to {target}."),
         )
         .await?;
+        record_activity_spike(&app, &p.account_id, &card_id).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

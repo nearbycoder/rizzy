@@ -1,0 +1,277 @@
+{
+  "fixture_cards": 100,
+  "closed_cards": 20,
+  "sample_shape_and_count_parity": true,
+  "samples": {
+    "fizzy": [
+      {
+        "shape": [
+          {
+            "id": "str",
+            "number": "int",
+            "title": "str",
+            "status": "str",
+            "description": "str",
+            "description_html": "str",
+            "image_url": "NoneType",
+            "has_attachments": "bool",
+            "tags": [],
+            "closed": "bool",
+            "postponed": "bool",
+            "golden": "bool",
+            "last_active_at": "str",
+            "created_at": "str",
+            "url": "str",
+            "board": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "creator": {
+              "id": "str",
+              "name": "str",
+              "role": "str",
+              "active": "bool",
+              "email_address": "str",
+              "created_at": "str",
+              "url": "str",
+              "avatar_url": "str"
+            },
+            "assignees": [],
+            "has_more_assignees": "bool",
+            "comments_url": "str",
+            "reactions_url": "str"
+          }
+        ],
+        "count": 80,
+        "first_page_bytes": 24705
+      },
+      {
+        "shape": [
+          {
+            "id": "str",
+            "number": "int",
+            "title": "str",
+            "status": "str",
+            "description": "str",
+            "description_html": "str",
+            "image_url": "NoneType",
+            "has_attachments": "bool",
+            "tags": [],
+            "closed": "bool",
+            "postponed": "bool",
+            "golden": "bool",
+            "last_active_at": "str",
+            "created_at": "str",
+            "url": "str",
+            "board": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "creator": {
+              "id": "str",
+              "name": "str",
+              "role": "str",
+              "active": "bool",
+              "email_address": "str",
+              "created_at": "str",
+              "url": "str",
+              "avatar_url": "str"
+            },
+            "assignees": [],
+            "has_more_assignees": "bool",
+            "comments_url": "str",
+            "reactions_url": "str"
+          }
+        ],
+        "count": 20,
+        "first_page_bytes": 24685
+      }
+    ],
+    "rizzy": [
+      {
+        "shape": [
+          {
+            "assignees": [],
+            "board": {
+              "all_access": "bool",
+              "auto_postpone_period_in_days": "int",
+              "created_at": "str",
+              "creator": {
+                "active": "bool",
+                "avatar_url": "str",
+                "created_at": "str",
+                "email_address": "str",
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "url": "str"
+              },
+              "id": "str",
+              "name": "str",
+              "url": "str"
+            },
+            "closed": "bool",
+            "comments_url": "str",
+            "created_at": "str",
+            "creator": {
+              "active": "bool",
+              "avatar_url": "str",
+              "created_at": "str",
+              "email_address": "str",
+              "id": "str",
+              "name": "str",
+              "role": "str",
+              "url": "str"
+            },
+            "description": "str",
+            "description_html": "str",
+            "golden": "bool",
+            "has_attachments": "bool",
+            "has_more_assignees": "bool",
+            "id": "str",
+            "image_url": "NoneType",
+            "last_active_at": "str",
+            "number": "int",
+            "postponed": "bool",
+            "reactions_url": "str",
+            "status": "str",
+            "tags": [],
+            "title": "str",
+            "url": "str"
+          }
+        ],
+        "count": 80,
+        "first_page_bytes": 24495
+      },
+      {
+        "shape": [
+          {
+            "assignees": [],
+            "board": {
+              "all_access": "bool",
+              "auto_postpone_period_in_days": "int",
+              "created_at": "str",
+              "creator": {
+                "active": "bool",
+                "avatar_url": "str",
+                "created_at": "str",
+                "email_address": "str",
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "url": "str"
+              },
+              "id": "str",
+              "name": "str",
+              "url": "str"
+            },
+            "closed": "bool",
+            "comments_url": "str",
+            "created_at": "str",
+            "creator": {
+              "active": "bool",
+              "avatar_url": "str",
+              "created_at": "str",
+              "email_address": "str",
+              "id": "str",
+              "name": "str",
+              "role": "str",
+              "url": "str"
+            },
+            "description": "str",
+            "description_html": "str",
+            "golden": "bool",
+            "has_attachments": "bool",
+            "has_more_assignees": "bool",
+            "id": "str",
+            "image_url": "NoneType",
+            "last_active_at": "str",
+            "number": "int",
+            "postponed": "bool",
+            "reactions_url": "str",
+            "status": "str",
+            "tags": [],
+            "title": "str",
+            "url": "str"
+          }
+        ],
+        "count": 20,
+        "first_page_bytes": 24475
+      }
+    ]
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.11,
+        "requests": 3426,
+        "errors": {},
+        "rps": 669.9,
+        "p50_ms": 41.58,
+        "p95_ms": 95.52,
+        "p99_ms": 128.39
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.17,
+        "requests": 3283,
+        "errors": {},
+        "rps": 635.6,
+        "p50_ms": 94.74,
+        "p95_ms": 174.6,
+        "p99_ms": 210.87
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 11890,
+        "errors": {},
+        "rps": 2372.5,
+        "p50_ms": 13.56,
+        "p95_ms": 15.39,
+        "p99_ms": 16.23
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.03,
+        "requests": 12291,
+        "errors": {},
+        "rps": 2445.4,
+        "p50_ms": 26.27,
+        "p95_ms": 28.8,
+        "p99_ms": 29.91
+      }
+    ]
+  }
+}

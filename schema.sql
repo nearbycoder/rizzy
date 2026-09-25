@@ -136,6 +136,19 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 CREATE INDEX IF NOT EXISTS cards_board_active ON cards(board_id, status, closed, postponed, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS cards_account_latest ON cards(account_id, last_active_at DESC);
+CREATE TABLE IF NOT EXISTS closures (
+  card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS closures_user_created ON closures(user_id,created_at);
+CREATE TABLE IF NOT EXISTS card_activity_spikes (
+  card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS card_activity_spikes_account_updated ON card_activity_spikes(account_id,updated_at);
 CREATE TABLE IF NOT EXISTS steps (
   id TEXT PRIMARY KEY,
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
