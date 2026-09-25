@@ -538,28 +538,28 @@
       "path": "/columns/cards/:card_id/drops/not_now(.:format)",
       "controller": "columns/cards/drops/not_nows",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/columns/cards/:card_id/drops/stream(.:format)",
       "controller": "columns/cards/drops/streams",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/columns/cards/:card_id/drops/closure(.:format)",
       "controller": "columns/cards/drops/closures",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
       "path": "/columns/cards/:card_id/drops/column(.:format)",
       "controller": "columns/cards/drops/columns",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1189,7 +1189,7 @@
       "path": "/session/magic_link(.:format)",
       "controller": "sessions/magic_links",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1495,6 +1495,10 @@
       "path": "/session/new"
     },
     {
+      "method": "GET",
+      "path": "/session/magic_link"
+    },
+    {
       "method": "POST",
       "path": "/session/magic_link"
     },
@@ -1537,6 +1541,10 @@
     {
       "method": "GET",
       "path": "/assets/system_user.png"
+    },
+    {
+      "method": "GET",
+      "path": "/assets/lexxy/{filename}"
     },
     {
       "method": "POST",
@@ -1901,6 +1909,22 @@
     {
       "method": "GET",
       "path": "/{account}/cards"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/columns/cards/{card_id}/drops/closure"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/columns/cards/{card_id}/drops/not_now"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/columns/cards/{card_id}/drops/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/columns/cards/{card_id}/drops/column"
     },
     {
       "method": "POST",

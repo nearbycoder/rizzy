@@ -1,6 +1,6 @@
 use axum::{
     Json, Router, ServiceExt,
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
     middleware::{self, Next},
@@ -1520,7 +1520,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/client_configurations/ios_v1.json", get(ios_config))
         .route("/session", post(request_magic_link).delete(logout_session))
         .route("/session/new", get(new_session))
-        .route("/session/magic_link", post(complete_magic_link))
+        .route("/session/magic_link", get(show_magic_link).post(complete_magic_link))
         .route("/signup", post(request_signup))
         .route("/signup/completion", post(complete_signup))
         .route("/my/identity", get(my_identity))
@@ -1751,6 +1751,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/boards/{board}/cards", post(create_card))
         .route("/{account}/cards", get(list_cards))
+        .route(
+            "/{account}/columns/cards/{card_id}/drops/closure",
+            post(drop_card_closure),
+        )
+        .route(
+            "/{account}/columns/cards/{card_id}/drops/not_now",
+            post(drop_card_not_now),
+        )
+        .route(
+            "/{account}/columns/cards/{card_id}/drops/stream",
+            post(drop_card_stream),
+        )
+        .route(
+            "/{account}/columns/cards/{card_id}/drops/column",
+            post(drop_card_column),
+        )
         .route("/{account}/filters", post(create_filter))
         .route(
             "/{account}/filters/{id}",
@@ -2111,9 +2127,72 @@ async fn request_magic_link(
     State(app): Shared,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
-    request_magic_link_inner(&app, peer, headers, body, false).await
+    let (body, form) = session_body(&headers, &body)?;
+    let mut response = request_magic_link_inner(&app, peer, headers, body, false).await?;
+    if form {
+        *response.status_mut() = StatusCode::FOUND;
+        response.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_static("/session/magic_link"),
+        );
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        *response.body_mut() = Body::empty();
+    }
+    Ok(response)
+}
+fn session_body(headers: &HeaderMap, body: &Bytes) -> Result<(Value, bool)> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    if form {
+        let fields = url::form_urlencoded::parse(body)
+            .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
+            .collect::<serde_json::Map<String, Value>>();
+        Ok((Value::Object(fields), true))
+    } else {
+        Ok((
+            serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))?,
+            false,
+        ))
+    }
+}
+async fn show_magic_link(State(app): Shared, headers: HeaderMap) -> Result<Response> {
+    let Some(pending) = cookie_value(&headers, "pending_authentication_token") else {
+        return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
+    };
+    let row = sqlx::query(
+        "SELECT email_address FROM pending_authentications WHERE token_hash=? AND expires_at>?",
+    )
+    .bind(hash(&pending))
+    .bind(now())
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?;
+    let Some(row) = row else {
+        return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
+    };
+    let email: String = row.get("email_address");
+    let code_hint = if dev_magic_links() {
+        let code: Option<String> = sqlx::query_scalar("SELECT m.code FROM magic_links m JOIN identities i ON i.id=m.identity_id WHERE i.email_address=? AND m.expires_at>? ORDER BY m.created_at DESC LIMIT 1")
+            .bind(&email).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?;
+        code.map(|code| {
+            format!(
+                "<p>Development code: <strong>{}</strong></p>",
+                escape(&code)
+            )
+        })
+        .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Check your email | Rizzy</title></head><body><main><h1>Check your email</h1><p>Enter the verification code sent to <strong>{}</strong>.</p><form method=\"post\" action=\"/session/magic_link\"><label>Verification code<input name=\"code\" autocomplete=\"one-time-code\" maxlength=\"6\" required autofocus></label><button type=\"submit\">Continue</button></form>{code_hint}</main></body></html>",escape(&email))).into_response())
 }
 async fn request_signup(
     State(app): Shared,
@@ -2245,8 +2324,9 @@ async fn complete_magic_link(
     State(app): Shared,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
+    let (body, form) = session_body(&headers, &body)?;
     let pending = cookie_value(&headers, "pending_authentication_token").ok_or_else(|| {
         err(
             StatusCode::UNAUTHORIZED,
@@ -2340,6 +2420,17 @@ async fn complete_magic_link(
         31536000,
         secure_request(&headers),
     );
+    if form {
+        *response.status_mut() = StatusCode::FOUND;
+        response
+            .headers_mut()
+            .insert(header::LOCATION, HeaderValue::from_static("/"));
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        *response.body_mut() = Body::empty();
+    }
     Ok(response)
 }
 async fn logout_session(State(app): Shared, headers: HeaderMap) -> Result<Response> {
@@ -6366,6 +6457,73 @@ async fn unpostpone_card(
     let p = principal(&app, &h, &a).await?;
     set_flag(&app, &p, &n, "postponed", 0).await
 }
+async fn drop_card_to(
+    app: &App,
+    account: &str,
+    number: &str,
+    headers: &HeaderMap,
+    destination: &str,
+    column_id: Option<&str>,
+) -> Result<Response> {
+    let p = principal(app, headers, account).await?;
+    p.write()?;
+    let c = card(app, &p, number).await?;
+    let board_id: String = c.get("board_id");
+    match destination {
+        "closure" => {
+            set_flag(app, &p, number, "closed", 1).await?;
+        }
+        "not_now" => {
+            set_flag(app, &p, number, "postponed", 1).await?;
+        }
+        "stream" => {
+            send_card_to_stream(app, &p, number).await?;
+        }
+        "column" => {
+            let id = column_id.ok_or_else(|| bad("column_id is required"))?;
+            triage_card_into(app, &p, number, id).await?;
+        }
+        _ => return Err(bad("invalid destination")),
+    }
+    board_page::drop_column_response(app, &p, &board_id, destination, column_id).await
+}
+async fn drop_card_closure(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    drop_card_to(&app, &account, &number, &headers, "closure", None).await
+}
+async fn drop_card_not_now(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    drop_card_to(&app, &account, &number, &headers, "not_now", None).await
+}
+async fn drop_card_stream(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    drop_card_to(&app, &account, &number, &headers, "stream", None).await
+}
+async fn drop_card_column(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    drop_card_to(
+        &app,
+        &account,
+        &number,
+        &headers,
+        "column",
+        query.get("column_id").map(String::as_str),
+    )
+    .await
+}
 async fn gild_card(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
@@ -6390,9 +6548,13 @@ async fn triage_card(
     Json(body): Json<Value>,
 ) -> Result<StatusCode> {
     let p = principal(&app, &headers, &account).await?;
+    let column = required(&body, "column_id")?;
+    triage_card_into(&app, &p, &number, &column).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn triage_card_into(app: &App, p: &Principal, number: &str, column: &str) -> Result<()> {
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let column = required(&body, "column_id")?;
     let col = checked_column(&app, &p, &c.get::<String, _>("board_id"), &column).await?;
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
@@ -6428,7 +6590,7 @@ async fn triage_card(
         ),
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 async fn untriage_card(
     State(app): Shared,
@@ -6436,6 +6598,10 @@ async fn untriage_card(
     headers: HeaderMap,
 ) -> Result<StatusCode> {
     let p = principal(&app, &headers, &account).await?;
+    send_card_to_stream(&app, &p, &number).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn send_card_to_stream(app: &App, p: &Principal, number: &str) -> Result<()> {
     p.write()?;
     let c = card(&app, &p, &number).await?;
     let timestamp = now();
@@ -6469,7 +6635,7 @@ async fn untriage_card(
         &format!("{who} <strong>moved</strong> this back to “Maybe?”"),
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 async fn move_card(
     State(app): Shared,

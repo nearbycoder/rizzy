@@ -1,4 +1,7 @@
-use axum::response::Html;
+use axum::{
+    http::header,
+    response::{Html, IntoResponse, Response},
+};
 use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
@@ -16,8 +19,13 @@ fn column_html(
     path: &str,
     add_card: bool,
 ) -> String {
+    let dom_id = match id {
+        "done" => "closed-cards".to_owned(),
+        "maybe" | "not-now" => id.to_owned(),
+        _ => format!("column_{id}"),
+    };
     let mut html = format!(
-        "<section class=\"cards cards--{}\" id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><h2>{}</h2><span class=\"cards__count\">{count}</span></header><div class=\"cards__list\">",
+        "<section class=\"cards cards--{}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><h2>{}</h2><span class=\"cards__count\">{count}</span></header><div class=\"cards__list\">",
         if id == "maybe" {
             "maybe"
         } else if id == "done" {
@@ -27,6 +35,7 @@ fn column_html(
         } else {
             "doing"
         },
+        escape(&dom_id),
         escape(id),
         escape(title),
         escape(title),
@@ -43,7 +52,7 @@ fn column_html(
             let title: String = card.get("title");
             let golden = card.get::<i64, _>("golden") != 0;
             html.push_str(&format!(
-                "<a class=\"card{}\" href=\"/{account}/cards/{number}\"><span class=\"card__number\">#{number}</span><strong class=\"card__title\">{}</strong><span class=\"card__meta\">{}</span></a>",
+                "<a class=\"card{}\" draggable=\"true\" data-card-number=\"{number}\" href=\"/{account}/cards/{number}\"><span class=\"card__number\">#{number}</span><strong class=\"card__title\">{}</strong><span class=\"card__meta\">{}</span></a>",
                 if golden { " card--golden" } else { "" },
                 escape(&title),
                 if id == "done" { "Done" } else if id == "not-now" { "Not Now" } else { "Open" },
@@ -68,6 +77,112 @@ fn column_html(
     }
     html.push_str("</section>");
     html
+}
+
+pub(super) async fn drop_column_response(
+    app: &App,
+    principal: &Principal,
+    board_id: &str,
+    destination: &str,
+    column_id: Option<&str>,
+) -> Result<Response> {
+    let (id, title, path, add_card) = match destination {
+        "closure" => (
+            "done".to_owned(),
+            "Done".to_owned(),
+            "/columns/closed".to_owned(),
+            false,
+        ),
+        "not_now" => (
+            "not-now".to_owned(),
+            "Not Now".to_owned(),
+            "/columns/not_now".to_owned(),
+            false,
+        ),
+        "stream" => (
+            "maybe".to_owned(),
+            "Maybe?".to_owned(),
+            "/columns/stream".to_owned(),
+            true,
+        ),
+        "column" => {
+            let id = column_id.ok_or_else(|| super::bad("column_id is required"))?;
+            let row = super::checked_column(app, principal, board_id, id).await?;
+            (
+                id.to_owned(),
+                row.get("name"),
+                format!("/columns/{id}/cards"),
+                false,
+            )
+        }
+        _ => return Err(super::bad("invalid destination")),
+    };
+    let (predicate, order) = match destination {
+        "closure" => ("c.closed=1", "cl.created_at DESC,c.id DESC"),
+        "not_now" => (
+            "c.closed=0 AND c.postponed=1",
+            "c.last_active_at DESC,c.id DESC",
+        ),
+        "stream" => (
+            "c.closed=0 AND c.postponed=0 AND c.column_id IS NULL",
+            "c.golden DESC,c.last_active_at DESC,c.id DESC",
+        ),
+        _ => (
+            "c.closed=0 AND c.postponed=0 AND c.column_id=?",
+            "c.golden DESC,c.last_active_at DESC,c.id DESC",
+        ),
+    };
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM cards c WHERE c.board_id=? AND c.status='published' AND {predicate}"
+    );
+    let cards_sql = format!(
+        "SELECT c.* FROM cards c LEFT JOIN closures cl ON cl.card_id=c.id WHERE c.board_id=? AND c.status='published' AND {predicate} ORDER BY {order} LIMIT 15"
+    );
+    let (count, cards) = if destination == "column" {
+        let count: i64 = sqlx::query_scalar(&count_sql)
+            .bind(board_id)
+            .bind(&id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+        let cards = sqlx::query(&cards_sql)
+            .bind(board_id)
+            .bind(&id)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
+        (count, cards)
+    } else {
+        let count: i64 = sqlx::query_scalar(&count_sql)
+            .bind(board_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+        let cards = sqlx::query(&cards_sql)
+            .bind(board_id)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
+        (count, cards)
+    };
+    let target = match destination {
+        "closure" => "closed-cards".to_owned(),
+        "not_now" => "not-now".to_owned(),
+        "stream" => "maybe".to_owned(),
+        _ => format!("column_{id}"),
+    };
+    let content = column_html(
+        principal.slug,
+        board_id,
+        &id,
+        &title,
+        count,
+        Some(&cards),
+        &path,
+        add_card,
+    );
+    Ok(([(header::CONTENT_TYPE, "text/vnd.turbo-stream.html; charset=utf-8")],
+        format!("<turbo-stream action=\"replace\" method=\"morph\" target=\"{}\"><template>{content}</template></turbo-stream>", escape(&target))).into_response())
 }
 
 pub(super) async fn show(
