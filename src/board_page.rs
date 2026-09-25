@@ -5,9 +5,162 @@ use axum::{
 use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
-use super::{App, Principal, Result, card_page::render_template, db_err, escape};
+use super::{
+    App, CardQuery, Principal, Result, card_page::render_template, cards_query, db_err, escape,
+    page_window,
+};
 
 const TEMPLATE: &str = include_str!("../static/board.html");
+
+fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
+    let term = query.terms.first().map(String::as_str).unwrap_or("");
+    let mut preserved = String::new();
+    for (key, values) in [
+        ("terms[]", query.terms.iter().skip(1).collect::<Vec<_>>()),
+        ("card_ids[]", query.card_ids.iter().collect()),
+        ("column_ids[]", query.column_ids.iter().collect()),
+        ("tag_ids[]", query.tag_ids.iter().collect()),
+        ("assignee_ids[]", query.assignee_ids.iter().collect()),
+        ("creator_ids[]", query.creator_ids.iter().collect()),
+        ("closer_ids[]", query.closer_ids.iter().collect()),
+    ] {
+        for value in values {
+            preserved.push_str(&format!(
+                "<input type=\"hidden\" name=\"{key}\" value=\"{}\">",
+                escape(value)
+            ));
+        }
+    }
+    for (key, value) in [
+        ("assignment_status", query.assignment_status.as_deref()),
+        ("creation", query.creation.as_deref()),
+        ("closure", query.closure.as_deref()),
+    ] {
+        if let Some(value) = value {
+            preserved.push_str(&format!(
+                "<input type=\"hidden\" name=\"{key}\" value=\"{}\">",
+                escape(value)
+            ));
+        }
+    }
+    let option = |value: &str, label: &str, current: Option<&str>| {
+        format!(
+            "<option value=\"{value}\"{}>{label}</option>",
+            if current == Some(value) {
+                " selected"
+            } else {
+                ""
+            }
+        )
+    };
+    let index = query.indexed_by.as_deref().unwrap_or("all");
+    let sort = query.sorted_by.as_deref().unwrap_or("latest");
+    format!(
+        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><label>Filter these cards<input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Search cards\"></label>{preserved}<label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{account}/boards/{}\">Clear</a></form>",
+        escape(board_id),
+        escape(term),
+        [
+            ("all", "Open"),
+            ("closed", "Done"),
+            ("not_now", "Not Now"),
+            ("stalled", "Stalled"),
+            ("postponing_soon", "Closing soon"),
+            ("golden", "Golden")
+        ]
+        .iter()
+        .map(|(value, label)| option(value, label, Some(index)))
+        .collect::<String>(),
+        [
+            ("latest", "Latest activity"),
+            ("newest", "Newest"),
+            ("oldest", "Oldest")
+        ]
+        .iter()
+        .map(|(value, label)| option(value, label, Some(sort)))
+        .collect::<String>(),
+        escape(board_id)
+    )
+}
+
+pub(super) async fn show_filtered(
+    app: &App,
+    principal: &Principal,
+    board: &SqliteRow,
+    query: &CardQuery,
+    raw_query: Option<&str>,
+) -> Result<Html<String>> {
+    let board_id: String = board.get("id");
+    let board_name: String = board.get("name");
+    let (offset, limit) = page_window(query.page);
+    let mut count = cards_query("SELECT COUNT(*)", principal, query);
+    let total: i64 = count
+        .build_query_scalar()
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let order = match query.sorted_by.as_deref() {
+        Some("oldest") => "c.created_at ASC",
+        Some("newest") => "c.created_at DESC",
+        _ => "c.last_active_at DESC",
+    };
+    let mut builder = cards_query("SELECT c.*", principal, query);
+    builder
+        .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
+        .push_bind(limit)
+        .push(" OFFSET ")
+        .push_bind(offset);
+    let cards = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
+    let mut list = format!(
+        "<div class=\"card-columns card-columns--filtered\" aria-label=\"Filtered cards\"><section class=\"cards cards--grid\"><h2>Filtered cards <span class=\"cards__count\">{total}</span></h2><div class=\"cards__list\">"
+    );
+    for card in &cards {
+        let number: i64 = card.get("number");
+        let title: String = card.get("title");
+        list.push_str(&format!("<a class=\"card{}\" href=\"/{}/cards/{number}\"><span class=\"card__number\">#{number}</span><strong class=\"card__title\">{}</strong></a>",
+            if card.get::<i64,_>("golden") != 0 { " card--golden" } else { "" }, principal.slug, escape(&title)));
+    }
+    if cards.is_empty() {
+        list.push_str("<p class=\"cards__empty\">No cards match this filter.</p>");
+    }
+    list.push_str("</div>");
+    let page_url = |page: i64| {
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        for (key, value) in url::form_urlencoded::parse(raw_query.unwrap_or("").as_bytes()) {
+            if key != "page" {
+                serializer.append_pair(&key, &value);
+            }
+        }
+        serializer.append_pair("page", &page.to_string());
+        format!(
+            "/{}/boards/{}?{}",
+            principal.slug,
+            escape(&board_id),
+            escape(&serializer.finish())
+        )
+    };
+    if query.page > 1 {
+        list.push_str(&format!(
+            "<a class=\"button button--secondary\" href=\"{}\">Previous page</a>",
+            page_url(query.page - 1)
+        ));
+    }
+    if offset + (cards.len() as i64) < total {
+        list.push_str(&format!(
+            "<a class=\"button button--secondary\" href=\"{}\">Next page</a>",
+            page_url(query.page + 1)
+        ));
+    }
+    list.push_str("</section></div>");
+    let values = HashMap::from([
+        ("ACCOUNT", principal.slug.to_string()),
+        ("BOARD_ID", escape(&board_id)),
+        ("BOARD_NAME", escape(&board_name)),
+        ("ADD_COLUMN", String::new()),
+        ("FILTER_FORM", filter_form(principal.slug, &board_id, query)),
+        ("COLUMNS", list),
+    ]);
+    Ok(Html(render_template(TEMPLATE, &values)))
+}
 
 fn column_html(
     account: i64,
@@ -214,7 +367,7 @@ pub(super) async fn show(
         .await
         .map_err(db_err)?;
     let account = principal.slug;
-    let mut column_markup = String::new();
+    let mut column_markup = "<div class=\"card-columns\" aria-label=\"Board columns\">".to_owned();
     column_markup.push_str(&column_html(
         account,
         &board_id,
@@ -259,10 +412,13 @@ pub(super) async fn show(
         "/columns/closed",
         false,
     ));
+    column_markup.push_str("</div>");
     let values = HashMap::from([
         ("ACCOUNT", account.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
+        ("ADD_COLUMN", "<button class=\"button button--secondary\" id=\"add-column\" type=\"button\">Add column</button>".to_owned()),
+        ("FILTER_FORM", filter_form(account, &board_id, &CardQuery::default())),
         ("COLUMNS", column_markup),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))

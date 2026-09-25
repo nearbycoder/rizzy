@@ -39,6 +39,13 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 .board-tools { display: grid; gap: 8px; margin-top: 16px }
 .board-tools form { margin: 0 }
 .board-tools button { width: 100% }
+.board-filter { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin-top: 18px }
+.board-filter label { display: grid; gap: 4px; font-size: 13px; color: #d6c9b5 }
+.board-filter input,.board-filter select { min-height: 41px; padding: 8px 10px; border: 1px solid #666158; border-radius: 8px; background: #34322f; color: #f5f0e8; font: inherit }
+.board-filter a { padding: 8px; color: #e7bd61 }
+.card-columns--filtered .cards { flex: 1 1 auto }
+.cards--grid .cards__list { grid-template-columns: repeat(auto-fill,minmax(220px,1fr)) }
+.cards--grid .button { display: inline-block; margin: 16px 12px 0 0; text-decoration: none }
 @media (max-width:600px) { .site__back { display:none } .board { padding: 18px 16px } .board__header { align-items: flex-start } .cards { flex-basis: min(290px,82vw) } }
 </style>
 </head>
@@ -46,11 +53,12 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 <a class="skip" href="#main">Skip to main content</a>
 <header class="site"><a class="site__brand" href="/">Rizzy</a><a class="site__back" href="/">All boards</a></header>
 <main class="board" id="main">
-  <div class="board__header"><h1>{{BOARD_NAME}}</h1><button class="button button--secondary" id="add-column" type="button">Add column</button></div>
-  <div class="card-columns" aria-label="Board columns">{{COLUMNS}}</div>
+  <div class="board__header"><h1>{{BOARD_NAME}}</h1>{{ADD_COLUMN}}</div>
+  {{FILTER_FORM}}
+  {{COLUMNS}}
 </main>
 <script>
-document.getElementById('add-column').addEventListener('click',async()=>{
+document.getElementById('add-column')?.addEventListener('click',async()=>{
   const name=prompt('Column name'); if(!name?.trim())return;
   const account=document.body.dataset.account,board=document.body.dataset.board;
   const response=await fetch(`/${account}/boards/${board}/columns`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({column:{name:name.trim()}})});
@@ -102,6 +110,6 @@ boardColumns.addEventListener('drop',async event=>{
     location.reload();
   }catch(error){alert(error.message)}
 });
-document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='c'&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&!/input|textarea/i.test(document.activeElement?.tagName||''))document.getElementById('add-card').requestSubmit()});
+document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='c'&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&!/input|textarea/i.test(document.activeElement?.tagName||''))document.getElementById('add-card')?.requestSubmit()});
 </script>
 </body></html>

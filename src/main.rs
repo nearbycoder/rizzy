@@ -3668,13 +3668,56 @@ async fn show_board(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
+    RawQuery(raw): RawQuery,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let r = board(&app, &p, &id).await?;
     if !headers.contains_key("x-rizzy-json-request") {
-        return Ok(board_page::show(&app, &p, &r).await?.into_response());
+        let mut query = parse_card_query(raw.clone());
+        if let Some(filter_id) = query.filter_id.as_deref() {
+            let fields: String = sqlx::query_scalar(
+                "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
+            )
+            .bind(filter_id)
+            .bind(&p.account_id)
+            .bind(&p.user_id)
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(missing)?;
+            let stored: Value = serde_json::from_str(&fields)
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
+            query = card_query_from_filter(&stored, query.page);
+        }
+        query.terms.retain(|term| !term.trim().is_empty());
+        let filtered = board_filter_used(&query);
+        query.board_ids = vec![id.clone()];
+        return Ok(if filtered {
+            board_page::show_filtered(&app, &p, &r, &query, raw.as_deref())
+                .await?
+                .into_response()
+        } else {
+            board_page::show(&app, &p, &r).await?.into_response()
+        });
     }
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
+}
+fn board_filter_used(query: &CardQuery) -> bool {
+    !query.terms.is_empty()
+        || !query.card_ids.is_empty()
+        || !query.tag_ids.is_empty()
+        || !query.assignee_ids.is_empty()
+        || !query.creator_ids.is_empty()
+        || !query.closer_ids.is_empty()
+        || query.assignment_status.as_deref() == Some("unassigned")
+        || query
+            .indexed_by
+            .as_deref()
+            .is_some_and(|index| index != "all")
+        || query
+            .sorted_by
+            .as_deref()
+            .is_some_and(|sort| sort != "latest")
 }
 async fn list_board_accesses(
     State(app): Shared,

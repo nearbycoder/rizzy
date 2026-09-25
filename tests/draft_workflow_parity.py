@@ -18,6 +18,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def request(target, path, method="GET", data=None, *, accept="application/json", bearer=False, csrf=None):
     headers = {"Accept": accept}
+    headers.update(target.get("extra_headers", {}))
     if bearer:
         headers["Authorization"] = f"Bearer {target['token']}"
     if csrf:
