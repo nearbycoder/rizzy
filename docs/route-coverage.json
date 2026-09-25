@@ -615,7 +615,7 @@
       "path": "/cards/:card_id/column/edit(.:format)",
       "controller": "cards/columns",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -2117,6 +2117,10 @@
     {
       "method": "GET",
       "path": "/{account}/cards/{number}/draft"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/column/edit"
     },
     {
       "method": "GET",

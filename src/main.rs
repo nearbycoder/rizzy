@@ -35,6 +35,7 @@ mod account_transfer;
 mod board_page;
 mod board_settings;
 mod board_views;
+mod card_column_page;
 mod card_page;
 mod events_page;
 mod exports;
@@ -1862,6 +1863,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .delete(delete_card),
         )
         .route("/{account}/cards/{number}/draft", get(show_draft))
+        .route("/{account}/cards/{number}/column/edit", get(card_column_page::edit))
         .route("/{account}/cards/previews", get(card_previews))
         .route("/{account}/cards/previews.turbo_stream", get(card_previews))
         .route("/{account}/cards/{number}/publish", post(publish_card))
