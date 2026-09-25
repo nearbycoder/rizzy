@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS cards (
   UNIQUE(account_id, number)
 );
 CREATE INDEX IF NOT EXISTS cards_board_active ON cards(board_id, status, closed, postponed, last_active_at DESC);
+CREATE INDEX IF NOT EXISTS cards_board_column_active ON cards(board_id, column_id, status, closed, postponed, golden DESC, last_active_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS cards_account_latest ON cards(account_id, last_active_at DESC);
 CREATE TABLE IF NOT EXISTS storage_blobs (
   id TEXT PRIMARY KEY,

@@ -1,0 +1,21 @@
+{
+  "fixture": "30,000 synthetic published cards in one board; one in twenty in target column",
+  "repetitions": 60,
+  "before": {
+    "query_plan": [
+      "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ],
+    "median_ms": 1.614,
+    "p95_ms": 1.853
+  },
+  "after": {
+    "query_plan": [
+      "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=? AND status=? AND closed=? AND postponed=?)"
+    ],
+    "median_ms": 0.014,
+    "p95_ms": 0.015
+  },
+  "median_speedup": 115.3,
+  "scope": "in-memory SQLite query probe, not full HTTP or Fizzy comparison"
+}

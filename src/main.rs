@@ -29,6 +29,7 @@ use tokio::net::lookup_host;
 use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
 mod account_transfer;
+mod board_page;
 mod board_views;
 mod card_page;
 mod exports;
@@ -3580,7 +3581,7 @@ async fn show_board(
     let p = principal(&app, &headers, &account).await?;
     let r = board(&app, &p, &id).await?;
     if !headers.contains_key("x-rizzy-json-request") {
-        return Ok(Html(include_str!("../static/index.html")).into_response());
+        return Ok(board_page::show(&app, &p, &r).await?.into_response());
     }
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
 }

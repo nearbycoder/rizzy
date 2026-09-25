@@ -61,6 +61,7 @@ def run(target):
     try:
         status, _, html = request(target, board_path, accept="text/html")
         assert status == 200, status
+        assert all(marker in html for marker in (b"card-columns", b"cards--maybe", b"cards--on-deck", b"cards--closed", b"Add a card")), html[:500]
         token = re.search(rb'<meta name="csrf-token" content="([^"]+)"', html)
         csrf = token.group(1).decode() if token else None
 
@@ -107,6 +108,8 @@ def run(target):
         status, _, raw = request(target, f"/{account}/activities.json?board_ids%5B%5D={board['id']}", bearer=True)
         activities = json.loads(raw)
         assert status == 200 and len(activities) == 1 and activities[0]["action"] == "card_published", (status, activities)
+        status, _, board_html = request(target, board_path, accept="text/html")
+        assert status == 200 and title.encode() in board_html and b"cards--maybe" in board_html
         comment_text = f"Comment parity {time.time_ns()}"
         status, _, _ = request(target, f"/{account}/cards/{number}/comments.json", "POST", {
             "comment": {"body": comment_text}
@@ -132,7 +135,8 @@ def run(target):
         assert status == 200 and json.loads(raw)["title"] == "Untitled", raw[:150]
         return {"draft_reused": True, "draft_json_status": 406, "publish_status": 201,
                 "add_another": True, "published_title_matches": card["title"] == title, "search_after_publish": True,
-                "activity_after_publish": True, "server_card_html": True, "empty_title_default": True, "published_status_immutable": True}
+                "activity_after_publish": True, "server_board_html": True, "server_card_html": True,
+                "empty_title_default": True, "published_status_immutable": True}
     finally:
         status, _, _ = request(target, board_path, "DELETE", bearer=True)
         assert status == 204, status

@@ -6,9 +6,9 @@ use super::{App, Principal, Result, board, db_err, escape, storage, wrap_html};
 
 const TEMPLATE: &str = include_str!("../static/card.html");
 
-fn render_template(values: &HashMap<&str, String>) -> String {
-    let mut result = String::with_capacity(TEMPLATE.len() + 2048);
-    let mut rest = TEMPLATE;
+pub(super) fn render_template(template: &str, values: &HashMap<&str, String>) -> String {
+    let mut result = String::with_capacity(template.len() + 2048);
+    let mut rest = template;
     while let Some((before, after_open)) = rest.split_once("{{") {
         result.push_str(before);
         if let Some((key, after_close)) = after_open.split_once("}}") {
@@ -156,5 +156,5 @@ pub(super) async fn show(
         "PIN_METHOD",
         if pinned != 0 { "DELETE" } else { "POST" }.into(),
     );
-    Ok(Html(render_template(&values)))
+    Ok(Html(render_template(TEMPLATE, &values)))
 }

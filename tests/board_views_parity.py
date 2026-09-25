@@ -100,6 +100,8 @@ def run(target):
     code, public_second, _ = request(target, f"/public/boards/{key}/columns/stream?page=2", accept="text/html", public=True)
     assert code == 200 and "Paged stream card 00" in public_second and "Parity card maybe" in public_second
     result["public_pagination"] = (code, "Paged stream card 00" in public_second)
+    code, _, _ = request(target, f"/boards/{board_id}", "DELETE")
+    assert code == 204
     return result
 
 
