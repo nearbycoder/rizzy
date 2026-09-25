@@ -17,12 +17,13 @@ use sqlx::{
 use std::{
     collections::{HashMap, HashSet},
     env,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     process::Stdio,
     sync::Arc,
     time::Duration,
 };
 use tokio::io::AsyncWriteExt;
+use tokio::net::lookup_host;
 use tokio::process::Command;
 
 struct App {
@@ -356,11 +357,21 @@ async fn record_event(
     particulars: Value,
 ) -> Result<()> {
     let timestamp = now();
+    let event_id = id();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-        .bind(id()).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
+        .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
         .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
+    queue_webhooks(
+        &mut tx,
+        &p.account_id,
+        board_id,
+        &event_id,
+        action,
+        &timestamp,
+    )
+    .await?;
     sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
         .bind(&timestamp)
         .bind(card_id)
@@ -369,6 +380,294 @@ async fn record_event(
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     Ok(())
+}
+async fn queue_webhooks(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+    board_id: &str,
+    event_id: &str,
+    action: &str,
+    timestamp: &str,
+) -> Result<()> {
+    let webhooks:Vec<String>=sqlx::query_scalar("SELECT w.id FROM webhooks w WHERE w.account_id=? AND w.board_id=? AND w.active=1 AND EXISTS(SELECT 1 FROM json_each(w.subscribed_actions) WHERE value=?)")
+        .bind(account_id).bind(board_id).bind(action).fetch_all(&mut **tx).await.map_err(db_err)?;
+    for webhook_id in webhooks {
+        sqlx::query("INSERT INTO webhook_deliveries(id,account_id,webhook_id,event_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .bind(id()).bind(account_id).bind(webhook_id).bind(event_id).bind(timestamp).bind(timestamp)
+            .execute(&mut **tx).await.map_err(db_err)?;
+    }
+    Ok(())
+}
+
+fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !matches!(a, 0 | 10 | 127 | 224..=255)
+                && !(a == 100 && (64..=127).contains(&b))
+                && !(a == 169 && b == 254)
+                && !(a == 172 && (16..=31).contains(&b))
+                && !(a == 192 && (b == 0 || b == 168 || (b == 88 && c == 99)))
+                && !(a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+                && !(a == 203 && b == 0 && c == 113)
+        }
+        IpAddr::V6(ip) => {
+            let seg = ip.segments();
+            (seg[0] & 0xe000) == 0x2000 && !(seg[0] == 0x2001 && seg[1] == 0x0db8)
+        }
+    }
+}
+
+fn hmac_sha256(secret: &str, body: &str) -> String {
+    let mut key = [0u8; 64];
+    let bytes = secret.as_bytes();
+    if bytes.len() > 64 {
+        key[..32].copy_from_slice(&Sha256::digest(bytes));
+    } else {
+        key[..bytes.len()].copy_from_slice(bytes);
+    }
+    let mut inner = key;
+    let mut outer = key;
+    for byte in &mut inner {
+        *byte ^= 0x36;
+    }
+    for byte in &mut outer {
+        *byte ^= 0x5c;
+    }
+    let inner_hash = Sha256::digest([inner.as_slice(), body.as_bytes()].concat());
+    hex::encode(Sha256::digest(
+        [outer.as_slice(), inner_hash.as_slice()].concat(),
+    ))
+}
+
+#[cfg(test)]
+mod webhook_security_tests {
+    use super::{hmac_sha256, public_ip};
+
+    #[test]
+    fn signature_matches_hmac_sha256_reference_vector() {
+        assert_eq!(
+            hmac_sha256("Jefe", "what do ya want for nothing?"),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    #[test]
+    fn private_and_reserved_destinations_are_blocked() {
+        for address in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "169.254.169.254",
+            "192.168.1.1",
+            "198.51.100.1",
+            "::1",
+            "fc00::1",
+            "2001:db8::1",
+        ] {
+            assert!(!public_ip(address.parse().unwrap()), "{address}");
+        }
+        for address in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            assert!(public_ip(address.parse().unwrap()), "{address}");
+        }
+    }
+}
+
+async fn webhook_payload(app: &App, row: &SqliteRow, host: &str) -> Result<String> {
+    let account_id: String = row.get("account_id");
+    let slug: i64 = row.get("external_account_id");
+    let creator_id: String = row.get("creator_id");
+    let principal = Principal {
+        account_id,
+        user_id: creator_id,
+        slug,
+        role: "owner".into(),
+        permission: "write".into(),
+    };
+    let event = sqlx::query("SELECT * FROM events WHERE id=?")
+        .bind(row.get::<String, _>("event_id"))
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let item = activity_items(app, &principal, &[event], host)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(missing)?;
+    Ok(
+        json!({"id":item["id"],"action":item["action"],"created_at":item["created_at"],
+        "eventable":item["eventable"],"board":item["board"],"creator":item["creator"]})
+        .to_string(),
+    )
+}
+
+async fn send_webhook(url: &str, secret: &str, timestamp: &str, body: &str) -> Value {
+    let Ok(uri) = url::Url::parse(url) else {
+        return json!({"error":"destination_unreachable"});
+    };
+    if !matches!(uri.scheme(), "http" | "https") {
+        return json!({"error":"destination_unreachable"});
+    }
+    let Some(host) = uri.host_str() else {
+        return json!({"error":"dns_lookup_failed"});
+    };
+    let Some(port) = uri.port_or_known_default() else {
+        return json!({"error":"destination_unreachable"});
+    };
+    let addresses = if let Ok(ip) = host.parse::<IpAddr>() {
+        vec![SocketAddr::new(ip, port)]
+    } else {
+        match tokio::time::timeout(Duration::from_secs(7), lookup_host((host, port))).await {
+            Ok(Ok(found)) => found.collect::<Vec<_>>(),
+            _ => return json!({"error":"dns_lookup_failed"}),
+        }
+    };
+    // Refuse the destination if DNS returns even one private or reserved address.
+    if addresses.is_empty() {
+        return json!({"error":"dns_lookup_failed"});
+    }
+    if addresses.iter().any(|address| !public_ip(address.ip())) {
+        return json!({"error":"private_uri"});
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(7))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .resolve_to_addrs(host, &addresses)
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return json!({"error":"destination_unreachable"}),
+    };
+    let result = client
+        .post(uri)
+        .header("User-Agent", "fizzy/1.0.0 Webhook")
+        .header("Content-Type", "application/json")
+        .header("X-Webhook-Timestamp", timestamp)
+        .header("X-Webhook-Signature", hmac_sha256(secret, body))
+        .body(body.to_owned())
+        .send()
+        .await;
+    let Ok(mut response) = result else {
+        let error = result.unwrap_err();
+        return if error.is_timeout() {
+            json!({"error":"connection_timeout"})
+        } else if error.is_connect() {
+            json!({"error":"destination_unreachable"})
+        } else {
+            json!({"error":"destination_unreachable"})
+        };
+    };
+    let code = response.status().as_u16();
+    let mut bytes = 0usize;
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                bytes += chunk.len();
+                if bytes > 100_000 {
+                    return json!({"error":"response_too_large"});
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                return if error.is_timeout() {
+                    json!({"error":"connection_timeout"})
+                } else {
+                    json!({"error":"destination_unreachable"})
+                };
+            }
+        }
+    }
+    json!({"code":code})
+}
+
+async fn process_webhook_delivery(app: &App, delivery_id: &str, host: &str) -> Result<()> {
+    let row = sqlx::query("SELECT d.*,w.url,w.signing_secret,e.creator_id,e.created_at event_created_at,a.external_account_id FROM webhook_deliveries d JOIN webhooks w ON w.id=d.webhook_id JOIN events e ON e.id=d.event_id JOIN accounts a ON a.id=d.account_id WHERE d.id=?")
+        .bind(delivery_id).fetch_one(&app.db).await.map_err(db_err)?;
+    let timestamp: String = row.get("event_created_at");
+    let timestamp = chrono::DateTime::parse_from_rfc3339(&timestamp)
+        .map(|t| {
+            t.to_utc()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        })
+        .unwrap_or(timestamp);
+    let request = json!({"headers":{"User-Agent":"fizzy/1.0.0 Webhook","Content-Type":"application/json","X-Webhook-Timestamp":timestamp}});
+    let payload = webhook_payload(app, &row, host).await?;
+    let response = send_webhook(
+        &row.get::<String, _>("url"),
+        &row.get::<String, _>("signing_secret"),
+        &timestamp,
+        &payload,
+    )
+    .await;
+    let completed_at = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("UPDATE webhook_deliveries SET state='completed',request=?,response=?,updated_at=? WHERE id=?")
+        .bind(request.to_string()).bind(response.to_string()).bind(&completed_at).bind(delivery_id)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    let webhook_id: String = row.get("webhook_id");
+    let succeeded = response["code"]
+        .as_u64()
+        .is_some_and(|code| (200..300).contains(&code));
+    if succeeded {
+        sqlx::query(
+            "UPDATE webhooks SET consecutive_failures_count=0,first_failure_at=NULL WHERE id=?",
+        )
+        .bind(&webhook_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    } else {
+        let threshold = (Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        sqlx::query("UPDATE webhooks SET active=CASE WHEN consecutive_failures_count+1>=10 AND first_failure_at<? THEN 0 ELSE active END,first_failure_at=CASE WHEN consecutive_failures_count=0 THEN ? ELSE first_failure_at END,consecutive_failures_count=consecutive_failures_count+1,updated_at=? WHERE id=?")
+            .bind(threshold).bind(&completed_at).bind(&completed_at).bind(&webhook_id)
+            .execute(&mut *tx).await.map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
+
+async fn webhook_worker(app: Arc<App>) {
+    let host = env::var("RIZZY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3007".into());
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
+    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    let mut ticks = 0u32;
+    loop {
+        interval.tick().await;
+        if ticks == 0 {
+            let stale = (Utc::now() - chrono::Duration::minutes(15))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            if let Err(error) = sqlx::query("UPDATE webhook_deliveries SET state='pending' WHERE state='in_progress' AND updated_at<?")
+                .bind(stale).execute(&app.db).await { eprintln!("webhook recovery failed: {error}"); }
+        }
+        ticks = (ticks + 1) % 240;
+        while let Ok(permit) = semaphore.clone().try_acquire_owned() {
+            let claimed = sqlx::query_scalar::<_,String>("UPDATE webhook_deliveries SET state='in_progress',updated_at=? WHERE id=(SELECT id FROM webhook_deliveries WHERE state='pending' ORDER BY created_at,id LIMIT 1) AND state='pending' RETURNING id")
+                .bind(now()).fetch_optional(&app.db).await;
+            match claimed {
+                Ok(Some(delivery_id)) => {
+                    let app = app.clone();
+                    let host = host.clone();
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        if let Err(error) =
+                            process_webhook_delivery(&app, &delivery_id, &host).await
+                        {
+                            eprintln!("webhook delivery {delivery_id} failed: {}", error.1);
+                            let _ = sqlx::query("UPDATE webhook_deliveries SET state='errored',response=?,updated_at=? WHERE id=?")
+                                .bind(json!({"error":"delivery_failed"}).to_string()).bind(now()).bind(&delivery_id)
+                                .execute(&app.db).await;
+                        }
+                    });
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("webhook claim failed: {error}");
+                    break;
+                }
+            }
+        }
+    }
 }
 async fn board_json(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
     let creator: String = r.get("creator_id");
@@ -503,6 +802,27 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    let webhook_columns = sqlx::query("PRAGMA table_info(webhooks)")
+        .fetch_all(&db)
+        .await?;
+    if !webhook_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "consecutive_failures_count")
+    {
+        sqlx::query(
+            "ALTER TABLE webhooks ADD COLUMN consecutive_failures_count INTEGER NOT NULL DEFAULT 0",
+        )
+        .execute(&db)
+        .await?;
+    }
+    if !webhook_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "first_failure_at")
+    {
+        sqlx::query("ALTER TABLE webhooks ADD COLUMN first_failure_at TEXT")
+            .execute(&db)
+            .await?;
+    }
     let comment_columns = sqlx::query("PRAGMA table_info(comments)")
         .fetch_all(&db)
         .await?;
@@ -610,6 +930,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
     });
+    if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
+        tokio::spawn(webhook_worker(app.clone()));
+    }
     let maintenance_db = app.db.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
@@ -698,6 +1021,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/boards/{id}/involvement",
             axum::routing::put(update_board_involvement).patch(update_board_involvement),
+        )
+        .route(
+            "/{account}/boards/{board}/webhooks",
+            get(list_webhooks).post(create_webhook),
+        )
+        .route(
+            "/{account}/boards/{board}/webhooks/{webhook}",
+            get(show_webhook)
+                .put(update_webhook)
+                .patch(update_webhook)
+                .delete(delete_webhook),
+        )
+        .route(
+            "/{account}/boards/{board}/webhooks/{webhook}/activation",
+            post(activate_webhook),
+        )
+        .route(
+            "/{account}/boards/{board}/webhooks/{webhook}/deliveries",
+            get(list_webhook_deliveries),
         )
         .route(
             "/{account}/boards/{id}/publication",
@@ -1966,6 +2308,281 @@ async fn update_board_involvement(
     }
     Ok(StatusCode::NO_CONTENT)
 }
+const WEBHOOK_ACTIONS: &[&str] = &[
+    "card_assigned",
+    "card_closed",
+    "card_postponed",
+    "card_auto_postponed",
+    "card_board_changed",
+    "card_published",
+    "card_reopened",
+    "card_sent_back_to_triage",
+    "card_triaged",
+    "card_unassigned",
+    "comment_created",
+];
+fn normalized_webhook_actions(value: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(actions) = value.as_array() {
+        for action in actions.iter().filter_map(Value::as_str) {
+            if WEBHOOK_ACTIONS.contains(&action) && !out.iter().any(|existing| existing == action) {
+                out.push(action.to_owned());
+            }
+        }
+    }
+    out
+}
+fn webhook_secret() -> String {
+    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut rng = rand::rng();
+    (0..24)
+        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+        .collect()
+}
+fn validate_webhook_url(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let parsed = url::Url::parse(trimmed).map_err(|_| bad("url is not a URL"))?;
+    if !["http", "https"].contains(&parsed.scheme()) || parsed.host_str().is_none() {
+        return Err(bad("url must use HTTP or HTTPS"));
+    }
+    Ok(trimmed.to_owned())
+}
+async fn webhook_json(
+    app: &App,
+    p: &Principal,
+    b: &SqliteRow,
+    w: &SqliteRow,
+    host: &str,
+) -> Result<Value> {
+    let id: String = w.get("id");
+    let board_id: String = b.get("id");
+    let actions: Value =
+        serde_json::from_str(&w.get::<String, _>("subscribed_actions")).unwrap_or(json!([]));
+    Ok(
+        json!({"id":id,"name":w.get::<String,_>("name"),"active":w.get::<i64,_>("active")!=0,
+        "signing_secret":w.get::<String,_>("signing_secret"),"subscribed_actions":actions,
+        "payload_url":w.get::<String,_>("url"),"created_at":w.get::<String,_>("created_at"),
+        "url":format!("{host}/{}/boards/{board_id}/webhooks/{id}",p.slug),
+        "board":board_json(app,p,b,host).await?}),
+    )
+}
+async fn webhook_row(
+    app: &App,
+    p: &Principal,
+    board_id: &str,
+    webhook_id: &str,
+) -> Result<SqliteRow> {
+    sqlx::query("SELECT * FROM webhooks WHERE id=? AND board_id=? AND account_id=?")
+        .bind(webhook_id)
+        .bind(board_id)
+        .bind(&p.account_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)
+}
+async fn list_webhooks(
+    State(app): Shared,
+    Path((account, board_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(query): Query<PageQuery>,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &board_id).await?;
+    p.account_admin()?;
+    let page = query.page.unwrap_or(1).max(1);
+    let (offset, limit) = page_window(page);
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM webhooks WHERE board_id=? AND account_id=?")
+            .bind(&board_id)
+            .bind(&p.account_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    let rows=sqlx::query("SELECT * FROM webhooks WHERE board_id=? AND account_id=? ORDER BY name ASC,id DESC LIMIT ? OFFSET ?")
+        .bind(&board_id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
+    let host = base(&headers);
+    let mut out = Vec::new();
+    for row in &rows {
+        out.push(webhook_json(&app, &p, &b, row, &host).await?);
+    }
+    Ok(paginated(json!(out), total, page, &uri, &headers))
+}
+async fn show_webhook(
+    State(app): Shared,
+    Path((account, board_id, webhook_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &board_id).await?;
+    p.account_admin()?;
+    let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    Ok(Json(webhook_json(&app, &p, &b, &w, &base(&headers)).await?))
+}
+async fn create_webhook(
+    State(app): Shared,
+    Path((account, board_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &board_id).await?;
+    p.write()?;
+    p.account_admin()?;
+    let v = nested(&body, "webhook");
+    let name = required(v, "name")?;
+    let url = validate_webhook_url(&required(v, "url")?)?;
+    let actions = normalized_webhook_actions(v.get("subscribed_actions").unwrap_or(&Value::Null));
+    let webhook_id = id();
+    let timestamp = now();
+    sqlx::query("INSERT INTO webhooks(id,account_id,board_id,name,url,signing_secret,subscribed_actions,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+        .bind(&webhook_id).bind(&p.account_id).bind(&board_id).bind(name).bind(url).bind(webhook_secret())
+        .bind(json!(actions).to_string()).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+    let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    let host = base(&headers);
+    Ok(created(
+        format!("{host}/{account}/boards/{board_id}/webhooks/{webhook_id}.json"),
+        webhook_json(&app, &p, &b, &w, &host).await?,
+    ))
+}
+async fn update_webhook(
+    State(app): Shared,
+    Path((account, board_id, webhook_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &board_id).await?;
+    p.write()?;
+    p.account_admin()?;
+    let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    let v = nested(&body, "webhook");
+    let name = string(v, "name").unwrap_or_else(|| w.get("name"));
+    if name.trim().is_empty() {
+        return Err(bad("name is required"));
+    }
+    let actions = v
+        .get("subscribed_actions")
+        .map(normalized_webhook_actions)
+        .unwrap_or_else(|| {
+            serde_json::from_str(&w.get::<String, _>("subscribed_actions")).unwrap_or_default()
+        });
+    sqlx::query("UPDATE webhooks SET name=?,subscribed_actions=?,updated_at=? WHERE id=?")
+        .bind(name)
+        .bind(json!(actions).to_string())
+        .bind(now())
+        .bind(&webhook_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    let updated = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    Ok(Json(
+        webhook_json(&app, &p, &b, &updated, &base(&headers)).await?,
+    ))
+}
+async fn delete_webhook(
+    State(app): Shared,
+    Path((account, board_id, webhook_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    board(&app, &p, &board_id).await?;
+    p.write()?;
+    p.account_admin()?;
+    let deleted = sqlx::query("DELETE FROM webhooks WHERE id=? AND board_id=? AND account_id=?")
+        .bind(&webhook_id)
+        .bind(&board_id)
+        .bind(&p.account_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    if deleted.rows_affected() == 0 {
+        return Err(missing());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn activate_webhook(
+    State(app): Shared,
+    Path((account, board_id, webhook_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &board_id).await?;
+    p.write()?;
+    p.account_admin()?;
+    let changed = sqlx::query(
+        "UPDATE webhooks SET active=1,updated_at=? WHERE id=? AND board_id=? AND account_id=?",
+    )
+    .bind(now())
+    .bind(&webhook_id)
+    .bind(&board_id)
+    .bind(&p.account_id)
+    .execute(&app.db)
+    .await
+    .map_err(db_err)?;
+    if changed.rows_affected() == 0 {
+        return Err(missing());
+    }
+    let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(webhook_json(&app, &p, &b, &w, &base(&headers)).await?),
+    )
+        .into_response())
+}
+async fn list_webhook_deliveries(
+    State(app): Shared,
+    Path((account, board_id, webhook_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Query(query): Query<PageQuery>,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    board(&app, &p, &board_id).await?;
+    p.account_admin()?;
+    webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    let page = query.page.unwrap_or(1).max(1);
+    let (offset, limit) = page_window(page);
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id=? AND account_id=?",
+    )
+    .bind(&webhook_id)
+    .bind(&p.account_id)
+    .fetch_one(&app.db)
+    .await
+    .map_err(db_err)?;
+    let rows=sqlx::query("SELECT d.*,e.action,e.created_at event_created_at,e.creator_id,e.eventable_type,e.eventable_id,c.number,u.name creator_name FROM webhook_deliveries d JOIN events e ON e.id=d.event_id JOIN cards c ON c.id=e.card_id JOIN users u ON u.id=e.creator_id WHERE d.webhook_id=? AND d.account_id=? ORDER BY d.created_at DESC,d.id DESC LIMIT ? OFFSET ?")
+        .bind(&webhook_id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
+    let host = base(&headers);
+    let mut out = Vec::new();
+    for row in rows {
+        let eventable_type: String = row.get("eventable_type");
+        let eventable_id: String = row.get("eventable_id");
+        let eventable_url = if eventable_type == "Comment" {
+            format!(
+                "{host}/{account}/cards/{}/comments/{eventable_id}",
+                row.get::<i64, _>("number")
+            )
+        } else {
+            format!("{host}/{account}/cards/{}", row.get::<i64, _>("number"))
+        };
+        let request: Option<Value> = row
+            .get::<Option<String>, _>("request")
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let response: Option<Value> = row
+            .get::<Option<String>, _>("response")
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .map(|value| json!({"code":value.get("code"),"error":value.get("error")}));
+        out.push(json!({"id":row.get::<String,_>("id"),"state":row.get::<String,_>("state"),
+            "created_at":row.get::<String,_>("created_at"),"updated_at":row.get::<String,_>("updated_at"),
+            "request":request,"response":response,"event":{"id":row.get::<String,_>("event_id"),
+            "action":row.get::<String,_>("action"),"created_at":row.get::<String,_>("event_created_at"),
+            "creator":{"id":row.get::<String,_>("creator_id"),"name":row.get::<String,_>("creator_name")},
+            "eventable":{"type":eventable_type,"id":eventable_id,"url":eventable_url}}}));
+    }
+    Ok(paginated(json!(out), total, page, &uri, &headers))
+}
 async fn create_board(
     State(app): Shared,
     Path(account): Path<String>,
@@ -3016,8 +3633,17 @@ async fn create_card(
         .await
         .map_err(db_err)?;
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")
-        .bind(event_id).bind(&p.account_id).bind(&board_id).bind(&id).bind(&p.user_id)
+        .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&id).bind(&p.user_id)
         .bind(&id).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    queue_webhooks(
+        &mut tx,
+        &p.account_id,
+        &board_id,
+        &event_id,
+        "card_published",
+        &timestamp,
+    )
+    .await?;
     tx.commit().await.map_err(db_err)?;
     drop(writer);
     let c = card(&app, &p, &number.to_string()).await?;

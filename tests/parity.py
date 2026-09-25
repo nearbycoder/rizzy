@@ -63,6 +63,14 @@ def run(target):
     changed_accesses=step("board_accesses_after_involvement",f"/boards/{board_id}/accesses")
     result["involvement_access_only"]=next(user["involvement"] for user in changed_accesses["users"] if user["id"]==users[0]["id"])
     step("board_involvement_watching",f"/boards/{board_id}/involvement","PUT",{"involvement":"watching"})
+    webhook=step("webhook_create",f"/boards/{board_id}/webhooks","POST",{"webhook":{"name":"Parity","url":"https://example.invalid/rizzy-parity","subscribed_actions":[]}})
+    webhook_path=f"/boards/{board_id}/webhooks/{webhook['id']}"
+    step("webhook_show",webhook_path)
+    result["webhook_list_count"]=len(step("webhook_list",f"/boards/{board_id}/webhooks"))
+    step("webhook_update",webhook_path,"PATCH",{"webhook":{"name":"Parity updated","subscribed_actions":[]}})
+    step("webhook_activation",webhook_path+"/activation","POST")
+    result["webhook_delivery_count"]=len(step("webhook_deliveries",webhook_path+"/deliveries"))
+    step("webhook_delete",webhook_path,"DELETE")
     step("board_show", f"/boards/{board_id}")
     column = step("column_create", f"/boards/{board_id}/columns", "POST", {"column": {"name": "Doing"}})
     column_id = column["id"]

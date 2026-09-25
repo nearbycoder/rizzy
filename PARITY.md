@@ -18,7 +18,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Activities and core event side effects | ✓ | No |
 | Saved filters and full text search | — | No |
 | Board publication and basic public pages | ✓ | No |
-| Public board workflow and webhooks | — | No |
+| Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | — | No |
 | Attachments and Action Text rich text | — | No |
 | Imports, exports, account lifecycle | — | No |
@@ -28,6 +28,6 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
-The local `tests/parity.py` scenario currently passes 126 comparisons against the running reference server using fresh accounts. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, account and board entropy, join-code metadata, board access and involvement, publication, activity events and descriptions, event deletion, and system comment count. `tests/auth.py` and `tests/join.py` exercise the Rust JSON magic-link, cookie, and join flows with disposable accounts; they are not yet cross-implementation comparisons. Neither test replaces the full upstream test suite.
+The local `tests/parity.py` scenario currently passes 135 comparisons against the running reference server using fresh accounts. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, account and board entropy, join-code metadata, board access and involvement, webhook management, publication, activity events and descriptions, event deletion, and system comment count. `tests/auth.py`, `tests/join.py`, and `tests/webhooks.py` exercise Rust authentication, join, and webhook flows with disposable accounts; they are not yet cross-implementation comparisons. Neither test replaces the full upstream test suite.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

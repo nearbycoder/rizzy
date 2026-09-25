@@ -201,6 +201,34 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_account_recent ON events(account_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS events_board_recent ON events(board_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS events_eventable ON events(eventable_type,eventable_id);
+CREATE TABLE IF NOT EXISTS webhooks (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  signing_secret TEXT NOT NULL,
+  subscribed_actions TEXT NOT NULL DEFAULT '[]',
+  consecutive_failures_count INTEGER NOT NULL DEFAULT 0,
+  first_failure_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS webhooks_board_order ON webhooks(board_id,name,id DESC);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  webhook_id TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','in_progress','completed','errored')),
+  request TEXT,
+  response TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_recent ON webhook_deliveries(webhook_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(state,created_at);
 CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
