@@ -46,6 +46,21 @@ def run(target):
 
         plain = html()
         assert "card-columns" in plain and "cards--maybe" in plain and GRID not in plain
+        if target["name"] == "rizzy":
+            assert 'cards--maybe is-expanded' in plain and 'board-tools__watch-toggle' in plain
+            assert 'data-card-number=' in plain and 'class="bottom-bar"' in plain
+            target["extra_headers"] = {"X-Rizzy-Card-Fragment": "1"}
+            try:
+                status, _, fragment = request(target, board_path + "/columns/stream?page=2", accept="text/html")
+            finally:
+                target["extra_headers"].pop("X-Rizzy-Card-Fragment")
+            assert status == 200 and fragment.count(b"<article ") == 2, fragment[:200]
+            assert b'card__meta' in fragment and f"{marker} card 00".encode() in fragment
+            status, _, _ = request(target, board_path + "/involvement", "PUT", {"involvement": "access_only"}, bearer=True)
+            assert status == 204, status
+            assert "No one is watching for new cards" in html()
+            status, _, _ = request(target, board_path + "/involvement", "PUT", {"involvement": "watching"}, bearer=True)
+            assert status == 204 and "Watching for new cards" in html()
         explicit_default = html("?indexed_by=all&sorted_by=latest")
         assert GRID not in explicit_default
         closed = html("?indexed_by=closed")

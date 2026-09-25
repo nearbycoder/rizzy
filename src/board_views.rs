@@ -70,7 +70,7 @@ async fn cards_for_view(
     }
     let total = count.fetch_one(&app.db).await.map_err(db_err)?;
     let select_sql = format!(
-        "SELECT c.*{from} ORDER BY {} LIMIT ? OFFSET ?",
+        "SELECT c.*,(SELECT name FROM boards WHERE id=c.board_id) AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name{from} ORDER BY {} LIMIT ? OFFSET ?",
         view.order()
     );
     let mut rows = sqlx::query(&select_sql).bind(board_id);
@@ -98,6 +98,9 @@ async fn private_view(
     let p = principal(app, headers, account).await?;
     let b = board(app, &p, board_id).await?;
     let (rows, total) = cards_for_view(app, board_id, view, None, page, false).await?;
+    if headers.contains_key("x-rizzy-card-fragment") {
+        return Ok(Html(cards_page::previews(app, &p, &rows).await?).into_response());
+    }
     let wants_json = uri.path().ends_with(".json")
         || headers
             .get(header::ACCEPT)

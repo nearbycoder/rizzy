@@ -6,11 +6,25 @@ use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
 use super::{
-    App, CardQuery, Principal, Result, card_page::render_template, cards_query, db_err, escape,
-    page_window,
+    App, CardQuery, Principal, Result, card_page::render_template, cards_page, cards_query, db_err,
+    escape, page_window,
 };
 
 const TEMPLATE: &str = include_str!("../static/board.html");
+
+fn column_color_class(color: &str) -> &'static str {
+    match color {
+        "var(--color-card-1)" => "cards--color-1",
+        "var(--color-card-2)" => "cards--color-2",
+        "var(--color-card-3)" => "cards--color-3",
+        "var(--color-card-4)" => "cards--color-4",
+        "var(--color-card-5)" => "cards--color-5",
+        "var(--color-card-6)" => "cards--color-6",
+        "var(--color-card-7)" => "cards--color-7",
+        "var(--color-card-8)" => "cards--color-8",
+        _ => "cards--color-default",
+    }
+}
 
 fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
     let term = query.terms.first().map(String::as_str).unwrap_or("");
@@ -55,8 +69,26 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
     };
     let index = query.indexed_by.as_deref().unwrap_or("all");
     let sort = query.sorted_by.as_deref().unwrap_or("latest");
+    let clear = if !query.terms.is_empty()
+        || !matches!(index, "all")
+        || !matches!(sort, "latest")
+        || !query.tag_ids.is_empty()
+        || !query.assignee_ids.is_empty()
+        || !query.creator_ids.is_empty()
+        || !query.closer_ids.is_empty()
+        || query.assignment_status.is_some()
+        || query.creation.is_some()
+        || query.closure.is_some()
+    {
+        format!(
+            "<a class=\"filter-clear\" href=\"/{account}/boards/{}\" aria-label=\"Clear filters\" title=\"Clear filters\">×</a>",
+            escape(board_id)
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><label>Filter these cards<input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Search cards\"></label>{preserved}<label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{account}/boards/{}\">Clear</a></form>",
+        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<details class=\"filter-more\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"filter-more__fields\"><label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><button class=\"button\" type=\"submit\">Filter</button></div></details>{clear}</form>",
         escape(board_id),
         escape(term),
         [
@@ -78,7 +110,6 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
         .iter()
         .map(|(value, label)| option(value, label, Some(sort)))
         .collect::<String>(),
-        escape(board_id)
     )
 }
 
@@ -159,9 +190,11 @@ pub(super) async fn show_filtered(
         (
             "SETTINGS_LINK",
             format!(
-                "<a class=\"button button--secondary\" href=\"/{}/boards/{}/edit\">Settings</a>",
+                "<a class=\"board-settings\" href=\"/{}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",
                 principal.slug,
-                escape(&board_id)
+                escape(&board_id),
+                escape(&board_name),
+                escape(&board_name)
             ),
         ),
         ("ADD_COLUMN", String::new()),
@@ -176,10 +209,13 @@ fn column_html(
     board_id: &str,
     id: &str,
     title: &str,
+    color: &str,
     count: i64,
     cards: Option<&Vec<SqliteRow>>,
+    rendered_cards: Option<&str>,
     path: &str,
     add_card: bool,
+    board_footer: Option<&str>,
 ) -> String {
     let dom_id = match id {
         "done" => "closed-cards".to_owned(),
@@ -187,7 +223,7 @@ fn column_html(
         _ => format!("column_{id}"),
     };
     let mut html = format!(
-        "<section class=\"cards cards--{}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><h2>{}</h2><span class=\"cards__count\">{count}</span></header><div class=\"cards__list\">",
+        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button></header><div class=\"cards__list\">",
         if id == "maybe" {
             "maybe"
         } else if id == "done" {
@@ -197,18 +233,27 @@ fn column_html(
         } else {
             "doing"
         },
+        if id == "maybe" {
+            "is-expanded"
+        } else {
+            "is-collapsed"
+        },
+        column_color_class(color),
         escape(&dom_id),
         escape(id),
         escape(title),
+        if id == "maybe" { "true" } else { "false" },
         escape(title),
     );
     if add_card {
         html.push_str(&format!(
-            "<div class=\"board-tools\"><form id=\"add-card\" action=\"/{account}/boards/{}/cards\" method=\"post\"><button class=\"button\" type=\"submit\">Add a card</button></form></div>",
-            escape(board_id)
+            "<div class=\"board-tools\"><form id=\"add-card\" action=\"/{account}/boards/{}/cards\" method=\"post\"><button class=\"button\" type=\"submit\">Add a card <kbd>C</kbd></button></form>{}</div>",
+            escape(board_id), board_footer.unwrap_or("")
         ));
     }
-    if let Some(cards) = cards {
+    if let Some(rendered) = rendered_cards {
+        html.push_str(rendered);
+    } else if let Some(cards) = cards {
         for card in cards {
             let number: i64 = card.get("number");
             let title: String = card.get("title");
@@ -241,6 +286,50 @@ fn column_html(
     html
 }
 
+async fn board_footer(app: &App, principal: &Principal, board_id: &str) -> Result<String> {
+    let rows = sqlx::query("SELECT u.id,u.name FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.involvement='watching' AND u.active=1 ORDER BY lower(u.name),u.id")
+        .bind(board_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let watching = rows
+        .iter()
+        .any(|row| row.get::<String, _>("id") == principal.user_id);
+    let heading = if rows.is_empty() {
+        "No one is watching for new cards"
+    } else {
+        "Watching for new cards"
+    };
+    let mut avatars = String::new();
+    for row in rows.iter().take(8) {
+        let name: String = row.get("name");
+        let initial = name
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .collect::<String>();
+        avatars.push_str(&format!(
+            "<span class=\"board-tools__avatar\" title=\"{}\" aria-label=\"{}\">{}</span>",
+            escape(&name),
+            escape(&name),
+            escape(&initial)
+        ));
+    }
+    if rows.len() > 8 {
+        avatars.push_str(&format!("<span class=\"board-tools__avatar board-tools__overflow\" aria-label=\"{} more watchers\">+{}</span>",rows.len()-8,rows.len()-8));
+    }
+    Ok(format!(
+        "<footer class=\"board-tools__footer\"><div class=\"board-tools__divider\"><strong>{heading}</strong></div><div class=\"board-tools__watching\">{avatars}</div><button class=\"board-tools__watch-toggle\" type=\"button\" data-involvement=\"{}\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4\"/></svg>{}</button></footer>",
+        if watching { "access_only" } else { "watching" },
+        if watching {
+            "Stop watching"
+        } else {
+            "Watch this"
+        }
+    ))
+}
+
 pub(super) async fn drop_column_response(
     app: &App,
     principal: &Principal,
@@ -248,22 +337,25 @@ pub(super) async fn drop_column_response(
     destination: &str,
     column_id: Option<&str>,
 ) -> Result<Response> {
-    let (id, title, path, add_card) = match destination {
+    let (id, title, color, path, add_card) = match destination {
         "closure" => (
             "done".to_owned(),
             "Done".to_owned(),
+            "var(--color-card-complete)".to_owned(),
             "/columns/closed".to_owned(),
             false,
         ),
         "not_now" => (
             "not-now".to_owned(),
             "Not Now".to_owned(),
+            "var(--color-card-complete)".to_owned(),
             "/columns/not_now".to_owned(),
             false,
         ),
         "stream" => (
             "maybe".to_owned(),
             "Maybe?".to_owned(),
+            "var(--color-card-default)".to_owned(),
             "/columns/stream".to_owned(),
             true,
         ),
@@ -273,6 +365,7 @@ pub(super) async fn drop_column_response(
             (
                 id.to_owned(),
                 row.get("name"),
+                row.get("color"),
                 format!("/columns/{id}/cards"),
                 false,
             )
@@ -333,15 +426,23 @@ pub(super) async fn drop_column_response(
         "stream" => "maybe".to_owned(),
         _ => format!("column_{id}"),
     };
+    let footer = if add_card {
+        Some(board_footer(app, principal, board_id).await?)
+    } else {
+        None
+    };
     let content = column_html(
         principal.slug,
         board_id,
         &id,
         &title,
+        &color,
         count,
         Some(&cards),
+        None,
         &path,
         add_card,
+        footer.as_deref(),
     );
     Ok(([(header::CONTENT_TYPE, "text/vnd.turbo-stream.html; charset=utf-8")],
         format!("<turbo-stream action=\"replace\" method=\"morph\" target=\"{}\"><template>{content}</template></turbo-stream>", escape(&target))).into_response())
@@ -354,11 +455,12 @@ pub(super) async fn show(
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
-    let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
-        .bind(&board_id)
-        .fetch_all(&app.db)
-        .await
-        .map_err(db_err)?;
+    let columns =
+        sqlx::query("SELECT id,name,color FROM columns WHERE board_id=? ORDER BY position,id")
+            .bind(&board_id)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
     // Fizzy renders the Maybe stream immediately and loads the other columns
     // when their frames enter view. Keep that first response bounded by 15 cards.
     let count_rows = sqlx::query("SELECT CASE WHEN closed=1 THEN 'done' WHEN postponed=1 THEN 'not-now' ELSE COALESCE(column_id,'maybe') END AS group_key,COUNT(*) AS total FROM cards WHERE board_id=? AND status='published' GROUP BY group_key")
@@ -370,11 +472,13 @@ pub(super) async fn show(
     for row in count_rows {
         counts.insert(row.get("group_key"), row.get("total"));
     }
-    let maybe = sqlx::query("SELECT * FROM cards WHERE board_id=? AND column_id IS NULL AND status='published' AND closed=0 AND postponed=0 ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT 15")
+    let maybe = sqlx::query("SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.board_id=? AND c.column_id IS NULL AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT 15")
         .bind(&board_id)
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
+    let maybe_html = cards_page::previews(app, principal, &maybe).await?;
+    let footer = board_footer(app, principal, &board_id).await?;
     let account = principal.slug;
     let mut column_markup = "<div class=\"card-columns\" aria-label=\"Board columns\">".to_owned();
     column_markup.push_str(&column_html(
@@ -382,33 +486,43 @@ pub(super) async fn show(
         &board_id,
         "not-now",
         "Not Now",
+        "var(--color-card-complete)",
         *counts.get("not-now").unwrap_or(&0),
+        None,
         None,
         "/columns/not_now",
         false,
+        None,
     ));
     column_markup.push_str(&column_html(
         account,
         &board_id,
         "maybe",
         "Maybe?",
+        "var(--color-card-default)",
         *counts.get("maybe").unwrap_or(&0),
         Some(&maybe),
+        Some(&maybe_html),
         "/columns/stream",
         true,
+        Some(&footer),
     ));
     for column in columns {
         let id: String = column.get("id");
         let name: String = column.get("name");
+        let color: String = column.get("color");
         column_markup.push_str(&column_html(
             account,
             &board_id,
             &id,
             &name,
+            &color,
             *counts.get(&id).unwrap_or(&0),
+            None,
             None,
             &format!("/columns/{id}/cards"),
             false,
+            None,
         ));
     }
     column_markup.push_str(&column_html(
@@ -416,10 +530,13 @@ pub(super) async fn show(
         &board_id,
         "done",
         "Done",
+        "var(--color-card-complete)",
         *counts.get("done").unwrap_or(&0),
+        None,
         None,
         "/columns/closed",
         false,
+        None,
     ));
     column_markup.push_str("</div>");
     let values = HashMap::from([
@@ -427,8 +544,8 @@ pub(super) async fn show(
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
         ("HOME_PATH", format!("/{account}/")),
-        ("SETTINGS_LINK", format!("<a class=\"button button--secondary\" href=\"/{account}/boards/{}/edit\">Settings</a>",escape(&board_id))),
-        ("ADD_COLUMN", "<button class=\"button button--secondary\" id=\"add-column\" type=\"button\">Add column</button>".to_owned()),
+        ("SETTINGS_LINK", format!("<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",escape(&board_id),escape(&board_name),escape(&board_name))),
+        ("ADD_COLUMN", "<button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button>".to_owned()),
         ("FILTER_FORM", filter_form(account, &board_id, &CardQuery::default())),
         ("COLUMNS", column_markup),
     ]);

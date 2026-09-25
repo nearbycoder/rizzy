@@ -6854,7 +6854,7 @@ async fn column_cards(
         .await
         .map_err(db_err)?;
     let rows = sqlx::query(&format!(
-        "SELECT *{scope} ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT ? OFFSET ?"
+        "SELECT c.*,(SELECT name FROM boards WHERE id=c.board_id) AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c WHERE c.board_id=? AND c.column_id=? AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT ? OFFSET ?"
     ))
     .bind(&board_id)
     .bind(&column_id)
@@ -6863,6 +6863,9 @@ async fn column_cards(
     .fetch_all(&app.db)
     .await
     .map_err(db_err)?;
+    if headers.contains_key("x-rizzy-card-fragment") {
+        return Ok(Html(cards_page::previews(&app, &p, &rows).await?).into_response());
+    }
     let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, page, &uri, &headers))
 }
