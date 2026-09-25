@@ -1262,6 +1262,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
+    migrate_deactivated_users(&db).await?;
     for table in ["cards", "comments"] {
         let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
             .fetch_all(&db)
@@ -1666,7 +1667,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/users/{id}/events", get(events_page::user_events))
         .route(
             "/{account}/users/{id}/role",
-            axum::routing::put(update_user_role).patch(update_user_role),
+            post(update_user_role).put(update_user_role).patch(update_user_role),
         )
         .route(
             "/{account}/users/{id}/email_addresses",
@@ -2011,6 +2012,58 @@ async fn backfill_system_users(db: &SqlitePool) -> std::result::Result<(), sqlx:
             .bind(id()).bind(&account_id).bind(identity_id).bind(&timestamp)
             .execute(&mut *tx).await?;
         tx.commit().await?;
+    }
+    Ok(())
+}
+
+async fn migrate_deactivated_users(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+    let mut connection = db.acquire().await?;
+    let columns = sqlx::query("PRAGMA table_info(users)")
+        .fetch_all(&mut *connection)
+        .await?;
+    if !columns.iter().any(|row| {
+        row.get::<String, _>("name") == "identity_id" && row.get::<i64, _>("notnull") == 1
+    }) {
+        return Ok(());
+    }
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&mut *connection)
+        .await?;
+    let migration: std::result::Result<(), sqlx::Error> = async {
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("CREATE TABLE users_identity_v2 (id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),identity_id TEXT REFERENCES identities(id),name TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'member',active INTEGER NOT NULL DEFAULT 1,verified_at TEXT,created_at TEXT NOT NULL,UNIQUE(account_id,identity_id))")
+            .execute(&mut *connection).await?;
+        sqlx::query("INSERT INTO users_identity_v2(id,account_id,identity_id,name,role,active,verified_at,created_at) SELECT id,account_id,identity_id,name,role,active,verified_at,created_at FROM users")
+            .execute(&mut *connection).await?;
+        sqlx::query("DROP TABLE users")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("ALTER TABLE users_identity_v2 RENAME TO users")
+            .execute(&mut *connection).await?;
+        sqlx::query("CREATE UNIQUE INDEX users_system_account ON users(account_id) WHERE role='system'")
+            .execute(&mut *connection).await?;
+        sqlx::query("CREATE TRIGGER user_attachables_created AFTER INSERT ON users BEGIN INSERT INTO user_attachables(user_id,account_id,sgid) VALUES(NEW.id,NEW.account_id,lower(hex(randomblob(32)))); END")
+            .execute(&mut *connection).await?;
+        sqlx::query("COMMIT").execute(&mut *connection).await?;
+        Ok(())
+    }.await;
+    if migration.is_err() {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+    }
+    let restored = sqlx::query("PRAGMA foreign_keys=ON")
+        .execute(&mut *connection)
+        .await;
+    migration?;
+    restored?;
+    let violations = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&mut *connection)
+        .await?;
+    if !violations.is_empty() {
+        return Err(sqlx::Error::Protocol(
+            "User migration produced broken foreign keys".into(),
+        ));
     }
     Ok(())
 }
@@ -3049,10 +3102,14 @@ async fn update_user(
             false,
         )
     };
-    if method == Method::POST
-        && (!form || body.get("_method").and_then(Value::as_str) != Some("patch"))
-    {
-        return Err(missing());
+    if method == Method::POST {
+        match (form, body.get("_method").and_then(Value::as_str)) {
+            (true, Some("delete")) => {
+                return delete_user(State(app), Path((account, id)), headers).await;
+            }
+            (true, Some("patch")) => {}
+            _ => return Err(missing()),
+        }
     }
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
@@ -3109,7 +3166,7 @@ async fn delete_user(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let u = active_user(&app, &p, &id).await?;
@@ -3120,20 +3177,48 @@ async fn delete_user(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    sqlx::query("UPDATE users SET active=0 WHERE id=?")
+    sqlx::query("UPDATE users SET active=0,identity_id=NULL WHERE id=?")
         .bind(&id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if headers.contains_key("x-rizzy-json-request") {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/account/settings"))],
+        )
+            .into_response()
+    })
 }
 async fn update_user_role(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    method: Method,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        if method == Method::POST && fields.get("_method").map(String::as_str) != Some("patch") {
+            return Err(missing());
+        }
+        json!({"user":{"role":fields.get("user[role]").cloned().unwrap_or_default()}})
+    } else {
+        if method == Method::POST {
+            return Err(missing());
+        }
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let user = active_user(&app, &p, &id).await?;
@@ -3151,7 +3236,15 @@ async fn update_user_role(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if form {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/account/settings"))],
+        )
+            .into_response()
+    } else {
+        StatusCode::NO_CONTENT.into_response()
+    })
 }
 fn email_change_invalid(headers: &HeaderMap, account: i64, user_id: &str) -> Response {
     if headers.contains_key("x-rizzy-json-request")

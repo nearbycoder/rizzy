@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS identities (
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
-  identity_id TEXT NOT NULL REFERENCES identities(id),
+  identity_id TEXT REFERENCES identities(id),
   name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
   active INTEGER NOT NULL DEFAULT 1,

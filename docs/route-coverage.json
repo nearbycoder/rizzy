@@ -1763,6 +1763,10 @@
       "path": "/{account}/users/{id}/events"
     },
     {
+      "method": "POST",
+      "path": "/{account}/users/{id}/role"
+    },
+    {
       "method": "PUT",
       "path": "/{account}/users/{id}/role"
     },
