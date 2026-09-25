@@ -48,6 +48,8 @@ The board HTML now switches to a filtered grid when Fizzy's filter-active condit
 
 `tests/events_html_parity.py` checks the account home timeline, board-filtered events, three activity columns, local-hour placement with a New York timezone cookie, day fragments, column pages, next-day links, and invalid day/column responses against live Fizzy. A browser flow created and published a card, then opened its Added event. Rizzy uses a bounded 301-event day read; busy days fall back to exact counts and at most 100 events per column. The event cards, filters, and page layout remain simplified, and saved filter IDs and complete event descriptions are still missing.
 
+`tests/users_events_html_parity.py` checks the user activity Turbo frame against live Fizzy: the self heading, a newly published event, a next-day link back to the user route, and invalid user/day inputs. The full user profile page that loads this frame is still missing from Rizzy's browser UI.
+
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified and passkey sign-in is still absent. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 
 `tests/session_html.py` checks the local browser form flow from email entry through a development magic code to the board landing page. The same flow was exercised in Chromium without console errors. JSON session requests remain supported. Signup completion and passkey presentation are still incomplete.

@@ -1644,6 +1644,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/users/{id}/avatar",
             get(storage::show_avatar).delete(storage::delete_avatar),
         )
+        .route("/{account}/users/{id}/events", get(events_page::user_events))
         .route(
             "/{account}/users/{id}/role",
             axum::routing::put(update_user_role).patch(update_user_role),

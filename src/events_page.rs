@@ -8,7 +8,7 @@ use chrono_tz::Tz;
 use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
 use std::str::FromStr;
 
-use super::{App, Principal, Result, Shared, db_err, err, escape, missing, principal};
+use super::{App, Principal, Result, Shared, active_user, db_err, err, escape, missing, principal};
 
 const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card_closed','card_reopened','card_collection_changed','card_board_changed','card_postponed','card_auto_postponed','card_triaged','card_sent_back_to_triage','comment_created')";
 
@@ -25,6 +25,7 @@ fn params(raw: Option<String>) -> Params {
         for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
             match key.as_ref() {
                 "day" => result.day = Some(value.into_owned()),
+                "day[]" => result.day = Some("invalid day array".to_owned()),
                 "board_ids[]" if !value.is_empty() => result.boards.push(value.into_owned()),
                 "creator_ids[]" if !value.is_empty() => result.creators.push(value.into_owned()),
                 _ => {}
@@ -346,7 +347,7 @@ fn render_column(column: &Column, day: NaiveDate, tz: Tz, account: i64, params: 
     html
 }
 
-fn render_day(timeline: &Timeline, account: i64, params: &Params) -> String {
+fn render_day(timeline: &Timeline, account: i64, params: &Params, pagination_path: &str) -> String {
     let mut html = format!(
         "<turbo-frame id=\"day-timeline-pagination-contents-{}\" role=\"presentation\"><section class=\"events__day\">",
         timeline.day
@@ -382,7 +383,7 @@ fn render_day(timeline: &Timeline, account: i64, params: &Params) -> String {
     html.push_str("</section>");
     if let Some(next_day) = timeline.next_day {
         let filter = filter_query(params);
-        html.push_str(&format!("<a class=\"day-timeline-pagination-link\" href=\"/{account}/events/days?day={next_day}{}\" data-frame=\"day-timeline-pagination-contents-{next_day}\">Load more…</a>", if filter.is_empty() { String::new() } else { format!("&{filter}") }));
+        html.push_str(&format!("<a class=\"day-timeline-pagination-link\" href=\"/{account}/{pagination_path}?day={next_day}{}\" data-frame=\"day-timeline-pagination-contents-{next_day}\">Load more…</a>", if filter.is_empty() { String::new() } else { format!("&{filter}") }));
     }
     html.push_str("</turbo-frame>");
     html
@@ -435,7 +436,7 @@ pub(super) async fn index(
     } else {
         "Latest Activity"
     };
-    let body = render_day(&timeline, p.slug, &params);
+    let body = render_day(&timeline, p.slug, &params, "events/days");
     Ok(Html(format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a><h1 class=\"header__title\">{title}</h1><a class=\"button\" href=\"/{}/boards/new\">Add a board</a></header><main id=\"main\"><form class=\"events__filters\" action=\"/{}/events\" method=\"get\"><details class=\"quick-filter\"><summary>Board…</summary><div class=\"quick-filter__options\">{board_options}</div></details><details class=\"quick-filter\"><summary>Person…</summary><div class=\"quick-filter__options\">{user_options}</div></details><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{}/events\">Clear</a></form><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
         include_str!("../static/events.css"),
@@ -456,7 +457,36 @@ pub(super) async fn days(
     let p = principal(&app, &headers, &account).await?;
     let params = params(raw);
     let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
-    Ok(Html(render_day(&timeline, p.slug, &params)))
+    Ok(Html(render_day(&timeline, p.slug, &params, "events/days")))
+}
+
+pub(super) async fn user_events(
+    State(app): Shared,
+    Path((account, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    let user = active_user(&app, &p, &user_id).await?;
+    let id: String = user.get("id");
+    let mut params = params(raw);
+    params.boards.clear();
+    params.creators = vec![id.clone()];
+    let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
+    let heading = if p.user_id == id {
+        "What have you been up to?".to_owned()
+    } else {
+        let name: String = user.get("name");
+        format!(
+            "What has {} been up to?",
+            escape(name.split_whitespace().next().unwrap_or(""))
+        )
+    };
+    let path = format!("users/{}/events", escape(&id));
+    Ok(Html(format!(
+        "<turbo-frame id=\"user_events\"><h1>{heading}</h1><div class=\"events\" id=\"activity\" data-controller=\"pagination\">{}</div></turbo-frame>",
+        render_day(&timeline, p.slug, &params, &path)
+    )))
 }
 
 pub(super) async fn column(
