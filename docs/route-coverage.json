@@ -1455,7 +1455,7 @@
       "path": "/service-worker(.:format)",
       "controller": "pwa",
       "action": "service_worker",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1489,6 +1489,34 @@
     {
       "method": "GET",
       "path": "/client_configurations/ios_v1.json"
+    },
+    {
+      "method": "GET",
+      "path": "/manifest.json"
+    },
+    {
+      "method": "GET",
+      "path": "/service-worker"
+    },
+    {
+      "method": "GET",
+      "path": "/service-worker.js"
+    },
+    {
+      "method": "GET",
+      "path": "/assets/pwa/{filename}"
+    },
+    {
+      "method": "GET",
+      "path": "/app-icon.png"
+    },
+    {
+      "method": "GET",
+      "path": "/app-icon-192.png"
+    },
+    {
+      "method": "GET",
+      "path": "/app-icon-192-maskable.png"
     },
     {
       "method": "POST",

@@ -30,10 +30,13 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
 [ROUTE_COVERAGE.md](ROUTE_COVERAGE.md) inventories source controller actions and Rizzy method/path declarations. Route presence does not establish functional parity.
+The source's parameterized client configuration route appears missing in that normalized inventory; Rizzy has explicit Android v1 and iOS v1 JSON routes, which pass the targeted client settings checks.
 
 `tests/session_transfer_parity.py` compares profile link generation, replacement of an older link, public QR image rendering and decoded destination, anonymous transfer pages, PUT/PATCH redemption, and replay rejection on both apps. It also checks Rust's four-hour expiry and simultaneous redemption from two requests. Rizzy renders QR images only while the transfer remains active; Fizzy's signed QR URL continues to render its encoded destination after the sign-in link has expired. The profile's broader layout and CSRF behavior still differ.
 
 `tests/passkey_parity.py` registers the same fixed-key WebAuthn test credential on both running apps, names it, verifies a signed assertion, checks challenge replay and bad-signature rejection, and deletes the credential. Rizzy stores one-use challenges and verifier state in SQLite, and asks browsers for resident credentials so the account-free sign-in picker can find them. The rendered scripts pass JavaScript syntax checks. This verifies a synthetic credential flow; hardware authenticator/browser interoperability and the full Fizzy passkey presentation still need testing.
+
+`tests/pwa_parity.py` compares the authenticated service worker script against live Fizzy after normalizing its bundled asset URL, then checks Rizzy's manifest, icons, and local offline bundle. Automatic worker registration on every browser page and installation behavior remain unverified.
 
 `tests/my_menu_parity.py` checks the account navigation menu's main sections, ETag reuse, board addition invalidation, and HTML-only response against Fizzy. Rizzy links to the menu from its board, card, and activity views. Its saved-view labels, styling, keyboard behavior, and conditional caching inputs are still simpler than Fizzy's.
 

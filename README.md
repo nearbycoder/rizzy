@@ -43,6 +43,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
 - An account navigation menu for boards, people, tags, saved views, settings, and shortcuts, with conditional ETag responses.
 - A dedicated card edit route with title and Lexxy description fields, alongside the card page's inline editor.
+- A Fizzy-matching service worker script and local offline bundle, plus a Rizzy web app manifest and icons. Automatic service worker registration across all browser pages is still pending.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
 ## Parity still required

@@ -48,6 +48,7 @@ mod imports;
 mod join_code_page;
 mod my_menu;
 mod passkeys;
+mod pwa;
 mod reaction_page;
 mod rich_text;
 mod session_transfer;
@@ -98,7 +99,10 @@ fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Reque
     request.headers_mut().remove("x-rizzy-original-path");
     let original = request.uri().clone();
     let path = original.path();
-    if !path.ends_with(".json") || path.contains("/client_configurations/") {
+    if !path.ends_with(".json")
+        || path.contains("/client_configurations/")
+        || path == "/manifest.json"
+    {
         return request;
     }
     let stripped = &path[..path.len() - ".json".len()];
@@ -1578,6 +1582,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(android_config),
         )
         .route("/client_configurations/ios_v1.json", get(ios_config))
+        .route("/manifest.json", get(pwa::manifest))
+        .route("/service-worker", get(pwa::service_worker))
+        .route("/service-worker.js", get(pwa::service_worker))
+        .route("/assets/pwa/{filename}", get(pwa::asset))
+        .route("/app-icon.png", get(pwa::icon))
+        .route("/app-icon-192.png", get(pwa::icon))
+        .route("/app-icon-192-maskable.png", get(pwa::icon))
         .route("/session", post(request_magic_link).delete(logout_session))
         .route("/session/new", get(new_session))
         .route("/session/passkey", post(passkeys::sign_in))
