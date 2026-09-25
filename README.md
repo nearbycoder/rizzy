@@ -24,6 +24,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - User email changes with validation, a 30-minute one-use confirmation token, session switch, and delivery through the configured sendmail executable.
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
+- Special board column JSON lists (Maybe?, Not now, Done) and public pages for those lists and named columns. The public board page links to each view.
 - Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings.
 - Board, column, and card create/read/update/delete JSON routes; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions. Card JSON accepts explicit creation and last activity timestamps.
 - Tag listing, card filters for saved views, terms, dates, closures, stalled activity, assignments, boards, columns and tags, and SQLite FTS5 card and comment search with indexed edits and deletes.

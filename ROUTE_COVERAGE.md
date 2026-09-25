@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 125. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 132. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -20,9 +20,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `webhooks` | 8 | 6 |
 | `account/cancellations` | 1 | 0 |
 | `account/join_codes` | 5 | 4 |
-| `boards/columns/closeds` | 1 | 0 |
-| `boards/columns/not_nows` | 1 | 0 |
-| `boards/columns/streams` | 1 | 0 |
 | `cards/assignments` | 2 | 1 |
 | `cards/boards` | 3 | 2 |
 | `cards/columns` | 1 | 0 |
@@ -54,10 +51,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `prompts/boards/users` | 1 | 0 |
 | `prompts/cards` | 1 | 0 |
 | `prompts/users` | 1 | 0 |
-| `public/boards/columns` | 1 | 0 |
-| `public/boards/columns/closeds` | 1 | 0 |
-| `public/boards/columns/not_nows` | 1 | 0 |
-| `public/boards/columns/streams` | 1 | 0 |
 | `pwa` | 1 | 0 |
 | `qr_codes` | 1 | 0 |
 | `sessions` | 3 | 2 |
@@ -76,6 +69,9 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `boards/accesses` | 1 | 1 |
 | `boards/columns` | 6 | 6 |
 | `boards/columns/cards` | 1 | 1 |
+| `boards/columns/closeds` | 1 | 1 |
+| `boards/columns/not_nows` | 1 | 1 |
+| `boards/columns/streams` | 1 | 1 |
 | `boards/entropies` | 2 | 2 |
 | `boards/involvements` | 2 | 2 |
 | `boards/publications` | 2 | 2 |
@@ -95,6 +91,10 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `notifications/settings` | 3 | 3 |
 | `notifications/trays` | 1 | 1 |
 | `public/boards` | 1 | 1 |
+| `public/boards/columns` | 1 | 1 |
+| `public/boards/columns/closeds` | 1 | 1 |
+| `public/boards/columns/not_nows` | 1 | 1 |
+| `public/boards/columns/streams` | 1 | 1 |
 | `public/cards` | 1 | 1 |
 | `searches` | 1 | 1 |
 | `tags` | 1 | 1 |

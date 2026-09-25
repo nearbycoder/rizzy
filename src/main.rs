@@ -26,6 +26,7 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
+mod board_views;
 mod exports;
 
 struct App {
@@ -1327,6 +1328,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/public/boards/{key}", get(public_board))
         .route(
+            "/{account}/public/boards/{key}/columns/stream",
+            get(board_views::public_stream),
+        )
+        .route(
+            "/{account}/public/boards/{key}/columns/closed",
+            get(board_views::public_closed),
+        )
+        .route(
+            "/{account}/public/boards/{key}/columns/not_now",
+            get(board_views::public_not_now),
+        )
+        .route(
+            "/{account}/public/boards/{key}/columns/{column}",
+            get(board_views::public_column),
+        )
+        .route(
             "/{account}/public/boards/{key}/cards/{number}",
             get(public_card),
         )
@@ -1340,6 +1357,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/boards/{board}/columns",
             get(list_columns).post(create_column),
+        )
+        .route(
+            "/{account}/boards/{board}/columns/stream",
+            get(board_views::private_stream),
+        )
+        .route(
+            "/{account}/boards/{board}/columns/closed",
+            get(board_views::private_closed),
+        )
+        .route(
+            "/{account}/boards/{board}/columns/not_now",
+            get(board_views::private_not_now),
         )
         .route(
             "/{account}/boards/{board}/columns/{column}",
@@ -3449,11 +3478,24 @@ async fn public_board(
     let board_id: String = board.get("id");
     let rows = sqlx::query("SELECT number,title FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 ORDER BY golden DESC,last_active_at DESC LIMIT 100")
         .bind(board_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
+        .bind(board.get::<String, _>("id"))
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
     let mut body = format!(
-        "<h1>{}</h1><p>{}</p><ul>",
+        "<h1>{}</h1><p>{}</p><nav><a href=\"/{account}/public/boards/{key}/columns/stream\">Maybe?</a> · <a href=\"/{account}/public/boards/{key}/columns/not_now\">Not now</a> · <a href=\"/{account}/public/boards/{key}/columns/closed\">Done</a>",
         escape(&board.get::<String, _>("name")),
         escape(&board.get::<String, _>("public_description"))
     );
+    for column in columns {
+        body.push_str(&format!(
+            " · <a href=\"/{account}/public/boards/{key}/columns/{}\">{}</a>",
+            column.get::<String, _>("id"),
+            escape(&column.get::<String, _>("name"))
+        ));
+    }
+    body.push_str("</nav><ul>");
     for row in rows {
         let number: i64 = row.get("number");
         body.push_str(&format!(
@@ -4829,7 +4871,7 @@ async fn column_cards(
         .await
         .map_err(db_err)?;
     let rows = sqlx::query(&format!(
-        "SELECT *{scope} ORDER BY last_active_at DESC,id DESC LIMIT ? OFFSET ?"
+        "SELECT *{scope} ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT ? OFFSET ?"
     ))
     .bind(&board_id)
     .bind(&column_id)

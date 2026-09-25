@@ -321,21 +321,21 @@
       "path": "/boards/:board_id/columns/not_now(.:format)",
       "controller": "boards/columns/not_nows",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/boards/:board_id/columns/stream(.:format)",
       "controller": "boards/columns/streams",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/boards/:board_id/columns/closed(.:format)",
       "controller": "boards/columns/closeds",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1413,28 +1413,28 @@
       "path": "/public/boards/:board_id/columns/not_now(.:format)",
       "controller": "public/boards/columns/not_nows",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/public/boards/:board_id/columns/stream(.:format)",
       "controller": "public/boards/columns/streams",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/public/boards/:board_id/columns/closed(.:format)",
       "controller": "public/boards/columns/closeds",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/public/boards/:board_id/columns/:id(.:format)",
       "controller": "public/boards/columns",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1736,6 +1736,22 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/public/boards/{key}/columns/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/public/boards/{key}/columns/closed"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/public/boards/{key}/columns/not_now"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/public/boards/{key}/columns/{column}"
+    },
+    {
+      "method": "GET",
       "path": "/{account}/public/boards/{key}/cards/{number}"
     },
     {
@@ -1761,6 +1777,18 @@
     {
       "method": "POST",
       "path": "/{account}/boards/{board}/columns"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/boards/{board}/columns/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/boards/{board}/columns/closed"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/boards/{board}/columns/not_now"
     },
     {
       "method": "GET",
