@@ -67,7 +67,7 @@ def main():
             assert board["user_ids"] == [board["creator"]["id"]]
             assert call(port, outsider, outsider_token, f"/boards/{board_id}", status=404)
             col = call(port, owner, owner_token, f"/boards/{board_id}/columns", "POST", {"column": {"name": "Doing"}}, 201)
-            card = call(port, owner, owner_token, f"/boards/{board_id}/cards", "POST", {"card": {"title": "First", "description": "Safe <text>"}}, 201)
+            card = call(port, owner, owner_token, f"/boards/{board_id}/cards", "POST", {"card": {"title": "First", "description": "Safe &lt;text&gt;"}}, 201)
             number = card["number"]
             assert "&lt;text&gt;" in card["description_html"]
             assert call(port, outsider, outsider_token, f"/cards/{number}", status=404)

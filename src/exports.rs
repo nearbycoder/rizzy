@@ -228,7 +228,7 @@ async fn export_card(app: &App, row: &SqliteRow) -> std::result::Result<Value, s
         "board":row.get::<String,_>("board_name"),
         "status":status,
         "creator":creator,
-        "description":if description.is_empty() { String::new() } else { escape(&description) },
+        "description":if description.is_empty() { String::new() } else { escape(&rich_text::plain_text(&description)) },
         "created_at":iso(&row.get::<String,_>("created_at")),
         "updated_at":iso(&row.get::<String,_>("updated_at")),
         "comments":comments

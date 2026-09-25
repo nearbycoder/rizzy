@@ -30,6 +30,7 @@ use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
 mod board_views;
 mod exports;
+mod rich_text;
 mod storage;
 
 struct App {
@@ -250,10 +251,7 @@ fn escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 fn rich_html(s: &str) -> String {
-    format!(
-        "<div class=\"action-text-content\">\n  {}\n</div>\n",
-        escape(s)
-    )
+    rich_text::html(s)
 }
 fn wrap_html(s: &str) -> String {
     format!("<div class=\"action-text-content\">\n  {s}\n</div>\n")
@@ -840,7 +838,7 @@ fn board_json_row(p: &Principal, r: &SqliteRow, host: &str, creator: Value) -> V
     let mut value = json!({"id":id,"name":r.get::<String,_>("name"),"all_access":all,"created_at":r.get::<String,_>("created_at"),"auto_postpone_period_in_days":r.get::<i64,_>("auto_postpone_period_in_days"),"url":format!("{host}/{}/boards/{id}",p.slug),"creator":creator});
     if let Some(key) = r.get::<Option<String>, _>("publication_key") {
         let description: String = r.get("public_description");
-        value["public_description"] = json!(description);
+        value["public_description"] = json!(rich_text::plain_text(&description));
         value["public_description_html"] = json!(rich_html(&description));
         value["public_url"] = json!(format!("{host}/{}/public/boards/{key}", p.slug));
     }
@@ -895,7 +893,7 @@ async fn card_json(
     let number: i64 = r.get("number");
     let tags: Vec<String> = sqlx::query_scalar("SELECT t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title").bind(&id).fetch_all(&app.db).await.map_err(db_err)?;
     let b = board(app, p, &board_id).await?;
-    let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":description,"description_html":rich_html(&description),"image_url":null,"has_attachments":false,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
+    let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":rich_text::plain_text(&description),"description_html":rich_html(&description),"image_url":null,"has_attachments":false,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
     out["image_url"] = storage::image_url_for_card(app, p, &id).await?;
     let assigned = sqlx::query(
         "SELECT assignee_id FROM assignments WHERE card_id=? ORDER BY created_at,id LIMIT 6",
@@ -1022,7 +1020,7 @@ async fn cards_json_batch(
             .filter_map(|id| users.get(id).cloned())
             .collect();
         let mut value = json!({"id":card_id,"number":number,"title":card.get::<String,_>("title"),"status":card.get::<String,_>("status"),
-            "description":description,"description_html":rich_html(&description),"image_url":image_values.get(&card_id).cloned().unwrap_or(Value::Null),"has_attachments":false,
+            "description":rich_text::plain_text(&description),"description_html":rich_html(&description),"image_url":image_values.get(&card_id).cloned().unwrap_or(Value::Null),"has_attachments":false,
             "tags":tag_values.get(&card_id).cloned().unwrap_or_default(),"closed":card.get::<i64,_>("closed")!=0,
             "postponed":card.get::<i64,_>("postponed")!=0,"golden":card.get::<i64,_>("golden")!=0,
             "last_active_at":card.get::<String,_>("last_active_at"),"created_at":card.get::<String,_>("created_at"),
@@ -3710,7 +3708,7 @@ async fn public_card(
         "<nav><a href=\"/{account}/public/boards/{key}\">{}</a></nav><h1>{}</h1><article>{}</article>",
         escape(&board.get::<String, _>("name")),
         escape(&title),
-        escape(&card.get::<String, _>("description"))
+        rich_html(&card.get::<String, _>("description"))
     );
     Ok(public_page(&title, &body))
 }
@@ -4495,7 +4493,7 @@ async fn activity_items(
             .filter_map(|id| users.get(id).cloned())
             .collect();
         let mut value = json!({"id":id,"number":number,"title":title,"status":c.get::<String,_>("status"),
-            "description":description,"description_html":rich_html(&description),"image_url":image_values.get(&id).cloned().unwrap_or(Value::Null),
+            "description":rich_text::plain_text(&description),"description_html":rich_html(&description),"image_url":image_values.get(&id).cloned().unwrap_or(Value::Null),
             "has_attachments":false,"tags":tags.get(&id).cloned().unwrap_or_default(),
             "closed":c.get::<i64,_>("closed")!=0,"postponed":c.get::<i64,_>("postponed")!=0,
             "golden":c.get::<i64,_>("golden")!=0,"last_active_at":c.get::<String,_>("last_active_at"),
@@ -4530,7 +4528,7 @@ async fn activity_items(
         comments.insert(
             id.clone(),
             json!({"id":id,"created_at":created,"updated_at":updated,
-            "body":{"plain_text":body,"html":rich_html(&body)},"creator":creator,
+            "body":{"plain_text":rich_text::plain_text(&body),"html":rich_html(&body)},"creator":creator,
             "card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},
             "reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),
             "url":format!("{host}/{}/cards/{number}/comments/{id}",p.slug)}),
@@ -6062,7 +6060,7 @@ async fn comment_json(
     let (plain, html) = if creator["role"] == "system" {
         (system_plain_text(&body), wrap_html(&body))
     } else {
-        (body.clone(), rich_html(&body))
+        (rich_text::plain_text(&body), rich_html(&body))
     };
     Ok(
         json!({"id":id,"created_at":created,"updated_at":updated,"body":{"plain_text":plain,"html":html},"creator":creator,"card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},"reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),"url":format!("{host}/{}/cards/{number}/comments/{id}",p.slug)}),

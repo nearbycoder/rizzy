@@ -1,0 +1,62 @@
+{
+  "fixture_cards": 100,
+  "description_input": "<p>A <strong>bold</strong> idea &amp; a <a href=\"https://example.com\">link</a>.</p><ul><li>Plan</li><li>Ship</li></ul>",
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.04,
+        "requests": 6457,
+        "errors": {},
+        "rps": 1280.9,
+        "p50_ms": 21.13,
+        "p95_ms": 59.81,
+        "p99_ms": 84.46
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.1,
+        "requests": 5326,
+        "errors": {},
+        "rps": 1045.1,
+        "p50_ms": 55.82,
+        "p95_ms": 123.89,
+        "p99_ms": 160.89
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 16601,
+        "errors": {},
+        "rps": 3314.9,
+        "p50_ms": 9.11,
+        "p95_ms": 16.22,
+        "p99_ms": 20.58
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.02,
+        "requests": 16884,
+        "errors": {},
+        "rps": 3366.6,
+        "p50_ms": 18.34,
+        "p95_ms": 30.04,
+        "p99_ms": 39.16
+      }
+    ]
+  },
+  "sample_parity": {
+    "fizzy": {
+      "description": "A bold idea & a link.\n\n\u2022 Plan\n\u2022 Ship",
+      "description_html": "<div class=\"action-text-content\">\n  <p>A <strong>bold</strong> idea &amp; a <a href=\"https://example.com\">link</a>.</p><ul><li>Plan</li><li>Ship</li></ul>\n</div>\n",
+      "first_page_bytes": 26235
+    },
+    "rizzy": {
+      "description": "A bold idea & a link.\n\n\u2022 Plan\n\u2022 Ship",
+      "description_html": "<div class=\"action-text-content\">\n  <p>A <strong>bold</strong> idea &amp; a <a href=\"https://example.com\">link</a>.</p><ul><li>Plan</li><li>Ship</li></ul>\n</div>\n",
+      "first_page_bytes": 25575
+    }
+  }
+}

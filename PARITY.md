@@ -21,7 +21,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Basic event notifications and read controls | No |
-| Attachments and Action Text rich text | Card image and user avatar direct uploads, authorized serving, 256px avatar thumbnails, replacement, and removal | No |
+| Attachments and Action Text rich text | Card images, avatars, and common formatted card/comment/board text | No |
 | Imports, exports, account lifecycle | Asynchronous user card ZIP exports, authenticated download, and expiry | No |
 | API response shape and pagination parity | Partial | No |
 | SQLite and MySQL deployment parity | SQLite only | No |
@@ -51,5 +51,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 `tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. Other Action Text embeds, file export, and the original image controls in the browser interface remain to be built.
 
 `tests/avatar_parity.py` compares public initials and conditional responses, direct-upload attachment, public original blob and 256px JPEG/PNG thumbnail access, replacement, invalid SVG rejection, and removal. Rizzy's thumbnail encoder produces different bytes from Fizzy's libvips output, and GIF/WebP variants have not been cross-checked. Identity avatars, rich-text embeds, exports with attachments, and the original browser upload controls are still missing.
+
+`tests/rich_text_parity.py` compares common Action Text card descriptions, comments, and published board descriptions against Fizzy: plain-text extraction, safe formatted HTML, paragraph/list breaks, automatic links, and removal of unsafe attributes and protocols. It does not cover the full Rails sanitizer allowlist, attachment rendering, mentions, or every HTML edge case. The Rust search index still stores raw description markup, so formatted-content search needs a separate parity pass. `tests/smoke.py` now sends an encoded literal angle bracket to reflect the source API's HTML-input semantics.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

@@ -1,0 +1,72 @@
+{
+  "fixture_cards": 100,
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.05,
+        "requests": 5896,
+        "errors": {},
+        "rps": 1168.1,
+        "p50_ms": 23.85,
+        "p95_ms": 60.03,
+        "p99_ms": 81.98
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.1,
+        "requests": 5355,
+        "errors": {},
+        "rps": 1049.5,
+        "p50_ms": 54.12,
+        "p95_ms": 126.58,
+        "p99_ms": 162.07
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 19150,
+        "errors": {},
+        "rps": 3825.4,
+        "p50_ms": 7.67,
+        "p95_ms": 15.53,
+        "p99_ms": 18.12
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.02,
+        "requests": 18868,
+        "errors": {},
+        "rps": 3759.9,
+        "p50_ms": 16.37,
+        "p95_ms": 28.57,
+        "p99_ms": 31.93
+      }
+    ]
+  },
+  "sample_parity": {
+    "board_shape": true,
+    "card_shape": true,
+    "activity_shape": true,
+    "description_html": true,
+    "first_page_count": true,
+    "first_page_bytes": {
+      "fizzy": 24645,
+      "rizzy": 23985
+    }
+  },
+  "comparison": [
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 3.275,
+      "p95_ratio_fizzy_over_rizzy": 3.865
+    },
+    {
+      "concurrency": 64,
+      "rps_ratio_rizzy_over_fizzy": 3.583,
+      "p95_ratio_fizzy_over_rizzy": 4.431
+    }
+  ]
+}
