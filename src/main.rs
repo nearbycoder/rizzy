@@ -622,6 +622,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .patch(update_user)
                 .delete(delete_user),
         )
+        .route(
+            "/{account}/users/{id}/role",
+            axum::routing::put(update_user_role).patch(update_user_role),
+        )
         .route("/{account}/boards", get(list_boards).post(create_board))
         .route(
             "/{account}/boards/{id}/publication",
@@ -1446,6 +1450,31 @@ async fn delete_user(
         .await
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn update_user_role(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let user = active_user(&app, &p, &id).await?;
+    if !matches!(p.role.as_str(), "owner" | "admin")
+        || p.user_id == id
+        || user.get::<String, _>("role") == "owner"
+    {
+        return Err(err(StatusCode::FORBIDDEN, "Cannot administer user"));
+    }
+    let role = string(nested(&body, "user"), "role").unwrap_or_default();
+    let role = if role == "admin" { "admin" } else { "member" };
+    sqlx::query("UPDATE users SET role=? WHERE id=?")
+        .bind(role)
+        .bind(&id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
 fn valid_entropy(days: i64) -> Result<i64> {

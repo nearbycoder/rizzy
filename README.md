@@ -19,7 +19,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 
 ## Implemented now
 
-- Bearer token and cookie session authentication with SHA-256 token hashes, single-use email codes, initial signup, account scoping, read versus write permission, token management, identity listing, user listing and editing, and private board access checks.
+- Bearer token and cookie session authentication with SHA-256 token hashes, single-use email codes, initial signup, account scoping, read versus write permission, token management, identity listing, user listing and editing, role changes, and private board access checks.
 - Board, column, and card create/read/update/delete JSON routes; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions.
 - Tag listing, selected card filters, and basic card search.
 - Board publishing and unpublishing with unauthenticated public board and card pages.

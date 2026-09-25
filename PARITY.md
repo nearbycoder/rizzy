@@ -12,7 +12,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Tags, steps, comments | ✓ | No |
 | Full board and card HTML interface | Basic UI | No |
 | Sign up, magic links, sessions, passkeys | Magic links, sessions, and initial signup | No |
-| Users, roles, invitations, board involvement | — | No |
+| Users, roles, invitations, board involvement | User listing/editing and role changes | No |
 | Assignments, reactions, pins, watches | ✓ | No |
 | Card filters, tag listing, basic search | ✓ | No |
 | Activities and core event side effects | ✓ | No |
