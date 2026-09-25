@@ -2,7 +2,7 @@ use axum::response::Html;
 use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
-use super::{App, Principal, Result, board, db_err, escape, storage, wrap_html};
+use super::{App, Principal, Result, board, comment_edit_page, db_err, escape, storage, wrap_html};
 
 const TEMPLATE: &str = include_str!("../static/card.html");
 
@@ -108,22 +108,15 @@ pub(super) async fn show(
                 .await?
                 .1
         };
-        let comment_id: String = comment.get("id");
-        let edit = if comment.get::<String, _>("creator_id") == principal.user_id {
-            format!(
-                " <a href=\"/{}/cards/{number}/comments/{}/edit\">Edit</a>",
-                principal.slug,
-                escape(&comment_id)
-            )
-        } else {
-            String::new()
-        };
-        comment_html.push_str(&format!(
-            "<article class=\"comment\"><h3>{} <time>{}</time>{edit} <a href=\"/{}/cards/{number}/comments/{}/reactions/new\">React</a></h3><div class=\"comment__body lexxy-content\">{content}</div></article>",
-            escape(&comment.get::<String, _>("creator_name")),
-            escape(&comment.get::<String, _>("created_at")),
+        comment_html.push_str(&comment_edit_page::comment_frame(
             principal.slug,
-            escape(&comment_id),
+            number,
+            &comment.get::<String, _>("id"),
+            &comment.get::<String, _>("creator_id"),
+            &comment.get::<String, _>("creator_name"),
+            &comment.get::<String, _>("created_at"),
+            &content,
+            comment.get::<String, _>("creator_id") == principal.user_id,
         ));
     }
     let watching: i64 = sqlx::query_scalar(

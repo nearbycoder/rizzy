@@ -8672,21 +8672,76 @@ async fn show_comment(
     State(app): Shared,
     Path((account, number, id)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let c = card(&app, &p, &number).await?;
     let r = comment_row(&app, &c, &id).await?;
-    Ok(Json(comment_json(&app, &p, &c, &r, &base(&headers)).await?))
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok(
+            Html(comment_edit_page::rendered_comment_frame(&app, &p, &c, &r).await?)
+                .into_response(),
+        );
+    }
+    Ok(Json(comment_json(&app, &p, &c, &r, &base(&headers)).await?).into_response())
+}
+fn wants_turbo_stream(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/vnd.turbo-stream.html"))
+}
+async fn comment_replace_stream(
+    app: &App,
+    account: &str,
+    number: &str,
+    id: &str,
+    headers: &HeaderMap,
+) -> Result<Response> {
+    let p = principal(app, headers, account).await?;
+    let c = card(app, &p, number).await?;
+    let r = comment_row(app, &c, id).await?;
+    let frame = comment_edit_page::rendered_comment_frame(app, &p, &c, &r).await?;
+    let stream = format!(
+        "<turbo-stream action=\"replace\" target=\"container_comment_{}\"><template>{frame}</template></turbo-stream>",
+        escape(id)
+    );
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/vnd.turbo-stream.html; charset=utf-8",
+        )],
+        stream,
+    )
+        .into_response())
 }
 async fn update_comment(
     State(app): Shared,
     Path((account, number, id)): Path<(String, String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
-    Ok(Json(
-        update_comment_data(&app, &account, &number, &id, &headers, &body).await?,
-    ))
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
+    let body: Value = if form {
+        let content = url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "comment[body]")
+            .map(|(_, value)| value.into_owned())
+            .ok_or_else(|| bad("body is required"))?;
+        json!({"comment":{"body":content}})
+    } else {
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
+    if !wants_turbo_stream(&headers) && !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    let result = update_comment_data(&app, &account, &number, &id, &headers, &body).await?;
+    if wants_turbo_stream(&headers) {
+        comment_replace_stream(&app, &account, &number, &id, &headers).await
+    } else {
+        Ok(Json(result).into_response())
+    }
 }
 
 async fn update_or_delete_comment_form(
@@ -8719,14 +8774,22 @@ async fn update_or_delete_comment_form(
                 &json!({"comment":{"body":content}}),
             )
             .await?;
+            if wants_turbo_stream(&headers) {
+                return comment_replace_stream(&app, &account, &number, &id, &headers).await;
+            }
         }
         Some("delete") => {
-            delete_comment(
+            let mut delete_headers = headers;
+            delete_headers.insert("x-rizzy-json-request", HeaderValue::from_static("1"));
+            let response = delete_comment(
                 State(app),
                 Path((account.clone(), number.clone(), id)),
-                headers,
+                delete_headers,
             )
             .await?;
+            if response.status() == StatusCode::OK {
+                return Ok(response);
+            }
         }
         _ => return Err(missing()),
     }
@@ -8785,7 +8848,7 @@ async fn delete_comment(
     State(app): Shared,
     Path((account, number, comment)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
@@ -8812,7 +8875,7 @@ async fn delete_comment(
     .await
     .map_err(db_err)?;
     let done = sqlx::query("DELETE FROM comments WHERE id=? AND card_id=? AND creator_id=?")
-        .bind(comment)
+        .bind(&comment)
         .bind(c.get::<String, _>("id"))
         .bind(&p.user_id)
         .execute(&mut *tx)
@@ -8823,7 +8886,23 @@ async fn delete_comment(
     }
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
-    Ok(StatusCode::NO_CONTENT)
+    if wants_turbo_stream(&headers) {
+        Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            format!(
+                "<turbo-stream action=\"remove\" target=\"container_comment_{}\"></turbo-stream>",
+                escape(&comment)
+            ),
+        )
+            .into_response())
+    } else if headers.contains_key("x-rizzy-json-request") {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
+    }
 }
 
 async fn toggle_assignment(
