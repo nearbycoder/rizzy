@@ -25,8 +25,14 @@ def main():
             board, _ = call(port, f"/{account}/boards", "POST", {"board": {"name": "HTML card board"}}, bearer=token, status=201)
             board_id = board["id"]
             for index in range(17):
-                call(port, f"/{account}/boards/{board_id}/cards", "POST",
-                     {"card": {"title": f"Grid item {index:02d}"}}, bearer=token, status=201)
+                card, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST",
+                               {"card": {"title": f"Grid item {index:02d}"}}, bearer=token, status=201)
+                if index == 16:
+                    newest = card
+            column, _ = call(port, f"/{account}/boards/{board_id}/columns", "POST",
+                             {"column": {"name": "In progress", "color": "var(--color-card-4)"}}, bearer=token, status=201)
+            call(port, f"/{account}/cards/{newest['number']}/triage", "POST",
+                 {"column_id": column["id"]}, bearer=token, status=204)
             closed, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST",
                              {"card": {"title": "Completed item"}}, bearer=token, status=201)
             call(port, f"/{account}/cards/{closed['number']}/closure", "POST", bearer=token, status=204)
@@ -46,6 +52,9 @@ def main():
             assert '<turbo-frame id="cards_container">' in first
             assert 'id="cards_paginated_container"' in first
             assert 'HTML card board' in first and '17 cards' in first
+            assert 'class="card__board"' in first and 'class="card__id"' in first
+            assert 'class="card__footer"' in first and 'class="card__column-name">In progress</span>' in first
+            assert 'card--color-4' in first
             assert all(f"Grid item {index:02d}" in first for index in range(2, 17))
             assert "Grid item 00" not in first and "Completed item" not in first
             assert 'data-preview-url=' in first and 'load-page-2' in first

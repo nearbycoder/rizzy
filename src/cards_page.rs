@@ -18,6 +18,8 @@ pub(super) fn previews(principal: &Principal, cards: &[SqliteRow]) -> String {
         let number: i64 = card.get("number");
         let title: String = card.get("title");
         let board_name: String = card.get("board_name");
+        let column_name: Option<String> = card.get("column_name");
+        let column_color: Option<String> = card.get("column_color");
         let closed = card.get::<i64, _>("closed") != 0;
         let postponed = card.get::<i64, _>("postponed") != 0;
         let golden = card.get::<i64, _>("golden") != 0;
@@ -29,16 +31,46 @@ pub(super) fn previews(principal: &Principal, cards: &[SqliteRow]) -> String {
             "Open"
         };
         let class = if golden { " card--golden" } else { "" };
+        let color = match column_color.as_deref() {
+            Some("var(--color-card-1)") => "card--color-1",
+            Some("var(--color-card-2)") => "card--color-2",
+            Some("var(--color-card-3)") => "card--color-3",
+            Some("var(--color-card-4)") => "card--color-4",
+            Some("var(--color-card-5)") => "card--color-5",
+            Some("var(--color-card-6)") => "card--color-6",
+            Some("var(--color-card-7)") => "card--color-7",
+            Some("var(--color-card-8)") => "card--color-8",
+            _ => "card--color-default",
+        };
+        let column = column_name
+            .as_ref()
+            .map(|name| format!("<span class=\"card__column-name\">{}</span>", escape(name)))
+            .unwrap_or_default();
+        let created_at: String = card.get("created_at");
+        let last_active_at: String = card.get("last_active_at");
+        let stamp = if closed || postponed {
+            format!(
+                "<div class=\"card__closed\"><span class=\"card__closed-title\">{status}</span></div>"
+            )
+        } else {
+            String::new()
+        };
         let _ = write!(
             html,
-            "<article id=\"article_card_{}\" class=\"card{}\" data-id=\"{number}\" tabindex=\"0\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"card__board\">{}</span><span class=\"card__number\">#{number}</span><h3 class=\"card__title\">{}</h3><span class=\"card__status\">{status}</span></a></article>",
+            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\"><span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\">{}</time></span><span class=\"card__meta-text card__meta-text--updated\">Updated <time datetime=\"{}\">{}</time></span></div></footer></article>",
             escape(&id),
             class,
+            color,
             principal.slug,
             escape(&title),
             escape(&board_name),
+            escape(&title),
             escape(&board_name),
-            escape(&title)
+            escape(&title),
+            escape(&created_at),
+            escape(created_at.get(..10).unwrap_or(&created_at)),
+            escape(&last_active_at),
+            escape(last_active_at.get(..10).unwrap_or(&last_active_at))
         );
     }
     html

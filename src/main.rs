@@ -6441,14 +6441,20 @@ async fn list_cards(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let mut builder = cards_query("SELECT c.*,b.name AS board_name", &p, &query);
+    let html = !headers.contains_key("x-rizzy-json-request");
+    let select = if html {
+        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color"
+    } else {
+        "SELECT c.*,b.name AS board_name"
+    };
+    let mut builder = cards_query(select, &p, &query);
     builder
         .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
         .push_bind(limit)
         .push(" OFFSET ")
         .push_bind(offset);
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
-    if !headers.contains_key("x-rizzy-json-request") {
+    if html {
         return Ok(
             cards_page::show(&app, &p, &rows, total, &query, raw.as_deref())
                 .await?
@@ -6494,7 +6500,11 @@ async fn card_previews(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let mut builder = cards_query("SELECT c.*,b.name AS board_name", &p, &query);
+    let mut builder = cards_query(
+        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color",
+        &p,
+        &query,
+    );
     builder
         .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
         .push_bind(limit)
