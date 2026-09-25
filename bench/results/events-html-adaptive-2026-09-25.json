@@ -1,0 +1,98 @@
+{
+  "fixture_cards": 100,
+  "sample_parity": {
+    "fizzy": {
+      "visible_events": 100,
+      "columns": 3,
+      "html_bytes": 243412
+    },
+    "rizzy": {
+      "visible_events": 100,
+      "columns": 3,
+      "html_bytes": 47540
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 2.0,
+        "requests": 122,
+        "errors": {},
+        "rps": 61.0,
+        "p50_ms": 15.84,
+        "p95_ms": 23.51,
+        "p99_ms": 25.39
+      },
+      {
+        "concurrency": 8,
+        "seconds": 2.01,
+        "requests": 1006,
+        "errors": {},
+        "rps": 500.4,
+        "p50_ms": 15.51,
+        "p95_ms": 20.62,
+        "p99_ms": 25.29
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.06,
+        "requests": 1607,
+        "errors": {},
+        "rps": 780.6,
+        "p50_ms": 36.2,
+        "p95_ms": 81.1,
+        "p99_ms": 96.49
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 2.0,
+        "requests": 2025,
+        "errors": {},
+        "rps": 1012.1,
+        "p50_ms": 0.97,
+        "p95_ms": 1.21,
+        "p99_ms": 1.44
+      },
+      {
+        "concurrency": 8,
+        "seconds": 2.0,
+        "requests": 1615,
+        "errors": {},
+        "rps": 806.6,
+        "p50_ms": 9.75,
+        "p95_ms": 13.01,
+        "p99_ms": 14.54
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.04,
+        "requests": 1356,
+        "errors": {},
+        "rps": 665.5,
+        "p50_ms": 47.77,
+        "p95_ms": 57.43,
+        "p99_ms": 59.78
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 1,
+      "rps_ratio_rizzy_over_fizzy": 16.592,
+      "p95_ratio_fizzy_over_rizzy": 19.43
+    },
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 1.612,
+      "p95_ratio_fizzy_over_rizzy": 1.585
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 0.853,
+      "p95_ratio_fizzy_over_rizzy": 1.412
+    }
+  ]
+}

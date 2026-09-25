@@ -33,6 +33,7 @@ mod board_page;
 mod board_settings;
 mod board_views;
 mod card_page;
+mod events_page;
 mod exports;
 mod imports;
 mod rich_text;
@@ -1514,7 +1515,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
         .route("/", get(home))
-        .route("/{account}/", get(account_home))
+        .route("/{account}/", get(events_page::index))
         .route(
             "/client_configurations/android_v1.json",
             get(android_config),
@@ -1796,6 +1797,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(read_notification).delete(unread_notification),
         )
         .route("/{account}/activities", get(list_activities))
+        .route("/{account}/events", get(events_page::index))
+        .route("/{account}/events/days", get(events_page::days))
+        .route(
+            "/{account}/events/day_timeline/columns/{id}",
+            get(events_page::column),
+        )
         .route(
             "/{account}/cards/{number}",
             get(show_card)
@@ -7605,12 +7612,4 @@ async fn delete_comment_reaction(
 
 async fn home() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../static/index.html"))
-}
-async fn account_home(
-    State(app): Shared,
-    Path(account): Path<String>,
-    headers: HeaderMap,
-) -> Result<Html<&'static str>> {
-    principal(&app, &headers, &account).await?;
-    Ok(Html(include_str!("../static/index.html")))
 }

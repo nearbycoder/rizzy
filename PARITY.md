@@ -16,7 +16,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
 | Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pins, watches | No |
 | Card filters, tag listing, basic search | Saved IDs, terms, dates, closures, activity spikes, and FTS5 index | No |
-| Activities and core event side effects | ✓ | No |
+| Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, and column pages | No |
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; saved filter persistence and Turbo toggles | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
@@ -45,6 +45,8 @@ The private board HTML now renders Maybe, named, Not Now, and Done columns in Ru
 The board HTML now switches to a filtered grid when Fizzy's filter-active conditions apply. It uses the same SQL filter builder as Rizzy's card API, forces the current board scope, and paginates results. Its form exposes text, status, and sort controls while preserving other active filter fields on submission. `tests/board_filter_html_parity.py` compared unfiltered columns, explicit defaults, Done and Not Now, text search across two pages, oldest sort, and empty results with live Fizzy. Chromium checks exercised search, Done, and page navigation without console errors. Fizzy's full filter picker controls, saved-filter UI, and card preview markup remain incomplete.
 
 `tests/board_settings_html_parity.py` compares Fizzy and Rizzy's New Board and Board Settings pages, form creation, name/access/entropy update, redirect paths, and HTML deletion. The browser flow also exercised rename, private access, 11-day auto-close, and public-link publication. The settings layout and rich-text description editor are still simplified; Fizzy's full board access controls and CSRF enforcement remain incomplete. JSON board creation/deletion and column view checks passed after the HTML handlers were added.
+
+`tests/events_html_parity.py` checks the account home timeline, board-filtered events, three activity columns, local-hour placement with a New York timezone cookie, day fragments, column pages, next-day links, and invalid day/column responses against live Fizzy. A browser flow created and published a card, then opened its Added event. Rizzy uses a bounded 301-event day read; busy days fall back to exact counts and at most 100 events per column. The event cards, filters, and page layout remain simplified, and saved filter IDs and complete event descriptions are still missing.
 
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified and passkey sign-in is still absent. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 

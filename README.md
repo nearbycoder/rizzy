@@ -33,6 +33,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Board publishing and unpublishing with unauthenticated public board and card pages.
 - Direct uploads for card images, user avatars, and uploaded image/file embeds in card descriptions and comments, with private/public blob access and cached image previews.
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
+- An account home activity timeline with Added, Updated, and Done columns, board and person filters, timezone grouping, day pagination, and column detail pages.
 - Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
 - A basic browser interface for boards, columns, cards, description editing, and completion.
 - SQLite WAL storage with indexes for the board and card lookup paths.
@@ -80,10 +81,13 @@ python3 tests/embed_parity.py
 python3 tests/export_attachment_parity.py
 python3 tests/account_export_parity.py
 python3 tests/step_read_parity.py
+python3 tests/events_html_parity.py
 python3 tests/search_rich_text_parity.py
 ```
 
 For a comparative run, start both applications on the same machine using the same database engine, equivalent seed data, and production builds. Then set `FIZZY_URL`, `FIZZY_ACCOUNT`, `FIZZY_TOKEN`, `RIZZY_URL`, `RIZZY_ACCOUNT`, and `RIZZY_TOKEN` and run `python3 bench/compare.py --cards 100 --seconds 10`. The script creates equal card and activity counts, checks sampled response shapes and first page sizes, warms both services, and reports throughput, p50, p95, p99, and errors at several concurrency levels. `tests/parity.py` passed 142 comparisons for the implemented workflow using fresh accounts. Fizzy was brought up with a local Ruby 3.4.8 installation for the [diagnostic runs](bench/README.md). A valid product wide performance claim still requires full behavioral parity, repeated runs, CPU and memory measurements, and a larger dataset.
+
+`bench/events_html.py` measures the browser activity timeline after creating equal card and event fixtures. It additionally needs `FIZZY_EMAIL`, `FIZZY_DB`, `RIZZY_EMAIL`, and `RIZZY_DB` so it can sign in to each browser session; set `RIZZY_DEV_MAGIC_LINKS=1` on the local Rust server. Results and limits are in [bench/README.md](bench/README.md).
 
 ## License
 

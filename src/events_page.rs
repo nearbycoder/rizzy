@@ -1,0 +1,492 @@
+use axum::{
+    extract::{Path, RawQuery, State},
+    http::{HeaderMap, StatusCode},
+    response::Html,
+};
+use chrono::{DateTime, NaiveDate, TimeZone, Timelike, Utc};
+use chrono_tz::Tz;
+use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
+use std::str::FromStr;
+
+use super::{App, Principal, Result, Shared, db_err, err, escape, missing, principal};
+
+const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card_closed','card_reopened','card_collection_changed','card_board_changed','card_postponed','card_auto_postponed','card_triaged','card_sent_back_to_triage','comment_created')";
+
+#[derive(Default)]
+struct Params {
+    day: Option<String>,
+    boards: Vec<String>,
+    creators: Vec<String>,
+}
+
+fn params(raw: Option<String>) -> Params {
+    let mut result = Params::default();
+    if let Some(raw) = raw {
+        for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+            match key.as_ref() {
+                "day" => result.day = Some(value.into_owned()),
+                "board_ids[]" if !value.is_empty() => result.boards.push(value.into_owned()),
+                "creator_ids[]" if !value.is_empty() => result.creators.push(value.into_owned()),
+                _ => {}
+            }
+        }
+    }
+    result
+}
+
+fn timezone(headers: &HeaderMap) -> Tz {
+    headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookie| {
+            cookie.split(';').find_map(|part| {
+                let (key, value) = part.trim().split_once('=')?;
+                (key == "timezone").then(|| {
+                    url::form_urlencoded::parse(format!("value={value}").as_bytes())
+                        .next()
+                        .map(|(_, zone)| zone.into_owned())
+                })
+            })
+        })
+        .flatten()
+        .and_then(|name| Tz::from_str(&name).ok())
+        .unwrap_or(chrono_tz::UTC)
+}
+
+fn selected_day(params: &Params, tz: Tz) -> Result<NaiveDate> {
+    match params.day.as_deref() {
+        None | Some("") => Ok(Utc::now().with_timezone(&tz).date_naive()),
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .or_else(|_| {
+                DateTime::parse_from_rfc3339(value).map(|time| time.with_timezone(&tz).date_naive())
+            })
+            .map_err(|_| missing()),
+    }
+}
+
+fn start_of_day(day: NaiveDate, tz: Tz) -> Result<DateTime<Utc>> {
+    // A local midnight can be skipped by a timezone transition. The earliest
+    // valid instant on that date is the boundary used by Rails' all_day range.
+    let midnight = day.and_hms_opt(0, 0, 0).ok_or_else(missing)?;
+    for minute in 0..180 {
+        let local = midnight + chrono::Duration::minutes(minute);
+        if let Some(time) = tz.from_local_datetime(&local).earliest() {
+            return Ok(time.with_timezone(&Utc));
+        }
+    }
+    Err(missing())
+}
+
+fn timestamp(time: DateTime<Utc>) -> String {
+    time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn base_query<'a>(select: &str, p: &'a Principal, params: &'a Params) -> QueryBuilder<'a, Sqlite> {
+    let mut query = QueryBuilder::new(format!(
+        "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=e.board_id JOIN users u ON u.id=e.creator_id LEFT JOIN comments m ON m.id=e.eventable_id AND e.eventable_type='Comment' WHERE e.account_id="
+    ));
+    query
+        .push_bind(&p.account_id)
+        .push(" AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=")
+        .push_bind(&p.user_id)
+        .push(") AND e.action IN ")
+        .push(ACTIONS)
+        .push(" AND (e.eventable_type='Card' OR m.id IS NOT NULL)");
+    for (field, values) in [
+        ("e.board_id", &params.boards),
+        ("e.creator_id", &params.creators),
+    ] {
+        if !values.is_empty() {
+            query.push(" AND ").push(field).push(" IN (");
+            let mut separated = query.separated(",");
+            for value in values {
+                separated.push_bind(value);
+            }
+            separated.push_unseparated(")");
+        }
+    }
+    query
+}
+
+fn column_clause(query: &mut QueryBuilder<'_, Sqlite>, column: &str) {
+    match column {
+        "added" => {
+            query.push(" AND e.action IN ('card_published','card_reopened')");
+        }
+        "closed" => {
+            query.push(" AND e.action='card_closed'");
+        }
+        _ => {
+            query.push(" AND e.action NOT IN ('card_published','card_reopened','card_closed')");
+        }
+    }
+}
+
+const EVENT_FIELDS: &str = "SELECT e.id,e.action,e.created_at,e.eventable_type,e.eventable_id,c.id card_id,c.number,c.title,c.description,c.golden,b.name board_name,u.name creator_name,m.body comment_body";
+
+struct Column {
+    id: &'static str,
+    title: &'static str,
+    index: usize,
+    count: i64,
+    events: Vec<SqliteRow>,
+}
+
+struct Timeline {
+    day: NaiveDate,
+    next_day: Option<NaiveDate>,
+    columns: Vec<Column>,
+    tz: Tz,
+}
+
+async fn timeline(app: &App, p: &Principal, params: &Params, tz: Tz) -> Result<Timeline> {
+    let day = selected_day(params, tz)?;
+    let start = timestamp(start_of_day(day, tz)?);
+    let end = timestamp(start_of_day(day.succ_opt().ok_or_else(missing)?, tz)?);
+    let mut columns: Vec<Column> = [
+        ("added", "Added", 1),
+        ("updated", "Updated", 2),
+        ("closed", "Done", 3),
+    ]
+    .into_iter()
+    .map(|(id, title, index)| Column {
+        id,
+        title,
+        index,
+        count: 0,
+        events: Vec::new(),
+    })
+    .collect();
+    // A normal day needs only one indexed read for exact counts and cards.
+    let mut query = base_query(EVENT_FIELDS, p, params);
+    query
+        .push(" AND e.created_at >= ")
+        .push_bind(&start)
+        .push(" AND e.created_at < ")
+        .push_bind(&end)
+        .push(" ORDER BY e.created_at DESC,e.id DESC LIMIT 301");
+    let rows = query.build().fetch_all(&app.db).await.map_err(db_err)?;
+    if rows.len() < 301 {
+        for row in rows {
+            let action: String = row.get("action");
+            let bucket = match action.as_str() {
+                "card_published" | "card_reopened" => "added",
+                "card_closed" => "closed",
+                _ => "updated",
+            };
+            if let Some(column) = columns.iter_mut().find(|column| column.id == bucket) {
+                column.count += 1;
+                if column.events.len() < 100 {
+                    column.events.push(row);
+                }
+            }
+        }
+    } else {
+        // Beyond 300 events, fetch exact totals and a bounded first page for
+        // each column. This keeps a busy account's HTML work predictable.
+        for column in &mut columns {
+            let mut count = base_query("SELECT COUNT(*)", p, params);
+            count
+                .push(" AND e.created_at >= ")
+                .push_bind(&start)
+                .push(" AND e.created_at < ")
+                .push_bind(&end);
+            column_clause(&mut count, column.id);
+            column.count = count
+                .build_query_scalar()
+                .fetch_one(&app.db)
+                .await
+                .map_err(db_err)?;
+            let mut events = base_query(EVENT_FIELDS, p, params);
+            events
+                .push(" AND e.created_at >= ")
+                .push_bind(&start)
+                .push(" AND e.created_at < ")
+                .push_bind(&end);
+            column_clause(&mut events, column.id);
+            events.push(" ORDER BY e.created_at DESC,e.id DESC LIMIT 100");
+            column.events = events.build().fetch_all(&app.db).await.map_err(db_err)?;
+        }
+    }
+    let mut previous = base_query("SELECT e.created_at", p, params);
+    previous
+        .push(" AND e.created_at < ")
+        .push_bind(&start)
+        .push(" ORDER BY e.created_at DESC,e.id DESC LIMIT 1");
+    let next_day = previous
+        .build_query_scalar::<String>()
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+        .map(|date| date.with_timezone(&tz).date_naive());
+    Ok(Timeline {
+        day,
+        next_day,
+        columns,
+        tz,
+    })
+}
+
+fn filter_query(params: &Params) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for board in &params.boards {
+        serializer.append_pair("board_ids[]", board);
+    }
+    for creator in &params.creators {
+        serializer.append_pair("creator_ids[]", creator);
+    }
+    serializer.finish()
+}
+
+fn excerpt(text: &str) -> String {
+    let plain = super::rich_text::plain_text(text);
+    let mut short: String = plain.chars().take(200).collect();
+    if plain.chars().count() > 200 {
+        short.push('…');
+    }
+    escape(&short)
+}
+
+fn render_event(event: &SqliteRow, account: i64) -> String {
+    let id: String = event.get("id");
+    let action: String = event.get("action");
+    let number: i64 = event.get("number");
+    let title: String = event.get("title");
+    let creator: String = event.get("creator_name");
+    let board: String = event.get("board_name");
+    let card_id: String = event.get("card_id");
+    let comment: Option<String> = event.get("comment_body");
+    let body: String = if action == "comment_created" {
+        comment.as_deref().map(excerpt).unwrap_or_default()
+    } else if action == "card_published" {
+        excerpt(&event.get::<String, _>("description"))
+    } else {
+        String::new()
+    };
+    let verb = match action.as_str() {
+        "card_published" => "added",
+        "card_closed" => "closed",
+        "card_reopened" => "reopened",
+        "card_assigned" => "assigned someone to",
+        "card_unassigned" => "removed someone from",
+        "comment_created" => "commented on",
+        "card_postponed" | "card_auto_postponed" => "moved to Not Now",
+        "card_sent_back_to_triage" => "sent back to triage",
+        "card_triaged" => "triaged",
+        "card_board_changed" => "moved",
+        "card_collection_changed" => "updated",
+        _ => "updated",
+    };
+    let comment_fragment = if action == "comment_created" {
+        format!(
+            "#comment_{}",
+            escape(&event.get::<String, _>("eventable_id"))
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<a id=\"timelined_event_{}\" class=\"event event--{}{}\" href=\"/{account}/cards/{number}{comment_fragment}\" data-card-id=\"{}\"><span class=\"event__board\"><span class=\"event__number\">#{number}</span> {}</span><span class=\"event__creator\">{}</span><strong>{} {}</strong><span class=\"event__excerpt\">{body}</span></a>",
+        escape(&id),
+        escape(&action),
+        if event.get::<i64, _>("golden") != 0 {
+            " golden-effect"
+        } else {
+            ""
+        },
+        escape(&card_id),
+        escape(&board),
+        escape(&creator),
+        verb,
+        escape(&title)
+    )
+}
+
+fn render_column(column: &Column, day: NaiveDate, tz: Tz, account: i64, params: &Params) -> String {
+    let mut html = format!(
+        "<div class=\"events__column\"><h3 class=\"events__column-header\"><span>{} {}{}</span>",
+        column.title,
+        day.format("%b %-d"),
+        if column.count > 0 {
+            format!(" ({})", column.count)
+        } else {
+            String::new()
+        }
+    );
+    if column.count > 0 {
+        let filter = filter_query(params);
+        html.push_str(&format!("<a class=\"events__maximize-button\" href=\"/{account}/events/day_timeline/columns/{}?day={day}{}\" aria-label=\"Expand {} column\">Expand</a>", column.id, if filter.is_empty() { String::new() } else { format!("&{filter}") }, column.title));
+    }
+    html.push_str("</h3>");
+    let mut last_hour = None;
+    for event in &column.events {
+        let created: String = event.get("created_at");
+        let Ok(time) = DateTime::parse_from_rfc3339(&created) else {
+            continue;
+        };
+        let local = time.with_timezone(&tz);
+        let hour = local.hour();
+        if last_hour != Some(hour) {
+            if last_hour.is_some() {
+                html.push_str("</div>");
+            }
+            html.push_str(&format!("<div class=\"events__time-block\" style=\"grid-area: {}/{}\"><time class=\"event__timestamp\" datetime=\"{}\">{}</time>", 25-hour, column.index, escape(&created), local.format("%-I:%M %p")));
+            last_hour = Some(hour);
+        }
+        html.push_str(&render_event(event, account));
+    }
+    if last_hour.is_some() {
+        html.push_str("</div>");
+    }
+    if column.count > 100 {
+        html.push_str(&format!("<div class=\"events__column-footer\">Showing the 100 most recent ({} are hidden)</div>", column.count-100));
+    }
+    html.push_str("</div>");
+    html
+}
+
+fn render_day(timeline: &Timeline, account: i64, params: &Params) -> String {
+    let mut html = format!(
+        "<turbo-frame id=\"day-timeline-pagination-contents-{}\" role=\"presentation\"><section class=\"events__day\">",
+        timeline.day
+    );
+    if timeline.columns.iter().any(|column| column.count > 0) {
+        html.push_str("<div class=\"events__columns\">");
+        for column in &timeline.columns {
+            html.push_str(&render_column(
+                column,
+                timeline.day,
+                timeline.tz,
+                account,
+                params,
+            ));
+        }
+        html.push_str("</div>");
+    }
+    if let Some(next_day) = timeline.next_day {
+        let gap = (timeline.day - next_day).num_days() - 1;
+        if gap > 0 {
+            html.push_str(&format!("<div class=\"events__none\"><h2>{} – {}</h2><p>No activity for {gap} days</p></div>", next_day.succ_opt().unwrap_or(next_day).format("%b %-d"), timeline.day.pred_opt().unwrap_or(timeline.day).format("%b %-d")));
+        }
+    } else {
+        html.push_str(&format!(
+            "<div class=\"events__none\"><p>{}</p></div>",
+            if timeline.columns.iter().any(|column| column.count > 0) {
+                "No more activity"
+            } else {
+                "No activity"
+            }
+        ));
+    }
+    html.push_str("</section>");
+    if let Some(next_day) = timeline.next_day {
+        let filter = filter_query(params);
+        html.push_str(&format!("<a class=\"day-timeline-pagination-link\" href=\"/{account}/events/days?day={next_day}{}\" data-frame=\"day-timeline-pagination-contents-{next_day}\">Load more…</a>", if filter.is_empty() { String::new() } else { format!("&{filter}") }));
+    }
+    html.push_str("</turbo-frame>");
+    html
+}
+
+pub(super) async fn index(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    let params = params(raw);
+    let tz = timezone(&headers);
+    let timeline = timeline(&app, &p, &params, tz).await?;
+    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? ORDER BY lower(b.name),b.id")
+        .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let users = sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY lower(name),id")
+        .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let mut board_options = String::new();
+    for board in &boards {
+        let id: String = board.get("id");
+        board_options.push_str(&format!(
+            "<label class=\"quick-filter__option\"><input type=\"checkbox\" name=\"board_ids[]\" value=\"{}\"{}>{}</label>",
+            escape(&id),
+            if params.boards.contains(&id) {
+                " checked"
+            } else {
+                ""
+            },
+            escape(&board.get::<String, _>("name"))
+        ));
+    }
+    let mut user_options = String::new();
+    for user in &users {
+        let id: String = user.get("id");
+        user_options.push_str(&format!(
+            "<label class=\"quick-filter__option\"><input type=\"checkbox\" name=\"creator_ids[]\" value=\"{}\"{}>{}</label>",
+            escape(&id),
+            if params.creators.contains(&id) {
+                " checked"
+            } else {
+                ""
+            },
+            escape(&user.get::<String, _>("name"))
+        ));
+    }
+    let title = if boards.len() > 1 {
+        "Activity across"
+    } else {
+        "Latest Activity"
+    };
+    let body = render_day(&timeline, p.slug, &params);
+    Ok(Html(format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a><h1 class=\"header__title\">{title}</h1><a class=\"button\" href=\"/{}/boards/new\">Add a board</a></header><main id=\"main\"><form class=\"events__filters\" action=\"/{}/events\" method=\"get\"><details class=\"quick-filter\"><summary>Board…</summary><div class=\"quick-filter__options\">{board_options}</div></details><details class=\"quick-filter\"><summary>Person…</summary><div class=\"quick-filter__options\">{user_options}</div></details><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{}/events\">Clear</a></form><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
+        include_str!("../static/events.css"),
+        p.slug,
+        p.slug,
+        p.slug,
+        p.slug,
+        include_str!("../static/events.js")
+    )))
+}
+
+pub(super) async fn days(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    let params = params(raw);
+    let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
+    Ok(Html(render_day(&timeline, p.slug, &params)))
+}
+
+pub(super) async fn column(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+) -> Result<Html<String>> {
+    if !["added", "updated", "closed"].contains(&id.as_str()) {
+        return Err(err(StatusCode::NOT_FOUND, "Not found"));
+    }
+    let p = principal(&app, &headers, &account).await?;
+    let params = params(raw);
+    let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
+    let selected = timeline
+        .columns
+        .iter()
+        .find(|column| column.id == id)
+        .ok_or_else(missing)?;
+    let mut events = String::new();
+    for event in &selected.events {
+        events.push_str(&render_event(event, p.slug));
+    }
+    Ok(Html(format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header class=\"header\"><a href=\"/{}/\">Activity</a><h1>{} {} ({})</h1></header><main id=\"main\" class=\"events--grid\">{events}</main></body></html>",
+        selected.title,
+        include_str!("../static/events.css"),
+        p.slug,
+        selected.title,
+        timeline.day.format("%b %-d"),
+        selected.count
+    )))
+}

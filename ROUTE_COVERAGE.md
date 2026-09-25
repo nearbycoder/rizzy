@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 158. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 161. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -26,9 +26,9 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `cards/taggings` | 2 | 1 |
 | `cards/watches` | 3 | 2 |
 | `client_configurations` | 1 | 0 |
-| `events` | 2 | 1 |
-| `events/day_timeline/columns` | 1 | 0 |
-| `events/days` | 1 | 0 |
+| `events` | 2 | 2 |
+| `events/day_timeline/columns` | 1 | 1 |
+| `events/days` | 1 | 1 |
 | `filters/settings_refreshes` | 1 | 0 |
 | `landings` | 1 | 0 |
 | `my/menus` | 1 | 0 |

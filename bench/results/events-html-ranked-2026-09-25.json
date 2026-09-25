@@ -1,0 +1,98 @@
+{
+  "fixture_cards": 100,
+  "sample_parity": {
+    "fizzy": {
+      "visible_events": 100,
+      "columns": 3,
+      "html_bytes": 242741
+    },
+    "rizzy": {
+      "visible_events": 100,
+      "columns": 3,
+      "html_bytes": 47394
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 2.01,
+        "requests": 125,
+        "errors": {},
+        "rps": 62.1,
+        "p50_ms": 15.56,
+        "p95_ms": 22.32,
+        "p99_ms": 25.81
+      },
+      {
+        "concurrency": 8,
+        "seconds": 2.01,
+        "requests": 1012,
+        "errors": {},
+        "rps": 502.4,
+        "p50_ms": 15.47,
+        "p95_ms": 21.45,
+        "p99_ms": 26.28
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.06,
+        "requests": 1575,
+        "errors": {},
+        "rps": 763.9,
+        "p50_ms": 38.03,
+        "p95_ms": 79.02,
+        "p99_ms": 101.23
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 2.0,
+        "requests": 2087,
+        "errors": {},
+        "rps": 1043.2,
+        "p50_ms": 0.81,
+        "p95_ms": 1.44,
+        "p99_ms": 1.77
+      },
+      {
+        "concurrency": 8,
+        "seconds": 2.0,
+        "requests": 1194,
+        "errors": {},
+        "rps": 595.7,
+        "p50_ms": 13.27,
+        "p95_ms": 16.16,
+        "p99_ms": 17.34
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.04,
+        "requests": 949,
+        "errors": {},
+        "rps": 465.2,
+        "p50_ms": 71.11,
+        "p95_ms": 79.23,
+        "p99_ms": 82.23
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 1,
+      "rps_ratio_rizzy_over_fizzy": 16.799,
+      "p95_ratio_fizzy_over_rizzy": 15.5
+    },
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 1.186,
+      "p95_ratio_fizzy_over_rizzy": 1.327
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 0.609,
+      "p95_ratio_fizzy_over_rizzy": 0.997
+    }
+  ]
+}

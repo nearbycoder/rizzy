@@ -1098,21 +1098,21 @@
       "path": "/events(.:format)",
       "controller": "events",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/events/days(.:format)",
       "controller": "events/days",
       "action": "index",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/events/day_timeline/columns/:id(.:format)",
       "controller": "events/day_timeline/columns",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
