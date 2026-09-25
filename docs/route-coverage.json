@@ -209,14 +209,14 @@
       "path": "/users/:user_id/data_exports(.:format)",
       "controller": "users/data_exports",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/users/:user_id/data_exports/:id(.:format)",
       "controller": "users/data_exports",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1553,6 +1553,18 @@
     {
       "method": "GET",
       "path": "/{account}/users"
+    },
+    {
+      "method": "POST",
+      "path": "/{account}/users/{user}/data_exports"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/users/{user}/data_exports/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/exports/{id}/download"
     },
     {
       "method": "GET",

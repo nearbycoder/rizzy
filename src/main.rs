@@ -26,6 +26,7 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
+mod exports;
 
 struct App {
     db: SqlitePool,
@@ -1163,6 +1164,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
+    tokio::spawn(exports::worker(app.clone()));
     let maintenance_db = app.db.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
@@ -1236,6 +1238,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::delete(delete_token),
         )
         .route("/{account}/users", get(list_users))
+        .route(
+            "/{account}/users/{user}/data_exports",
+            post(exports::create_user),
+        )
+        .route(
+            "/{account}/users/{user}/data_exports/{id}",
+            get(exports::show_user),
+        )
+        .route("/{account}/exports/{id}/download", get(exports::download))
         .route(
             "/{account}/account/settings",
             get(show_account).put(update_account).patch(update_account),

@@ -22,7 +22,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Public board workflow and webhooks | Public pages; webhook CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Basic event notifications and read controls | No |
 | Attachments and Action Text rich text | — | No |
-| Imports, exports, account lifecycle | — | No |
+| Imports, exports, account lifecycle | Asynchronous user card ZIP exports, authenticated download, and expiry | No |
 | API response shape and pagination parity | Partial | No |
 | SQLite and MySQL deployment parity | SQLite only | No |
 | Comparative performance and scale proof | Harness added | No |
@@ -35,5 +35,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 
 `tests/filter_parity.py` passes 13 additional cross-app card-result comparisons, including terms, closure dates, closers, a backdated card, and a card approaching auto-postponement. `tests/saved_filter_parity.py` checks that a saved filter selects the same closed card on both apps; the Rails filter is created through its model layer because its Turbo controller requires a browser session. This does not cover the full filter UI or every time zone.
 `tests/stalled_parity.py` additionally checks the stalled index before and after an old spike, a fresh comment, and postponement. Local `tests/stalled.py` checks spike creation from assignment, reopening, and multi-person comments. These checks do not cover all background-job timing or all search syntax.
+
+`tests/exports.py` checks user export ZIP content, board access scope, download permissions, asynchronous completion, and the 24-hour request limit. A live Fizzy export confirmed the same sample card's board, title, status, escaped description, and comment body format. User ZIPs currently omit attachments because Rizzy does not yet store them; account ZIP export and import are still missing. The background worker retries processing exports after a five-minute stale lease and removes completed exports after 24 hours.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.

@@ -83,6 +83,17 @@ CREATE TABLE IF NOT EXISTS authentication_attempts (
 );
 CREATE INDEX IF NOT EXISTS authentication_attempts_bucket ON authentication_attempts(bucket,created_at);
 CREATE INDEX IF NOT EXISTS authentication_attempts_age ON authentication_attempts(created_at);
+CREATE TABLE IF NOT EXISTS exports (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN ('user','account')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS exports_current ON exports(account_id,kind,created_at);
 CREATE TABLE IF NOT EXISTS boards (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
