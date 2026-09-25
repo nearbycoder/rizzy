@@ -31,6 +31,38 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   permission TEXT NOT NULL CHECK(permission IN ('read','write')),
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS magic_links (
+  id TEXT PRIMARY KEY,
+  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  purpose TEXT NOT NULL CHECK(purpose IN ('sign_in','sign_up')),
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS magic_links_expiration ON magic_links(expires_at);
+CREATE TABLE IF NOT EXISTS pending_authentications (
+  token_hash TEXT PRIMARY KEY,
+  email_address TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pending_authentications_expiration ON pending_authentications(expires_at);
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  user_agent TEXT,
+  signup_pending INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_identity ON sessions(identity_id);
+CREATE TABLE IF NOT EXISTS authentication_attempts (
+  id TEXT PRIMARY KEY,
+  bucket TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS authentication_attempts_bucket ON authentication_attempts(bucket,created_at);
+CREATE INDEX IF NOT EXISTS authentication_attempts_age ON authentication_attempts(created_at);
 CREATE TABLE IF NOT EXISTS boards (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),

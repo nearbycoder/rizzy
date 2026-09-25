@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{OriginalUri, Path, Query, RawQuery, State},
+    extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -17,13 +17,18 @@ use sqlx::{
 use std::{
     collections::{HashMap, HashSet},
     env,
+    net::SocketAddr,
+    process::Stdio,
     sync::Arc,
     time::Duration,
 };
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
 struct App {
     db: SqlitePool,
     write_lock: tokio::sync::Mutex<()>,
+    auth_lock: tokio::sync::Mutex<()>,
 }
 type Shared = State<Arc<App>>;
 type Result<T> = std::result::Result<T, ApiError>;
@@ -63,6 +68,33 @@ fn id() -> String {
 }
 fn hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
+}
+fn random_token() -> String {
+    hex::encode(rand::random::<[u8; 32]>())
+}
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|line| line.split(';'))
+        .filter_map(|part| part.trim().split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value.to_string())
+}
+fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, max_age: i64, secure: bool) {
+    let secure_part = if secure { "; Secure" } else { "" };
+    let cookie =
+        format!("{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure_part}");
+    if let Ok(v) = HeaderValue::from_str(&cookie) {
+        headers.append(header::SET_COOKIE, v);
+    }
+}
+fn secure_request(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        == Some("https")
 }
 fn base(headers: &HeaderMap) -> String {
     let host = headers
@@ -194,19 +226,15 @@ impl Principal {
 }
 async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Principal> {
     let slug: i64 = slug.parse().map_err(|_| missing())?;
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Bearer token required"))?;
-    let r = sqlx::query("SELECT a.id account_id,u.id user_id,u.role,t.permission FROM access_tokens t JOIN users u ON u.identity_id=t.identity_id JOIN accounts a ON a.id=u.account_id WHERE t.token_hash=? AND a.external_account_id=? AND u.active=1")
-        .bind(hash(token)).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?
+    let (identity_id, permission) = identity_auth(app, headers).await?;
+    let r = sqlx::query("SELECT a.id account_id,u.id user_id,u.role FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
+        .bind(identity_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED,"Invalid token or account"))?;
     Ok(Principal {
         account_id: r.get("account_id"),
         user_id: r.get("user_id"),
         role: r.get("role"),
-        permission: r.get("permission"),
+        permission,
         slug,
     })
 }
@@ -525,10 +553,44 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let app = Arc::new(App {
         db,
         write_lock: tokio::sync::Mutex::new(()),
+        auth_lock: tokio::sync::Mutex::new(()),
+    });
+    let maintenance_db = app.db.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            let expiration = now();
+            let attempts_cutoff = (Utc::now() - chrono::Duration::minutes(15))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            for (statement, cutoff) in [
+                ("DELETE FROM magic_links WHERE expires_at<?", &expiration),
+                (
+                    "DELETE FROM pending_authentications WHERE expires_at<?",
+                    &expiration,
+                ),
+                (
+                    "DELETE FROM authentication_attempts WHERE created_at<?",
+                    &attempts_cutoff,
+                ),
+            ] {
+                if let Err(error) = sqlx::query(statement)
+                    .bind(cutoff)
+                    .execute(&maintenance_db)
+                    .await
+                {
+                    eprintln!("authentication cleanup failed: {error}");
+                }
+            }
+        }
     });
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
         .route("/", get(home))
+        .route("/session", post(request_magic_link).delete(logout_session))
+        .route("/session/magic_link", post(complete_magic_link))
+        .route("/signup", post(request_signup))
+        .route("/signup/completion", post(complete_signup))
         .route("/my/identity", get(my_identity))
         .route("/my/access_tokens", get(list_tokens).post(create_token))
         .route(
@@ -681,9 +743,16 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .with_state(app);
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
+    if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
+        return Err("RIZZY_DEV_MAGIC_LINKS requires a loopback bind address".into());
+    }
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("Rizzy listening on http://{bind}");
-    axum::serve(listener, routes).await?;
+    axum::serve(
+        listener,
+        routes.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -722,12 +791,455 @@ async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+fn future_minutes(minutes: i64) -> String {
+    (Utc::now() + chrono::Duration::minutes(minutes))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+fn valid_email(email: &str) -> bool {
+    !email.contains(['\r', '\n', ' '])
+        && email.len() <= 254
+        && email.split_once('@').is_some_and(|(local, domain)| {
+            !local.is_empty() && domain.contains('.') && !domain.starts_with('.')
+        })
+}
+fn magic_code() -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let mut rng = rand::rng();
+    (0..6)
+        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+        .collect()
+}
+fn normalize_magic_code(code: &str) -> String {
+    code.to_ascii_uppercase()
+        .replace('O', "0")
+        .replace(['I', 'L'], "1")
+        .chars()
+        .filter(|c| "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(*c))
+        .collect()
+}
+async fn auth_attempt(
+    app: &App,
+    bucket: &str,
+    limit: i64,
+    window_minutes: i64,
+    message: &str,
+) -> Result<()> {
+    let cutoff = (Utc::now() - chrono::Duration::minutes(window_minutes))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM authentication_attempts WHERE bucket=? AND created_at>=?",
+    )
+    .bind(bucket)
+    .bind(&cutoff)
+    .fetch_one(&app.db)
+    .await
+    .map_err(db_err)?;
+    if count >= limit {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, message));
+    }
+    sqlx::query("INSERT INTO authentication_attempts(id,bucket,created_at) VALUES(?,?,?)")
+        .bind(id())
+        .bind(bucket)
+        .bind(now())
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(())
+}
+fn dev_magic_links() -> bool {
+    env::var("RIZZY_DEV_MAGIC_LINKS").as_deref() == Ok("1")
+}
+async fn deliver_magic_link(email: &str, code: &str, host: &str) -> Result<()> {
+    if dev_magic_links() {
+        return Ok(());
+    }
+    let path = env::var("RIZZY_SENDMAIL").map_err(|_| {
+        err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Mail delivery is not configured",
+        )
+    })?;
+    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
+    if !valid_email(email) || from.contains(['\r', '\n']) {
+        return Err(bad("invalid email address"));
+    }
+    let message = format!(
+        "From: {from}\nTo: {email}\nSubject: Your Rizzy sign-in code\nContent-Type: text/plain; charset=UTF-8\n\nYour Rizzy code is {code}.\n\nIt expires in 15 minutes.\n{host}/session/magic_link?code={code}\n"
+    );
+    let mut child = Command::new(path)
+        .arg("-t")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
+    };
+    stdin
+        .write_all(message.as_bytes())
+        .await
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
+    drop(stdin);
+    let status = child
+        .wait()
+        .await
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
+    if !status.success() {
+        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
+    }
+    Ok(())
+}
+async fn request_magic_link(
+    State(app): Shared,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response> {
+    request_magic_link_inner(&app, peer, headers, body, false).await
+}
+async fn request_signup(
+    State(app): Shared,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response> {
+    if identity_auth(&app, &headers).await.is_ok() {
+        return Err(err(StatusCode::FORBIDDEN, "Already signed in"));
+    }
+    let email = required(nested(&body, "signup"), "email_address")?;
+    request_magic_link_inner(&app, peer, headers, json!({"email_address":email}), true).await
+}
+async fn request_magic_link_inner(
+    app: &App,
+    peer: SocketAddr,
+    headers: HeaderMap,
+    body: Value,
+    forced_signup: bool,
+) -> Result<Response> {
+    let email = required(&body, "email_address")?.trim().to_lowercase();
+    let guard = app.auth_lock.lock().await;
+    auth_attempt(
+        app,
+        &format!(
+            "{}:{}",
+            if forced_signup { "signup" } else { "request" },
+            peer.ip()
+        ),
+        10,
+        3,
+        "Try again later.",
+    )
+    .await?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
+            .bind(&email)
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?;
+    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let accepting = env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1") || accounts == 0;
+    if forced_signup && !accepting {
+        return Err(err(StatusCode::FORBIDDEN, "Signup is closed"));
+    }
+    let identity_id = if let Some(identity_id) = existing {
+        Some((
+            identity_id,
+            if forced_signup { "sign_up" } else { "sign_in" },
+        ))
+    } else if accepting {
+        if !valid_email(&email) {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Something went wrong",
+            ));
+        }
+        let identity_id = id();
+        sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+            .bind(&identity_id)
+            .bind(&email)
+            .bind(now())
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+        Some((identity_id, "sign_up"))
+    } else {
+        None
+    };
+    let expires = future_minutes(15);
+    let pending = random_token();
+    sqlx::query("INSERT INTO pending_authentications(token_hash,email_address,expires_at,created_at) VALUES(?,?,?,?)")
+        .bind(hash(&pending)).bind(&email).bind(&expires).bind(now()).execute(&app.db).await.map_err(db_err)?;
+    let mut code_header = None;
+    if let Some((identity_id, purpose)) = identity_id {
+        let code = loop {
+            let candidate = magic_code();
+            let inserted=sqlx::query("INSERT OR IGNORE INTO magic_links(id,identity_id,code,purpose,expires_at,created_at) VALUES(?,?,?,?,?,?)")
+                .bind(id()).bind(&identity_id).bind(&candidate).bind(purpose).bind(&expires).bind(now())
+                .execute(&app.db).await.map_err(db_err)?;
+            if inserted.rows_affected() == 1 {
+                break candidate;
+            }
+        };
+        drop(guard);
+        if let Err(error) = deliver_magic_link(&email, &code, &base(&headers)).await {
+            sqlx::query("DELETE FROM magic_links WHERE code=?")
+                .bind(&code)
+                .execute(&app.db)
+                .await
+                .map_err(db_err)?;
+            sqlx::query("DELETE FROM pending_authentications WHERE token_hash=?")
+                .bind(hash(&pending))
+                .execute(&app.db)
+                .await
+                .map_err(db_err)?;
+            return Err(error);
+        }
+        if dev_magic_links() {
+            code_header = Some(code);
+        }
+    } else {
+        drop(guard);
+    }
+    let mut response = (
+        StatusCode::CREATED,
+        Json(json!({"pending_authentication_token":pending})),
+    )
+        .into_response();
+    set_cookie(
+        response.headers_mut(),
+        "pending_authentication_token",
+        &pending,
+        900,
+        secure_request(&headers),
+    );
+    if let Some(code) = code_header {
+        response.headers_mut().insert(
+            "x-magic-link-code",
+            HeaderValue::from_str(&code).expect("base32"),
+        );
+    }
+    Ok(response)
+}
+async fn complete_magic_link(
+    State(app): Shared,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response> {
+    let pending = cookie_value(&headers, "pending_authentication_token").ok_or_else(|| {
+        err(
+            StatusCode::UNAUTHORIZED,
+            "Enter your email address to sign in.",
+        )
+    })?;
+    let _guard = app.auth_lock.lock().await;
+    let record = sqlx::query(
+        "SELECT email_address FROM pending_authentications WHERE token_hash=? AND expires_at>?",
+    )
+    .bind(hash(&pending))
+    .bind(now())
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?
+    .ok_or_else(|| {
+        err(
+            StatusCode::UNAUTHORIZED,
+            "Enter your email address to sign in.",
+        )
+    })?;
+    auth_attempt(
+        &app,
+        &format!("verify:{}", peer.ip()),
+        10,
+        15,
+        "Try again in 15 minutes.",
+    )
+    .await?;
+    let code = normalize_magic_code(&required(&body, "code")?);
+    let link=sqlx::query("SELECT m.id,m.identity_id,m.purpose,i.email_address FROM magic_links m JOIN identities i ON i.id=m.identity_id WHERE m.code=? AND m.expires_at>?")
+        .bind(&code).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?
+        .ok_or_else(||err(StatusCode::UNAUTHORIZED,"Try another code."))?;
+    let mut response;
+    if link.get::<String, _>("email_address") != record.get::<String, _>("email_address") {
+        sqlx::query("DELETE FROM magic_links WHERE id=?")
+            .bind(link.get::<String, _>("id"))
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("DELETE FROM pending_authentications WHERE token_hash=?")
+            .bind(hash(&pending))
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+        response = err(
+            StatusCode::UNAUTHORIZED,
+            "Something went wrong. Please try again.",
+        )
+        .into_response();
+        set_cookie(
+            response.headers_mut(),
+            "pending_authentication_token",
+            "",
+            0,
+            secure_request(&headers),
+        );
+        return Ok(response);
+    }
+    let token = random_token();
+    let purpose: String = link.get("purpose");
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("DELETE FROM magic_links WHERE id=?")
+        .bind(link.get::<String, _>("id"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("DELETE FROM pending_authentications WHERE token_hash=?")
+        .bind(hash(&pending))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("INSERT INTO sessions(id,identity_id,token_hash,user_agent,signup_pending,created_at) VALUES(?,?,?,?,?,?)")
+        .bind(id()).bind(link.get::<String,_>("identity_id")).bind(hash(&token))
+        .bind(headers.get(header::USER_AGENT).and_then(|v|v.to_str().ok()))
+        .bind((purpose=="sign_up") as i64).bind(now()).execute(&mut *tx).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    response = Json(json!({"session_token":token,"requires_signup_completion":purpose=="sign_up"}))
+        .into_response();
+    set_cookie(
+        response.headers_mut(),
+        "pending_authentication_token",
+        "",
+        0,
+        secure_request(&headers),
+    );
+    set_cookie(
+        response.headers_mut(),
+        "session_token",
+        &token,
+        31536000,
+        secure_request(&headers),
+    );
+    Ok(response)
+}
+async fn logout_session(State(app): Shared, headers: HeaderMap) -> Result<Response> {
+    let token = cookie_value(&headers, "session_token")
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
+    let done = sqlx::query("DELETE FROM sessions WHERE token_hash=?")
+        .bind(hash(&token))
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    if done.rows_affected() == 0 {
+        return Err(err(StatusCode::UNAUTHORIZED, "Authentication required"));
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    set_cookie(
+        response.headers_mut(),
+        "session_token",
+        "",
+        0,
+        secure_request(&headers),
+    );
+    Ok(response)
+}
+async fn complete_signup(
+    State(app): Shared,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let token = cookie_value(&headers, "session_token")
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
+    let session = sqlx::query("SELECT identity_id,signup_pending FROM sessions WHERE token_hash=?")
+        .bind(hash(&token))
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
+    if session.get::<i64, _>("signup_pending") == 0 {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Signup completion is not pending",
+        ));
+    }
+    let name = required(nested(&body, "signup"), "full_name")?;
+    if name.chars().count() > 240 {
+        return Err(bad("full_name is too long"));
+    }
+    let _writer = app.write_lock.lock().await;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let identity_id: String = session.get("identity_id");
+    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if accounts > 0 && env::var("RIZZY_MULTI_TENANT").as_deref() != Ok("1") {
+        return Err(err(StatusCode::FORBIDDEN, "Signup is closed"));
+    }
+    let consumed =
+        sqlx::query("UPDATE sessions SET signup_pending=0 WHERE token_hash=? AND signup_pending=1")
+            .bind(hash(&token))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if consumed.rows_affected() == 0 {
+        return Err(err(StatusCode::FORBIDDEN, "Signup is already complete"));
+    }
+    let slug: i64 =
+        sqlx::query_scalar("SELECT COALESCE(MAX(external_account_id),0)+1 FROM accounts")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    let account_id = id();
+    let user_id = id();
+    let system_identity = id();
+    let system_id = id();
+    let timestamp = now();
+    let first = name.split_whitespace().next().unwrap_or("New");
+    let account_name = format!("{first}'s Rizzy");
+    sqlx::query("INSERT INTO accounts(id,external_account_id,name,created_at) VALUES(?,?,?,?)")
+        .bind(&account_id)
+        .bind(slug)
+        .bind(account_name)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,?,'owner',?)")
+        .bind(&user_id).bind(&account_id).bind(&identity_id)
+        .bind(&name).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+        .bind(&system_identity)
+        .bind(format!("system+{account_id}@rizzy.invalid"))
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
+        .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(StatusCode::CREATED)
+}
+
 async fn identity_auth(app: &App, headers: &HeaderMap) -> Result<(String, String)> {
+    if let Some(token) = cookie_value(headers, "session_token") {
+        let identity_id: Option<String> =
+            sqlx::query_scalar("SELECT identity_id FROM sessions WHERE token_hash=?")
+                .bind(hash(&token))
+                .fetch_optional(&app.db)
+                .await
+                .map_err(db_err)?;
+        if let Some(identity_id) = identity_id {
+            return Ok((identity_id, "write".into()));
+        }
+    }
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Bearer token required"))?;
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Authentication required"))?;
     let r = sqlx::query("SELECT identity_id,permission FROM access_tokens WHERE token_hash=?")
         .bind(hash(token))
         .fetch_optional(&app.db)

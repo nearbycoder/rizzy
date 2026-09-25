@@ -11,7 +11,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
 | Full board and card HTML interface | Basic UI | No |
-| Sign up, magic links, sessions, passkeys | — | No |
+| Sign up, magic links, sessions, passkeys | Magic links, sessions, and initial signup | No |
 | Users, roles, invitations, board involvement | — | No |
 | Assignments, reactions, pins, watches | ✓ | No |
 | Card filters, tag listing, basic search | ✓ | No |
@@ -28,6 +28,6 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
-The local `tests/parity.py` scenario currently passes 117 comparisons against the running reference server using fresh accounts. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, account and board entropy, publication, activity events and descriptions, event deletion, and system comment count. It does not replace the full upstream test suite.
+The local `tests/parity.py` scenario currently passes 117 comparisons against the running reference server using fresh accounts. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, account and board entropy, publication, activity events and descriptions, event deletion, and system comment count. `tests/auth.py` exercises the Rust JSON magic-link and cookie flow with disposable accounts; it is not yet a cross-implementation comparison. Neither test replaces the full upstream test suite.
 
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.
