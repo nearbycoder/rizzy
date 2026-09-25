@@ -3126,12 +3126,25 @@ async fn update_user_role(
         .map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
-fn email_change_invalid() -> Response {
-    (
-        StatusCode::UNPROCESSABLE_ENTITY,
-        Json(json!({"error":"Token is invalid or has expired"})),
-    )
-        .into_response()
+fn email_change_invalid(headers: &HeaderMap, account: i64, user_id: &str) -> Response {
+    if headers.contains_key("x-rizzy-json-request")
+        || headers
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("json"))
+    {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error":"Token is invalid or has expired"})),
+        )
+            .into_response()
+    } else {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            user_page::expired_email(account, user_id),
+        )
+            .into_response()
+    }
 }
 async fn deliver_email_change(email: &str, link: &str) -> Result<()> {
     if dev_magic_links() {
@@ -3307,11 +3320,7 @@ async fn show_email_change_confirmation(
     if exists == 0 {
         return Err(missing());
     }
-    Ok(Html(format!(
-        "<!doctype html><html><head><title>Confirm email address</title></head><body><h1>Confirm email address</h1><form method=\"post\" action=\"/{slug}/users/{}/email_addresses/{}/confirmation\"><button type=\"submit\">Confirm email address</button></form></body></html>",
-        escape(&user_id),
-        escape(&token)
-    )))
+    Ok(user_page::confirm_email(slug, &user_id, &token))
 }
 async fn confirm_email_change(
     State(app): Shared,
@@ -3333,10 +3342,10 @@ async fn confirm_email_change(
     .await?;
     let Some(request)=sqlx::query("SELECT old_identity_id,new_email_address FROM email_change_requests WHERE token_hash=? AND user_id=? AND account_id=? AND expires_at>?")
         .bind(hash(&token)).bind(&user_id).bind(user.get::<String,_>("account_id")).bind(now())
-        .fetch_optional(&app.db).await.map_err(db_err)? else {return Ok(email_change_invalid());};
+        .fetch_optional(&app.db).await.map_err(db_err)? else {return Ok(email_change_invalid(&headers,slug,&user_id));};
     let old_identity: String = request.get("old_identity_id");
     if old_identity != user.get::<String, _>("identity_id") {
-        return Ok(email_change_invalid());
+        return Ok(email_change_invalid(&headers, slug, &user_id));
     }
     let new_email: String = request.get("new_email_address");
     let mut tx = app.db.begin().await.map_err(db_err)?;
@@ -3357,7 +3366,7 @@ async fn confirm_email_change(
         .bind(&new_identity).bind(&user_id).bind(user.get::<String,_>("account_id")).bind(&old_identity)
         .execute(&mut *tx).await.map_err(db_err)?;
     if changed.rows_affected() == 0 {
-        return Ok(email_change_invalid());
+        return Ok(email_change_invalid(&headers, slug, &user_id));
     }
     sqlx::query("DELETE FROM email_change_requests WHERE user_id=? AND account_id=?")
         .bind(&user_id)
@@ -3386,8 +3395,8 @@ async fn confirm_email_change(
         StatusCode::NO_CONTENT.into_response()
     } else {
         (
-            StatusCode::SEE_OTHER,
-            [(header::LOCATION, format!("/{account}/users/{user_id}"))],
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/users/{user_id}/edit"))],
         )
             .into_response()
     };

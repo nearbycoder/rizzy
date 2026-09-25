@@ -85,6 +85,7 @@ python3 tests/events_html_parity.py
 python3 tests/users_events_html_parity.py
 python3 tests/user_profile_html_parity.py
 python3 tests/email_change_html_parity.py
+python3 tests/email_confirmation_html_parity.py
 python3 tests/search_rich_text_parity.py
 ```
 

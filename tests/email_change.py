@@ -42,7 +42,7 @@ def main():
             expired_token = headers["X-Email-Change-Token"]
             expired_path = f"/{account}/users/{owner_id}/email_addresses/{expired_token}/confirmation"
             html, _ = call(port, expired_path)
-            assert "Confirm email address" in html
+            assert "Confirm email change" in html
             with sqlite3.connect(database) as db:
                 db.execute("UPDATE email_change_requests SET expires_at='2025-01-01T00:00:00Z' WHERE token_hash=?", (hashlib.sha256(expired_token.encode()).hexdigest(),))
             error, _ = call(port, expired_path, "POST", status=422)

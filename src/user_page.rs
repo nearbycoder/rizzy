@@ -110,3 +110,24 @@ pub(super) fn email_sent(principal: &Principal, user_id: &str, email: &str) -> H
     );
     page("Confirm your new email address", principal.slug, content)
 }
+
+pub(super) fn confirm_email(account: i64, user_id: &str, token: &str) -> Html<String> {
+    let action = format!(
+        "/{account}/users/{}/email_addresses/{}/confirmation",
+        escape(user_id),
+        escape(token)
+    );
+    let content = format!(
+        "<div class=\"profile-card\"><h1>Confirm email change</h1><p>Just a sec while we confirm your new email address.</p><form id=\"email-confirmation\" method=\"post\" action=\"{action}\"><input type=\"hidden\" name=\"email_address_token\" value=\"{}\"><button class=\"button\" type=\"submit\">Done</button></form></div><script>document.getElementById('email-confirmation')?.requestSubmit()</script>",
+        escape(token)
+    );
+    page("Confirm email change", account, content)
+}
+
+pub(super) fn expired_email(account: i64, user_id: &str) -> Html<String> {
+    let change = format!("/{account}/users/{}/email_addresses/new", escape(user_id));
+    let content = format!(
+        "<div class=\"profile-card\"><h1>Link expired</h1><p>That email confirmation link is no longer valid—they expire after 30 minutes. You’ll have to try again.</p><a class=\"button\" href=\"{change}\">Change my email address</a></div>"
+    );
+    page("Link expired", account, content)
+}
