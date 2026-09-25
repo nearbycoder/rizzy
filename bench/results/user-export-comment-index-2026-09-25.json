@@ -1,0 +1,26 @@
+{
+  "workload": "asynchronous user ZIP export",
+  "fixture": {
+    "source_database": "/tmp/rizzy-search-bench.sqlite3",
+    "cards_per_database": 2000,
+    "comments_per_database": 2000,
+    "zip_entries_per_export": 2000,
+    "method": "SQLite backup into two equal databases, one comment added to each card; three completed exports per server with a one-second worker poll"
+  },
+  "builds": {
+    "before": "Rizzy debug build at 589ad8f without comments_card_created index",
+    "after": "Same Rizzy source with only CREATE INDEX IF NOT EXISTS comments_card_created ON comments(card_id,created_at) added to schema.sql"
+  },
+  "query_probe": {
+    "before_seconds": 0.083,
+    "after_seconds": 0.005,
+    "query_count": 2000,
+    "before_plan": "SCAN c; USE TEMP B-TREE FOR ORDER BY",
+    "after_plan": "SEARCH c USING INDEX comments_card_created (card_id=?)"
+  },
+  "export_wall_seconds": {
+    "before": [3.136, 2.936, 2.919],
+    "after": [1.842, 0.852, 1.017]
+  },
+  "limitations": "Single local debug-build diagnostic; worker poll timing, cache state, and unrelated startup effects can affect each run. This compares two Rizzy builds, not Fizzy and Rizzy."
+}

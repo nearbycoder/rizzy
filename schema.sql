@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at TEXT NOT NULL,
   updated_at TEXT
 );
+CREATE INDEX IF NOT EXISTS comments_card_created ON comments(card_id,created_at);
 CREATE TABLE IF NOT EXISTS tags (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),

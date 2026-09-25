@@ -46,6 +46,8 @@ A local tuning probe of the five-endpoint workload measured 8, 12, and 24 SQLite
 
 The benchmark client uses Python threads and runs each target sequentially; it can become a bottleneck at high concurrency. Further scale work should use a separate load generator, report CPU, proportional memory, database I/O and error rate, and define a latency service level objective before comparing maximum sustainable throughput.
 
+The [user-export index probe](results/user-export-comment-index-2026-09-25.json) copied a 2,000-card Rizzy database twice and added one comment to each card. Without an index on `comments(card_id,created_at)`, the 2,000 comment lookups used table scans and took 83 ms in an in-process SQLite probe; with the index, they used indexed lookups and took 5 ms. Three completed ZIP exports with the same 2,000 JSON entries took 2.92–3.14 seconds before and 0.85–1.84 seconds after. This compares two local Rizzy debug builds and includes the export worker's polling delay, so it does not measure Fizzy or isolate server CPU time.
+
 ## Write contention
 
 The [first card creation run](results/write-before-queue-2026-09-24.json) showed that Rizzy lost throughput as concurrent SQLite writers contended for the database lock. A Tokio mutex now queues the card number allocation and insert transaction in one process. The [repeat with 500 card writes per level](results/write-500-2026-09-24.json) produced the following diagnostic results:
