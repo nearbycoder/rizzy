@@ -7051,31 +7051,74 @@ async fn list_notifications(
     Ok(paginated(json!(items), total, page, &uri, &headers))
 }
 
-#[derive(Deserialize)]
-struct NotificationTrayQuery {
-    include_read: Option<bool>,
-}
 async fn notification_tray(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Query(query): Query<NotificationTrayQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    let include_read = raw_query.as_deref().and_then(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .filter(|(key, _)| key == "include_read")
+            .last()
+            .map(|(_, value)| match value.as_ref() {
+                "" => None,
+                "0" | "f" | "F" | "false" | "FALSE" | "off" | "OFF" => Some(false),
+                _ => Some(true),
+            })
+            .flatten()
+    });
+    let json_request = headers.contains_key("x-rizzy-json-request");
+    // Fizzy keys this validator on the entire notification collection. Reading an
+    // older notification must invalidate the unread-only tray as well.
+    let version = notification_page_version(&app, &p).await?;
+    let etag = format!(
+        "W/\"{}\"",
+        hash(&format!(
+            "tray:{}:{}:{}:{include_read:?}:{version:?}",
+            p.account_id, p.user_id, json_request
+        ))
+    );
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.split(',').any(|candidate| candidate.trim() == etag));
+    if not_modified {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        response.headers_mut().insert(
+            header::ETAG,
+            HeaderValue::from_str(&etag).expect("hex ETag"),
+        );
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("max-age=0, private, must-revalidate"),
+        );
+        return Ok(response);
+    }
     let unread=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL ORDER BY updated_at DESC LIMIT 100")
         .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
     let host = base(&headers);
     let mut items = notification_items(&app, &p, unread, &host).await?;
-    if query.include_read.unwrap_or(false) {
+    if include_read == Some(true) {
         let read=sqlx::query("SELECT * FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NOT NULL ORDER BY read_at DESC,updated_at DESC LIMIT 100")
             .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
         items.extend(notification_items(&app, &p, read, &host).await?);
     }
-    if headers.contains_key("x-rizzy-json-request") {
-        Ok(Json(json!(items)).into_response())
+    let mut response = if json_request {
+        Json(json!(items)).into_response()
     } else {
-        Ok(Html(notification_page::tray(p.slug, &items)).into_response())
-    }
+        Html(notification_page::tray(p.slug, &items)).into_response()
+    };
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("hex ETag"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    Ok(response)
 }
 async fn set_notification_reading(
     app: &App,

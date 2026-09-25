@@ -15,17 +15,22 @@ from auth import BINARY, ROOT, call as session_call, cookie, request_code, start
 from join import call
 
 
-def browser_request(port, path, method, session, accept):
+def browser_response(port, path, method, session, accept, extra_headers=None):
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}", method=method,
-        headers={"Accept": accept, "Cookie": session},
+        headers={"Accept": accept, "Cookie": session, **(extra_headers or {})},
     )
     try:
         response = urllib.request.urlopen(request, timeout=3)
     except urllib.error.HTTPError as error:
         response = error
     with response:
-        return response.status, response.headers.get_content_type(), response.read()
+        return response.status, response.headers, response.read()
+
+
+def browser_request(port, path, method, session, accept):
+    status, headers, body = browser_response(port, path, method, session, accept)
+    return status, headers.get_content_type(), body
 
 
 def main():
@@ -82,6 +87,28 @@ def main():
                 port, f"/{account}/notifications/tray", "GET", member_session, "text/html")
             assert status == 200 and content_type == "text/html"
             assert b'<turbo-frame id="notifications">' in body and f'notification_{notice["id"]}'.encode() in body
+            tray_path = f"/{account}/notifications/tray"
+            status, tray_headers, _ = browser_response(
+                port, tray_path, "GET", member_session, "text/html")
+            unread_etag = tray_headers["ETag"]
+            assert status == 200 and tray_headers["Cache-Control"] == "max-age=0, private, must-revalidate"
+            status, cached_headers, cached_body = browser_response(
+                port, tray_path, "GET", member_session, "text/html", {"If-None-Match": unread_etag})
+            assert status == 304 and cached_headers["ETag"] == unread_etag and not cached_body
+            false_status, false_headers, _ = browser_response(
+                port, tray_path + "?include_read=0", "GET", member_session, "text/html")
+            true_status, true_headers, _ = browser_response(
+                port, tray_path + "?include_read=1", "GET", member_session, "text/html")
+            assert false_status == true_status == 200
+            assert len({unread_etag, false_headers["ETag"], true_headers["ETag"]}) == 3
+            status, json_headers, json_body = browser_response(
+                port, tray_path + ".json?include_read=true", "GET", member_session, "application/json")
+            assert status == 200 and json_headers["ETag"] != true_headers["ETag"]
+            assert b"First alert" in json_body
+            status, _, cached_json = browser_response(
+                port, tray_path + ".json?include_read=1", "GET", member_session,
+                "application/json", {"If-None-Match": json_headers["ETag"]})
+            assert status == 304 and not cached_json
             status, content_type, body = browser_request(
                 port, f"/{account}/notifications?page=1", "GET", member_session,
                 "text/vnd.turbo-stream.html")
@@ -95,6 +122,10 @@ def main():
                         other_port, f"/{account}/notifications", "GET", member_session, "text/html")
                     assert status == 200 and b"New for you" in body
                 call(port, card_reading, "POST", bearer=member_token, status=201)
+                status, changed_headers, changed_body = browser_response(
+                    other_port, tray_path, "GET", member_session, "text/html", {"If-None-Match": unread_etag})
+                assert status == 200 and changed_headers["ETag"] != unread_etag
+                assert f'notification_{notice["id"]}'.encode() not in changed_body
                 status, _, body = browser_request(
                     other_port, f"/{account}/notifications", "GET", member_session, "text/html")
                 assert status == 200 and b"Previously seen" in body.split(b"</main>", 1)[0]
