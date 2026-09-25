@@ -2527,6 +2527,10 @@ async fn lexxy_asset(Path(filename): Path<String>) -> Result<Response> {
             "text/javascript; charset=utf-8",
             include_bytes!("../static/lexxy/lexxy.js"),
         ),
+        "activestorage.esm.js" => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("../static/lexxy/activestorage.esm.js"),
+        ),
         "lexxy.css" => (
             "text/css; charset=utf-8",
             include_bytes!("../static/lexxy/lexxy.css"),
@@ -5894,7 +5898,7 @@ async fn show_draft(
     let html = format!(
         r##"<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>New card | Rizzy</title>
-<link rel="stylesheet" href="/assets/lexxy/lexxy.css"><link rel="stylesheet" href="/assets/lexxy/rizzy-dark.css"><script type="module" src="/assets/lexxy/lexxy.js"></script>
+<link rel="stylesheet" href="/assets/lexxy/lexxy.css"><link rel="stylesheet" href="/assets/lexxy/rizzy-dark.css"><script type="importmap">{{"imports":{{"@rails/activestorage":"/assets/lexxy/activestorage.esm.js"}}}}</script><script type="module" src="/assets/lexxy/lexxy.js"></script>
 <style>
 :root{{font:16px/1.5 system-ui,sans-serif;background:#1b1b1b;color:#f5f0e8}}
 *{{box-sizing:border-box}}body{{margin:0}}a{{color:inherit}}button,textarea{{font:inherit}}
