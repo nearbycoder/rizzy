@@ -36,6 +36,7 @@ mod board_page;
 mod board_settings;
 mod board_views;
 mod card_column_page;
+mod card_controls;
 mod card_page;
 mod cards_page;
 mod events_page;
@@ -1936,11 +1937,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/watch",
-            post(watch_card).delete(unwatch_card),
+            get(card_controls::show_watch)
+                .post(card_controls::watch)
+                .delete(card_controls::unwatch),
         )
         .route(
             "/{account}/cards/{number}/pin",
-            post(pin_card).delete(unpin_card),
+            get(card_controls::show_pin)
+                .post(card_controls::pin)
+                .delete(card_controls::unpin),
         )
         .route("/{account}/my/pins", get(list_pins))
         .route(
@@ -8490,22 +8495,6 @@ async fn set_watch(app: &App, p: &Principal, number: &str, watching: bool) -> Re
         .bind(c.get::<String,_>("id")).bind(&p.user_id).bind(watching as i64).execute(&app.db).await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
-async fn watch_card(
-    State(app): Shared,
-    Path((a, n)): Path<(String, String)>,
-    h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_watch(&app, &p, &n, true).await
-}
-async fn unwatch_card(
-    State(app): Shared,
-    Path((a, n)): Path<(String, String)>,
-    h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_watch(&app, &p, &n, false).await
-}
 async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result<StatusCode> {
     p.write()?;
     let c = card(app, p, number).await?;
@@ -8522,22 +8511,6 @@ async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result
             .map_err(db_err)?;
     }
     Ok(StatusCode::NO_CONTENT)
-}
-async fn pin_card(
-    State(app): Shared,
-    Path((a, n)): Path<(String, String)>,
-    h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_pin(&app, &p, &n, true).await
-}
-async fn unpin_card(
-    State(app): Shared,
-    Path((a, n)): Path<(String, String)>,
-    h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_pin(&app, &p, &n, false).await
 }
 async fn list_pins(
     State(app): Shared,

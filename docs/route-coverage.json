@@ -650,7 +650,7 @@
       "path": "/cards/:card_id/pin(.:format)",
       "controller": "cards/pins",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -706,7 +706,7 @@
       "path": "/cards/:card_id/watch(.:format)",
       "controller": "cards/watches",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "DELETE",
@@ -2243,12 +2243,20 @@
       "path": "/{account}/cards/{number}/self_assignment"
     },
     {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/watch"
+    },
+    {
       "method": "POST",
       "path": "/{account}/cards/{number}/watch"
     },
     {
       "method": "DELETE",
       "path": "/{account}/cards/{number}/watch"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/pin"
     },
     {
       "method": "POST",
