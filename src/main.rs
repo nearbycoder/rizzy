@@ -14,7 +14,12 @@ use sqlx::{
     QueryBuilder, Row, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteRow},
 };
-use std::{env, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    sync::Arc,
+    time::Duration,
+};
 
 struct App {
     db: SqlitePool,
@@ -179,6 +184,13 @@ impl Principal {
             Err(err(StatusCode::FORBIDDEN, "Board administrator required"))
         }
     }
+    fn account_admin(&self) -> Result<()> {
+        if self.role == "owner" || self.role == "admin" {
+            Ok(())
+        } else {
+            Err(err(StatusCode::FORBIDDEN, "Account administrator required"))
+        }
+    }
 }
 async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Principal> {
     let slug: i64 = slug.parse().map_err(|_| missing())?;
@@ -213,15 +225,17 @@ async fn card(app: &App, p: &Principal, number: &str) -> Result<SqliteRow> {
 async fn user_json(app: &App, p: &Principal, id: &str, host: &str) -> Result<Value> {
     let r = sqlx::query("SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=? AND u.account_id=?")
         .bind(id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    Ok(user_json_row(p, &r, host))
+}
+fn user_json_row(p: &Principal, r: &SqliteRow, host: &str) -> Value {
+    let id: String = r.get("id");
     let role: String = r.get("role");
     let email: Option<String> = if role == "system" {
         None
     } else {
         Some(r.get("email_address"))
     };
-    Ok(
-        json!({"id":id,"name":r.get::<String,_>("name"),"role":role,"active":r.get::<i64,_>("active")!=0,"email_address":email,"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/users/{id}",p.slug),"avatar_url":format!("{host}/{}/users/{id}/avatar",p.slug)}),
-    )
+    json!({"id":id,"name":r.get::<String,_>("name"),"role":role,"active":r.get::<i64,_>("active")!=0,"email_address":email,"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/users/{id}",p.slug),"avatar_url":format!("{host}/{}/users/{id}/avatar",p.slug)})
 }
 async fn actor_name(app: &App, p: &Principal) -> Result<String> {
     sqlx::query_scalar("SELECT name FROM users WHERE id=? AND account_id=?")
@@ -272,18 +286,51 @@ async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> 
         .bind(id()).bind(card_id).bind(system).bind(body).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
     Ok(())
 }
+async fn record_event(
+    app: &App,
+    p: &Principal,
+    board_id: &str,
+    card_id: &str,
+    eventable_type: &str,
+    eventable_id: &str,
+    action: &str,
+    particulars: Value,
+) -> Result<()> {
+    let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+        .bind(id()).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
+        .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
 async fn board_json(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
-    let id: String = r.get("id");
     let creator: String = r.get("creator_id");
+    Ok(board_json_row(
+        p,
+        r,
+        host,
+        user_json(app, p, &creator, host).await?,
+    ))
+}
+fn board_json_row(p: &Principal, r: &SqliteRow, host: &str, creator: Value) -> Value {
+    let id: String = r.get("id");
     let all = r.get::<i64, _>("all_access") != 0;
-    let mut value = json!({"id":id,"name":r.get::<String,_>("name"),"all_access":all,"created_at":r.get::<String,_>("created_at"),"auto_postpone_period_in_days":r.get::<i64,_>("auto_postpone_period_in_days"),"url":format!("{host}/{}/boards/{id}",p.slug),"creator":user_json(app,p,&creator,host).await?});
+    let mut value = json!({"id":id,"name":r.get::<String,_>("name"),"all_access":all,"created_at":r.get::<String,_>("created_at"),"auto_postpone_period_in_days":r.get::<i64,_>("auto_postpone_period_in_days"),"url":format!("{host}/{}/boards/{id}",p.slug),"creator":creator});
     if let Some(key) = r.get::<Option<String>, _>("publication_key") {
         let description: String = r.get("public_description");
         value["public_description"] = json!(description);
         value["public_description_html"] = json!(rich_html(&description));
         value["public_url"] = json!(format!("{host}/{}/public/boards/{key}", p.slug));
     }
-    Ok(value)
+    value
 }
 async fn board_detail(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
     let mut out = board_json(app, p, r, host).await?;
@@ -385,8 +432,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .journal_mode(SqliteJournalMode::Wal)
         .foreign_keys(true)
         .busy_timeout(Duration::from_secs(5));
+    let pool_size = env::var("RIZZY_DB_POOL_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(12)
+        .clamp(1, 64);
     let db = SqlitePoolOptions::new()
-        .max_connections(12)
+        .max_connections(pool_size)
         .connect_with(options)
         .await?;
     sqlx::raw_sql(include_str!("../schema.sql"))
@@ -440,6 +492,27 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
+    if !board_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "entropy_override")
+    {
+        sqlx::query("ALTER TABLE boards ADD COLUMN entropy_override INTEGER NOT NULL DEFAULT 0")
+            .execute(&db)
+            .await?;
+        sqlx::query("UPDATE boards SET entropy_override=1 WHERE auto_postpone_period_in_days!=30")
+            .execute(&db)
+            .await?;
+    }
+    let account_columns = sqlx::query("PRAGMA table_info(accounts)")
+        .fetch_all(&db)
+        .await?;
+    if !account_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "auto_postpone_period_in_days")
+    {
+        sqlx::query("ALTER TABLE accounts ADD COLUMN auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30")
+            .execute(&db).await?;
+    }
     sqlx::query(
         "CREATE UNIQUE INDEX IF NOT EXISTS boards_publication_key ON boards(publication_key)",
     )
@@ -473,13 +546,28 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/users", get(list_users))
         .route(
+            "/{account}/account/settings",
+            get(show_account).put(update_account).patch(update_account),
+        )
+        .route(
+            "/{account}/account/entropy",
+            axum::routing::put(update_account_entropy).patch(update_account_entropy),
+        )
+        .route(
             "/{account}/users/{id}",
-            get(show_user).put(update_user).delete(delete_user),
+            get(show_user)
+                .put(update_user)
+                .patch(update_user)
+                .delete(delete_user),
         )
         .route("/{account}/boards", get(list_boards).post(create_board))
         .route(
             "/{account}/boards/{id}/publication",
             post(publish_board).delete(unpublish_board),
+        )
+        .route(
+            "/{account}/boards/{id}/entropy",
+            axum::routing::put(update_board_entropy).patch(update_board_entropy),
         )
         .route("/{account}/public/boards/{key}", get(public_board))
         .route(
@@ -488,7 +576,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/boards/{id}",
-            get(show_board).put(update_board).delete(delete_board),
+            get(show_board)
+                .put(update_board)
+                .patch(update_board)
+                .delete(delete_board),
         )
         .route(
             "/{account}/boards/{board}/columns",
@@ -496,7 +587,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/boards/{board}/columns/{column}",
-            get(show_column).put(update_column).delete(delete_column),
+            get(show_column)
+                .put(update_column)
+                .patch(update_column)
+                .delete(delete_column),
         )
         .route(
             "/{account}/boards/{board}/columns/{column}/cards",
@@ -506,9 +600,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/cards", get(list_cards))
         .route("/{account}/tags", get(list_tags))
         .route("/{account}/search", get(search_cards))
+        .route("/{account}/activities", get(list_activities))
         .route(
             "/{account}/cards/{number}",
-            get(show_card).put(update_card).delete(delete_card),
+            get(show_card)
+                .put(update_card)
+                .patch(update_card)
+                .delete(delete_card),
         )
         .route(
             "/{account}/cards/{number}/closure",
@@ -528,7 +626,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/board",
-            axum::routing::put(move_card),
+            axum::routing::put(move_card).patch(move_card),
         )
         .route("/{account}/cards/{number}/taggings", post(toggle_tag))
         .route(
@@ -558,7 +656,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/steps/{step}",
-            axum::routing::put(update_step).delete(delete_step),
+            axum::routing::put(update_step)
+                .patch(update_step)
+                .delete(delete_step),
         )
         .route(
             "/{account}/cards/{number}/comments",
@@ -566,7 +666,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/comments/{comment}",
-            get(show_comment).put(update_comment).delete(delete_comment),
+            get(show_comment)
+                .put(update_comment)
+                .patch(update_comment)
+                .delete(delete_comment),
         )
         .route(
             "/{account}/cards/{number}/comments/{comment}/reactions",
@@ -833,6 +936,74 @@ async fn delete_user(
     tx.commit().await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
+fn valid_entropy(days: i64) -> Result<i64> {
+    if [3, 7, 11, 30, 90, 365].contains(&days) {
+        Ok(days)
+    } else {
+        Err(bad("invalid auto_postpone_period_in_days"))
+    }
+}
+async fn account_json(app: &App, p: &Principal) -> Result<Value> {
+    let row = sqlx::query("SELECT id,name,cards_count,created_at,auto_postpone_period_in_days FROM accounts WHERE id=?")
+        .bind(&p.account_id).fetch_one(&app.db).await.map_err(db_err)?;
+    Ok(
+        json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),
+        "cards_count":row.get::<i64,_>("cards_count"),"created_at":row.get::<String,_>("created_at"),
+        "auto_postpone_period_in_days":row.get::<i64,_>("auto_postpone_period_in_days")}),
+    )
+}
+async fn show_account(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    Ok(Json(account_json(&app, &p).await?))
+}
+async fn update_account(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    p.account_admin()?;
+    let name = required(nested(&body, "account"), "name")?;
+    sqlx::query("UPDATE accounts SET name=? WHERE id=?")
+        .bind(name)
+        .bind(&p.account_id)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn update_account_entropy(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    p.account_admin()?;
+    let days = nested(&body, "entropy")
+        .get("auto_postpone_period_in_days")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad("auto_postpone_period_in_days is required"))?;
+    let days = valid_entropy(days)?;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("UPDATE accounts SET auto_postpone_period_in_days=? WHERE id=?")
+        .bind(days)
+        .bind(&p.account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,updated_at=? WHERE account_id=? AND entropy_override=0")
+        .bind(days).bind(now()).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(Json(account_json(&app, &p).await?))
+}
 
 #[derive(Deserialize, Default)]
 struct PageQuery {
@@ -892,16 +1063,22 @@ async fn create_board(
     let v = nested(&body, "board");
     let name = required(v, "name")?;
     let all = v.get("all_access").and_then(Value::as_bool).unwrap_or(true);
-    let days = v
+    let requested_days = v
         .get("auto_postpone_period_in_days")
-        .and_then(Value::as_i64)
-        .unwrap_or(30);
+        .and_then(Value::as_i64);
+    let account_days: i64 =
+        sqlx::query_scalar("SELECT auto_postpone_period_in_days FROM accounts WHERE id=?")
+            .bind(&p.account_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    let days = valid_entropy(requested_days.unwrap_or(account_days))?;
     let id = id();
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let public_description = string(v, "public_description").unwrap_or_default();
-    sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,auto_postpone_period_in_days,public_description,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&p.user_id).bind(name).bind(all as i64).bind(days).bind(public_description).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,auto_postpone_period_in_days,entropy_override,public_description,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+        .bind(&id).bind(&p.account_id).bind(&p.user_id).bind(name).bind(all as i64).bind(days).bind(requested_days.is_some() as i64).bind(public_description).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     if !all {
         sqlx::query("INSERT INTO accesses(board_id,user_id) VALUES(?,?)")
             .bind(&id)
@@ -936,15 +1113,16 @@ async fn update_board(
         .get("all_access")
         .and_then(Value::as_bool)
         .unwrap_or(b.get::<i64, _>("all_access") != 0);
-    let days = v
+    let requested_days = v
         .get("auto_postpone_period_in_days")
-        .and_then(Value::as_i64)
-        .unwrap_or(b.get("auto_postpone_period_in_days"));
+        .and_then(Value::as_i64);
+    let days = valid_entropy(requested_days.unwrap_or(b.get("auto_postpone_period_in_days")))?;
+    let override_days = requested_days.is_some() || b.get::<i64, _>("entropy_override") != 0;
     let public_description =
         string(v, "public_description").unwrap_or_else(|| b.get("public_description"));
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query("UPDATE boards SET name=?,all_access=?,auto_postpone_period_in_days=?,public_description=?,updated_at=? WHERE id=?")
-        .bind(name).bind(all as i64).bind(days).bind(public_description).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("UPDATE boards SET name=?,all_access=?,auto_postpone_period_in_days=?,entropy_override=?,public_description=?,updated_at=? WHERE id=?")
+        .bind(name).bind(all as i64).bind(days).bind(override_days as i64).bind(public_description).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
     if let Some(ids) = body
         .get("user_ids")
         .or_else(|| v.get("user_ids"))
@@ -975,6 +1153,26 @@ async fn update_board(
     }
     let r = board(&app, &p, &id).await?;
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
+}
+async fn update_board_entropy(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>> {
+    let p = principal(&app, &headers, &account).await?;
+    p.write()?;
+    let b = board(&app, &p, &id).await?;
+    p.admin(&b.get::<String, _>("creator_id"))?;
+    let days = nested(&body, "board")
+        .get("auto_postpone_period_in_days")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad("auto_postpone_period_in_days is required"))?;
+    let days = valid_entropy(days)?;
+    sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,entropy_override=1,updated_at=? WHERE id=? AND account_id=?")
+        .bind(days).bind(now()).bind(&id).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
+    let b = board(&app, &p, &id).await?;
+    Ok(Json(board_detail(&app, &p, &b, &base(&headers)).await?))
 }
 async fn delete_board(
     State(app): Shared,
@@ -1422,6 +1620,347 @@ async fn search_cards(
     }
     Ok(paginated(json!(items), total, page, &uri, &headers))
 }
+#[derive(Default)]
+struct ActivityQuery {
+    creators: Vec<String>,
+    boards: Vec<String>,
+    page: i64,
+}
+fn parse_activity_query(raw: Option<String>) -> ActivityQuery {
+    let mut query = ActivityQuery {
+        page: 1,
+        ..Default::default()
+    };
+    if let Some(raw) = raw {
+        for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+            match key.as_ref() {
+                "creator_ids[]" => query.creators.push(value.into_owned()),
+                "board_ids[]" => query.boards.push(value.into_owned()),
+                "page" => query.page = value.parse::<i64>().unwrap_or(1).max(1),
+                _ => {}
+            }
+        }
+    }
+    query
+}
+fn activities_query<'a>(
+    select: &str,
+    p: &'a Principal,
+    q: &'a ActivityQuery,
+) -> QueryBuilder<'a, Sqlite> {
+    let mut builder = QueryBuilder::new(format!(
+        "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=c.board_id WHERE e.account_id="
+    ));
+    builder.push_bind(&p.account_id).push(" AND (b.all_access=1 OR EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=")
+        .push_bind(&p.user_id).push(")) AND (e.eventable_type='Card' OR EXISTS (SELECT 1 FROM comments m WHERE m.id=e.eventable_id AND m.card_id=c.id))");
+    for (field, values) in [("e.creator_id", &q.creators), ("c.board_id", &q.boards)] {
+        if !values.is_empty() {
+            builder.push(" AND ").push(field).push(" IN (");
+            let mut separated = builder.separated(",");
+            for value in values {
+                separated.push_bind(value);
+            }
+            separated.push_unseparated(")");
+        }
+    }
+    builder
+}
+async fn rows_for_ids(app: &App, prefix: &str, ids: &[String]) -> Result<Vec<SqliteRow>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut builder = QueryBuilder::<Sqlite>::new(prefix);
+    let mut separated = builder.separated(",");
+    for id in ids {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(")");
+    builder.build().fetch_all(&app.db).await.map_err(db_err)
+}
+async fn assignment_rows_for_cards(app: &App, ids: &[String]) -> Result<Vec<SqliteRow>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT card_id,assignee_id FROM assignments WHERE card_id IN (",
+    );
+    let mut separated = builder.separated(",");
+    for id in ids {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(")");
+    builder.push(" ORDER BY created_at,id");
+    builder.build().fetch_all(&app.db).await.map_err(db_err)
+}
+fn unique_ids(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    values
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect()
+}
+fn activity_description(
+    p: &Principal,
+    event: &SqliteRow,
+    title: &str,
+    users: &HashMap<String, Value>,
+) -> String {
+    let actor = users
+        .get(&event.get::<String, _>("creator_id"))
+        .and_then(|u| u["name"].as_str())
+        .unwrap_or("");
+    let quoted = format!("&quot;{}&quot;", escape(title));
+    let action: String = event.get("action");
+    let particulars: Value =
+        serde_json::from_str(&event.get::<String, _>("particulars")).unwrap_or(json!({}));
+    let text = match action.as_str() {
+        "card_published" => format!("{actor} added {quoted}"),
+        "card_closed" => format!("{actor} moved {quoted} to \"Done\""),
+        "card_reopened" => format!("{actor} reopened {quoted}"),
+        "card_postponed" => format!("{actor} moved {quoted} to \"Not Now\""),
+        "card_auto_postponed" => format!("{quoted} moved to \"Not Now\" due to inactivity"),
+        "card_sent_back_to_triage" => format!("{actor} moved {quoted} back to \"Maybe?\""),
+        "card_triaged" => format!(
+            "{actor} moved {quoted} to \"{}\"",
+            escape(particulars["column"].as_str().unwrap_or(""))
+        ),
+        "card_title_changed" => format!(
+            "{actor} renamed {quoted} (was: \"{}\")",
+            escape(particulars["old_title"].as_str().unwrap_or(""))
+        ),
+        "card_board_changed" => format!(
+            "{actor} moved {quoted} to \"{}\"",
+            escape(particulars["new_board"].as_str().unwrap_or(""))
+        ),
+        "comment_created" => format!("{actor} commented on {quoted}"),
+        "card_assigned" => {
+            let ids = particulars["assignee_ids"].as_array();
+            if ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&p.user_id))) {
+                format!("{actor} will handle {quoted}")
+            } else {
+                let assignee = ids
+                    .and_then(|ids| ids.first())
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let name = users
+                    .get(assignee)
+                    .and_then(|u| u["name"].as_str())
+                    .unwrap_or("");
+                format!("{actor} assigned {name} to {quoted}")
+            }
+        }
+        "card_unassigned" => {
+            let ids = particulars["assignee_ids"].as_array();
+            let assignee = ids
+                .and_then(|ids| ids.first())
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let target = if assignee == p.user_id {
+                "yourself".to_string()
+            } else {
+                users
+                    .get(assignee)
+                    .and_then(|u| u["name"].as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            format!("{actor} unassigned {target} from {quoted}")
+        }
+        _ => String::new(),
+    };
+    text
+}
+async fn activity_items(
+    app: &App,
+    p: &Principal,
+    events: &[SqliteRow],
+    host: &str,
+) -> Result<Vec<Value>> {
+    if events.is_empty() {
+        return Ok(Vec::new());
+    }
+    let card_ids = unique_ids(events.iter().map(|e| e.get::<String, _>("card_id")));
+    let card_rows = rows_for_ids(app, "SELECT * FROM cards WHERE id IN (", &card_ids).await?;
+    let board_ids = unique_ids(card_rows.iter().map(|c| c.get::<String, _>("board_id")));
+    let board_rows = rows_for_ids(app, "SELECT * FROM boards WHERE id IN (", &board_ids).await?;
+    let assignment_rows = assignment_rows_for_cards(app, &card_ids).await?;
+    let tag_rows=rows_for_ids(app,"SELECT g.card_id,t.title FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",&card_ids).await?;
+    let column_ids = unique_ids(
+        card_rows
+            .iter()
+            .filter_map(|c| c.get::<Option<String>, _>("column_id")),
+    );
+    let column_rows = rows_for_ids(app, "SELECT * FROM columns WHERE id IN (", &column_ids).await?;
+    let comment_ids = unique_ids(
+        events
+            .iter()
+            .filter(|e| e.get::<String, _>("eventable_type") == "Comment")
+            .map(|e| e.get::<String, _>("eventable_id")),
+    );
+    let comment_rows =
+        rows_for_ids(app, "SELECT * FROM comments WHERE id IN (", &comment_ids).await?;
+    let user_ids = unique_ids(
+        card_rows
+            .iter()
+            .map(|c| c.get::<String, _>("creator_id"))
+            .chain(board_rows.iter().map(|b| b.get::<String, _>("creator_id")))
+            .chain(
+                assignment_rows
+                    .iter()
+                    .map(|a| a.get::<String, _>("assignee_id")),
+            )
+            .chain(
+                comment_rows
+                    .iter()
+                    .map(|c| c.get::<String, _>("creator_id")),
+            )
+            .chain(events.iter().map(|e| e.get::<String, _>("creator_id"))),
+    );
+    let user_rows=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
+    let users: HashMap<String, Value> = user_rows
+        .iter()
+        .map(|u| (u.get::<String, _>("id"), user_json_row(p, u, host)))
+        .collect();
+    let mut boards = HashMap::<String, Value>::new();
+    for b in &board_rows {
+        let creator = b.get::<String, _>("creator_id");
+        let user = users.get(&creator).cloned().ok_or_else(missing)?;
+        boards.insert(b.get("id"), board_json_row(p, b, host, user));
+    }
+    let mut columns = HashMap::<String, Value>::new();
+    for c in &column_rows {
+        columns.insert(c.get("id"), column_json(p, c, host));
+    }
+    let mut tags = HashMap::<String, Vec<String>>::new();
+    for t in &tag_rows {
+        tags.entry(t.get("card_id"))
+            .or_default()
+            .push(t.get("title"));
+    }
+    for list in tags.values_mut() {
+        list.sort();
+    }
+    let mut assignments = HashMap::<String, Vec<String>>::new();
+    for a in &assignment_rows {
+        assignments
+            .entry(a.get("card_id"))
+            .or_default()
+            .push(a.get("assignee_id"));
+    }
+    let mut cards = HashMap::<String, Value>::new();
+    let mut card_meta = HashMap::<String, (i64, String, String)>::new();
+    for c in &card_rows {
+        let id: String = c.get("id");
+        let board_id: String = c.get("board_id");
+        let creator_id: String = c.get("creator_id");
+        let number: i64 = c.get("number");
+        let title: String = c.get("title");
+        let description: String = c.get("description");
+        let assigned = assignments.get(&id).cloned().unwrap_or_default();
+        let assignees: Vec<Value> = assigned
+            .iter()
+            .take(5)
+            .filter_map(|id| users.get(id).cloned())
+            .collect();
+        let mut value = json!({"id":id,"number":number,"title":title,"status":c.get::<String,_>("status"),
+            "description":description,"description_html":rich_html(&description),"image_url":null,
+            "has_attachments":false,"tags":tags.get(&id).cloned().unwrap_or_default(),
+            "closed":c.get::<i64,_>("closed")!=0,"postponed":c.get::<i64,_>("postponed")!=0,
+            "golden":c.get::<i64,_>("golden")!=0,"last_active_at":c.get::<String,_>("last_active_at"),
+            "created_at":c.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),
+            "board":boards.get(&board_id).cloned().ok_or_else(missing)?,
+            "creator":users.get(&creator_id).cloned().ok_or_else(missing)?,
+            "assignees":assignees,"has_more_assignees":assigned.len()>5,
+            "comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),
+            "reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
+        if let Some(column_id) = c.get::<Option<String>, _>("column_id") {
+            if let Some(column) = columns.get(&column_id) {
+                value["column"] = column.clone();
+            }
+        }
+        card_meta.insert(id.clone(), (number, title, board_id));
+        cards.insert(id, value);
+    }
+    let mut comments = HashMap::<String, Value>::new();
+    for c in &comment_rows {
+        let id: String = c.get("id");
+        let card_id: String = c.get("card_id");
+        let (number, _, _) = card_meta.get(&card_id).ok_or_else(missing)?;
+        let body: String = c.get("body");
+        let created: String = c.get("created_at");
+        let updated = c
+            .get::<Option<String>, _>("updated_at")
+            .unwrap_or_else(|| created.clone());
+        let creator = users
+            .get(&c.get::<String, _>("creator_id"))
+            .cloned()
+            .ok_or_else(missing)?;
+        comments.insert(
+            id.clone(),
+            json!({"id":id,"created_at":created,"updated_at":updated,
+            "body":{"plain_text":body,"html":rich_html(&body)},"creator":creator,
+            "card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},
+            "reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),
+            "url":format!("{host}/{}/cards/{number}/comments/{id}",p.slug)}),
+        );
+    }
+    let mut items = Vec::with_capacity(events.len());
+    for e in events {
+        let card_id: String = e.get("card_id");
+        let (number, title, board_id) = card_meta.get(&card_id).ok_or_else(missing)?;
+        let eventable_id: String = e.get("eventable_id");
+        let eventable_type: String = e.get("eventable_type");
+        let (eventable, url) = if eventable_type == "Comment" {
+            (
+                comments.get(&eventable_id).cloned().ok_or_else(missing)?,
+                format!("{host}/{}/cards/{number}#comment_{eventable_id}", p.slug),
+            )
+        } else {
+            (
+                cards.get(&card_id).cloned().ok_or_else(missing)?,
+                format!("{host}/{}/cards/{number}", p.slug),
+            )
+        };
+        let particulars: Value =
+            serde_json::from_str(&e.get::<String, _>("particulars")).unwrap_or(json!({}));
+        items.push(
+            json!({"id":e.get::<String,_>("id"),"action":e.get::<String,_>("action"),
+            "created_at":e.get::<String,_>("created_at"),
+            "description":activity_description(p,e,title,&users),"particulars":particulars,
+            "url":url,"eventable_type":eventable_type,"eventable":eventable,
+            "board":boards.get(board_id).cloned().ok_or_else(missing)?,
+            "creator":users.get(&e.get::<String,_>("creator_id")).cloned().ok_or_else(missing)?}),
+        );
+    }
+    Ok(items)
+}
+async fn list_activities(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let query = parse_activity_query(raw);
+    let (offset, limit) = page_window(query.page);
+    let mut count = activities_query("SELECT COUNT(*)", &p, &query);
+    let total: i64 = count
+        .build_query_scalar()
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut builder = activities_query("SELECT e.*", &p, &query);
+    builder
+        .push(" ORDER BY e.created_at DESC,e.id DESC LIMIT ")
+        .push_bind(limit)
+        .push(" OFFSET ")
+        .push_bind(offset);
+    let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
+    let host = base(&headers);
+    let items = activity_items(&app, &p, &rows, &host).await?;
+    Ok(paginated(json!(items), total, query.page, &uri, &headers))
+}
 async fn list_cards(
     State(app): Shared,
     Path(account): Path<String>,
@@ -1515,6 +2054,7 @@ async fn create_card(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Untitled".into());
     let description = string(v, "description").unwrap_or_default();
+    let event_id = id();
     let id = id();
     let timestamp = now();
     let writer = app.write_lock.lock().await;
@@ -1534,6 +2074,9 @@ async fn create_card(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")
+        .bind(event_id).bind(&p.account_id).bind(&board_id).bind(&id).bind(&p.user_id)
+        .bind(&id).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     drop(writer);
     let c = card(&app, &p, &number.to_string()).await?;
@@ -1554,6 +2097,7 @@ async fn update_card(
     let v = nested(&body, "card");
     let title = string(v, "title").unwrap_or_else(|| c.get("title"));
     let old_title: String = c.get("title");
+    let old_status: String = c.get("status");
     let description = string(v, "description").unwrap_or_else(|| c.get("description"));
     let status = string(v, "status").unwrap_or_else(|| c.get("status"));
     if !["drafted", "published"].contains(&status.as_str()) {
@@ -1564,7 +2108,7 @@ async fn update_card(
     )
     .bind(&title)
     .bind(description)
-    .bind(status)
+    .bind(&status)
     .bind(now())
     .bind(now())
     .bind(c.get::<String, _>("id"))
@@ -1572,6 +2116,17 @@ async fn update_card(
     .await
     .map_err(db_err)?;
     if title != old_title && !old_title.is_empty() {
+        record_event(
+            &app,
+            &p,
+            &c.get::<String, _>("board_id"),
+            &c.get::<String, _>("id"),
+            "Card",
+            &c.get::<String, _>("id"),
+            "card_title_changed",
+            json!({"old_title":&old_title,"new_title":&title}),
+        )
+        .await?;
         let who = escape(&actor_name(&app, &p).await?);
         system_comment(
             &app,
@@ -1582,6 +2137,19 @@ async fn update_card(
                 escape(&old_title),
                 escape(&title)
             ),
+        )
+        .await?;
+    }
+    if old_status == "drafted" && status == "published" {
+        record_event(
+            &app,
+            &p,
+            &c.get::<String, _>("board_id"),
+            &c.get::<String, _>("id"),
+            "Card",
+            &c.get::<String, _>("id"),
+            "card_published",
+            json!({}),
         )
         .await?;
     }
@@ -1644,6 +2212,22 @@ async fn set_flag(
         .map_err(db_err)?;
     let card_id: String = c.get("id");
     if flag == "closed" && (c.get::<i64, _>("closed") != value) {
+        let action = if value == 1 {
+            "card_closed"
+        } else {
+            "card_reopened"
+        };
+        record_event(
+            app,
+            p,
+            &c.get::<String, _>("board_id"),
+            &card_id,
+            "Card",
+            &card_id,
+            action,
+            json!({}),
+        )
+        .await?;
         let who = escape(&actor_name(app, p).await?);
         let body = if value == 1 {
             format!("<strong>Moved</strong> to “Done” by {who}")
@@ -1652,6 +2236,17 @@ async fn set_flag(
         };
         system_comment(app, p, &card_id, &body).await?;
     } else if flag == "postponed" && value == 1 {
+        record_event(
+            app,
+            p,
+            &c.get::<String, _>("board_id"),
+            &card_id,
+            "Card",
+            &card_id,
+            "card_postponed",
+            json!({}),
+        )
+        .await?;
         let who = escape(&actor_name(app, p).await?);
         system_comment(
             app,
@@ -1726,6 +2321,17 @@ async fn triage_card(
     let timestamp = now();
     sqlx::query("UPDATE cards SET column_id=?,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
         .bind(column).bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&app.db).await.map_err(db_err)?;
+    record_event(
+        &app,
+        &p,
+        &c.get::<String, _>("board_id"),
+        &c.get::<String, _>("id"),
+        "Card",
+        &c.get::<String, _>("id"),
+        "card_triaged",
+        json!({"column":col.get::<String,_>("name")}),
+    )
+    .await?;
     let who = escape(&actor_name(&app, &p).await?);
     system_comment(
         &app,
@@ -1750,6 +2356,17 @@ async fn untriage_card(
     let timestamp = now();
     sqlx::query("UPDATE cards SET column_id=NULL,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
         .bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&app.db).await.map_err(db_err)?;
+    record_event(
+        &app,
+        &p,
+        &c.get::<String, _>("board_id"),
+        &c.get::<String, _>("id"),
+        "Card",
+        &c.get::<String, _>("id"),
+        "card_sent_back_to_triage",
+        json!({}),
+    )
+    .await?;
     let who = escape(&actor_name(&app, &p).await?);
     system_comment(
         &app,
@@ -1780,6 +2397,13 @@ async fn move_card(
         .await
         .map_err(db_err)?;
     if c.get::<String, _>("board_id") != destination {
+        sqlx::query("UPDATE events SET board_id=? WHERE card_id=?")
+            .bind(&destination)
+            .bind(c.get::<String, _>("id"))
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+        record_event(&app,&p,&destination,&c.get::<String,_>("id"),"Card",&c.get::<String,_>("id"),"card_board_changed",json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")})).await?;
         let who = escape(&actor_name(&app, &p).await?);
         system_comment(
             &app,
@@ -2030,6 +2654,17 @@ async fn create_comment(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
+    record_event(
+        &app,
+        &p,
+        &c.get::<String, _>("board_id"),
+        &c.get::<String, _>("id"),
+        "Comment",
+        &id,
+        "comment_created",
+        json!({}),
+    )
+    .await?;
     let r = comment_row(&app, &c, &id).await?;
     Ok(created(
         format!("/{account}/cards/{number}/comments/{id}.json"),
@@ -2082,6 +2717,22 @@ async fn delete_comment(
     if r.get::<String, _>("creator_id") != p.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }
+    sqlx::query(
+        "DELETE FROM events WHERE eventable_type='Comment' AND eventable_id=? AND card_id=?",
+    )
+    .bind(&comment)
+    .bind(c.get::<String, _>("id"))
+    .execute(&app.db)
+    .await
+    .map_err(db_err)?;
+    sqlx::query(
+        "DELETE FROM reactions WHERE reactable_type='Comment' AND reactable_id=? AND account_id=?",
+    )
+    .bind(&comment)
+    .bind(&p.account_id)
+    .execute(&app.db)
+    .await
+    .map_err(db_err)?;
     let done = sqlx::query("DELETE FROM comments WHERE id=? AND card_id=? AND creator_id=?")
         .bind(comment)
         .bind(c.get::<String, _>("id"))
@@ -2125,6 +2776,17 @@ async fn toggle_assignment(
             .execute(&app.db)
             .await
             .map_err(db_err)?;
+        record_event(
+            &app,
+            &p,
+            &board_id,
+            &card_id,
+            "Card",
+            &card_id,
+            "card_unassigned",
+            json!({"assignee_ids":[&assignee_id]}),
+        )
+        .await?;
         system_comment(
             &app,
             &p,
@@ -2146,6 +2808,17 @@ async fn toggle_assignment(
         }
         sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at) VALUES(?,?,?,?,?,?)")
             .bind(id()).bind(&p.account_id).bind(&card_id).bind(&assignee_id).bind(&p.user_id).bind(now()).execute(&app.db).await.map_err(db_err)?;
+        record_event(
+            &app,
+            &p,
+            &board_id,
+            &card_id,
+            "Card",
+            &card_id,
+            "card_assigned",
+            json!({"assignee_ids":[&assignee_id]}),
+        )
+        .await?;
         sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1")
             .bind(&card_id).bind(&assignee_id).execute(&app.db).await.map_err(db_err)?;
         system_comment(

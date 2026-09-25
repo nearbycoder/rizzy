@@ -107,16 +107,21 @@ def main():
     for name, target in targets.items():
         board, number = fixture(target, args.cards)
         filtered_cards = f"/cards?board_ids%5B%5D={board}"
-        paths[name] = ["/boards", f"/boards/{board}", f"/cards/{number}", filtered_cards]
+        activities = f"/activities?board_ids%5B%5D={board}"
+        paths[name] = ["/boards", f"/boards/{board}", f"/cards/{number}", filtered_cards, activities]
         # Verify each app actually returns the seeded objects before timing it.
         board_sample = request(target, f"/boards/{board}")
         card_sample = request(target, f"/cards/{number}")
         page_sample, page_headers = request(target, filtered_cards, with_headers=True)
+        activity_sample, activity_headers = request(target, activities, with_headers=True)
         assert board_sample["name"].startswith("Rizzy benchmark")
         assert card_sample["title"] == "Benchmark card 0"
         assert len(page_sample) == min(args.cards, 15), (name, "first page count", len(page_sample))
         assert int(page_headers["X-Total-Count"]) == args.cards, (name, "total count", page_headers["X-Total-Count"])
+        assert len(activity_sample) == min(args.cards, 15), (name, "activity first page count", len(activity_sample))
+        assert int(activity_headers["X-Total-Count"]) == args.cards, (name, "activity total count", activity_headers["X-Total-Count"])
         samples[name] = {"board_shape": shape(board_sample), "card_shape": shape(card_sample),
+                         "activity_shape":shape(activity_sample),
                          "card_description_html": card_sample["description_html"],
                          "first_page_count": len(page_sample), "first_page_bytes": len(json.dumps(page_sample))}
         for path in paths[name]:
@@ -126,9 +131,11 @@ def main():
         left, right = samples["fizzy"], samples["rizzy"]
         results["sample_parity"] = {"board_shape": left["board_shape"] == right["board_shape"],
                                     "card_shape": left["card_shape"] == right["card_shape"],
+                                    "activity_shape": left["activity_shape"] == right["activity_shape"],
                                     "description_html": left["card_description_html"] == right["card_description_html"],
                                     "first_page_count": left["first_page_count"] == right["first_page_count"],
                                     "first_page_bytes": {name: sample["first_page_bytes"] for name, sample in samples.items()}}
+        assert all(value for key,value in results["sample_parity"].items() if key != "first_page_bytes"), results["sample_parity"]
     for concurrency in map(int, args.concurrency.split(",")):
         for name, target in targets.items():
             results["runs"].setdefault(name, []).append(run(target, paths[name], concurrency, args.seconds))

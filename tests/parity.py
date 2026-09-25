@@ -43,6 +43,8 @@ def run(target):
         return value
 
     identity = step("identity_show", "/my/identity")
+    step("account_show","/account/settings")
+    result["account_entropy_days"]=step("account_entropy", "/account/entropy", "PUT", {"entropy":{"auto_postpone_period_in_days":7}})["auto_postpone_period_in_days"]
     users = step("users_list", "/users")
     result["users_list"]["count"] = len(users)
     step("user_show", f"/users/{users[0]['id']}")
@@ -51,6 +53,7 @@ def run(target):
     step("token_delete", f"/my/access_tokens/{token['id']}", "DELETE")
     board = step("board_create", "/boards", "POST", {"board": {"name": "Parity " + str(time.time_ns())}})
     board_id = board["id"]
+    result["inherited_board_days"]=board["auto_postpone_period_in_days"]
     step("board_show", f"/boards/{board_id}")
     column = step("column_create", f"/boards/{board_id}/columns", "POST", {"column": {"name": "Doing"}})
     column_id = column["id"]
@@ -60,6 +63,11 @@ def run(target):
     number = card["number"]
     result["card_create"]["description_html"] = card["description_html"]
     step("card_show", f"/cards/{number}")
+    step("board_entropy",f"/boards/{board_id}/entropy","PUT",{"board":{"auto_postpone_period_in_days":90}})
+    step("board_touch_after_entropy",f"/boards/{board_id}","PATCH",{"board":{"name":"Active " + search_word}})
+    result["board_entropy_effective"]=step("board_show_after_entropy",f"/boards/{board_id}")["auto_postpone_period_in_days"]
+    result["account_entropy_restored_days"]=step("account_entropy_restore","/account/entropy","PUT",{"entropy":{"auto_postpone_period_in_days":30}})["auto_postpone_period_in_days"]
+    result["board_override_survives"]=step("board_show_after_account_entropy",f"/boards/{board_id}")["auto_postpone_period_in_days"]
     result["search_text_count"]=len(step("search_text",f"/search?q={search_word}"))
     result["search_number_count"]=len(step("search_number",f"/search?q={number}"))
     listing = step("card_list", f"/cards?board_ids%5B%5D={board_id}")
@@ -108,14 +116,29 @@ def run(target):
     comments = step("comment_list", f"/cards/{number}/comments")
     result["comment_body"] = next(item["body"]["plain_text"] for item in comments if item["id"] == comment["id"])
     result["system_comment_count"] = sum(item["creator"]["role"] == "system" for item in comments)
+    activities=step("activity_list",f"/activities?board_ids%5B%5D={board_id}")
+    result["activity_actions"]=sorted(item["action"] for item in activities)
+    result["activity_particulars"]={item["action"]:shape(item["particulars"]) for item in activities}
+    result["activity_descriptions"]={item["action"]:item["description"].replace(search_word,"<WORD>") for item in activities}
+    result["activity_creator_filter_count"]=len(step("activity_creator_filter",f"/activities?board_ids%5B%5D={board_id}&creator_ids%5B%5D={users[0]['id']}"))
+    step("card_rename",f"/cards/{number}","PUT",{"card":{"title":"Renamed " + search_word}})
+    other_board=step("second_board_create","/boards","POST",{"board":{"name":"Moved " + search_word}})
+    step("card_move",f"/cards/{number}/board","PUT",{"board_id":other_board["id"]})
+    result["old_board_activity_count"]=len(step("old_board_activities",f"/activities?board_ids%5B%5D={board_id}"))
+    moved=step("moved_activities",f"/activities?board_ids%5B%5D={other_board['id']}")
+    result["moved_activity_actions"]=sorted(item["action"] for item in moved)
+    result["moved_activity_particulars"]={item["action"]:shape(item["particulars"]) for item in moved}
     step("comment_delete", f"/cards/{number}/comments/{comment['id']}", "DELETE")
+    result["activities_after_comment_delete"]=sorted(item["action"] for item in step("activity_after_comment_delete",f"/activities?board_ids%5B%5D={other_board['id']}"))
     published=step("board_publish",f"/boards/{board_id}/publication","POST")
     result["published_url_present"]="public_url" in published
     step("board_published_show",f"/boards/{board_id}")
     step("board_unpublish",f"/boards/{board_id}/publication","DELETE")
     result["unpublished_url_absent"]="public_url" not in step("board_unpublished_show",f"/boards/{board_id}")
     step("card_delete", f"/cards/{number}", "DELETE")
+    result["activities_after_card_delete_count"]=len(step("activity_after_card_delete",f"/activities?board_ids%5B%5D={other_board['id']}"))
     step("board_delete", f"/boards/{board_id}", "DELETE")
+    step("second_board_delete",f"/boards/{other_board['id']}","DELETE")
     return result
 
 

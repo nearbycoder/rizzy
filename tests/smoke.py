@@ -71,6 +71,7 @@ def main():
             number = card["number"]
             assert "&lt;text&gt;" in card["description_html"]
             assert call(port, outsider, outsider_token, f"/cards/{number}", status=404)
+            assert call(port, outsider, outsider_token, "/activities") == []
             call(port, owner, owner_token, f"/cards/{number}/triage", "POST", {"column_id": col["id"]}, 204)
             assert call(port, owner, owner_token, f"/cards/{number}")["column"]["name"] == "Doing"
             step = call(port, owner, owner_token, f"/cards/{number}/steps", "POST", {"step": {"content": "Test"}}, 201)
@@ -104,6 +105,14 @@ def main():
                 assert error.code == 404
             call(port, owner, owner_token, f"/cards/{number}/closure", "POST", status=204)
             assert call(port, owner, owner_token, f"/cards/{number}")["closed"] is True
+            assert call(port, owner, owner_token, "/account/settings")["auto_postpone_period_in_days"] == 30
+            assert call(port, owner, owner_token, "/account/entropy", "PUT", {"entropy":{"auto_postpone_period_in_days":7}})["auto_postpone_period_in_days"] == 7
+            assert call(port, owner, owner_token, f"/boards/{board_id}")["auto_postpone_period_in_days"] == 7
+            assert call(port, owner, owner_token, f"/boards/{board_id}/entropy", "PUT", {"board":{"auto_postpone_period_in_days":90}})["auto_postpone_period_in_days"] == 90
+            call(port, owner, owner_token, "/account/entropy", "PUT", {"entropy":{"auto_postpone_period_in_days":3}})
+            assert call(port, owner, owner_token, f"/boards/{board_id}")["auto_postpone_period_in_days"] == 90
+            inherited = call(port, owner, owner_token, "/boards", "POST", {"board":{"name":"Inherited"}}, 201)
+            assert inherited["auto_postpone_period_in_days"] == 3
             with sqlite3.connect(database) as db:
                 identity = db.execute("SELECT identity_id FROM users WHERE id=?", (board["creator"]["id"],)).fetchone()[0]
                 db.execute("INSERT INTO access_tokens VALUES(?,?,?,?,?,?)", ("read-only", identity, hashlib.sha256(b"read-only-token").hexdigest(), "read", "read", "2026-01-01T00:00:00Z"))

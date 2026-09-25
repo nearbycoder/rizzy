@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   external_account_id INTEGER NOT NULL UNIQUE,
   name TEXT NOT NULL,
   cards_count INTEGER NOT NULL DEFAULT 0,
+  auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS identities (
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS boards (
   name TEXT NOT NULL,
   all_access INTEGER NOT NULL DEFAULT 1,
   auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30,
+  entropy_override INTEGER NOT NULL DEFAULT 0,
   public_description TEXT NOT NULL DEFAULT '',
   publication_key TEXT,
   created_at TEXT NOT NULL,
@@ -141,3 +143,27 @@ CREATE TABLE IF NOT EXISTS reactions (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reactions_target ON reactions(reactable_type,reactable_id,created_at);
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES users(id),
+  eventable_type TEXT NOT NULL CHECK(eventable_type IN ('Card','Comment')),
+  eventable_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  particulars TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_account_recent ON events(account_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS events_board_recent ON events(board_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS events_eventable ON events(eventable_type,eventable_id);
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards BEGIN
+  UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
+END;
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards BEGIN
+  UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
+END;
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_delete AFTER DELETE ON cards BEGIN
+  UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.board_id;
+END;

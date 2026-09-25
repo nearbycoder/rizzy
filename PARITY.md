@@ -4,7 +4,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 
 | Area | Initial implementation | Full parity |
 | --- | --- | --- |
-| Account scoped routing, bearer tokens, identity, user listing | ✓ | No |
+| Account scoped routing, bearer tokens, identity, user listing and settings | ✓ | No |
 | Boards CRUD and access control | ✓ | No |
 | Columns CRUD and card listings | ✓ | No |
 | Cards CRUD and card numbering | ✓ | No |
@@ -15,7 +15,8 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Users, roles, invitations, board involvement | — | No |
 | Assignments, reactions, pins, watches | ✓ | No |
 | Card filters, tag listing, basic search | ✓ | No |
-| Saved filters, full text search, activities, events | — | No |
+| Activities and core event side effects | ✓ | No |
+| Saved filters and full text search | — | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | — | No |
 | Notifications, mail, push, jobs | — | No |
@@ -27,4 +28,6 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
-The local `tests/parity.py` scenario currently passes 86 comparisons against the running reference server. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, publication, and system comment count. It does not replace the full upstream test suite.
+The local `tests/parity.py` scenario currently passes 117 comparisons against the running reference server using fresh accounts. It checks status and JSON shape for the core workflow, selected state values, search results, tag, assignment and card state filters, account and board entropy, publication, activity events and descriptions, event deletion, and system comment count. It does not replace the full upstream test suite.
+
+Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.
