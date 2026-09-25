@@ -114,6 +114,10 @@ def main():
                 assert archive.getinfo(f"storage/{image['key']}").compress_type == zipfile.ZIP_STORED
                 account_data = json.loads(archive.read("data/account.json"))
                 assert account_data["id"] == account_id and account_data["join_code"]["account_id"] == account_id
+                system_user = next(json.loads(archive.read(path)) for path in names
+                                   if path.startswith("data/users/")
+                                   and json.loads(archive.read(path))["role"] == "system")
+                assert system_user["email_address"] is None and system_user["identity_id"] is None
                 card_data = json.loads(archive.read(f"data/cards/{card['id']}.json"))
                 assert card_data["title"] == "Transfer card" and "description" not in card_data
                 rich_texts = [json.loads(archive.read(name)) for name in names

@@ -31,6 +31,7 @@ use tower::{Layer, util::MapRequestLayer};
 mod account_transfer;
 mod board_views;
 mod exports;
+mod imports;
 mod rich_text;
 mod storage;
 
@@ -39,6 +40,7 @@ struct App {
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
     export_notify: tokio::sync::Notify,
+    import_notify: tokio::sync::Notify,
 }
 type Shared = State<Arc<App>>;
 type Result<T> = std::result::Result<T, ApiError>;
@@ -1286,6 +1288,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
         export_notify: tokio::sync::Notify::new(),
+        import_notify: tokio::sync::Notify::new(),
     });
     let plain_search_backfilled: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_plain_v2'")
@@ -1357,6 +1360,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(webhook_worker(app.clone()));
     }
     tokio::spawn(exports::worker(app.clone()));
+    tokio::spawn(imports::worker(app.clone()));
     let maintenance_db = app.db.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
@@ -1408,6 +1412,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/signup", post(request_signup))
         .route("/signup/completion", post(complete_signup))
         .route("/my/identity", get(my_identity))
+        .route("/account/imports/new", get(imports::new))
+        .route("/account/imports", post(imports::create).layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)))
         .route("/my/access_tokens", get(list_tokens).post(create_token))
         .route(
             "/my/access_tokens/{id}",
@@ -1473,6 +1479,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(exports::show_user),
         )
         .route("/{account}/account/exports", post(exports::create_account))
+        .route("/{account}/account/imports/{id}", get(imports::show))
         .route(
             "/{account}/account/exports/{id}",
             get(exports::show_account),

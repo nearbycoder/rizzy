@@ -13,7 +13,7 @@ RIZZY_DEV_MAGIC_LINKS=1 cargo run --release
 # Open http://127.0.0.1:3007/ and sign in with the seeded email.
 ```
 
-The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`. Card images and user avatar bytes are stored in `data/storage/files` by default; set `RIZZY_STORAGE_DIR` to move them. User and account exports are stored in `data/exports` by default; set `RIZZY_EXPORT_DIR` for another path. Export notifications use `RIZZY_SENDMAIL` and `RIZZY_PUBLIC_URL` when configured.
+The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`. Card images and user avatar bytes are stored in `data/storage/files` by default; set `RIZZY_STORAGE_DIR` to move them. User and account exports are stored in `data/exports` by default; set `RIZZY_EXPORT_DIR` for another path. Uploaded account import ZIPs are stored in `data/imports` by default; set `RIZZY_IMPORT_DIR` to move them. Export notifications use `RIZZY_SENDMAIL` and `RIZZY_PUBLIC_URL` when configured.
 
 For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and `RIZZY_MAIL_FROM` to its sender address. `RIZZY_DEV_MAGIC_LINKS=1` exposes sign-in codes and email-change tokens in response headers for local testing. Without either delivery option, email sign-in returns 503; the seeded API token can still be entered through **Use an API token**. Bearer tokens are accepted only for JSON requests, and read tokens cannot make write requests, matching Fizzy. On a fresh database, the first email-code sign-in can create an account. Set `RIZZY_MULTI_TENANT=1` to allow additional accounts.
 
@@ -32,12 +32,13 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Board publishing and unpublishing with unauthenticated public board and card pages.
 - Direct uploads for card images, user avatars, and uploaded image/file embeds in card descriptions and comments, with private/public blob access and cached image previews.
 - Account settings and entropy, board entropy overrides, and an activity feed backed by card and comment events.
+- Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files.
 - A basic browser interface for boards, columns, cards, description editing, and completion.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
 ## Parity still required
 
-The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, remote and media-rich embeds, push, specialized webhook payloads, account import and full export parity, background jobs, and the complete Hotwire UI. User exports include accessible cards, comments, and their uploaded rich-text attachments. Account exports cover records currently stored by Rizzy and can be imported by Fizzy for the tested workflow; Rizzy account import is absent. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
+The reference contains 118 controllers, 164 model files, 384 view files, 70 database tables, and 351 test files. The current build does not yet cover most of that surface. Major missing work includes passkeys and complete signup behavior, remaining multiuser flows, complete notification delivery and mention handling, saved filter UI and complete search behavior, the complete activity timeline, complete public board views, remote and media-rich embeds, push, specialized webhook payloads, full account transfer parity, background jobs, and the complete Hotwire UI. User exports include accessible cards, comments, and their uploaded rich-text attachments. Account exports cover records currently stored by Rizzy and can be imported by Fizzy for the tested workflow. Rizzy imports those represented record groups, but rejects unsupported source records rather than dropping them. Import ZIPs above 512 MiB and unrepresented source features still need work. Existing JSON responses also differ from Fizzy in several fields and corner cases. See [PARITY.md](PARITY.md) for the parity tracker.
 
 ## Verification and benchmarks
 
@@ -59,6 +60,7 @@ python3 tests/notifications.py
 python3 tests/search.py
 python3 tests/exports.py
 python3 tests/account_transfer.py
+python3 tests/account_import.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:
 python3 tests/parity.py
 python3 tests/filter_parity.py

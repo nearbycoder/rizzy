@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS exports (
   completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS exports_current ON exports(account_id,kind,created_at);
+CREATE TABLE IF NOT EXISTS imports (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  identity_id TEXT NOT NULL REFERENCES identities(id),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS imports_pending ON imports(status,created_at);
 CREATE TABLE IF NOT EXISTS boards (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
@@ -108,6 +119,7 @@ CREATE TABLE IF NOT EXISTS boards (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS boards_account ON boards(account_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS boards_publication_key ON boards(publication_key) WHERE publication_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS accesses (
   board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

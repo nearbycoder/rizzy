@@ -104,21 +104,21 @@
       "path": "/account/imports(.:format)",
       "controller": "account/imports",
       "action": "create",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/account/imports/new(.:format)",
       "controller": "account/imports",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/account/imports/:id(.:format)",
       "controller": "account/imports",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1512,6 +1512,14 @@
     },
     {
       "method": "GET",
+      "path": "/account/imports/new"
+    },
+    {
+      "method": "POST",
+      "path": "/account/imports"
+    },
+    {
+      "method": "GET",
       "path": "/my/access_tokens"
     },
     {
@@ -1601,6 +1609,10 @@
     {
       "method": "POST",
       "path": "/{account}/account/exports"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/account/imports/{id}"
     },
     {
       "method": "GET",

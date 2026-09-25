@@ -217,6 +217,12 @@ fn row_value(row: &SqliteRow, record_set: &RecordSet) -> BuildResult<Value> {
     if object.get("id").is_none_or(Value::is_null) {
         object.insert("id".into(), json!(id()));
     }
+    if record_set.directory == "users"
+        && object.get("role").and_then(Value::as_str) == Some("system")
+    {
+        object.insert("email_address".into(), Value::Null);
+        object.insert("identity_id".into(), Value::Null);
+    }
     Ok(Value::Object(object))
 }
 
