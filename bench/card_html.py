@@ -30,23 +30,42 @@ def main():
         for name, target in targets.items():
             board, number = fixture(target, args.cards)
             boards[name] = board
+            request(target, f"/cards/{number}/publish", "POST")
             for content in ("Review the idea", "Share the update"):
                 request(target, f"/cards/{number}/steps", "POST", {"step": {"content": content}})
-            request(target, f"/cards/{number}/comments", "POST",
-                    {"comment": {"body": "Looks useful."}})
+            comment = request(target, f"/cards/{number}/comments", "POST",
+                              {"comment": {"body": "Looks useful."}})
             request(target, f"/cards/{number}/taggings", "POST", {"tag_title": "benchmark-tag"})
+            reaction_paths = (
+                f"/cards/{number}/reactions",
+                f"/cards/{number}/comments/{comment['id']}/reactions",
+            )
+            reaction_contents = ("👍", "🚀")
+            for reaction_path, content in zip(reaction_paths, reaction_contents):
+                request(target, reaction_path, "POST", {"reaction": {"content": content}})
+                saved = request(target, reaction_path)
+                assert len(saved) == 1 and saved[0]["content"] == content, (name, reaction_path, saved)
             target["cookie"] = browser_cookie(target)
             path = f"/cards/{number}"
             paths[name] = path
             sample = html(target, path)
             assert b'card-perma' in sample and b'Benchmark card 0' in sample
-            assert all(value in sample for value in (b'Review the idea', b'Share the update', b'Looks useful.', b'benchmark-tag'))
-            results["sample_parity"][name] = {"steps": 2, "comment": True, "tag": True, "html_bytes": len(sample)}
+            assert all(value.encode() in sample for value in (
+                "Review the idea", "Share the update", "Looks useful.", "benchmark-tag",
+                *reaction_contents)), name
+            results["sample_parity"][name] = {
+                "steps": 2, "comments": 1, "tag": True,
+                "card_reactions": 1, "comment_reactions": 1, "html_bytes": len(sample)}
             for _ in range(5):
                 html(target, path)
+        assert all(
+            results["sample_parity"]["fizzy"][field] == results["sample_parity"]["rizzy"][field]
+            for field in ("steps", "comments", "tag", "card_reactions", "comment_reactions")
+        )
         for concurrency in map(int, args.concurrency.split(",")):
             for name, target in targets.items():
                 result = run(target, paths[name], concurrency, args.seconds)
+                assert not result["errors"], (name, result)
                 results["runs"].setdefault(name, []).append(result)
                 print(f"{name} c={concurrency}: {result}", file=sys.stderr, flush=True)
         for fizzy, rust in zip(results["runs"]["fizzy"], results["runs"]["rizzy"]):
