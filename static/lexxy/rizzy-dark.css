@@ -1,0 +1,26 @@
+:root {
+  --lexxy-color-ink: #f5f0e8;
+  --lexxy-color-ink-medium: #c9c0b2;
+  --lexxy-color-ink-light: #afa89d;
+  --lexxy-color-ink-lighter: #57534d;
+  --lexxy-color-ink-lightest: #393733;
+  --lexxy-color-ink-inverted: #201f1e;
+  --lexxy-color-canvas: #292826;
+  --lexxy-color-accent-dark: #e7bd61;
+  --lexxy-color-accent-medium: #f0ca77;
+  --lexxy-color-accent-light: #5a4c2d;
+  --lexxy-color-accent-lightest: #403621;
+}
+
+lexxy-toolbar button,
+lexxy-toolbar .lexxy-editor__toolbar-button {
+  border: 0;
+  background: transparent;
+  color: #f5f0e8;
+  padding: 6px;
+}
+
+lexxy-toolbar button:hover,
+lexxy-toolbar .lexxy-editor__toolbar-button:hover {
+  background: #48443e;
+}

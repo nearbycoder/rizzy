@@ -10,7 +10,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Cards CRUD and card numbering | JSON CRUD, browser draft creation/resumption and publication, explicit timestamps, and account numbering | No |
 | Closure, triage, postpone, gold, board move | ✓ | No |
 | Tags, steps, comments | ✓ | No |
-| Full board and card HTML interface | Basic UI with direct board/card URLs and a draft editor | No |
+| Full board and card HTML interface | Basic board UI; Rust-rendered published card page with rich description, steps, comments, edit, comment, watch, pin, and completion controls; Lexxy draft and card editors | No |
 | Sign up, magic links, sessions, passkeys | Magic links, sessions, initial signup, and sign-in entry page | No |
 | Users, roles, invitations, board involvement | User listing/editing, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Android/iOS v1 JSON and timezone updates | No |
@@ -48,7 +48,7 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 
 `tests/self_assignment_parity.py` compares assignment and unassignment of the current user, including the card's returned assignee list and an unknown card response.
 
-`tests/draft_workflow_parity.py` signs in through magic links on both servers and compares browser draft creation and resumption, draft redirects, JSON editing, publication, search indexing, activity creation, and creating another draft. The Rust draft page's save/publish controls and direct board/card links were exercised in a browser. Its HTML design and interaction details are still much simpler than Fizzy's, and its cookie writes do not yet implement Fizzy's CSRF protection.
+`tests/draft_workflow_parity.py` signs in through magic links on both servers and compares browser draft creation and resumption, draft redirects, JSON editing, publication, search indexing, activity creation, creating another draft, Lexxy and prompt markup, and the published card page's title, description, board, and comment content. Rizzy serves the same Lexxy 0.9.32 browser component as Fizzy for draft editing and on its published card page. Browser checks confirmed formatted text and `@` mentions survive draft save/reload, `#` card references insert and survive reload, and published card edit, comment, pin, and completion controls work. The Rust HTML design and interaction details are still much simpler than Fizzy's; board and card views are not visually equivalent, and cookie writes do not yet implement Fizzy's CSRF protection.
 
 `tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. `tests/embed_parity.py` compares uploaded image and plain-file embeds in card descriptions and comments, placeholder handling, attachment status, normalized rendered HTML, private/public blob access, download disposition, preview generation, and cleanup after card, comment, and board deletion. Fizzy's signed URL and representation token formats are not reproduced; image preview bytes also differ from its libvips encoding. Remote embeds, media-specific rendering, and the original browser upload controls remain incomplete.
 

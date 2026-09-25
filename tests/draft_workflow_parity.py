@@ -75,6 +75,9 @@ def run(target):
         number = new_draft()
         status, _, html = request(target, f"/{account}/cards/{number}/draft", accept="text/html")
         assert status == 200 and b"card-perma--draft" in html, (status, html[:100])
+        assert b"<lexxy-editor" in html and b'trigger="@"' in html and b'trigger="#"' in html, html[:300]
+        assert f'/{account}/prompts/boards/{board["id"]}/users'.encode() in html
+        assert f'/{account}/prompts/cards'.encode() in html
         status, _, _ = request(target, f"/{account}/cards/{number}/draft.json", bearer=True)
         assert status == 406, status
         status, headers, _ = request(target, f"/{account}/cards/{number}.json", bearer=True)
@@ -87,6 +90,8 @@ def run(target):
         }, bearer=True)
         card = json.loads(raw)
         assert status == 200 and card["status"] == "drafted" and card["title"] == title, (status, card)
+        status, _, html = request(target, f"/{account}/cards/{number}/draft", accept="text/html")
+        assert status == 200 and b'Draft parity body' in html and b'value="' in html, (status, html[:300])
         status, _, raw = request(target, f"/{account}/search.json?q={title}", bearer=True)
         assert status == 200 and all(item["number"] != int(number) for item in json.loads(raw)), raw[:200]
         status, _, raw = request(target, f"/{account}/activities.json?board_ids%5B%5D={board['id']}", bearer=True)
@@ -102,6 +107,15 @@ def run(target):
         status, _, raw = request(target, f"/{account}/activities.json?board_ids%5B%5D={board['id']}", bearer=True)
         activities = json.loads(raw)
         assert status == 200 and len(activities) == 1 and activities[0]["action"] == "card_published", (status, activities)
+        comment_text = f"Comment parity {time.time_ns()}"
+        status, _, _ = request(target, f"/{account}/cards/{number}/comments.json", "POST", {
+            "comment": {"body": comment_text}
+        }, bearer=True)
+        assert status == 201, status
+        status, _, html = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200 and b"card-perma" in html and b"card__title" in html, (status, html[:300])
+        assert title.encode() in html and b"Draft parity body" in html and comment_text.encode() in html
+        assert board["name"].encode() in html
         status, headers, _ = request(target, f"/{account}/cards/{number}/draft", accept="text/html")
         assert status == 302 and urllib.parse.urlparse(headers["Location"]).path.endswith(f"/cards/{number}")
         status, _, raw = request(target, f"/{account}/cards/{number}.json", "PATCH", {"card": {"title": "", "status": "drafted"}}, bearer=True)
@@ -118,7 +132,7 @@ def run(target):
         assert status == 200 and json.loads(raw)["title"] == "Untitled", raw[:150]
         return {"draft_reused": True, "draft_json_status": 406, "publish_status": 201,
                 "add_another": True, "published_title_matches": card["title"] == title, "search_after_publish": True,
-                "activity_after_publish": True, "empty_title_default": True, "published_status_immutable": True}
+                "activity_after_publish": True, "server_card_html": True, "empty_title_default": True, "published_status_immutable": True}
     finally:
         status, _, _ = request(target, board_path, "DELETE", bearer=True)
         assert status == 204, status

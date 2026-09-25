@@ -30,6 +30,7 @@ use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
 mod account_transfer;
 mod board_views;
+mod card_page;
 mod exports;
 mod imports;
 mod rich_text;
@@ -1531,6 +1532,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/my/identity", get(my_identity))
         .route("/assets/system_user.png", get(storage::system_avatar))
+        .route("/assets/lexxy/{filename}", get(lexxy_asset))
         .route(
             "/{account}/rails/active_storage/direct_uploads",
             post(storage::direct_upload),
@@ -2518,6 +2520,40 @@ fn config_response(body: &'static str) -> Response {
         body,
     )
         .into_response()
+}
+async fn lexxy_asset(Path(filename): Path<String>) -> Result<Response> {
+    let (content_type, body): (&str, &'static [u8]) = match filename.as_str() {
+        "lexxy.js" => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("../static/lexxy/lexxy.js"),
+        ),
+        "lexxy.css" => (
+            "text/css; charset=utf-8",
+            include_bytes!("../static/lexxy/lexxy.css"),
+        ),
+        "lexxy-content.css" => (
+            "text/css; charset=utf-8",
+            include_bytes!("../static/lexxy/lexxy-content.css"),
+        ),
+        "lexxy-editor.css" => (
+            "text/css; charset=utf-8",
+            include_bytes!("../static/lexxy/lexxy-editor.css"),
+        ),
+        "lexxy-variables.css" => (
+            "text/css; charset=utf-8",
+            include_bytes!("../static/lexxy/lexxy-variables.css"),
+        ),
+        "rizzy-dark.css" => (
+            "text/css; charset=utf-8",
+            include_bytes!("../static/lexxy/rizzy-dark.css"),
+        ),
+        _ => return Err(missing()),
+    };
+    Ok((
+        [(header::CONTENT_TYPE, content_type)],
+        Bytes::from_static(body),
+    )
+        .into_response())
 }
 async fn android_config() -> Response {
     config_response(include_str!(
@@ -5678,7 +5714,7 @@ async fn show_card(
             .into_response());
     }
     if !headers.contains_key("x-rizzy-json-request") {
-        return Ok(Html(include_str!("../static/index.html")).into_response());
+        return Ok(card_page::show(&app, &p, &c).await?.into_response());
     }
     Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
 }
@@ -5846,7 +5882,7 @@ async fn show_draft(
             .into_response());
     }
     let title = escape(&c.get::<String, _>("title"));
-    let description = escape(&c.get::<String, _>("description"));
+    let description = c.get::<String, _>("description");
     let board_id: String = c.get("board_id");
     let board_name = escape(&board(&app, &p, &board_id).await?.get::<String, _>("name"));
     let creator_name: String = sqlx::query_scalar("SELECT name FROM users WHERE id=?")
@@ -5858,6 +5894,7 @@ async fn show_draft(
     let html = format!(
         r##"<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>New card | Rizzy</title>
+<link rel="stylesheet" href="/assets/lexxy/lexxy.css"><link rel="stylesheet" href="/assets/lexxy/rizzy-dark.css"><script type="module" src="/assets/lexxy/lexxy.js"></script>
 <style>
 :root{{font:16px/1.5 system-ui,sans-serif;background:#1b1b1b;color:#f5f0e8}}
 *{{box-sizing:border-box}}body{{margin:0}}a{{color:inherit}}button,textarea{{font:inherit}}
@@ -5872,7 +5909,9 @@ nav a{{color:#d6c9b5;text-decoration:none;font-weight:650}}nav a:hover{{text-dec
 .card-body{{padding:24px 28px 28px}}label{{display:block;color:#bdb7ac;font-size:14px;font-weight:600;margin:0 0 22px}}
 textarea{{display:block;resize:vertical;width:100%;margin-top:8px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px;outline:none}}
 textarea:focus{{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}}
-#title{{min-height:58px;font-size:25px;font-weight:750;line-height:1.3}}#description{{min-height:180px}}
+#title{{min-height:58px;font-size:25px;font-weight:750;line-height:1.3}}
+lexxy-editor{{display:block;min-height:180px;margin-top:8px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px}}
+lexxy-editor:focus-within{{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}}
 .card-foot{{padding:18px 28px;background:#242320;border-top:1px solid #45433e;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}}
 .byline{{color:#afa89d;font-size:14px}}.actions{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
 button{{border:1px solid #d5a94c;background:#e7bd61;color:#201b12;border-radius:9px;padding:9px 15px;font-weight:700;cursor:pointer}}
@@ -5883,24 +5922,44 @@ form{{display:inline}}@media(max-width:600px){{main{{margin-top:22px}}.card-body
 <main id="main"><nav><a href="/{account}/boards/{board_id}">← Back to {board_name}</a></nav>
 <article class="card-perma card-perma--draft"><div class="card-head">Card number {number}<strong>{board_name}</strong></div>
 <div class="card-body"><label>Name it<textarea id="title" maxlength="255" placeholder="Name it…">{title}</textarea></label>
-<label>Add some notes, context, pictures, or video<textarea id="description" placeholder="Add some notes, context, pictures, or video about this…">{description}</textarea></label></div>
+<label for="description">Add some notes, context, pictures, or video</label>
+<lexxy-editor id="description" name="card[description]" value="{description_value}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename">
+<lexxy-prompt trigger="@" src="/{account}/prompts/boards/{board_id}/users" name="mention"></lexxy-prompt>
+<lexxy-prompt trigger="#" src="/{account}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt>
+</lexxy-editor></div>
 <div class="card-foot"><span class="byline">Drafted · By {creator_name}</span><div class="actions">
 <button id="save" type="button" class="secondary">Save draft</button>
 <form action="/{account}/cards/{number}/publish" method="post"><button type="submit">Create card</button></form>
 <form action="/{account}/cards/{number}/publish" method="post"><input type="hidden" name="creation_type" value="add_another"><button type="submit" class="secondary">Create and add another</button></form>
 </div></div></article></main>
 <script>
-async function saveDraft() {{
-  const response = await fetch('/{account}/cards/{number}', {{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{card:{{title:document.getElementById('title').value,description:document.getElementById('description').value}}}})}});
-  if (!response.ok) {{ alert('Could not save draft'); return false; }}
-  return true;
+const editor = document.getElementById('description');
+let saveTimer;
+let saving = Promise.resolve(true);
+function saveDraft() {{
+  clearTimeout(saveTimer);
+  const body = JSON.stringify({{card:{{title:document.getElementById('title').value,description:editor.value}}}});
+  saving = saving.catch(() => false).then(async () => {{
+    try {{
+      const response = await fetch('/{account}/cards/{number}', {{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body}});
+      if (!response.ok) throw new Error('Could not save draft');
+      return true;
+    }} catch (error) {{ alert(error.message); return false; }}
+  }});
+  return saving;
 }}
+function scheduleSave() {{ clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 3000); }}
+document.getElementById('title').addEventListener('input', scheduleSave);
+document.getElementById('title').addEventListener('blur', saveDraft);
+editor.addEventListener('lexxy:change', scheduleSave);
+editor.addEventListener('focusout', saveDraft);
 document.getElementById('save').onclick = saveDraft;
 document.querySelectorAll('form').forEach(form => form.addEventListener('submit', async event => {{
   event.preventDefault();
   if (await saveDraft()) form.submit();
 }}));
-</script></body></html>"##
+</script></body></html>"##,
+        description_value = escape(&description)
     );
     Ok(Html(html).into_response())
 }
