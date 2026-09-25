@@ -28,6 +28,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
+mod account_cancellation;
 mod account_settings;
 mod account_transfer;
 mod board_page;
@@ -388,9 +389,16 @@ impl Principal {
 async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Principal> {
     let slug: i64 = slug.parse().map_err(|_| missing())?;
     let (identity_id, permission) = identity_auth(app, headers).await?;
-    let r = sqlx::query("SELECT a.id account_id,u.id user_id,u.role FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
+    let r = sqlx::query("SELECT a.id account_id,u.id user_id,u.role,EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) cancelled FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
         .bind(identity_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED,"Invalid token or account"))?;
+    if r.get::<i64, _>("cancelled") != 0 {
+        return Err(if headers.contains_key("x-rizzy-json-request") {
+            err(StatusCode::FORBIDDEN, "Account access required")
+        } else {
+            ApiError(StatusCode::FOUND, "/session/menu".into())
+        });
+    }
     Ok(Principal {
         account_id: r.get("account_id"),
         user_id: r.get("user_id"),
@@ -1491,6 +1499,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(exports::worker(app.clone()));
     tokio::spawn(imports::worker(app.clone()));
     let maintenance_db = app.db.clone();
+    let maintenance_app = app.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
         loop {
@@ -1525,6 +1534,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     eprintln!("authentication cleanup failed: {error}");
                 }
             }
+            if let Err(error) = account_cancellation::incinerate_due(&maintenance_app).await {
+                eprintln!("account incineration failed: {error}");
+            }
         }
     });
     let routes = Router::new()
@@ -1539,6 +1551,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/client_configurations/ios_v1.json", get(ios_config))
         .route("/session", post(request_magic_link).delete(logout_session))
         .route("/session/new", get(new_session))
+        .route("/session/menu", get(account_cancellation::menu))
         .route("/session/magic_link", get(show_magic_link).post(complete_magic_link))
         .route("/signup", post(request_signup))
         .route("/signup/completion", post(complete_signup))
@@ -1627,6 +1640,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/account/settings",
             get(show_account).post(update_account).put(update_account).patch(update_account),
         )
+        .route("/{account}/account/cancellation", post(account_cancellation::create))
         .route(
             "/{account}/account/entropy",
             post(update_account_entropy).put(update_account_entropy).patch(update_account_entropy),
@@ -2694,7 +2708,7 @@ async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
     let mut parts = uri.path().trim_start_matches('/').split('/');
     if let Ok(slug) = parts.next().unwrap_or("").parse::<i64>() {
         if parts.next() == Some("my") {
-            let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
+            let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1 AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id)")
                 .bind(identity_id).bind(slug).fetch_one(&app.db).await.map_err(db_err)?;
             if count == 0 {
                 return Err(err(StatusCode::FORBIDDEN, "Account access required"));
@@ -2779,7 +2793,7 @@ async fn my_identity(
 ) -> Result<Json<Value>> {
     let (identity_id, _) = identity_auth(&app, &headers).await?;
     check_my_scope(&app, &identity_id, &uri).await?;
-    let rows=sqlx::query("SELECT a.id account_id,a.external_account_id,a.name,a.created_at,u.id user_id,u.role FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=? AND u.active=1 AND u.role!='system' ORDER BY a.created_at")
+    let rows=sqlx::query("SELECT a.id account_id,a.external_account_id,a.name,a.created_at,u.id user_id,u.role FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=? AND u.active=1 AND u.role!='system' AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) ORDER BY a.created_at")
         .bind(&identity_id).fetch_all(&app.db).await.map_err(db_err)?;
     let host = base(&headers);
     let mut accounts = Vec::new();

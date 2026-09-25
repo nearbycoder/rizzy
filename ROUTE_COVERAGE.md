@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 166. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 168. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -13,7 +13,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `cards` | 8 | 6 |
 | `my/access_tokens` | 5 | 3 |
 | `webhooks` | 8 | 6 |
-| `account/cancellations` | 1 | 0 |
 | `cards/assignments` | 2 | 1 |
 | `cards/boards` | 3 | 2 |
 | `cards/columns` | 1 | 0 |
@@ -30,11 +29,11 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `my/passkey_challenges` | 1 | 0 |
 | `pwa` | 1 | 0 |
 | `qr_codes` | 1 | 0 |
-| `sessions/menus` | 1 | 0 |
 | `sessions/passkeys` | 1 | 0 |
 | `signups` | 2 | 1 |
 | `signups/completions` | 2 | 1 |
 | `transfer_tokens` | 1 | 0 |
+| `account/cancellations` | 1 | 1 |
 | `account/entropies` | 2 | 2 |
 | `account/exports` | 2 | 2 |
 | `account/imports` | 3 | 3 |
@@ -93,6 +92,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `searches` | 1 | 1 |
 | `sessions` | 3 | 3 |
 | `sessions/magic_links` | 2 | 2 |
+| `sessions/menus` | 1 | 1 |
 | `tags` | 1 | 1 |
 | `users` | 6 | 6 |
 | `users/avatars` | 2 | 2 |

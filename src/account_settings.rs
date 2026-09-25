@@ -1,6 +1,6 @@
 use axum::response::Html;
 use sqlx::Row;
-use std::collections::HashMap;
+use std::{collections::HashMap, env};
 
 use super::{App, Principal, Result, card_page::render_template, db_err, escape};
 
@@ -70,8 +70,18 @@ pub(super) async fn show(app: &App, p: &Principal, error: Option<&str>) -> Resul
     } else {
         String::new()
     };
+    let cancellation = if p.role == "owner" && env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1")
+    {
+        format!(
+            "<section class=\"section section--negative\"><h2>Danger zone</h2><p>Delete your account and everything in it, including all boards and cards.</p><button type=\"button\" id=\"begin-cancellation\">Delete account...</button><dialog id=\"cancellation-dialog\"><h2>Delete account</h2><h3>What happens next:</h3><ul><li>Your <strong>{}</strong> account will be closed immediately.</li><li>All users, including you, will lose access.</li><li>All your data will be permanently deleted within 30 days.</li></ul><h3>Remember to export your data</h3><p>Export your data before you go. You won’t be able to do it after you delete your account.</p><label><input id=\"confirm-cancellation\" type=\"checkbox\"> I’ve read the above and want to continue</label><form method=\"post\" action=\"/{}/account/cancellation\"><button type=\"button\" id=\"cancel-cancellation\">Not now</button><button type=\"submit\" id=\"submit-cancellation\" disabled>Delete my account</button></form></dialog></section>",
+            escape(&name),
+            p.slug
+        )
+    } else {
+        String::new()
+    };
     let content = format!(
-        "<h1>Account Settings</h1>{admin_note}<div class=\"settings\"><div class=\"panel\"><section class=\"section section--name\">{name_error}<form method=\"post\" action=\"/{}/account/settings\"><input type=\"hidden\" name=\"_method\" value=\"put\"><input class=\"account-name\" type=\"text\" name=\"account[name]\" value=\"{}\" placeholder=\"Account name…\" required{readonly}>{save}</form></section><section class=\"section\"><h2>People on this account</h2><input id=\"people-filter\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter people\"><ul class=\"people\" role=\"listbox\">{people_html}</ul><a class=\"invite\" href=\"/{}/account/join_code\">＋ Invite people</a></section></div><div class=\"panel\"><section class=\"section\"><h2>Auto close</h2><p>Rizzy doesn’t let stale cards stick around forever. Cards automatically move to “Not Now” if there is no activity for a specific period of time. <em>This is the default, global setting — you can override it on each board.</em></p><form id=\"entropy-form\" method=\"post\" action=\"/{}/account/entropy\"><input type=\"hidden\" name=\"_method\" value=\"put\"><div class=\"entropy-options\" role=\"radiogroup\" aria-label=\"Days until auto-close\">{options}</div><div class=\"days-label\">Days until auto-close</div></form></section>{export}</div></div>",
+        "<h1>Account Settings</h1>{admin_note}<div class=\"settings\"><div class=\"panel\"><section class=\"section section--name\">{name_error}<form method=\"post\" action=\"/{}/account/settings\"><input type=\"hidden\" name=\"_method\" value=\"put\"><input class=\"account-name\" type=\"text\" name=\"account[name]\" value=\"{}\" placeholder=\"Account name…\" required{readonly}>{save}</form></section><section class=\"section\"><h2>People on this account</h2><input id=\"people-filter\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter people\"><ul class=\"people\" role=\"listbox\">{people_html}</ul><a class=\"invite\" href=\"/{}/account/join_code\">＋ Invite people</a></section></div><div class=\"panel\"><section class=\"section\"><h2>Auto close</h2><p>Rizzy doesn’t let stale cards stick around forever. Cards automatically move to “Not Now” if there is no activity for a specific period of time. <em>This is the default, global setting — you can override it on each board.</em></p><form id=\"entropy-form\" method=\"post\" action=\"/{}/account/entropy\"><input type=\"hidden\" name=\"_method\" value=\"put\"><div class=\"entropy-options\" role=\"radiogroup\" aria-label=\"Days until auto-close\">{options}</div><div class=\"days-label\">Days until auto-close</div></form></section>{export}{cancellation}</div></div>",
         p.slug,
         escape(&name),
         p.slug,

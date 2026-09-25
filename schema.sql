@@ -7,6 +7,14 @@ CREATE TABLE IF NOT EXISTS accounts (
   auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_cancellations (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+  initiated_by_id TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS account_cancellations_due ON account_cancellations(created_at);
 CREATE TABLE IF NOT EXISTS account_join_codes (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,

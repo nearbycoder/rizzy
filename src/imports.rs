@@ -17,7 +17,7 @@ fn import_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("data/imports"))
 }
 
-fn import_path(import_id: &str) -> PathBuf {
+pub(crate) fn import_path(import_id: &str) -> PathBuf {
     import_dir().join(format!("{import_id}.zip"))
 }
 
