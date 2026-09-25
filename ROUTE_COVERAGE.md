@@ -2,7 +2,7 @@
 
 Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
-The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 156. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
+The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 158. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
@@ -10,7 +10,6 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `notifications/unsubscribes` | 3 | 0 |
 | `sessions/transfers` | 3 | 0 |
 | `users/push_subscriptions` | 3 | 0 |
-| `boards` | 8 | 6 |
 | `cards` | 8 | 6 |
 | `my/access_tokens` | 5 | 3 |
 | `webhooks` | 8 | 6 |
@@ -49,6 +48,7 @@ The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application rout
 | `account/imports` | 3 | 3 |
 | `account/settings` | 3 | 3 |
 | `activities` | 1 | 1 |
+| `boards` | 8 | 8 |
 | `boards/accesses` | 1 | 1 |
 | `boards/columns` | 6 | 6 |
 | `boards/columns/cards` | 1 | 1 |

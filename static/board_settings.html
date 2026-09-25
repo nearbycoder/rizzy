@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{TITLE}} | Rizzy</title>
+<style>
+:root{font:16px/1.5 system-ui,sans-serif;color:#f5f0e8;background:#1b1b1b}*{box-sizing:border-box}body{margin:0}a{color:#e7bd61}button,input,textarea{font:inherit}button{cursor:pointer}.site{padding:18px max(20px,4vw);border-bottom:1px solid #383735;display:flex;gap:22px;align-items:center}.site strong{font-size:26px;letter-spacing:-.05em}.page{max-width:850px;margin:0 auto;padding:30px 20px 80px}h1{margin:0 0 24px;font-size:clamp(28px,4vw,40px)}h2{margin:0 0 12px;font-size:21px}.panel{background:#292826;border:1px solid #46433d;border-radius:16px;padding:22px;margin:18px 0}.stack{display:grid;gap:18px}.field{display:grid;gap:7px}.field>span{font-weight:700}input[type=text],textarea{width:100%;padding:11px 12px;color:#f5f0e8;background:#34322f;border:1px solid #666158;border-radius:8px}textarea{min-height:110px;resize:vertical}.button{border:1px solid #d5a94c;background:#e7bd61;color:#201b12;border-radius:9px;padding:9px 15px;font-weight:700}.button--secondary{border-color:#666158;background:#393733;color:#f6f0e8}.button--danger{border-color:#be655d;background:#5c2b28;color:#fff}.button:disabled{opacity:.45;cursor:not-allowed}.person{display:flex;gap:12px;align-items:center;padding:9px 0;border-top:1px solid #45423c}.person small{display:block;color:#afa89d}.person input{width:19px;height:19px}.options{display:flex;flex-wrap:wrap;gap:12px}.options label{display:flex;gap:6px;align-items:center;padding:8px;border:1px solid #57534d;border-radius:8px}.muted{color:#afa89d}.actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.error{color:#ffae9d}
+</style></head>
+<body data-board-path="{{BOARD_PATH}}"><header class="site"><strong>Rizzy</strong><a href="{{HOME_PATH}}">All boards</a>{{BOARD_LINK}}</header><main class="page">{{CONTENT}}</main>
+<script>
+const boardPath=document.body.dataset.boardPath;
+document.querySelectorAll('input[name="board[auto_postpone_period_in_days]"]').forEach(input=>input.addEventListener('change',async()=>{
+  if(!boardPath)return;
+  const response=await fetch(`${boardPath}/entropy`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({board:{auto_postpone_period_in_days:Number(input.value)}})});
+  if(!response.ok)alert('Could not change auto close period');
+}));
+document.getElementById('publication-toggle')?.addEventListener('change',async event=>{
+  const response=await fetch(`${boardPath}/publication`,{method:event.target.checked?'POST':'DELETE',headers:{Accept:'application/json'}});
+  if(response.ok)location.reload();else{event.target.checked=!event.target.checked;alert('Could not change public link')}
+});
+document.getElementById('delete-board')?.addEventListener('click',async()=>{
+  if(!confirm('Delete this board and all its cards? This cannot be undone.'))return;
+  const response=await fetch(boardPath,{method:'DELETE',headers:{Accept:'application/json'}});
+  if(response.ok)location.href=`/${boardPath.split('/')[1]}/`;else alert('Could not delete board');
+});
+document.getElementById('settings-form')?.addEventListener('submit',event=>{
+  const me=document.getElementById('current-user-access'),everyone=document.getElementById('board-all-access');
+  if(me&&!me.checked&&!everyone.checked&&!confirm('Remove yourself from this board? You will need an invitation to regain access.'))event.preventDefault();
+});
+</script></body></html>

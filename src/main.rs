@@ -2,7 +2,7 @@ use axum::{
     Json, Router, ServiceExt,
     body::{Body, Bytes},
     extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -30,6 +30,7 @@ use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
 mod account_transfer;
 mod board_page;
+mod board_settings;
 mod board_views;
 mod card_page;
 mod exports;
@@ -1513,6 +1514,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
         .route("/", get(home))
+        .route("/{account}/", get(account_home))
         .route(
             "/client_configurations/android_v1.json",
             get(android_config),
@@ -1654,6 +1656,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(show_email_change_confirmation).post(confirm_email_change),
         )
         .route("/{account}/boards", get(list_boards).post(create_board))
+        .route("/{account}/boards/new", get(board_settings::new))
+        .route("/{account}/boards/{id}/edit", get(board_settings::edit))
         .route("/{account}/boards/{id}/accesses", get(list_board_accesses))
         .route(
             "/{account}/boards/{id}/involvement",
@@ -1710,6 +1714,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/boards/{id}",
             get(show_board)
+                .post(update_board)
                 .put(update_board)
                 .patch(update_board)
                 .delete(delete_board),
@@ -4058,12 +4063,62 @@ async fn list_webhook_deliveries(
     }
     Ok(paginated(json!(out), total, page, &uri, &headers))
 }
+fn board_body(headers: &HeaderMap, body: &Bytes) -> Result<(Value, bool)> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    if !form {
+        return Ok((
+            serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))?,
+            false,
+        ));
+    }
+    let mut fields = serde_json::Map::new();
+    let mut board = serde_json::Map::new();
+    let mut users = Vec::new();
+    for (key, value) in url::form_urlencoded::parse(body) {
+        match key.as_ref() {
+            "board[name]" | "board[public_description]" => {
+                board.insert(
+                    key.trim_start_matches("board[")
+                        .trim_end_matches(']')
+                        .to_owned(),
+                    json!(value.into_owned()),
+                );
+            }
+            "board[all_access]" => {
+                board.insert(
+                    "all_access".into(),
+                    json!(matches!(value.as_ref(), "1" | "true" | "on")),
+                );
+            }
+            "board[auto_postpone_period_in_days]" => {
+                if let Ok(days) = value.parse::<i64>() {
+                    board.insert("auto_postpone_period_in_days".into(), json!(days));
+                }
+            }
+            "user_ids[]" => users.push(json!(value.into_owned())),
+            "_method" => {
+                fields.insert("_method".into(), json!(value.into_owned()));
+            }
+            _ => {}
+        }
+    }
+    fields.insert("board".into(), Value::Object(board));
+    if !users.is_empty() {
+        fields.insert("user_ids".into(), Value::Array(users));
+    }
+    Ok((Value::Object(fields), true))
+}
 async fn create_board(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
+    let (body, form) = board_body(&headers, &body)?;
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let v = nested(&body, "board");
@@ -4097,6 +4152,13 @@ async fn create_board(
     }
     tx.commit().await.map_err(db_err)?;
     let r = board(&app, &p, &id).await?;
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/boards/{id}"))],
+        )
+            .into_response());
+    }
     Ok(created(
         format!("/{account}/boards/{id}.json"),
         board_detail(&app, &p, &r, &base(&headers)).await?,
@@ -4106,8 +4168,15 @@ async fn update_board(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    method: Method,
+    body: Bytes,
 ) -> Result<Response> {
+    let (body, form) = board_body(&headers, &body)?;
+    if method == Method::POST
+        && (!form || body.get("_method").and_then(Value::as_str) != Some("patch"))
+    {
+        return Err(missing());
+    }
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let b = board(&app, &p, &id).await?;
@@ -4185,10 +4254,25 @@ async fn update_board(
                 .await
                 .map_err(db_err)?;
         if has_access == 0 {
-            return Ok(StatusCode::NO_CONTENT.into_response());
+            return Ok(if form {
+                (
+                    StatusCode::FOUND,
+                    [(header::LOCATION, format!("/{account}/"))],
+                )
+                    .into_response()
+            } else {
+                StatusCode::NO_CONTENT.into_response()
+            });
         }
     }
     let r = board(&app, &p, &id).await?;
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/boards/{id}/edit"))],
+        )
+            .into_response());
+    }
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
 }
 async fn update_board_entropy(
@@ -4215,7 +4299,7 @@ async fn delete_board(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let b = board(&app, &p, &id).await?;
@@ -4230,7 +4314,15 @@ async fn delete_board(
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if headers.contains_key("x-rizzy-json-request") {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/"))],
+        )
+            .into_response()
+    })
 }
 fn publication_key() -> String {
     const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -7513,4 +7605,12 @@ async fn delete_comment_reaction(
 
 async fn home() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../static/index.html"))
+}
+async fn account_home(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Html<&'static str>> {
+    principal(&app, &headers, &account).await?;
+    Ok(Html(include_str!("../static/index.html")))
 }

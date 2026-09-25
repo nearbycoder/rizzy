@@ -16,11 +16,13 @@ button { font: inherit; cursor: pointer }
 .site__back { color: #d6c9b5; font-weight: 650; text-decoration: none }
 .board { padding: 22px max(20px,4vw) 60px }
 .board__header { display: flex; align-items: center; justify-content: space-between; gap: 16px }
+.board__actions { display:flex;align-items:center;gap:10px }
 h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 .button { border: 1px solid #d5a94c; background: #e7bd61; color: #201b12; border-radius: 9px; padding: 9px 15px; font-weight: 700 }
 .button:hover { background: #f0ca77 }
 .button--secondary { border-color: #666158; background: #393733; color: #f6f0e8 }
 .button--secondary:hover { background: #4a463f }
+.board__actions a { text-decoration:none }
 .card-columns { display: flex; align-items: flex-start; gap: 16px; overflow-x: auto; padding: 24px 0 40px }
 .cards { flex: 0 0 290px; min-height: 200px; background: #292826; border: 1px solid #46433d; border-radius: 16px; padding: 14px }
 .cards--drop-target { border-color: #e7bd61; box-shadow: inset 0 0 0 2px #e7bd61 }
@@ -51,9 +53,9 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 </head>
 <body data-account="{{ACCOUNT}}" data-board="{{BOARD_ID}}">
 <a class="skip" href="#main">Skip to main content</a>
-<header class="site"><a class="site__brand" href="/">Rizzy</a><a class="site__back" href="/">All boards</a></header>
+<header class="site"><a class="site__brand" href="{{HOME_PATH}}">Rizzy</a><a class="site__back" href="{{HOME_PATH}}">All boards</a></header>
 <main class="board" id="main">
-  <div class="board__header"><h1>{{BOARD_NAME}}</h1>{{ADD_COLUMN}}</div>
+  <div class="board__header"><h1>{{BOARD_NAME}}</h1><div class="board__actions">{{SETTINGS_LINK}}{{ADD_COLUMN}}</div></div>
   {{FILTER_FORM}}
   {{COLUMNS}}
 </main>

@@ -482,14 +482,14 @@
       "path": "/boards/new(.:format)",
       "controller": "boards",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
       "path": "/boards/:id/edit(.:format)",
       "controller": "boards",
       "action": "edit",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -1476,6 +1476,10 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/"
+    },
+    {
+      "method": "GET",
       "path": "/client_configurations/android_v1.json"
     },
     {
@@ -1756,6 +1760,14 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/boards/new"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/boards/{id}/edit"
+    },
+    {
+      "method": "GET",
       "path": "/{account}/boards/{id}/accesses"
     },
     {
@@ -1840,6 +1852,10 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/boards/{id}"
+    },
+    {
+      "method": "POST",
       "path": "/{account}/boards/{id}"
     },
     {

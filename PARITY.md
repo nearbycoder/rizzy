@@ -5,7 +5,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Area | Initial implementation | Full parity |
 | --- | --- | --- |
 | Account scoped routing, bearer tokens, identity, user listing and settings | ✓ | No |
-| Boards CRUD and access control | CRUD, access records, and involvement | No |
+| Boards CRUD and access control | JSON CRUD, browser new/edit forms, access records, and involvement | No |
 | Columns CRUD and card listings | Named and special board column listings, position swaps, and public pages | No |
 | Cards CRUD and card numbering | JSON CRUD, browser draft creation/resumption and publication, explicit timestamps, and account numbering | No |
 | Closure, triage, postpone, gold, board move | ✓ | No |
@@ -43,6 +43,8 @@ The local `tests/parity.py` scenario currently passes 142 comparisons against th
 The private board HTML now renders Maybe, named, Not Now, and Done columns in Rust with counts. It includes the first 15 Maybe cards in the initial response and fetches the other columns when they enter view. It offers direct card links, draft creation, named-column creation, further pages, and native browser drag and drop. Four Fizzy-compatible drop POST routes return a Turbo Stream for the destination column; `tests/board_drop_parity.py` compares their state changes and response target with live Fizzy. A browser drag between Maybe and Not Now worked in both directions without console errors. The board still lacks Fizzy's full Turbo frame behavior, complete filter controls, keyboard drag handling, and visual design. A synthetic 30,000-card [query probe](bench/results/board-column-index-2026-09-25.json) justified a named-column index, confirmed that existing databases add it on startup, and compared initial-response queries before and after lazy loading; it is not an end-to-end scale result.
 
 The board HTML now switches to a filtered grid when Fizzy's filter-active conditions apply. It uses the same SQL filter builder as Rizzy's card API, forces the current board scope, and paginates results. Its form exposes text, status, and sort controls while preserving other active filter fields on submission. `tests/board_filter_html_parity.py` compared unfiltered columns, explicit defaults, Done and Not Now, text search across two pages, oldest sort, and empty results with live Fizzy. Chromium checks exercised search, Done, and page navigation without console errors. Fizzy's full filter picker controls, saved-filter UI, and card preview markup remain incomplete.
+
+`tests/board_settings_html_parity.py` compares Fizzy and Rizzy's New Board and Board Settings pages, form creation, name/access/entropy update, redirect paths, and HTML deletion. The browser flow also exercised rename, private access, 11-day auto-close, and public-link publication. The settings layout and rich-text description editor are still simplified; Fizzy's full board access controls and CSRF enforcement remain incomplete. JSON board creation/deletion and column view checks passed after the HTML handlers were added.
 
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified and passkey sign-in is still absent. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 

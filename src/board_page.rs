@@ -155,6 +155,15 @@ pub(super) async fn show_filtered(
         ("ACCOUNT", principal.slug.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
+        ("HOME_PATH", format!("/{}/", principal.slug)),
+        (
+            "SETTINGS_LINK",
+            format!(
+                "<a class=\"button button--secondary\" href=\"/{}/boards/{}/edit\">Settings</a>",
+                principal.slug,
+                escape(&board_id)
+            ),
+        ),
         ("ADD_COLUMN", String::new()),
         ("FILTER_FORM", filter_form(principal.slug, &board_id, query)),
         ("COLUMNS", list),
@@ -417,6 +426,8 @@ pub(super) async fn show(
         ("ACCOUNT", account.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
+        ("HOME_PATH", format!("/{account}/")),
+        ("SETTINGS_LINK", format!("<a class=\"button button--secondary\" href=\"/{account}/boards/{}/edit\">Settings</a>",escape(&board_id))),
         ("ADD_COLUMN", "<button class=\"button button--secondary\" id=\"add-column\" type=\"button\">Add column</button>".to_owned()),
         ("FILTER_FORM", filter_form(account, &board_id, &CardQuery::default())),
         ("COLUMNS", column_markup),

@@ -11,7 +11,7 @@
 <dialog id="detail"><button style="float:right" onclick="document.querySelector('#detail').close()">Close</button><div id="detail-body"></div></dialog>
 <script>
 const app=document.querySelector('#app'); const dlg=document.querySelector('#detail');
-let slug=localStorage.getItem('rizzyAccount')||'';let token=localStorage.getItem('rizzyToken')||'';
+let slug=location.pathname.match(/^\/(\d+)\/$/)?.[1]||localStorage.getItem('rizzyAccount')||'';let token=localStorage.getItem('rizzyToken')||'';
 let currentBoard=null;
 let deepLinkBoard=location.pathname.match(/^\/\d+\/boards\/([^/]+)$/)?.[1]||null;
 let deepLinkCard=location.pathname.match(/^\/\d+\/cards\/(\d+)$/)?.[1]||null;
@@ -29,7 +29,7 @@ async function boards(){
   try{
     const data=await allPages('/boards');
     document.querySelector('#logout').style.display='block';
-    app.replaceChildren(node('div',{class:'top'},[node('h1',{text:'Boards'}),node('button',{text:'New board',onclick:async()=>{const name=prompt('Board name');if(name){try{await api('/boards','POST',{board:{name}});boards()}catch(e){error(e)}}}})]),node('div',{class:'boards'},data.map(b=>node('div',{class:'boardlink',text:b.name,onclick:()=>openBoard(b)}))));
+    app.replaceChildren(node('div',{class:'top'},[node('h1',{text:'Boards'}),node('button',{text:'New board',onclick:async()=>{if(!token){location.href=`/${slug}/boards/new`;return}const name=prompt('Board name');if(name){try{await api('/boards','POST',{board:{name}});boards()}catch(e){error(e)}}}})]),node('div',{class:'boards'},data.map(b=>node('div',{class:'boardlink',text:b.name,onclick:()=>{if(token)openBoard(b);else location.href=`/${slug}/boards/${b.id}`}}))));
     if(deepLinkBoard){
       const board=data.find(b=>b.id===deepLinkBoard);
       deepLinkBoard=null;
