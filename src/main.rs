@@ -7922,7 +7922,8 @@ async fn set_card_reading(
     p: &Principal,
     number: &str,
     read: bool,
-) -> Result<StatusCode> {
+    headers: &HeaderMap,
+) -> Result<Response> {
     p.write()?;
     let card = card(app, p, number).await?;
     let card_id: String = card.get("id");
@@ -7931,6 +7932,15 @@ async fn set_card_reading(
     let cutoff = (Utc::now() - chrono::Duration::minutes(5))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    let notification_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM notifications WHERE card_id=? AND user_id=? AND account_id=?",
+    )
+    .bind(&card_id)
+    .bind(&p.user_id)
+    .bind(&p.account_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_err)?;
     if read {
         sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE card_id=? AND user_id=? AND account_id=?")
             .bind(&timestamp).bind(&timestamp).bind(&card_id).bind(&p.user_id).bind(&p.account_id)
@@ -7952,27 +7962,57 @@ async fn set_card_reading(
             .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
+    if wants_turbo_stream(headers) {
+        if !read {
+            return Ok((
+                StatusCode::NO_CONTENT,
+                [(header::CONTENT_TYPE, "text/plain")],
+            )
+                .into_response());
+        }
+        let stream = notification_id.map_or_else(
+            || "\n".to_string(),
+            |id| {
+                format!(
+                    "<turbo-stream action=\"remove\" target=\"notification_{}\"></turbo-stream>\n",
+                    escape(&id)
+                )
+            },
+        );
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(if read {
         StatusCode::CREATED
     } else {
         StatusCode::NO_CONTENT
-    })
+    }
+    .into_response())
 }
 async fn read_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    set_card_reading(&app, &p, &number, true).await
+    set_card_reading(&app, &p, &number, true, &headers).await
 }
 async fn unread_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    set_card_reading(&app, &p, &number, false).await
+    set_card_reading(&app, &p, &number, false, &headers).await
 }
 async fn close_card(
     State(app): Shared,

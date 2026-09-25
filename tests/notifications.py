@@ -6,10 +6,25 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-from auth import BINARY, ROOT, start, stop
+from auth import BINARY, ROOT, call as session_call, cookie, request_code, start, stop
 from join import call
+
+
+def browser_request(port, path, method, session, accept):
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", method=method,
+        headers={"Accept": accept, "Cookie": session},
+    )
+    try:
+        response = urllib.request.urlopen(request, timeout=3)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        return response.status, response.headers.get_content_type(), response.read()
 
 
 def main():
@@ -47,8 +62,35 @@ def main():
             notice = notices[0]
             assert notice["creator"]["id"] == owner_id and notice["card"]["number"] == number
             assert notice["card"]["column"] is None and notice["unread_count"] == 1 and not notice["read"]
+            pending, code = request_code(port, "notice@example.com")
+            _, session_headers = session_call(port, "/session/magic_link", "POST", {"code": code}, [pending])
+            member_session = cookie(session_headers, "session_token")
+            card_reading = f"/{account}/cards/{number}/reading"
+            status, content_type, body = browser_request(
+                port, card_reading, "POST", member_session, "text/vnd.turbo-stream.html")
+            assert status == 200 and content_type == "text/vnd.turbo-stream.html"
+            assert f'action="remove" target="notification_{notice["id"]}"'.encode() in body, body
+            notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
+            assert notices[0]["read"] and notices[0]["unread_count"] == 0
+            status, content_type, body = browser_request(
+                port, card_reading, "DELETE", member_session, "text/vnd.turbo-stream.html")
+            assert status == 204 and content_type == "text/plain" and not body
+            notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
+            assert not notices[0]["read"] and notices[0]["unread_count"] == 1
             owner_notices, _ = call(port, f"/{account}/notifications", bearer=owner_token)
             assert owner_notices == []
+            with sqlite3.connect(database) as db:
+                owner_email = db.execute(
+                    "SELECT i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=?",
+                    (owner_id,),
+                ).fetchone()[0]
+            owner_pending, owner_code = request_code(port, owner_email)
+            _, owner_session_headers = session_call(
+                port, "/session/magic_link", "POST", {"code": owner_code}, [owner_pending])
+            owner_session = cookie(owner_session_headers, "session_token")
+            status, content_type, body = browser_request(
+                port, card_reading, "POST", owner_session, "text/vnd.turbo-stream.html")
+            assert status == 200 and content_type == "text/vnd.turbo-stream.html" and body == b"\n"
             call(port, f"/{account}/cards/{number}/closure", "POST", bearer=owner_token, status=204)
             notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
             assert len(notices) == 1 and notices[0]["unread_count"] == 2 and notices[0]["body"] == "Moved to Done by Owner", notices
@@ -56,7 +98,6 @@ def main():
             call(port, f"/{account}/cards/{number}/assignments", "POST", {"assignee_id": "notice-member"}, bearer=owner_token, status=204)
             notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
             assert len(notices) == 1 and notices[0]["unread_count"] == 3 and notices[0]["body"] == "Assigned to Member", notices
-            card_reading = f"/{account}/cards/{number}/reading"
             call(port, card_reading, "POST", bearer=member_token, status=201)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT accessed_at FROM accesses WHERE board_id=? AND user_id='notice-member'", (board_id,)).fetchone()[0]
