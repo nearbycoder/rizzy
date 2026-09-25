@@ -48,29 +48,30 @@ pub(super) async fn show(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let steps =
-        sqlx::query("SELECT content,completed FROM steps WHERE card_id=? ORDER BY created_at,id")
-            .bind(&card_id)
-            .fetch_all(&app.db)
-            .await
-            .map_err(db_err)?;
+    let steps = sqlx::query(
+        "SELECT id,content,completed FROM steps WHERE card_id=? ORDER BY created_at,id",
+    )
+    .bind(&card_id)
+    .fetch_all(&app.db)
+    .await
+    .map_err(db_err)?;
     let mut step_html = String::new();
-    if !steps.is_empty() {
-        step_html.push_str("<section aria-label=\"Steps\"><ol class=\"steps\">");
-        for step in steps {
-            let content: String = step.get("content");
-            let checked = if step.get::<i64, _>("completed") != 0 {
-                " checked"
-            } else {
-                ""
-            };
-            step_html.push_str(&format!(
-                "<li><input type=\"checkbox\" disabled{checked} aria-label=\"Step completed\"> {}</li>",
+    step_html.push_str("<section aria-label=\"Steps\"><ul class=\"steps\">");
+    for step in steps {
+        let id: String = step.get("id");
+        let content: String = step.get("content");
+        let checked = if step.get::<i64, _>("completed") != 0 {
+            " checked"
+        } else {
+            ""
+        };
+        step_html.push_str(&format!(
+                "<li><label><input type=\"checkbox\" data-step-id=\"{}\"{checked}><span>{}</span></label></li>",
+                escape(&id),
                 escape(&content)
             ));
-        }
-        step_html.push_str("</ol></section>");
     }
+    step_html.push_str("</ul><form class=\"steps__form\" id=\"step-form\"><label><span aria-hidden=\"true\">□</span><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" aria-label=\"Add a step\"></label></form></section>");
     let comments = sqlx::query("SELECT c.body,c.created_at,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
         .bind(&card_id)
         .fetch_all(&app.db)
@@ -110,6 +111,37 @@ pub(super) async fn show(
         .await
         .map_err(db_err)?;
     let closed = card.get::<i64, _>("closed") != 0;
+    let postponed = card.get::<i64, _>("postponed") != 0;
+    let column_id: Option<String> = card.get("column_id");
+    let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
+        .bind(&board_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut stage_rail =
+        String::from("<div class=\"stage-rail\" role=\"radiogroup\" aria-label=\"Card stage\">");
+    let mut stage = |name: &str, label: &str, current: bool, id: Option<&str>| {
+        stage_rail.push_str(&format!("<button type=\"button\" role=\"radio\" aria-checked=\"{}\" class=\"stage-rail__option{}\" data-stage=\"{}\"{}>{}</button>",if current {"true"} else {"false"},if current {" is-current"} else {""},name,id.map(|id|format!(" data-column-id=\"{}\"",escape(id))).unwrap_or_default(),escape(label)));
+    };
+    stage("not_now", "Not Now", postponed, None);
+    stage(
+        "maybe",
+        "Maybe?",
+        !closed && !postponed && column_id.is_none(),
+        None,
+    );
+    for column in columns {
+        let id: String = column.get("id");
+        let name: String = column.get("name");
+        stage(
+            "column",
+            &name,
+            !closed && !postponed && column_id.as_deref() == Some(&id),
+            Some(&id),
+        );
+    }
+    stage("done", "Done", closed, None);
+    stage_rail.push_str("</div>");
     let mut values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("NUMBER", number.to_string()),
@@ -122,6 +154,7 @@ pub(super) async fn show(
         ("CREATED_AT", escape(&card.get::<String, _>("created_at"))),
         ("COMMENTS", comment_html),
         ("STEPS", step_html),
+        ("STAGE_RAIL", stage_rail),
     ]);
     values.insert(
         "STATUS",
@@ -155,6 +188,24 @@ pub(super) async fn show(
     values.insert(
         "PIN_METHOD",
         if pinned != 0 { "DELETE" } else { "POST" }.into(),
+    );
+    values.insert(
+        "GOLD_LABEL",
+        if card.get::<i64, _>("golden") != 0 {
+            "Remove Golden Ticket"
+        } else {
+            "Promote to Golden Ticket"
+        }
+        .into(),
+    );
+    values.insert(
+        "GOLD_METHOD",
+        if card.get::<i64, _>("golden") != 0 {
+            "DELETE"
+        } else {
+            "POST"
+        }
+        .into(),
     );
     Ok(Html(render_template(TEMPLATE, &values)))
 }
