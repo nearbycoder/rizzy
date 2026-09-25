@@ -83,6 +83,8 @@ def run(target):
     search_word = "parityk" + str(time.time_ns())
     card = step("card_create", f"/boards/{board_id}/cards", "POST", {"card": {"title": "Parity " + search_word, "description": "Same text"}})
     number = card["number"]
+    step("card_reading_create",f"/cards/{number}/reading","POST")
+    step("card_reading_delete",f"/cards/{number}/reading","DELETE")
     result["card_create"]["description_html"] = card["description_html"]
     step("card_show", f"/cards/{number}")
     step("board_entropy",f"/boards/{board_id}/entropy","PUT",{"board":{"auto_postpone_period_in_days":90}})

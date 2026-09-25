@@ -23,7 +23,7 @@ For email delivery, set `RIZZY_SENDMAIL` to a sendmail-compatible executable and
 - Account join links with usage limits, reset, member name setup, and atomic redemption across Rust processes.
 - Board access records and involvement, including grants for new account members, private-board membership changes, and cleanup of revoked members' watches, pins, and assignments.
 - Board webhooks with action subscriptions, a durable delivery queue, signed JSON requests, bounded responses, private destination blocking, and deactivation after sustained delivery failures. Set `RIZZY_PUBLIC_URL` to the externally visible origin for payload links; `RIZZY_DISABLE_WEBHOOK_DELIVERY=1` pauses delivery for local testing.
-- Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, read controls, tray JSON, and bundle email frequency settings.
+- Initial notifications for board watchers, card assignments, and card watchers, with per-card unread counts, notification and card read controls, tray JSON, and bundle email frequency settings.
 - Board, column, and card create/read/update/delete JSON routes; account wide card numbering; card close, postpone, gold, triage, move, tag toggle, steps, comments, assignments, watches, pins, and reactions.
 - Tag listing, selected card filters, and SQLite FTS5 card and comment search with indexed edits and deletes.
 - Board publishing and unpublishing with unauthenticated public board and card pages.
@@ -49,7 +49,7 @@ python3 tests/search.py
 python3 tests/parity.py
 ```
 
-For a comparative run, start both applications on the same machine using the same database engine, equivalent seed data, and production builds. Then set `FIZZY_URL`, `FIZZY_ACCOUNT`, `FIZZY_TOKEN`, `RIZZY_URL`, `RIZZY_ACCOUNT`, and `RIZZY_TOKEN` and run `python3 bench/compare.py --cards 100 --seconds 10`. The script creates equal card and activity counts, checks sampled response shapes and first page sizes, warms both services, and reports throughput, p50, p95, p99, and errors at several concurrency levels. `tests/parity.py` passed 140 comparisons for the implemented workflow using fresh accounts. Fizzy was brought up with a local Ruby 3.4.8 installation for the [diagnostic runs](bench/README.md). A valid product wide performance claim still requires full behavioral parity, repeated runs, CPU and memory measurements, and a larger dataset.
+For a comparative run, start both applications on the same machine using the same database engine, equivalent seed data, and production builds. Then set `FIZZY_URL`, `FIZZY_ACCOUNT`, `FIZZY_TOKEN`, `RIZZY_URL`, `RIZZY_ACCOUNT`, and `RIZZY_TOKEN` and run `python3 bench/compare.py --cards 100 --seconds 10`. The script creates equal card and activity counts, checks sampled response shapes and first page sizes, warms both services, and reports throughput, p50, p95, p99, and errors at several concurrency levels. `tests/parity.py` passed 142 comparisons for the implemented workflow using fresh accounts. Fizzy was brought up with a local Ruby 3.4.8 installation for the [diagnostic runs](bench/README.md). A valid product wide performance claim still requires full behavioral parity, repeated runs, CPU and memory measurements, and a larger dataset.
 
 ## License
 

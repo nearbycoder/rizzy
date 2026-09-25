@@ -56,6 +56,15 @@ def main():
             call(port, f"/{account}/cards/{number}/assignments", "POST", {"assignee_id": "notice-member"}, bearer=owner_token, status=204)
             notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
             assert len(notices) == 1 and notices[0]["unread_count"] == 3 and notices[0]["body"] == "Assigned to Member", notices
+            card_reading = f"/{account}/cards/{number}/reading"
+            call(port, card_reading, "POST", bearer=member_token, status=201)
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT accessed_at FROM accesses WHERE board_id=? AND user_id='notice-member'", (board_id,)).fetchone()[0]
+            notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
+            assert notices[0]["read"] and notices[0]["unread_count"] == 0
+            call(port, card_reading, "DELETE", bearer=member_token, status=204)
+            notices, _ = call(port, f"/{account}/notifications", bearer=member_token)
+            assert not notices[0]["read"] and notices[0]["unread_count"] == 1
             path = f"/{account}/notifications/{notice['id']}/reading"
             call(port, path, "POST", bearer=owner_token, status=404)
             call(port, path, "POST", bearer=member_token, status=204)

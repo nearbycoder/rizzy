@@ -981,6 +981,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .await?;
         tx.commit().await?;
     }
+    let access_columns = sqlx::query("PRAGMA table_info(accesses)")
+        .fetch_all(&db)
+        .await?;
+    if !access_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "accessed_at")
+    {
+        sqlx::query("ALTER TABLE accesses ADD COLUMN accessed_at TEXT")
+            .execute(&db)
+            .await?;
+    }
     let webhook_columns = sqlx::query("PRAGMA table_info(webhooks)")
         .fetch_all(&db)
         .await?;
@@ -1286,6 +1297,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}/closure",
             post(close_card).delete(open_card),
+        )
+        .route(
+            "/{account}/cards/{number}/reading",
+            post(read_card).delete(unread_card),
         )
         .route(
             "/{account}/cards/{number}/triage",
@@ -4279,6 +4294,63 @@ async fn set_flag(
         .await?;
     }
     Ok(StatusCode::NO_CONTENT)
+}
+async fn set_card_reading(
+    app: &App,
+    p: &Principal,
+    number: &str,
+    read: bool,
+) -> Result<StatusCode> {
+    p.write()?;
+    let card = card(app, p, number).await?;
+    let card_id: String = card.get("id");
+    let board_id: String = card.get("board_id");
+    let timestamp = now();
+    let cutoff = (Utc::now() - chrono::Duration::minutes(5))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    if read {
+        sqlx::query("UPDATE notifications SET read_at=?,unread_count=0,updated_at=? WHERE card_id=? AND user_id=? AND account_id=?")
+            .bind(&timestamp).bind(&timestamp).bind(&card_id).bind(&p.user_id).bind(&p.account_id)
+            .execute(&mut *tx).await.map_err(db_err)?;
+    } else {
+        sqlx::query("UPDATE notifications SET read_at=NULL,unread_count=1,updated_at=? WHERE card_id=? AND user_id=? AND account_id=?")
+            .bind(&timestamp).bind(&card_id).bind(&p.user_id).bind(&p.account_id)
+            .execute(&mut *tx).await.map_err(db_err)?;
+    }
+    let touched=sqlx::query("UPDATE accesses SET accessed_at=? WHERE board_id=? AND user_id=? AND (accessed_at IS NULL OR accessed_at<?)")
+        .bind(&timestamp).bind(&board_id).bind(&p.user_id).bind(cutoff)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    if touched.rows_affected() > 0 {
+        sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+            .bind(&timestamp)
+            .bind(&board_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(if read {
+        StatusCode::CREATED
+    } else {
+        StatusCode::NO_CONTENT
+    })
+}
+async fn read_card(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    set_card_reading(&app, &p, &number, true).await
+}
+async fn unread_card(
+    State(app): Shared,
+    Path((account, number)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    let p = principal(&app, &headers, &account).await?;
+    set_card_reading(&app, &p, &number, false).await
 }
 async fn close_card(
     State(app): Shared,

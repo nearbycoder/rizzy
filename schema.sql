@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS accesses (
   board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   involvement TEXT NOT NULL DEFAULT 'access_only' CHECK(involvement IN ('access_only','watching')),
+  accessed_at TEXT,
   PRIMARY KEY(board_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS accesses_user_board ON accesses(user_id,board_id);
