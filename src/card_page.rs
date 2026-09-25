@@ -174,7 +174,8 @@ pub(super) async fn show(
         String::new()
     } else {
         format!(
-            "<details><summary aria-label=\"Add a tag\" title=\"Add a tag\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 11V4h7l11 11-7 7L3 11Z\"/><circle cx=\"8\" cy=\"8\" r=\"1\"/></svg></summary><div class=\"card-tags__picker\"><form id=\"tag-form\"><label for=\"tag-title\">Tag name</label><input id=\"tag-title\" name=\"tag_title\" placeholder=\"#tag\" autocomplete=\"off\"><button type=\"submit\">Toggle tag</button></form>{tag_choices}</div></details>"
+            "<details><summary aria-label=\"Add a tag\" title=\"Add a tag\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 11V4h7l11 11-7 7L3 11Z\"/><circle cx=\"8\" cy=\"8\" r=\"1\"/></svg></summary><div class=\"card-tags__picker\"><a href=\"/{}/cards/{number}/taggings/new\">Open tag picker</a><form id=\"tag-form\"><label for=\"tag-title\">Tag name</label><input id=\"tag-title\" name=\"tag_title\" placeholder=\"#tag\" autocomplete=\"off\"><button type=\"submit\">Toggle tag</button></form>{tag_choices}</div></details>",
+            principal.slug
         )
     };
     let tag_control = format!(

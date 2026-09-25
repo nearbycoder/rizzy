@@ -846,7 +846,7 @@
       "path": "/cards/:card_id/taggings/new(.:format)",
       "controller": "cards/taggings",
       "action": "new",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "GET",
@@ -2241,6 +2241,10 @@
     {
       "method": "POST",
       "path": "/{account}/cards/{number}/taggings"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/cards/{number}/taggings/new"
     },
     {
       "method": "POST",

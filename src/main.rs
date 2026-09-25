@@ -52,6 +52,7 @@ mod session_transfer;
 mod signup_page;
 mod signup_seed;
 mod storage;
+mod tagging_page;
 mod user_page;
 mod webhook_page;
 
@@ -1931,6 +1932,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/cards/{number}/board/edit", get(card_board_page::edit))
         .route("/{account}/cards/{number}/taggings", post(toggle_tag))
+        .route(
+            "/{account}/cards/{number}/taggings/new",
+            get(tagging_page::new),
+        )
         .route(
             "/{account}/cards/{number}/assignments",
             post(toggle_assignment),
@@ -8017,12 +8022,35 @@ async fn toggle_tag(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    RawQuery(raw_query): RawQuery,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+        || !headers.contains_key("x-rizzy-json-request");
+    let query_title = raw_query.as_deref().and_then(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .find(|(key, _)| key == "tag_title")
+            .map(|(_, value)| value.into_owned())
+    });
+    let tag_title = if let Some(value) = query_title {
+        value
+    } else if form {
+        url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "tag_title")
+            .map(|(_, value)| value.into_owned())
+            .ok_or_else(|| bad("tag_title is required"))?
+    } else {
+        let json: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
+        required(&json, "tag_title")?
+    };
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let title = required(&body, "tag_title")?
+    let title = tag_title
+        .trim()
         .trim_start_matches('#')
         .trim()
         .to_lowercase();
@@ -8061,7 +8089,14 @@ async fn toggle_tag(
             .await
             .map_err(db_err)?;
     }
-    Ok(StatusCode::NO_CONTENT)
+    if form {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/cards/{number}"))],
+        )
+            .into_response());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn list_steps(
