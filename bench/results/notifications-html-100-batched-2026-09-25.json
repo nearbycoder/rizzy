@@ -1,0 +1,123 @@
+{
+  "fixture_cards": 100,
+  "sample_parity": {
+    "fizzy": {
+      "unread": 100,
+      "visible": 100,
+      "html_bytes": 251752
+    },
+    "rizzy": {
+      "unread": 100,
+      "visible": 100,
+      "html_bytes": 102548
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 5.01,
+        "requests": 356,
+        "errors": {},
+        "rps": 71.1,
+        "p50_ms": 13.22,
+        "p95_ms": 18.25,
+        "p99_ms": 26.15
+      },
+      {
+        "concurrency": 8,
+        "seconds": 5.02,
+        "requests": 2609,
+        "errors": {},
+        "rps": 520.2,
+        "p50_ms": 14.76,
+        "p95_ms": 20.71,
+        "p99_ms": 28.29
+      },
+      {
+        "concurrency": 32,
+        "seconds": 5.05,
+        "requests": 4076,
+        "errors": {},
+        "rps": 806.6,
+        "p50_ms": 36.14,
+        "p95_ms": 73.64,
+        "p99_ms": 92.85
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.12,
+        "requests": 4115,
+        "errors": {},
+        "rps": 804.0,
+        "p50_ms": 74.43,
+        "p95_ms": 143.96,
+        "p99_ms": 173.59
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 5.0,
+        "requests": 2136,
+        "errors": {},
+        "rps": 427.1,
+        "p50_ms": 2.34,
+        "p95_ms": 3.1,
+        "p99_ms": 3.39
+      },
+      {
+        "concurrency": 8,
+        "seconds": 5.01,
+        "requests": 1107,
+        "errors": {},
+        "rps": 220.9,
+        "p50_ms": 36.65,
+        "p95_ms": 41.37,
+        "p99_ms": 43.08
+      },
+      {
+        "concurrency": 32,
+        "seconds": 5.12,
+        "requests": 1004,
+        "errors": {},
+        "rps": 196.2,
+        "p50_ms": 161.53,
+        "p95_ms": 186.54,
+        "p99_ms": 194.52
+      },
+      {
+        "concurrency": 64,
+        "seconds": 5.18,
+        "requests": 1048,
+        "errors": {},
+        "rps": 202.2,
+        "p50_ms": 312.18,
+        "p95_ms": 354.91,
+        "p99_ms": 369.88
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 1,
+      "rps_ratio_rizzy_over_fizzy": 6.007,
+      "p95_ratio_fizzy_over_rizzy": 5.887
+    },
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 0.425,
+      "p95_ratio_fizzy_over_rizzy": 0.501
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 0.243,
+      "p95_ratio_fizzy_over_rizzy": 0.395
+    },
+    {
+      "concurrency": 64,
+      "rps_ratio_rizzy_over_fizzy": 0.251,
+      "p95_ratio_fizzy_over_rizzy": 0.406
+    }
+  ]
+}

@@ -21,8 +21,8 @@ use std::{
     env,
     net::{IpAddr, SocketAddr},
     process::Stdio,
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Weak},
+    time::{Duration, Instant},
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
@@ -68,8 +68,16 @@ struct App {
     db: SqlitePool,
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
+    notification_html_cache: tokio::sync::Mutex<HashMap<String, NotificationHtmlCacheEntry>>,
+    notification_html_build_locks:
+        tokio::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
     export_notify: tokio::sync::Notify,
     import_notify: tokio::sync::Notify,
+}
+struct NotificationHtmlCacheEntry {
+    version: (i64, Option<String>, i64),
+    html: String,
+    cached_at: Instant,
 }
 type Shared = State<Arc<App>>;
 type Result<T> = std::result::Result<T, ApiError>;
@@ -1505,6 +1513,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         db,
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
+        notification_html_cache: tokio::sync::Mutex::new(HashMap::new()),
+        notification_html_build_locks: tokio::sync::Mutex::new(HashMap::new()),
         export_notify: tokio::sync::Notify::new(),
         import_notify: tokio::sync::Notify::new(),
     });
@@ -6713,11 +6723,220 @@ async fn notification_items(
     rows: Vec<SqliteRow>,
     host: &str,
 ) -> Result<Vec<Value>> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let card_ids = unique_ids(rows.iter().map(|row| row.get::<String, _>("card_id")));
+    let creator_ids = unique_ids(rows.iter().map(|row| row.get::<String, _>("creator_id")));
+    let event_ids = unique_ids(
+        rows.iter()
+            .filter(|row| row.get::<String, _>("source_type") == "Event")
+            .map(|row| row.get::<String, _>("source_id")),
+    );
+    let mention_ids = unique_ids(
+        rows.iter()
+            .filter(|row| row.get::<String, _>("source_type") == "Mention")
+            .map(|row| row.get::<String, _>("source_id")),
+    );
+    let cards: HashMap<String, SqliteRow> = rows_for_ids(
+        app,
+        "SELECT c.*,b.name board_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.id IN (",
+        &card_ids,
+    )
+    .await?
+    .into_iter()
+    .map(|row| (row.get("id"), row))
+    .collect();
+    let users: HashMap<String, Value> = rows_for_ids(
+        app,
+        "SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",
+        &creator_ids,
+    )
+    .await?
+    .into_iter()
+    .filter(|row| row.get::<String, _>("account_id") == p.account_id)
+    .map(|row| (row.get("id"), user_json_row(p, &row, host)))
+    .collect();
+    let column_ids = unique_ids(
+        cards
+            .values()
+            .filter_map(|card| card.get::<Option<String>, _>("column_id")),
+    );
+    let columns: HashMap<String, Value> =
+        rows_for_ids(app, "SELECT * FROM columns WHERE id IN (", &column_ids)
+            .await?
+            .into_iter()
+            .map(|row| (row.get("id"), column_json(p, &row, host)))
+            .collect();
+    let events: HashMap<String, SqliteRow> =
+        rows_for_ids(app, "SELECT * FROM events WHERE id IN (", &event_ids)
+            .await?
+            .into_iter()
+            .map(|row| (row.get("id"), row))
+            .collect();
+    let mentions: HashMap<String, SqliteRow> =
+        rows_for_ids(app, "SELECT * FROM mentions WHERE id IN (", &mention_ids)
+            .await?
+            .into_iter()
+            .map(|row| (row.get("id"), row))
+            .collect();
+    let comment_ids = unique_ids(
+        events
+            .values()
+            .filter(|event| event.get::<String, _>("action") == "comment_created")
+            .map(|event| event.get::<String, _>("eventable_id"))
+            .chain(
+                mentions
+                    .values()
+                    .filter(|mention| mention.get::<String, _>("source_type") == "Comment")
+                    .map(|mention| mention.get::<String, _>("source_id")),
+            ),
+    );
+    let comments: HashMap<String, String> = rows_for_ids(
+        app,
+        "SELECT id,body FROM comments WHERE id IN (",
+        &comment_ids,
+    )
+    .await?
+    .into_iter()
+    .map(|row| (row.get("id"), row.get("body")))
+    .collect();
+    let assignee_ids = unique_ids(events.values().filter_map(|event| {
+        let particulars: Value =
+            serde_json::from_str(&event.get::<String, _>("particulars")).ok()?;
+        particulars["assignee_ids"]
+            .as_array()?
+            .first()?
+            .as_str()
+            .map(str::to_owned)
+    }));
+    let assignees: HashMap<String, String> = rows_for_ids(
+        app,
+        "SELECT id,name,account_id FROM users WHERE id IN (",
+        &assignee_ids,
+    )
+    .await?
+    .into_iter()
+    .filter(|row| row.get::<String, _>("account_id") == p.account_id)
+    .map(|row| (row.get("id"), row.get("name")))
+    .collect();
     let mut result = Vec::with_capacity(rows.len());
-    for row in &rows {
-        result.push(notification_json(app, p, row, host).await?);
+    for row in rows {
+        let card_id: String = row.get("card_id");
+        let card = cards.get(&card_id).ok_or_else(missing)?;
+        let creator_id: String = row.get("creator_id");
+        let creator = users.get(&creator_id).ok_or_else(missing)?;
+        let column = card
+            .get::<Option<String>, _>("column_id")
+            .and_then(|id| columns.get(&id).cloned());
+        let raw_title: String = card.get("title");
+        let number: i64 = card.get("number");
+        let card_title = if raw_title.trim().is_empty() {
+            format!("Card {number}")
+        } else {
+            raw_title.clone()
+        };
+        let name = creator["name"].as_str().unwrap_or("");
+        let source_id: String = row.get("source_id");
+        let source_kind: String = row.get("source_type");
+        let (source_type, title, body) = match source_kind.as_str() {
+            "Mention" => {
+                let mention = mentions.get(&source_id).ok_or_else(missing)?;
+                let source_body = match mention.get::<String, _>("source_type").as_str() {
+                    "Card" => card.get::<String, _>("description"),
+                    "Comment" => comments
+                        .get(&mention.get::<String, _>("source_id"))
+                        .cloned()
+                        .ok_or_else(missing)?,
+                    _ => {
+                        return Err(err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Unsupported mention source",
+                        ));
+                    }
+                };
+                let first = name.split_whitespace().next().unwrap_or(name);
+                let (plain_body, _, _) =
+                    storage::render_rich_text(app, &p.account_id, p.slug, &source_body).await?;
+                (
+                    "mention",
+                    format!("{first} @mentioned you"),
+                    plain_body.chars().take(200).collect::<String>(),
+                )
+            }
+            "Event" => {
+                let event = events.get(&source_id).ok_or_else(missing)?;
+                let action: String = event.get("action");
+                let particulars: Value =
+                    serde_json::from_str(&event.get::<String, _>("particulars"))
+                        .unwrap_or(json!({}));
+                let body = match action.as_str() {
+                    "card_assigned" => {
+                        let assignee = particulars["assignee_ids"]
+                            .as_array()
+                            .and_then(|ids| ids.first())
+                            .and_then(Value::as_str);
+                        assignee
+                            .map(|id| {
+                                format!(
+                                    "Assigned to {}",
+                                    assignees.get(id).cloned().unwrap_or_else(|| "self".into())
+                                )
+                            })
+                            .unwrap_or_else(|| "Assigned to self".into())
+                    }
+                    "card_published" => format!("Added by {name}"),
+                    "card_closed" => format!("Moved to Done by {name}"),
+                    "card_reopened" => format!("Reopened by {name}"),
+                    "card_postponed" => format!("Moved to Not Now by {name}"),
+                    "card_unassigned" => format!("Unassigned by {name}"),
+                    "card_board_changed" => format!("Moved by {name}"),
+                    "card_sent_back_to_triage" => format!("Moved back to Maybe? by {name}"),
+                    "comment_created" => comments
+                        .get(&event.get::<String, _>("eventable_id"))
+                        .cloned()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(200)
+                        .collect(),
+                    _ => name.to_owned(),
+                };
+                let title = if action == "comment_created" {
+                    format!("RE: {card_title}")
+                } else {
+                    card_title
+                };
+                ("event", title, body)
+            }
+            _ => {
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unsupported notification source",
+                ));
+            }
+        };
+        let read_at: Option<String> = row.get("read_at");
+        result.push(json!({
+            "id":row.get::<String,_>("id"),"unread_count":row.get::<i64,_>("unread_count"),
+            "read":read_at.is_some(),"read_at":read_at,"created_at":row.get::<String,_>("created_at"),
+            "source_type":source_type,"title":title,"body":body,"creator":creator,
+            "card":{"id":card_id,"number":number,"title":raw_title,
+                "status":card.get::<String,_>("status"),"board_name":card.get::<String,_>("board_name"),
+                "closed":card.get::<i64,_>("closed")!=0,"postponed":card.get::<i64,_>("postponed")!=0,
+                "url":format!("{host}/{}/cards/{number}",p.slug),"column":column},
+            "url":format!("{host}/{}/notifications/{}",p.slug,row.get::<String,_>("id"))
+        }));
     }
     Ok(result)
+}
+
+async fn notification_page_version(app: &App, p: &Principal) -> Result<(i64, Option<String>, i64)> {
+    sqlx::query_as("SELECT COUNT(*),MAX(updated_at),COALESCE(SUM(unread_count),0) FROM notifications WHERE user_id=? AND account_id=?")
+        .bind(&p.user_id)
+        .bind(&p.account_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)
 }
 
 async fn list_notifications(
@@ -6729,6 +6948,39 @@ async fn list_notifications(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let json_request = headers.contains_key("x-rizzy-json-request");
+    let cache_key = format!("{}:{}:{}", p.account_id, p.user_id, p.slug);
+    let mut _build_guard = None;
+    let cache_version = if !json_request && !wants_turbo_stream(&headers) && query.page.is_none() {
+        let version = notification_page_version(&app, &p).await?;
+        if let Some(cached) = app.notification_html_cache.lock().await.get(&cache_key) {
+            if cached.version == version && cached.cached_at.elapsed() < Duration::from_secs(1) {
+                return Ok(Html(cached.html.clone()).into_response());
+            }
+        }
+        let build_lock = {
+            let mut locks = app.notification_html_build_locks.lock().await;
+            if locks.len() > 256 {
+                locks.retain(|_, lock| lock.strong_count() > 0);
+            }
+            if let Some(lock) = locks.get(&cache_key).and_then(Weak::upgrade) {
+                lock
+            } else {
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                locks.insert(cache_key.clone(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        _build_guard = Some(build_lock.lock_owned().await);
+        let version = notification_page_version(&app, &p).await?;
+        if let Some(cached) = app.notification_html_cache.lock().await.get(&cache_key) {
+            if cached.version == version && cached.cached_at.elapsed() < Duration::from_secs(1) {
+                return Ok(Html(cached.html.clone()).into_response());
+            }
+        }
+        Some(version)
+    } else {
+        None
+    };
     let show_unread = query.page.is_none();
     let unread_limit = if json_request { 100 } else { 500 };
     let unread = if show_unread {
@@ -6768,7 +7020,7 @@ async fn list_notifications(
     if !json_request {
         let unread_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id=? AND account_id=? AND read_at IS NULL")
             .bind(&p.user_id).bind(&p.account_id).fetch_one(&app.db).await.map_err(db_err)?;
-        return Ok(Html(notification_page::index(
+        let html = notification_page::index(
             p.slug,
             &unread_items,
             &read_items,
@@ -6777,8 +7029,22 @@ async fn list_notifications(
             offset + limit,
             (unread_total - unread_limit).max(0),
             show_unread,
-        ))
-        .into_response());
+        );
+        if let Some(version) = cache_version {
+            let mut cache = app.notification_html_cache.lock().await;
+            if cache.len() >= 128 && !cache.contains_key(&cache_key) {
+                cache.clear();
+            }
+            cache.insert(
+                cache_key,
+                NotificationHtmlCacheEntry {
+                    version,
+                    html: html.clone(),
+                    cached_at: Instant::now(),
+                },
+            );
+        }
+        return Ok(Html(html).into_response());
     }
     let mut items = unread_items;
     items.extend(read_items);

@@ -467,6 +467,8 @@ mod tests {
             db,
             write_lock: tokio::sync::Mutex::new(()),
             auth_lock: tokio::sync::Mutex::new(()),
+            notification_html_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            notification_html_build_locks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             export_notify: tokio::sync::Notify::new(),
             import_notify: tokio::sync::Notify::new(),
         };

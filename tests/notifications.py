@@ -6,6 +6,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -72,6 +73,11 @@ def main():
                 b"New for you", b"notifications_list", b"First alert", b"Added by Owner",
                 f'id="notification_{notice["id"]}"'.encode(), b"Mark all as read", b"Notification settings"))
             assert b'id="read_section"' not in body.split(b"</main>", 1)[0]
+            call(port, f"/{account}/boards/{board_id}", "PUT", {"board": {"name": "Alerts renamed"}}, bearer=owner_token)
+            time.sleep(1.1)
+            status, _, body = browser_request(
+                port, f"/{account}/notifications", "GET", member_session, "text/html")
+            assert status == 200 and b"Alerts renamed" in body
             status, content_type, body = browser_request(
                 port, f"/{account}/notifications/tray", "GET", member_session, "text/html")
             assert status == 200 and content_type == "text/html"
@@ -82,6 +88,22 @@ def main():
             assert status == 200 and content_type == "text/vnd.turbo-stream.html"
             assert b'append" target="notifications_list_read' in body and b'replace" target="next_page' in body
             card_reading = f"/{account}/cards/{number}/reading"
+            other_port, other_server = start(env)
+            try:
+                for _ in range(2):
+                    status, _, body = browser_request(
+                        other_port, f"/{account}/notifications", "GET", member_session, "text/html")
+                    assert status == 200 and b"New for you" in body
+                call(port, card_reading, "POST", bearer=member_token, status=201)
+                status, _, body = browser_request(
+                    other_port, f"/{account}/notifications", "GET", member_session, "text/html")
+                assert status == 200 and b"Previously seen" in body.split(b"</main>", 1)[0]
+                call(port, card_reading, "DELETE", bearer=member_token, status=204)
+                status, _, body = browser_request(
+                    other_port, f"/{account}/notifications", "GET", member_session, "text/html")
+                assert status == 200 and b"New for you" in body.split(b"</main>", 1)[0]
+            finally:
+                stop(other_server)
             status, content_type, body = browser_request(
                 port, card_reading, "POST", member_session, "text/vnd.turbo-stream.html")
             assert status == 200 and content_type == "text/vnd.turbo-stream.html"

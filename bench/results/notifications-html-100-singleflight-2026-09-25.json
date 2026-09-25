@@ -1,0 +1,48 @@
+{
+  "fixture_cards": 100,
+  "sample_parity": {
+    "fizzy": {
+      "unread": 100,
+      "visible": 100,
+      "html_bytes": 251846
+    },
+    "rizzy": {
+      "unread": 100,
+      "visible": 100,
+      "html_bytes": 102548
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 64,
+        "seconds": 5.12,
+        "requests": 3983,
+        "errors": {},
+        "rps": 777.7,
+        "p50_ms": 76.98,
+        "p95_ms": 145.51,
+        "p99_ms": 175.66
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 64,
+        "seconds": 5.01,
+        "requests": 32367,
+        "errors": {},
+        "rps": 6465.1,
+        "p50_ms": 8.88,
+        "p95_ms": 18.39,
+        "p99_ms": 26.08
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 64,
+      "rps_ratio_rizzy_over_fizzy": 8.313,
+      "p95_ratio_fizzy_over_rizzy": 7.912
+    }
+  ]
+}
