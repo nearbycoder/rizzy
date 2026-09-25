@@ -18,6 +18,7 @@ CASES = [
     "<div>Hello</div><div>World</div>",
     "See https://example.com now",
     '<p><a href="https://example.com">https://example.com</a> <code>https://example.com</code></p>',
+    '<p class="note">Styled <strong>content</strong></p>',
 ]
 
 

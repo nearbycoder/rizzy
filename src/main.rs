@@ -253,6 +253,17 @@ fn escape(s: &str) -> String {
 fn rich_html(s: &str) -> String {
     rich_text::html(s)
 }
+fn search_content(mut text: String) -> String {
+    const LIMIT: usize = 32 * 1024;
+    if text.len() > LIMIT {
+        let mut boundary = LIMIT;
+        while !text.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        text.truncate(boundary);
+    }
+    text
+}
 fn wrap_html(s: &str) -> String {
     format!("<div class=\"action-text-content\">\n  {s}\n</div>\n")
 }
@@ -436,8 +447,10 @@ async fn system_user(app: &App, p: &Principal) -> Result<String> {
 async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> Result<()> {
     let system = system_user(app, p).await?;
     let timestamp = now();
-    sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?)")
-        .bind(id()).bind(card_id).bind(system).bind(body).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+    let (plain, _, _) = storage::render_rich_text(app, &p.account_id, p.slug, body).await?;
+    let content = search_content(plain);
+    sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+        .bind(id()).bind(card_id).bind(system).bind(body).bind(content).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
     Ok(())
 }
 async fn record_event(
@@ -1114,26 +1127,20 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
-    let search_backfilled: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_v1'")
-            .fetch_one(&db)
+    for table in ["cards", "comments"] {
+        let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+            .fetch_all(&db)
             .await?;
-    if search_backfilled == 0 {
-        let mut tx = db.begin().await?;
-        sqlx::query("DELETE FROM card_search")
-            .execute(&mut *tx)
+        if !columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "search_text")
+        {
+            sqlx::query(&format!(
+                "ALTER TABLE {table} ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
+            ))
+            .execute(&db)
             .await?;
-        sqlx::query("DELETE FROM comment_search")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,description FROM cards WHERE status='published'")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.body FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT OR IGNORE INTO search_migrations(key) VALUES('fts_v1')")
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
+        }
     }
     let access_columns = sqlx::query("PRAGMA table_info(accesses)")
         .fetch_all(&db)
@@ -1274,6 +1281,72 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
     });
+    let plain_search_backfilled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_plain_v2'")
+            .fetch_one(&app.db)
+            .await?;
+    if plain_search_backfilled == 0 {
+        let cards = sqlx::query("SELECT c.id,c.account_id,c.description,a.external_account_id AS slug FROM cards c JOIN accounts a ON a.id=c.account_id")
+            .fetch_all(&app.db).await?;
+        let mut card_text = Vec::with_capacity(cards.len());
+        for row in cards {
+            let (plain, _, _) = storage::render_rich_text(
+                &app,
+                &row.get::<String, _>("account_id"),
+                row.get("slug"),
+                &row.get::<String, _>("description"),
+            )
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+            card_text.push((row.get::<String, _>("id"), search_content(plain)));
+        }
+        let comments = sqlx::query("SELECT m.id,m.body,c.account_id,a.external_account_id AS slug FROM comments m JOIN cards c ON c.id=m.card_id JOIN accounts a ON a.id=c.account_id")
+            .fetch_all(&app.db).await?;
+        let mut comment_text = Vec::with_capacity(comments.len());
+        for row in comments {
+            let (plain, _, _) = storage::render_rich_text(
+                &app,
+                &row.get::<String, _>("account_id"),
+                row.get("slug"),
+                &row.get::<String, _>("body"),
+            )
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+            comment_text.push((row.get::<String, _>("id"), search_content(plain)));
+        }
+        let mut tx = app.db.begin().await?;
+        for (id, content) in card_text {
+            sqlx::query("UPDATE cards SET search_text=? WHERE id=?")
+                .bind(content)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        for (id, content) in comment_text {
+            sqlx::query("UPDATE comments SET search_text=? WHERE id=?")
+                .bind(content)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::raw_sql(include_str!("../search_triggers.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM card_search")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM comment_search")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,search_text FROM cards WHERE status='published'")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.search_text FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT OR IGNORE INTO search_migrations(key) VALUES('fts_plain_v2')")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
@@ -5226,6 +5299,9 @@ async fn create_card(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Untitled".into());
     let description = string(v, "description").unwrap_or_default();
+    let (plain_description, _, _) =
+        storage::render_rich_text(&app, &p.account_id, p.slug, &description).await?;
+    let search_text = search_content(plain_description);
     let event_id = id();
     let id = id();
     let timestamp = now();
@@ -5241,8 +5317,8 @@ async fn create_card(
     .fetch_one(&mut *tx)
     .await
     .map_err(db_err)?;
-    sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
     storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
     storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
     sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
@@ -5512,15 +5588,19 @@ async fn update_card(
         title = "Untitled".into();
     }
     let description = string(v, "description").unwrap_or_else(|| c.get("description"));
+    let (plain_description, _, _) =
+        storage::render_rich_text(&app, &p.account_id, p.slug, &description).await?;
+    let search_text = search_content(plain_description);
     let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
     let custom_last_active_at = timestamp_param(v, "last_active_at")?;
     let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query(
-        "UPDATE cards SET title=?,description=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
+        "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
     )
     .bind(&title)
     .bind(&description)
+    .bind(&search_text)
     .bind(&status)
     .bind(&created_at)
     .bind(now())
@@ -6168,14 +6248,18 @@ async fn create_comment(
         return Err(err(StatusCode::FORBIDDEN, "Card is not commentable"));
     }
     let content = required(nested(&body, "comment"), "body")?;
+    let (plain_body, _, _) =
+        storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
+    let search_text = search_content(plain_body);
     let id = id();
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id)
         .bind(c.get::<String, _>("id"))
         .bind(&p.user_id)
         .bind(&content)
+        .bind(&search_text)
         .bind(&timestamp)
         .bind(&timestamp)
         .execute(&mut *tx)
@@ -6238,9 +6322,13 @@ async fn update_comment(
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }
     let content = required(nested(&body, "comment"), "body")?;
+    let (plain_body, _, _) =
+        storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
+    let search_text = search_content(plain_body);
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query("UPDATE comments SET body=?,updated_at=? WHERE id=?")
+    sqlx::query("UPDATE comments SET body=?,search_text=?,updated_at=? WHERE id=?")
         .bind(&content)
+        .bind(&search_text)
         .bind(now())
         .bind(&id)
         .execute(&mut *tx)

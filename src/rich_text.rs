@@ -35,7 +35,7 @@ fn allowed_html(input: &str) -> String {
             "ul",
         ]))
         .tag_attributes(HashMap::from([("a", HashSet::from(["href", "title"]))]))
-        .generic_attributes(HashSet::new())
+        .generic_attributes(HashSet::from(["class"]))
         .clean_content_tags(HashSet::new())
         .link_rel(None)
         .url_relative(ammonia::UrlRelative::PassThrough);
