@@ -213,6 +213,17 @@ fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, max_age: i64, se
         headers.append(header::SET_COOKIE, v);
     }
 }
+fn join_return_to(headers: &HeaderMap) -> Option<String> {
+    let value = cookie_value(headers, "join_return_to")?;
+    let account = value
+        .strip_prefix('/')?
+        .strip_suffix("/users/verifications/new")?;
+    if !account.is_empty() && account.bytes().all(|byte| byte.is_ascii_digit()) {
+        Some(value)
+    } else {
+        None
+    }
+}
 fn secure_request(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")
@@ -1519,6 +1530,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/up", get(|| async { "ok" }))
         .route("/", get(home))
         .route("/{account}/", get(events_page::index))
+        .route("/{account}/landing", get(landing))
         .route(
             "/client_configurations/android_v1.json",
             get(android_config),
@@ -2446,14 +2458,25 @@ async fn complete_magic_link(
     );
     if form {
         *response.status_mut() = StatusCode::FOUND;
-        response
-            .headers_mut()
-            .insert(header::LOCATION, HeaderValue::from_static("/"));
+        let destination = join_return_to(&headers).unwrap_or_else(|| "/".into());
+        response.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_str(&destination).expect("safe join destination"),
+        );
         response.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/html; charset=utf-8"),
         );
         *response.body_mut() = Body::empty();
+    }
+    if cookie_value(&headers, "join_return_to").is_some() {
+        set_cookie(
+            response.headers_mut(),
+            "join_return_to",
+            "",
+            0,
+            secure_request(&headers),
+        );
     }
     Ok(response)
 }
@@ -3651,11 +3674,14 @@ async fn join_page(
         )
             .into_response());
     };
+    let name: String = row.get("name");
     if row.get::<i64, _>("usage_count") >= row.get::<i64, _>("usage_limit") {
-        return Ok((StatusCode::GONE, Html("<h1>That code is all used up</h1>")).into_response());
+        return Ok((StatusCode::GONE, join_code_page::inactive(&name)).into_response());
     }
     let page = include_str!("../static/join.html")
-        .replace("{{ACCOUNT_NAME}}", &escape(&row.get::<String, _>("name")));
+        .replace("{{ACCOUNT_NAME}}", &escape(&name))
+        .replace("{{ACCOUNT}}", &slug.to_string())
+        .replace("{{CODE}}", &escape(&code));
     Ok(Html(page).into_response())
 }
 async fn redeem_join_code(
@@ -3663,17 +3689,45 @@ async fn redeem_join_code(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path((account, code)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
-    let email = required(&body, "email_address")?.trim().to_lowercase();
-    if !valid_email(&email) {
-        return Err(bad("Invalid email address"));
-    }
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("application/x-www-form-urlencoded");
+    let body: Value = if form {
+        let email = url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "email_address")
+            .map(|(_, value)| value.into_owned())
+            .unwrap_or_default();
+        json!({"email_address":email})
+    } else {
+        serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
+    };
+    let email = string(&body, "email_address")
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
     let existing=sqlx::query("SELECT a.id,j.usage_count,j.usage_limit FROM account_join_codes j JOIN accounts a ON a.id=j.account_id WHERE a.external_account_id=? AND j.code=?")
         .bind(slug).bind(&code).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     if existing.get::<i64, _>("usage_count") >= existing.get::<i64, _>("usage_limit") {
+        if form {
+            let name: String = sqlx::query_scalar("SELECT name FROM accounts WHERE id=?")
+                .bind(existing.get::<String, _>("id"))
+                .fetch_one(&app.db)
+                .await
+                .map_err(db_err)?;
+            return Ok((StatusCode::GONE, join_code_page::inactive(&name)).into_response());
+        }
         return Err(err(StatusCode::GONE, "That code is all used up"));
+    }
+    if !valid_email(&email) {
+        if form {
+            return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response());
+        }
+        return Err(bad("Invalid email address"));
     }
     let account_id: String = existing.get("id");
     {
@@ -3742,10 +3796,22 @@ async fn redeem_join_code(
     tx.commit().await.map_err(db_err)?;
     drop(_writer);
     if current.as_deref() == Some(identity_id.as_str()) {
-        return Ok(Json(
-            json!({"joined":true,"requires_name":requires_name,"account_slug":format!("/{slug}")}),
-        )
-        .into_response());
+        return Ok(if form {
+            (
+                StatusCode::FOUND,
+                [(
+                    header::LOCATION,
+                    if requires_name {
+                        format!("/{slug}/users/verifications/new")
+                    } else {
+                        format!("/{slug}/landing")
+                    },
+                )],
+            )
+                .into_response()
+        } else {
+            Json(json!({"joined":true,"requires_name":requires_name,"account_slug":format!("/{slug}")})).into_response()
+        });
     }
     if let Some(session) = cookie_value(&headers, "session_token") {
         sqlx::query("DELETE FROM sessions WHERE token_hash=?")
@@ -3770,6 +3836,25 @@ async fn redeem_join_code(
             0,
             secure_request(&headers),
         );
+    }
+    if form {
+        set_cookie(
+            response.headers_mut(),
+            "join_return_to",
+            &format!("/{slug}/users/verifications/new"),
+            900,
+            secure_request(&headers),
+        );
+        *response.status_mut() = StatusCode::FOUND;
+        response.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_static("/session/magic_link"),
+        );
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        *response.body_mut() = Body::empty();
     }
     Ok(response)
 }
@@ -3804,7 +3889,11 @@ async fn complete_join(
         .await
         .map_err(db_err)?;
     if form {
-        Ok((StatusCode::FOUND, [(header::LOCATION, "/")]).into_response())
+        Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/landing"))],
+        )
+            .into_response())
     } else {
         Ok(StatusCode::NO_CONTENT.into_response())
     }
@@ -7941,6 +8030,28 @@ async fn delete_comment_reaction(
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
     delete_reaction(&app, &p, &c, Some(&comment), &reaction).await
+}
+
+async fn landing(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let boards: Vec<String> = sqlx::query_scalar(
+        "SELECT b.id FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? LIMIT 2",
+    )
+    .bind(&p.user_id)
+    .bind(&p.account_id)
+    .fetch_all(&app.db)
+    .await
+    .map_err(db_err)?;
+    let destination = if boards.len() == 1 {
+        format!("/{account}/boards/{}", boards[0])
+    } else {
+        format!("/{account}/")
+    };
+    Ok((StatusCode::FOUND, [(header::LOCATION, destination)]).into_response())
 }
 
 async fn home() -> axum::response::Html<&'static str> {

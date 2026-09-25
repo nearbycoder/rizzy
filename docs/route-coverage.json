@@ -1266,7 +1266,7 @@
       "path": "/landing(.:format)",
       "controller": "landings",
       "action": "show",
-      "route_present": false
+      "route_present": true
     },
     {
       "method": "POST",
@@ -1477,6 +1477,10 @@
     {
       "method": "GET",
       "path": "/{account}/"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/landing"
     },
     {
       "method": "GET",

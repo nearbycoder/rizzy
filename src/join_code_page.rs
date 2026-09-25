@@ -55,3 +55,10 @@ pub(super) fn edit(p: &Principal, count: i64, limit: i64, error: Option<&str>) -
     );
     page(p, "Change usage limit", content)
 }
+
+pub(super) fn inactive(name: &str) -> Html<String> {
+    Html(format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>That code is all used up | Rizzy</title></head><body style=\"font:16px/1.5 system-ui,sans-serif;background:#f7f5f0;color:#252322\"><main style=\"max-width:540px;margin:12vh auto;padding:30px;background:white;border-radius:16px;text-align:center\"><h1>That code is all used up</h1><p>Ask someone from {} to send you a new link or increase the limit.</p><a href=\"/\">OK</a></main></body></html>",
+        escape(name)
+    ))
+}
