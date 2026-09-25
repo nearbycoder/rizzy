@@ -546,6 +546,30 @@ async fn queue_notifications(
     if p.role == "system" {
         return Ok(());
     }
+    let mention_content = if action == "card_published" {
+        sqlx::query_scalar::<_, String>("SELECT description FROM cards WHERE id=?")
+            .bind(card_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(db_err)?
+    } else if eventable_type == "Comment" {
+        sqlx::query_scalar::<_, String>(
+            "SELECT body FROM comments WHERE id=(SELECT eventable_id FROM events WHERE id=?)",
+        )
+        .bind(event_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(db_err)?
+    } else {
+        None
+    };
+    let mentioned: HashSet<String> = mention_content
+        .as_deref()
+        .map(rich_text::attachment_sgids)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|sgid| sgid.strip_prefix("gid://fizzy/User/").map(str::to_owned))
+        .collect();
     let recipients: Vec<String> = if action == "card_assigned" {
         particulars["assignee_ids"]
             .as_array()
@@ -562,12 +586,55 @@ async fn queue_notifications(
     };
     for recipient in unique_ids(recipients)
         .into_iter()
-        .filter(|user| user != &p.user_id)
+        .filter(|user| user != &p.user_id && !mentioned.contains(user))
     {
         sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Event',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
             .bind(id()).bind(&p.account_id).bind(&recipient).bind(&p.user_id).bind(card_id).bind(event_id)
             .bind(timestamp).bind(timestamp).bind(board_id).bind(&recipient)
             .execute(&mut **tx).await.map_err(db_err)?;
+    }
+    Ok(())
+}
+
+async fn create_new_mentions(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    p: &Principal,
+    board_id: &str,
+    card_id: &str,
+    source_type: &str,
+    source_id: &str,
+    content: &str,
+) -> Result<()> {
+    let mut seen = HashSet::new();
+    for sgid in rich_text::attachment_sgids(content) {
+        let Some(user_id) = sgid.strip_prefix("gid://fizzy/User/") else {
+            continue;
+        };
+        if !seen.insert(user_id.to_owned()) {
+            continue;
+        }
+        let accessible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users u JOIN accesses a ON a.user_id=u.id WHERE u.id=? AND u.account_id=? AND a.board_id=?")
+            .bind(user_id).bind(&p.account_id).bind(board_id)
+            .fetch_one(&mut **tx).await.map_err(db_err)?;
+        if accessible == 0 {
+            continue;
+        }
+        let mention_id = id();
+        let timestamp = now();
+        let inserted = sqlx::query("INSERT INTO mentions(id,account_id,mentionee_id,mentioner_id,source_type,source_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM mentions WHERE mentionee_id=? AND mentioner_id=? AND source_type=? AND source_id=?)")
+            .bind(&mention_id).bind(&p.account_id).bind(user_id).bind(&p.user_id).bind(source_type).bind(source_id)
+            .bind(&timestamp).bind(&timestamp).bind(user_id).bind(&p.user_id).bind(source_type).bind(source_id)
+            .execute(&mut **tx).await.map_err(db_err)?;
+        if inserted.rows_affected() == 0 {
+            continue;
+        }
+        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1")
+            .bind(card_id).bind(user_id).execute(&mut **tx).await.map_err(db_err)?;
+        if user_id != p.user_id && p.role != "system" {
+            sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Mention',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
+                .bind(id()).bind(&p.account_id).bind(user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
+                .bind(&timestamp).bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
+        }
     }
     Ok(())
 }
@@ -3759,6 +3826,8 @@ async fn update_board(
                     .map_err(db_err)?;
                 sqlx::query("DELETE FROM watches WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
                     .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+                sqlx::query("DELETE FROM mentions WHERE mentionee_id=? AND ((source_type='Card' AND source_id IN (SELECT id FROM cards WHERE board_id=?)) OR (source_type='Comment' AND source_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.board_id=?)))")
+                    .bind(user).bind(&id).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
                 sqlx::query("DELETE FROM notifications WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
                     .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
                 sqlx::query("DELETE FROM pins WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
@@ -5521,6 +5590,7 @@ async fn create_card(
         &timestamp,
     )
     .await?;
+    create_new_mentions(&mut tx, &p, &board_id, &id, "Card", &id, &description).await?;
     tx.commit().await.map_err(db_err)?;
     drop(writer);
     let c = card(&app, &p, &number.to_string()).await?;
@@ -5712,6 +5782,16 @@ async fn publish_card(
         &timestamp,
     )
     .await?;
+    create_new_mentions(
+        &mut tx,
+        &p,
+        &board_id,
+        &card_id,
+        "Card",
+        &card_id,
+        &c.get::<String, _>("description"),
+    )
+    .await?;
     tx.commit().await.map_err(db_err)?;
     if headers.contains_key("x-rizzy-json-request") {
         return Ok(StatusCode::CREATED.into_response());
@@ -5785,6 +5865,18 @@ async fn update_card(
     let removed_embed_keys =
         storage::sync_embeds_tx(&mut tx, &p, "Card", &c.get::<String, _>("id"), &description)
             .await?;
+    if status == "published" {
+        create_new_mentions(
+            &mut tx,
+            &p,
+            &c.get::<String, _>("board_id"),
+            &c.get::<String, _>("id"),
+            "Card",
+            &c.get::<String, _>("id"),
+            &description,
+        )
+        .await?;
+    }
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(replaced_image_keys).await;
     storage::remove_files(removed_embed_keys).await;
@@ -6500,6 +6592,16 @@ async fn create_comment(
         .await
         .map_err(db_err)?;
     storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
+    create_new_mentions(
+        &mut tx,
+        &p,
+        &c.get::<String, _>("board_id"),
+        &c.get::<String, _>("id"),
+        "Comment",
+        &id,
+        &content,
+    )
+    .await?;
     tx.commit().await.map_err(db_err)?;
     record_event(
         &app,
@@ -6569,6 +6671,16 @@ async fn update_comment(
         .await
         .map_err(db_err)?;
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
+    create_new_mentions(
+        &mut tx,
+        &p,
+        &c.get::<String, _>("board_id"),
+        &c.get::<String, _>("id"),
+        "Comment",
+        &id,
+        &content,
+    )
+    .await?;
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
     let r = comment_row(&app, &c, &id).await?;
