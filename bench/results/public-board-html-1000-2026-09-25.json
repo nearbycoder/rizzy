@@ -1,0 +1,193 @@
+{
+  "fixture_cards": 1000,
+  "sample_parity": {
+    "fizzy": {
+      "board_html_bytes": 41645,
+      "stream_html_bytes": 88183,
+      "column_counts": {
+        "maybe": "2",
+        "not_now": "99+",
+        "named": "99+",
+        "closed": "99+"
+      },
+      "stream_titles": [
+        "Public benchmark maybe 0985",
+        "Public benchmark maybe 0986",
+        "Public benchmark maybe 0987",
+        "Public benchmark maybe 0988",
+        "Public benchmark maybe 0989",
+        "Public benchmark maybe 0990",
+        "Public benchmark maybe 0991",
+        "Public benchmark maybe 0992",
+        "Public benchmark maybe 0993",
+        "Public benchmark maybe 0994",
+        "Public benchmark maybe 0995",
+        "Public benchmark maybe 0996",
+        "Public benchmark maybe 0997",
+        "Public benchmark maybe 0998",
+        "Public benchmark maybe 0999"
+      ]
+    },
+    "rizzy": {
+      "board_html_bytes": 11105,
+      "stream_html_bytes": 7932,
+      "column_counts": {
+        "maybe": "2",
+        "not_now": "99+",
+        "named": "99+",
+        "closed": "99+"
+      },
+      "stream_titles": [
+        "Public benchmark maybe 0985",
+        "Public benchmark maybe 0986",
+        "Public benchmark maybe 0987",
+        "Public benchmark maybe 0988",
+        "Public benchmark maybe 0989",
+        "Public benchmark maybe 0990",
+        "Public benchmark maybe 0991",
+        "Public benchmark maybe 0992",
+        "Public benchmark maybe 0993",
+        "Public benchmark maybe 0994",
+        "Public benchmark maybe 0995",
+        "Public benchmark maybe 0996",
+        "Public benchmark maybe 0997",
+        "Public benchmark maybe 0998",
+        "Public benchmark maybe 0999"
+      ]
+    }
+  },
+  "runs": {
+    "board": {
+      "fizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.03,
+          "requests": 988,
+          "errors": {},
+          "rps": 487.9,
+          "p50_ms": 15.12,
+          "p95_ms": 25.81,
+          "p99_ms": 35.64
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.02,
+          "requests": 3261,
+          "errors": {},
+          "rps": 1617.7,
+          "p50_ms": 17.71,
+          "p95_ms": 34.23,
+          "p99_ms": 44.38
+        },
+        {
+          "concurrency": 64,
+          "seconds": 2.04,
+          "requests": 3324,
+          "errors": {},
+          "rps": 1625.5,
+          "p50_ms": 34.8,
+          "p95_ms": 69.5,
+          "p99_ms": 91.87
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.0,
+          "requests": 12128,
+          "errors": {},
+          "rps": 6060.8,
+          "p50_ms": 1.23,
+          "p95_ms": 2.23,
+          "p99_ms": 2.91
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.0,
+          "requests": 14621,
+          "errors": {},
+          "rps": 7297.9,
+          "p50_ms": 4.01,
+          "p95_ms": 7.96,
+          "p99_ms": 11.04
+        },
+        {
+          "concurrency": 64,
+          "seconds": 2.0,
+          "requests": 15135,
+          "errors": {},
+          "rps": 7550.2,
+          "p50_ms": 7.48,
+          "p95_ms": 15.9,
+          "p99_ms": 23.37
+        }
+      ]
+    },
+    "stream": {
+      "fizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 1551,
+          "errors": {},
+          "rps": 771.9,
+          "p50_ms": 10.05,
+          "p95_ms": 12.69,
+          "p99_ms": 21.62
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.04,
+          "requests": 1602,
+          "errors": {},
+          "rps": 786.8,
+          "p50_ms": 35.56,
+          "p95_ms": 76.77,
+          "p99_ms": 108.99
+        },
+        {
+          "concurrency": 64,
+          "seconds": 2.12,
+          "requests": 1718,
+          "errors": {},
+          "rps": 812.1,
+          "p50_ms": 61.97,
+          "p95_ms": 161.11,
+          "p99_ms": 217.63
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.0,
+          "requests": 5372,
+          "errors": {},
+          "rps": 2682.7,
+          "p50_ms": 2.75,
+          "p95_ms": 5.37,
+          "p99_ms": 6.67
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.01,
+          "requests": 4980,
+          "errors": {},
+          "rps": 2474.2,
+          "p50_ms": 12.12,
+          "p95_ms": 21.8,
+          "p99_ms": 27.07
+        },
+        {
+          "concurrency": 64,
+          "seconds": 2.02,
+          "requests": 4653,
+          "errors": {},
+          "rps": 2301.2,
+          "p50_ms": 24.39,
+          "p95_ms": 49.59,
+          "p99_ms": 64.06
+        }
+      ]
+    }
+  }
+}
