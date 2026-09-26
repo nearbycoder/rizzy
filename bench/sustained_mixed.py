@@ -58,8 +58,8 @@ def rust_env(directory):
             "RIZZY_DISABLE_WEBHOOK_DELIVERY": "1"}
 
 
-def prepare_source(directory, workers):
-    env = source_env(directory, workers)
+def prepare_source(directory, workers, env=None):
+    env = env or source_env(directory, workers)
     subprocess.run(["bin/rails", "db:prepare"], cwd=SOURCE, env=env,
                    capture_output=True, text=True, check=True)
     script = '''require "json"
@@ -74,8 +74,8 @@ def prepare_source(directory, workers):
     return env, json.loads(result.stdout)
 
 
-def prepare_rust(directory):
-    env = rust_env(directory)
+def prepare_rust(directory, env=None):
+    env = env or rust_env(directory)
     seeded = subprocess.run([RUST, "seed"], cwd=ROOT, env=env,
                             capture_output=True, text=True, check=True).stdout
     return env, {"account": re.search(r"Account: (\d+)", seeded).group(1),

@@ -120,3 +120,38 @@ The database-independent SQLx row/pool layer is a foundation for this work.
 A short native-SQLite versus `AnyPool` comparison showed lower throughput in
 one of two `AnyPool` runs, so the pool choice should be measured again on
 longer workloads before merging into the primary checkout.
+
+## Preliminary MySQL throughput comparison
+
+`bench/sustained_mixed_mysql.py` runs the pinned Fizzy source and Rizzy against
+separate fresh databases on the same local Oracle MySQL 8.4.11 server. It
+compares JSON response shapes and fixture content, then checks card, event, and
+comment counts directly in MySQL after each run. One workload unit reads the
+board, card, card list, and activity list, then creates, edits, comments on,
+closes, and reads a card. The load generator and web servers use separate CPU
+affinity sets; Fizzy uses four Puma workers and Rizzy one multithreaded process
+on the four server CPUs. The two targets run sequentially, and the second
+round reverses their order. MySQL itself is shared and is not included in the
+application CPU and memory figures.
+
+The September 26, 2026 runs used 100 initial cards and 15 seconds per target.
+All four rounds had matching samples, correct stored counts, and zero HTTP
+errors:
+
+| Clients | Round order | Fizzy units/s | Rizzy units/s | Rizzy/Fizzy | Fizzy p95 unit | Rizzy p95 unit |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 8 | Fizzy, Rizzy | 6.74 | 71.09 | 10.55× | 1647 ms | 223 ms |
+| 8 | Rizzy, Fizzy | 25.27 | 174.30 | 6.90× | 439 ms | 69 ms |
+| 16 | Fizzy, Rizzy | 26.11 | 164.88 | 6.31× | 743 ms | 267 ms |
+| 16 | Rizzy, Fizzy | 24.89 | 111.78 | 4.49× | 827 ms | 338 ms |
+
+Raw measurements and revisions are in
+`bench/results/mysql_mixed_c8_2026-09-26.json` and
+`bench/results/mysql_mixed_c16_2026-09-26.json`. The spread is wide, including
+within one target, so these are preliminary local measurements for this one
+API workload, not a claim of maximum capacity or full application speed. An
+earlier two-client probe saw one Rizzy HTTP 500 on a card update; a later
+10-second two-client run and these four rounds did not reproduce it. That
+transient failure still needs diagnosis. Larger datasets, a concurrency sweep,
+multiple application processes, full background jobs, and representative
+browser workflows remain necessary before claiming greater scale.
