@@ -162,7 +162,10 @@ changing their activity timestamps, removes the column, and restores other
 columns' timestamps after MySQL card triggers. The core flow checks those
 timestamp effects. The four-process cluster flow also creates 20 columns on
 one board concurrently and checks that their positions are exactly 1 through
-20. Large-board delete throughput and cross-host behavior remain unmeasured.
+20. Column position swaps now take the same database board lock, and the
+cluster flow concurrently swaps ten disjoint pairs right and then left across
+four processes. Large-board delete throughput and cross-host behavior remain
+unmeasured.
 
 The schema and commands were exercised on a disposable local MariaDB 13.0.2
 instance on 2026-09-26. The Rust binary created all 63 tables through SQLx,

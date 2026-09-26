@@ -8373,7 +8373,7 @@ async fn move_column(
     column_id: &str,
     headers: &HeaderMap,
     left: bool,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(app, headers, account).await?;
     p.write()?;
     let column = sqlx::query("SELECT * FROM columns WHERE id=? AND account_id=?")
@@ -8386,13 +8386,14 @@ async fn move_column(
     let board_id: String = column.get("board_id");
     board(app, &p, &board_id).await?;
 
-    let _guard = app.write_lock.lock().await;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
     let position: i64 = sqlx::query_scalar("SELECT position FROM columns WHERE id=?")
         .bind(column_id)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(db_err)?;
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
     let neighbor = if left {
         sqlx::query("SELECT id,position FROM columns WHERE board_id=? AND position<? ORDER BY position DESC LIMIT 1")
             .bind(&board_id).bind(position).fetch_optional(&mut *tx).await.map_err(db_err)?
@@ -8400,7 +8401,7 @@ async fn move_column(
         sqlx::query("SELECT id,position FROM columns WHERE board_id=? AND position>? ORDER BY position ASC LIMIT 1")
             .bind(&board_id).bind(position).fetch_optional(&mut *tx).await.map_err(db_err)?
     };
-    if let Some(neighbor) = neighbor {
+    let neighbor_id = if let Some(neighbor) = neighbor {
         let neighbor_id: String = neighbor.get("id");
         let neighbor_position: i64 = neighbor.get("position");
         sqlx::query("UPDATE columns SET position=? WHERE id=?")
@@ -8411,20 +8412,67 @@ async fn move_column(
             .map_err(db_err)?;
         sqlx::query("UPDATE columns SET position=? WHERE id=?")
             .bind(position)
-            .bind(neighbor_id)
+            .bind(&neighbor_id)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-    }
+        Some(neighbor_id)
+    } else {
+        None
+    };
     tx.commit().await.map_err(db_err)?;
-    Ok(StatusCode::CREATED)
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(StatusCode::CREATED.into_response());
+    }
+    if wants_turbo_stream(headers) {
+        let mut stream = String::new();
+        if let Some(neighbor_id) = neighbor_id {
+            let column = checked_column(app, &p, &board_id, column_id).await?;
+            let content = column_stream_markup(app, &p, &board_id, &column).await?;
+            let action = if left { "before" } else { "after" };
+            stream.push_str(&format!(
+                "<turbo-stream action=\"remove\" target=\"column_{}\"></turbo-stream><turbo-stream action=\"{action}\" target=\"column_{}\"><template>{content}</template></turbo-stream>",
+                escape(column_id),
+                escape(&neighbor_id),
+            ));
+            let moved_position: i64 = column.get("position");
+            for query in [
+                "SELECT * FROM columns WHERE board_id=? AND position<? ORDER BY position DESC,id DESC LIMIT 1",
+                "SELECT * FROM columns WHERE board_id=? AND position>? ORDER BY position ASC,id ASC LIMIT 1",
+            ] {
+                let adjacent = sqlx::query(query)
+                    .bind(&board_id)
+                    .bind(moved_position)
+                    .fetch_optional(&app.db)
+                    .await
+                    .map_err(db_err)?;
+                if let Some(adjacent) = adjacent {
+                    let adjacent_id: String = adjacent.get("id");
+                    let content = column_stream_markup(app, &p, &board_id, &adjacent).await?;
+                    stream.push_str(&format!(
+                        "<turbo-stream action=\"replace\" target=\"column_{}\" method=\"morph\"><template>{content}</template></turbo-stream>",
+                        escape(&adjacent_id),
+                    ));
+                }
+            }
+        }
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
 }
 
 async fn move_column_left(
     State(app): Shared,
     Path((account, column_id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     move_column(&app, &account, &column_id, &headers, true).await
 }
 
@@ -8432,7 +8480,7 @@ async fn move_column_right(
     State(app): Shared,
     Path((account, column_id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     move_column(&app, &account, &column_id, &headers, false).await
 }
 

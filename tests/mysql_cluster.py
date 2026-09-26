@@ -161,6 +161,34 @@ def main():
                 url, "SELECT GROUP_CONCAT(position ORDER BY position) FROM columns "
                 f"WHERE board_id = '{columns_board['id']}'"
             ) == ",".join(str(position) for position in range(1, 21))
+            status, ordered_columns, _ = call(
+                bases[0], account, token, f"/boards/{columns_board['id']}/columns")
+            assert status == 200 and len(ordered_columns) == 20
+
+            def move_created_column(index, direction):
+                column_id = ordered_columns[index]["id"]
+                return call(bases[index % 4], account, token,
+                            f"/columns/{column_id}/{direction}_position.json", "POST")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+                moved_right = list(pool.map(
+                    lambda index: move_created_column(index, "right"), range(0, 20, 2)))
+            assert all(status == 201 for status, _, _ in moved_right), moved_right
+            expected_swapped = ",".join(
+                ordered_columns[index]["name"] for pair in range(0, 20, 2)
+                for index in (pair + 1, pair))
+            assert mysql_scalar(
+                url, "SELECT GROUP_CONCAT(name ORDER BY position) FROM columns "
+                f"WHERE board_id = '{columns_board['id']}'"
+            ) == expected_swapped
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+                moved_left = list(pool.map(
+                    lambda index: move_created_column(index, "left"), range(0, 20, 2)))
+            assert all(status == 201 for status, _, _ in moved_left), moved_left
+            assert mysql_scalar(
+                url, "SELECT GROUP_CONCAT(name ORDER BY position) FROM columns "
+                f"WHERE board_id = '{columns_board['id']}'"
+            ) == ",".join(column["name"] for column in ordered_columns)
 
             def create(index):
                 return call(
@@ -551,7 +579,7 @@ def main():
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 20 ordered concurrent columns, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            print("MySQL cluster passed: 20 concurrent columns and 20 position swaps, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()
