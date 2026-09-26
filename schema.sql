@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS accesses (
   PRIMARY KEY(board_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS accesses_user_board ON accesses(user_id,board_id);
+CREATE INDEX IF NOT EXISTS accesses_user_recent ON accesses(user_id,accessed_at DESC);
 CREATE TABLE IF NOT EXISTS access_records (
   board_id TEXT NOT NULL,
   user_id TEXT NOT NULL,

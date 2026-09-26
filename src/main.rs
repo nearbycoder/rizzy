@@ -5688,7 +5688,7 @@ async fn list_boards(
         .await
         .map_err(db_err)?;
     let rows = sqlx::query(&format!(
-        "SELECT b.*{scope} ORDER BY x.accessed_at DESC,b.created_at DESC LIMIT ? OFFSET ?"
+        "SELECT b.*{scope} ORDER BY x.accessed_at DESC LIMIT ? OFFSET ?"
     ))
     .bind(&p.account_id)
     .bind(&p.user_id)

@@ -1,0 +1,21 @@
+{
+  "fixture_boards": 30000,
+  "page_limit": 100,
+  "page_offset": 55,
+  "warm_reads": 40,
+  "before": {
+    "median_ms": 7.609,
+    "query_plan": [
+      "SEARCH x USING INDEX accesses_user_board (user_id=?)",
+      "SEARCH b USING INTEGER PRIMARY KEY (rowid=?)",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ]
+  },
+  "after": {
+    "median_ms": 0.039,
+    "query_plan": [
+      "SEARCH x USING COVERING INDEX accesses_user_recent (user_id=?)",
+      "SEARCH b USING INTEGER PRIMARY KEY (rowid=?)"
+    ]
+  }
+}
