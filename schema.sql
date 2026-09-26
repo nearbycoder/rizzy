@@ -630,6 +630,6 @@ END;
 CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
-CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(title,description);
-CREATE VIRTUAL TABLE IF NOT EXISTS comment_search USING fts5(body);
+CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(title,description,tokenize='porter unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS comment_search USING fts5(body,tokenize='porter unicode61');
 CREATE TABLE IF NOT EXISTS search_migrations (key TEXT PRIMARY KEY);

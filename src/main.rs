@@ -2498,6 +2498,36 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .await?;
         tx.commit().await?;
     }
+    let card_search_schema: String = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='card_search'",
+    )
+    .fetch_one(&app.db)
+    .await?;
+    if !card_search_schema.contains("porter unicode61") {
+        let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::raw_sql(
+            "DROP TRIGGER IF EXISTS cards_search_insert;
+             DROP TRIGGER IF EXISTS cards_search_update;
+             DROP TRIGGER IF EXISTS cards_search_delete;
+             DROP TRIGGER IF EXISTS comments_search_insert;
+             DROP TRIGGER IF EXISTS comments_search_update;
+             DROP TRIGGER IF EXISTS comments_search_delete;
+             DROP TABLE card_search;
+             DROP TABLE comment_search;
+             CREATE VIRTUAL TABLE card_search USING fts5(title,description,tokenize='porter unicode61');
+             CREATE VIRTUAL TABLE comment_search USING fts5(body,tokenize='porter unicode61');",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::raw_sql(include_str!("../search_triggers.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,search_text FROM cards WHERE status='published'")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.search_text FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
+    }
     if env::args().nth(1).as_deref() == Some("deliver-notifications") {
         let count = notification_mail::deliver_due(&app)
             .await

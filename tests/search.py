@@ -32,10 +32,15 @@ def main():
             first, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": "Layout is broken", "description": "Look at this mess"}}, bearer=token, status=201)
             second, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": "Just haggis", "description": "More haggis"}}, bearer=token, status=201)
             comment, _ = call(port, f"/{account}/cards/{second['number']}/comments", "POST", {"comment": {"body": "I love haggis and overflowing text"}}, bearer=token, status=201)
+            stemmed, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": "Running authentication"}}, bearer=token, status=201)
+            call(port, f"/{account}/cards/{stemmed['number']}/comments", "POST", {"comment": {"body": "Walking swiftly"}}, bearer=token, status=201)
             assert [card["id"] for card in search("broken")] == [first["id"]]
             assert [card["id"] for card in search("overflowing")] == [second["id"]]
             assert [card["id"] for card in search("haggis")] == [second["id"]]
             assert [card["id"] for card in search('"Layout is broken"')] == [first["id"]]
+            assert [card["id"] for card in search("run")] == [stemmed["id"]]
+            assert [card["id"] for card in search("authenticate")] == [stemmed["id"]]
+            assert [card["id"] for card in search("walk")] == [stemmed["id"]]
             assert [card["id"] for card in search(str(first["number"]))] == [first["id"]]
 
             pending, code = request_code(port, "search@example.com")
