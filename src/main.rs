@@ -13092,14 +13092,7 @@ async fn update_or_delete_comment_form(
             }
             Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
         }
-        Some("delete") => {
-            delete_comment(
-                State(app),
-                Path((account, number, id)),
-                headers,
-            )
-            .await
-        }
+        Some("delete") => delete_comment(State(app), Path((account, number, id)), headers).await,
         _ => Err(missing()),
     }
 }
