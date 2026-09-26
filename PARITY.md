@@ -96,6 +96,8 @@ and scoped-activity GETs. Both used the same account number and owner details;
 Rizzy's serialized bodies were about 1% smaller. The result covers only those
 four read routes on one host.
 
+A same-binary [four-process MySQL read run](bench/results/mysql-read-matched-fixtures-4process-1000-8-32-128-15s-2026-09-26.json) and [one-process control](bench/results/mysql-read-matched-fixtures-1process-1000-8-32-128-15s-2026-09-26.json) used 1,000-card fresh fixtures, the same four server CPUs, and two reversed-order 15-second rounds per client level. The load client distributed every route evenly over four Rust processes, checked their sampled JSON against Fizzy, and found zero HTTP errors and unchanged counts in all phases. Four-process Rizzy served 3,372–4,605 requests/s versus four-worker Fizzy's 290–312, or 11.4–15.6× in paired levels. Against the one-process Rizzy control with the identical binary, four processes averaged 2% more at 8 clients, 24% more at 32, and 30% more at 128. At 128 clients four processes had higher p95 latency (70–85 ms versus 45–54 ms) and used more CPU and memory. This verifies local process throughput scaling for four JSON reads; it does not verify multi-host deployment, write scaling, untested routes, or whole-app parity.
+
 The expanded `tests/mysql_cluster.py` reproduced HTTP 500 database errors when
 step creation, unwatching, triage, or reaction creation raced a title edit on
 the same board through different MySQL-backed processes. Those mutations now

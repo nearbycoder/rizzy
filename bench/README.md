@@ -16,6 +16,8 @@ is one-host read throughput, not a whole-app or maximum-scale
 result. Run `python3 bench/mysql_read_scale.py --mysql-port 33081` against a
 local Oracle MySQL server to repeat it.
 
+The [four-process read run](results/mysql-read-matched-fixtures-4process-1000-8-32-128-15s-2026-09-26.json) extends the same harness with balanced requests to four Rizzy processes and four Fizzy Puma workers on the same four server CPUs. Its [one-process Rizzy control](results/mysql-read-matched-fixtures-1process-1000-8-32-128-15s-2026-09-26.json) used the identical Rust binary hash. Both runs checked decoded sample JSON, all Rust replicas, unchanged 1,000-card/1,000-event counts, and zero errors in two reversed-order 15-second rounds at 8, 32, and 128 clients. Four-process Rizzy served 3,372–4,605 requests/s versus Fizzy's 290–312; its mean throughput gain over one Rizzy process was about 2% at 8 clients, 24% at 32, and 30% at 128. The extra processes increased memory, CPU use, and 128-client p95 latency. The result demonstrates local process throughput scaling for four JSON reads, not multi-host capacity or product-wide speed. Reproduce with `python3 bench/mysql_read_scale.py --mysql-port 33081 --rizzy-processes 4` and rerun with `--rizzy-processes 1` for the control.
+
 The [CSP-enabled board HTML run](results/board-html-csp-2026-09-26.json)
 rechecks a fresh 100-card board fixture after Rizzy began adding per-response
 script nonces. Two reversed-order five-second rounds at 8 and 32 clients used

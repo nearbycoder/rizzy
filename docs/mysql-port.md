@@ -388,6 +388,8 @@ served 3,251–4,117 requests/s versus Fizzy's 320–350, or 10.2–12.1× per
 paired level. Its serialized bodies were about 1% smaller. Unsampled responses,
 other routes, writes, and multi-host capacity remain unproven.
 
+The [four-process repeat](../bench/results/mysql-read-matched-fixtures-4process-1000-8-32-128-15s-2026-09-26.json) routed each JSON path evenly over four Rizzy processes and compared them with four Fizzy Puma workers on the same four app CPUs. A [one-process control](../bench/results/mysql-read-matched-fixtures-1process-1000-8-32-128-15s-2026-09-26.json) used the identical Rust binary. Both fresh-fixture runs completed two reversed-order 15-second rounds at 8, 32, and 128 clients with equal sampled decoded JSON, zero HTTP errors, and unchanged card/event/comment counts. Four-process Rizzy served 3,372–4,605 requests/s versus Fizzy's 290–312; compared with one Rizzy process, its mean throughput was 2%, 24%, and 30% higher at the three client levels. At 128 clients its p95 latency rose from 45–54 ms for one process to 70–85 ms for four, with greater CPU and memory use. These measurements support local read throughput scaling on the four routes, not cross-host or whole-application scale. Runtime and connection-pool configurations still differ between targets.
+
 The write-path audit found routes that updated cards without locking their
 parent board first. `tests/mysql_cluster.py` now checks 400 distinct cards
 through step create, update, and delete phases and then runs 200 same-card
