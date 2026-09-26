@@ -326,5 +326,16 @@ errors and verified database counts. The four-process distribution was within
 seven completed workflows among workers in each round. Summed app-process PSS
 was about 46 MiB at the end of each four-process phase versus 13–15 MiB for
 one process. The board-touch trigger serializes writes to this board, so this
-fixture may understate scale across independent boards; a multi-board check is
-the next measurement.
+fixture may understate scale across independent boards.
+
+The [four-board direct comparison](../bench/results/rizzy_mysql_1v4_4boards_500cards_c32_20s_2026-09-26.json)
+kept 500 initial cards, 32 clients, the same MySQL server and four app CPUs,
+and two reversed-order 20-second rounds. Work was distributed evenly across
+four boards and, in the cluster phases, four app processes. One process handled
+199.99 and 198.12 workflows/s; four handled 285.37 and 279.88, gains of 42.7%
+and 41.3%. All phases had zero HTTP errors and exact card, event, and comment
+counts. End-of-phase app PSS was 13–15 MiB for one process and 47 MiB for four.
+This supports higher throughput through application-process scaling on this
+local, four-board API workload. The shared account card counter and database
+remain contention points; other routes, larger datasets, durability under
+failure, and multiple hosts still need direct tests.
