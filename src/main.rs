@@ -1703,6 +1703,33 @@ async fn process_webhook_delivery(app: &App, delivery_id: &str, host: &str) -> R
     Ok(())
 }
 
+async fn claim_webhook_delivery(app: &App) -> sqlx::Result<Option<String>> {
+    if app.mysql {
+        let mut tx = app.db.begin().await?;
+        let delivery_id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM webhook_deliveries WHERE state='pending' ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(delivery_id) = delivery_id {
+            let updated = sqlx::query("UPDATE webhook_deliveries SET state='in_progress',updated_at=? WHERE id=? AND state='pending'")
+                .bind(now())
+                .bind(&delivery_id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Ok((updated.rows_affected() == 1).then_some(delivery_id));
+        }
+        tx.commit().await?;
+        Ok(None)
+    } else {
+        sqlx::query_scalar("UPDATE webhook_deliveries SET state='in_progress',updated_at=? WHERE id=(SELECT id FROM webhook_deliveries WHERE state='pending' ORDER BY created_at,id LIMIT 1) AND state='pending' RETURNING id")
+            .bind(now())
+            .fetch_optional(&app.db)
+            .await
+    }
+}
+
 async fn webhook_worker(app: Arc<App>) {
     let host = env::var("RIZZY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3007".into());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
@@ -1718,8 +1745,7 @@ async fn webhook_worker(app: Arc<App>) {
         }
         ticks = (ticks + 1) % 240;
         while let Ok(permit) = semaphore.clone().try_acquire_owned() {
-            let claimed = sqlx::query_scalar::<_,String>("UPDATE webhook_deliveries SET state='in_progress',updated_at=? WHERE id=(SELECT id FROM webhook_deliveries WHERE state='pending' ORDER BY created_at,id LIMIT 1) AND state='pending' RETURNING id")
-                .bind(now()).fetch_optional(&app.db).await;
+            let claimed = claim_webhook_delivery(&app).await;
             match claimed {
                 Ok(Some(delivery_id)) => {
                     let app = app.clone();

@@ -24,7 +24,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, and common formatted text | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
-| SQLite and MySQL deployment parity | SQLite runtime; MySQL 8.4.11 core and search flows, partial triggers, and two-process write checks on this branch | No |
+| SQLite and MySQL deployment parity | SQLite runtime; MySQL 8.4.11 core, search, notification, and webhook flows, partial triggers, and two-process write and worker checks on this branch | No |
 | Comparative performance and scale proof | Scoped reads plus 30- and 60-second mixed API runs through 256 clients | No |
 
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,

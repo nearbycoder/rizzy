@@ -26,6 +26,15 @@ checks one recipient's event notification, repeated unread count, a card
 mention, three queued push records, one pending email bundle, settings record
 timestamps and repeat no-ops, token renewal after expiry, and unsubscribe.
 Delivery, larger recipient sets, revocation, and full browser parity remain.
+The pinned source's selected webhook model and controller suites passed 71
+tests and 334 assertions on MySQL 8 with one test worker. The separate
+`tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,
+activation, and deletion; a queued card event; two worker processes claiming
+one delivery; private target rejection; and deactivation after the tenth
+failure. The claim uses a row lock with `SKIP LOCKED` on MySQL. This verifies
+single-delivery correctness for a local blocked target, not successful
+internet delivery or maximum worker throughput. The MySQL claim path has not
+yet been exercised on MariaDB.
 
 `schema.mysql.sql` is a snapshot of an initialized Rizzy SQLite database. To
 regenerate it after a SQLite schema change, seed a new SQLite database and run
