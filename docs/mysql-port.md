@@ -211,10 +211,10 @@ compares JSON response shapes and fixture content, then checks card, event, and
 comment counts directly in MySQL after each run. One workload unit reads the
 board, card, card list, and activity list, then creates, edits, comments on,
 closes, and reads a card. The load generator and web servers use separate CPU
-affinity sets; Fizzy uses four Puma workers and Rizzy one multithreaded process
-on the four server CPUs. The two targets run sequentially, and the second
-round reverses their order. MySQL itself is shared and is not included in the
-application CPU and memory figures.
+affinity sets; the initial comparisons used four Fizzy Puma workers and one
+multithreaded Rizzy process on the same four server CPUs. The two targets run
+sequentially, and the second round reverses their order. MySQL itself is
+shared and is not included in the application CPU and memory figures.
 
 The September 26, 2026 runs used 100 initial cards and 15 seconds per target.
 All four rounds had matching samples, correct stored counts, and zero HTTP
@@ -311,8 +311,20 @@ errors, verified card/event/comment counts, and near-even work distribution
 across all four Rust processes. Fizzy hit its previously observed ActiveSearch
 deadlock in the first round. Its second round completed 505 workflows at
 24.32/s without error, giving one valid paired ratio of 8.00×. All four app
-processes shared the same four assigned CPUs; MySQL ran outside that CPU set.
-The run tests one board and one API workflow on one host. A direct one-versus-
-four Rust process comparison, other routes and boards, retries for unrelated
-deadlocks, and multi-host deployment still need verification before claiming
-more general scale.
+processes shared the same four assigned CPUs; MySQL was not CPU pinned and was
+excluded from the application process resource figures.
+The run tests one board and one API workflow on one host. Other routes and
+boards, retries for unrelated deadlocks, and multi-host deployment still need
+verification before claiming more general scale.
+
+The [direct one-versus-four Rizzy comparison](../bench/results/rizzy_mysql_1v4_500cards_c32_20s_2026-09-26.json)
+uses the same binary, MySQL server, four assigned app CPUs, 500-card fixture,
+32 clients, and two reversed-order 20-second rounds. On this single-board
+workload, one process completed 164.70 and 165.74 workflows/s, while four
+completed 184.74 and 191.65 workflows/s: a 12.2–15.6% gain with no HTTP
+errors and verified database counts. The four-process distribution was within
+seven completed workflows among workers in each round. Summed app-process PSS
+was about 46 MiB at the end of each four-process phase versus 13–15 MiB for
+one process. The board-touch trigger serializes writes to this board, so this
+fixture may understate scale across independent boards; a multi-board check is
+the next measurement.
