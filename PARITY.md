@@ -27,6 +27,8 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | SQLite and MySQL deployment parity | SQLite only | No |
 | Comparative performance and scale proof | Harness added | No |
 
+The [conditional board HTML benchmark](bench/results/board-html-conditional-2026-09-25.json) verifies matching 304 responses and shows faster Rust reads on its 100-card fixture through 64 concurrent clients. Rust still renders the board before evaluating the validator, and the apps' full HTML responses differ substantially in size and detail. This result does not close the full-parity or scale-proof gates.
+
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
 [ROUTE_COVERAGE.md](ROUTE_COVERAGE.md) inventories source controller actions and Rizzy method/path declarations. Route presence does not establish functional parity.

@@ -1,0 +1,99 @@
+{
+  "fixture_cards": 100,
+  "conditional": true,
+  "sample_parity": {
+    "fizzy": {
+      "visible_cards": 15,
+      "html_bytes": 156446,
+      "etag": true
+    },
+    "rizzy": {
+      "visible_cards": 15,
+      "html_bytes": 47060,
+      "etag": true
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 3.01,
+        "requests": 3167,
+        "errors": {},
+        "rps": 1052.0,
+        "p50_ms": 6.24,
+        "p95_ms": 13.56,
+        "p99_ms": 28.98
+      },
+      {
+        "concurrency": 32,
+        "seconds": 3.03,
+        "requests": 3524,
+        "errors": {},
+        "rps": 1161.4,
+        "p50_ms": 25.47,
+        "p95_ms": 43.43,
+        "p99_ms": 52.13
+      },
+      {
+        "concurrency": 64,
+        "seconds": 3.06,
+        "requests": 3439,
+        "errors": {},
+        "rps": 1123.0,
+        "p50_ms": 55.3,
+        "p95_ms": 75.86,
+        "p99_ms": 90.45
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 3.0,
+        "requests": 7816,
+        "errors": {},
+        "rps": 2602.3,
+        "p50_ms": 3.07,
+        "p95_ms": 4.77,
+        "p99_ms": 5.5
+      },
+      {
+        "concurrency": 32,
+        "seconds": 3.01,
+        "requests": 5896,
+        "errors": {},
+        "rps": 1956.8,
+        "p50_ms": 16.44,
+        "p95_ms": 18.33,
+        "p99_ms": 19.24
+      },
+      {
+        "concurrency": 64,
+        "seconds": 3.03,
+        "requests": 6018,
+        "errors": {},
+        "rps": 1985.5,
+        "p50_ms": 32.71,
+        "p95_ms": 34.98,
+        "p99_ms": 35.81
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 2.474,
+      "p95_ratio_fizzy_over_rizzy": 2.843
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 1.685,
+      "p95_ratio_fizzy_over_rizzy": 2.369
+    },
+    {
+      "concurrency": 64,
+      "rps_ratio_rizzy_over_fizzy": 1.768,
+      "p95_ratio_fizzy_over_rizzy": 2.169
+    }
+  ]
+}
