@@ -215,6 +215,24 @@ card and board timestamps, and the untouched second column. The SQLite
 column lifecycle comparison remained equal to Fizzy. Large-column deletion
 is faster than the previous Rust build but still trails Fizzy on this fixture.
 
+The [MySQL index-layout probe](results/mysql-column-index-layouts-2026-09-26.json)
+tested the same 10,000-card deletion with the wide ordered column index and
+two smaller alternatives. Their delete times changed little, while the
+40-query named and Maybe first-page read batches went from roughly 2 ms with
+the wide index to about 330 ms with either smaller index: MySQL selected a
+board index and filesorted the result. The wide index remains. A separate
+[forced-index probe](results/mysql-column-index-force-2026-09-26.json)
+showed that MySQL's unhinted named-column count used a slower plan; 40 counts
+took 297 ms median versus 22 ms when forced onto the existing column index.
+The [authenticated binary A/B](results/mysql-column-count-hint-ab-2026-09-26.json)
+then measured three fresh 10,000-card trials of 40 named-column first-page
+requests per build. The median of trial medians fell from 8.664 to 1.475 ms,
+with matching response totals. The board route used an unchanged count query
+but also varied between builds, so its timings are a control for local run
+noise, not an effect credited to the named-column hint. These are sequential
+single-client reads on one MySQL host; concurrent capacity and full app parity
+still need measurement.
+
 The [five-step card workflow](card_workflow.py) creates a published card, edits its title and description, adds a comment, closes it, and reads its final state. It compares JSON response shapes in a preflight, then checks unique numbers, closed-card totals, four activity events per card, and a three-comment sample after each run. Fixture boards are deleted afterward. On [two reversed-order 500-workflow rounds](results/card-workflow-500-2026-09-26.json), at eight clients Rizzy completed 418–457 workflows/s versus Fizzy's 28.5–32.1; at 32 clients it completed 432–442 versus 28.5–28.6. Every run had zero HTTP errors and the expected 500 cards and 2,000 activities. Rizzy's p95 full-workflow latency was 19.7–21.5 ms at eight clients and 77.5–82.7 ms at 32; Fizzy's was 339–360 ms and 1,400–1,408 ms, respectively. A [100-workflow pilot](results/card-workflow-2026-09-26.json) passed the same checks, but its Rust runs were too short for a useful sustained-rate estimate.
 
 A two-process Rust run exposed a remaining SQLite lock error when a title change inserted its system comment. The edit, comment, closure, event, and system-comment transactions now use `BEGIN IMMEDIATE` to reserve the writer across processes. `tests/cluster_card_workflow.py` runs 600 workflows through two Rust processes, checking 600 closed cards, 2,400 events, and 1,800 comments; ten fresh repeats passed. The [post-fix 500-workflow comparison](results/card-workflow-500-immediate-2026-09-26.json) measured 420–450 Rizzy versus 27.5–29.4 Fizzy workflows/s at eight clients and 412–438 versus 28.6–30.4 at 32, with zero HTTP errors and the expected record counts. Rust's p95 workflow latency was 20.8–21.7 ms at eight clients and 80.9–85.8 ms at 32. These local runs do not show that adding Rust processes increases SQLite write capacity; SQLite still serializes writers.

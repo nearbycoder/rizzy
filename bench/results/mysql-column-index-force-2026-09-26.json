@@ -1,0 +1,97 @@
+{
+  "cards": 10000,
+  "trials": 3,
+  "rizzy_revision": "b4e1be5199866936da4272df708d8be31c8b8d25",
+  "server_cpus": [
+    0,
+    1
+  ],
+  "layouts": {
+    "wide": [
+      {
+        "reads": {
+          "named_page_40_us": 2344,
+          "named_count_40_us": 283781,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index",
+          "maybe_page_40_us": 2531,
+          "maybe_count_40_us": 96804,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 205527
+      },
+      {
+        "reads": {
+          "named_page_40_us": 1995,
+          "named_count_40_us": 297242,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index",
+          "maybe_page_40_us": 1664,
+          "maybe_count_40_us": 107687,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 195517
+      },
+      {
+        "reads": {
+          "named_page_40_us": 2238,
+          "named_count_40_us": 326741,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index",
+          "maybe_page_40_us": 2095,
+          "maybe_count_40_us": 96203,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 190372
+      }
+    ],
+    "wide_forced": [
+      {
+        "reads": {
+          "named_page_40_us": 1517,
+          "named_count_40_us": 21599,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_column_active\tcards_board_column_active\t663\tconst,const,const,const,const\t10000\t100.00\tBackward index scan; Using index",
+          "maybe_page_40_us": 1486,
+          "maybe_count_40_us": 20577,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_column_active\tcards_board_column_active\t663\tconst,const,const,const,const\t10000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 194670
+      },
+      {
+        "reads": {
+          "named_page_40_us": 2061,
+          "named_count_40_us": 27687,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_column_active\tcards_board_column_active\t663\tconst,const,const,const,const\t10000\t100.00\tBackward index scan; Using index",
+          "maybe_page_40_us": 1547,
+          "maybe_count_40_us": 23979,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_column_active\tcards_board_column_active\t663\tconst,const,const,const,const\t10000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 196060
+      },
+      {
+        "reads": {
+          "named_page_40_us": 1620,
+          "named_count_40_us": 20694,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_column_active\tcards_board_column_active\t663\tconst,const,const,const,const\t10000\t100.00\tBackward index scan; Using index",
+          "maybe_page_40_us": 1549,
+          "maybe_count_40_us": 20117,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_column_active\tcards_board_column_active\t663\tconst,const,const,const,const\t10000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 186325
+      }
+    ]
+  },
+  "median": {
+    "wide": {
+      "delete_us": 195517,
+      "named_page_40_us": 2238,
+      "named_count_40_us": 297242,
+      "maybe_page_40_us": 2095,
+      "maybe_count_40_us": 96804
+    },
+    "wide_forced": {
+      "delete_us": 194670,
+      "named_page_40_us": 1620,
+      "named_count_40_us": 21599,
+      "maybe_page_40_us": 1547,
+      "maybe_count_40_us": 20577
+    }
+  }
+}

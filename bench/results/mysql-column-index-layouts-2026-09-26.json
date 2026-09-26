@@ -1,0 +1,139 @@
+{
+  "cards": 10000,
+  "trials": 3,
+  "rizzy_revision": "b4e1be5199866936da4272df708d8be31c8b8d25",
+  "server_cpus": [
+    0,
+    1
+  ],
+  "layouts": {
+    "wide": [
+      {
+        "reads": {
+          "named_page_40_us": 1816,
+          "named_count_40_us": 282523,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index",
+          "maybe_page_40_us": 3029,
+          "maybe_count_40_us": 106156,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 203857
+      },
+      {
+        "reads": {
+          "named_page_40_us": 1986,
+          "named_count_40_us": 311462,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index",
+          "maybe_page_40_us": 2809,
+          "maybe_count_40_us": 109887,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 186808
+      },
+      {
+        "reads": {
+          "named_page_40_us": 2129,
+          "named_count_40_us": 287245,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index",
+          "maybe_page_40_us": 1818,
+          "maybe_count_40_us": 100766,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\trange\tcards_board_column_active,cards_board_active,fk_cards_1\tcards_board_column_active\t663\tNULL\t5000\t100.00\tUsing where; Backward index scan; Using index"
+        },
+        "delete_us": 191017
+      }
+    ],
+    "ordered_compact": [
+      {
+        "reads": {
+          "named_page_40_us": 326279,
+          "named_count_40_us": 295508,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort",
+          "maybe_page_40_us": 329392,
+          "maybe_count_40_us": 301559,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort"
+        },
+        "delete_us": 185441
+      },
+      {
+        "reads": {
+          "named_page_40_us": 345292,
+          "named_count_40_us": 294637,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort",
+          "maybe_page_40_us": 320085,
+          "maybe_count_40_us": 292491,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort"
+        },
+        "delete_us": 186451
+      },
+      {
+        "reads": {
+          "named_page_40_us": 336865,
+          "named_count_40_us": 295128,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort",
+          "maybe_page_40_us": 339703,
+          "maybe_count_40_us": 282180,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort"
+        },
+        "delete_us": 206110
+      }
+    ],
+    "filter_compact": [
+      {
+        "reads": {
+          "named_page_40_us": 327833,
+          "named_count_40_us": 295012,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort",
+          "maybe_page_40_us": 332917,
+          "maybe_count_40_us": 281438,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort"
+        },
+        "delete_us": 176983
+      },
+      {
+        "reads": {
+          "named_page_40_us": 334019,
+          "named_count_40_us": 325389,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort",
+          "maybe_page_40_us": 344619,
+          "maybe_count_40_us": 299198,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort"
+        },
+        "delete_us": 195912
+      },
+      {
+        "reads": {
+          "named_page_40_us": 329197,
+          "named_count_40_us": 309128,
+          "named_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort",
+          "maybe_page_40_us": 337817,
+          "maybe_count_40_us": 290842,
+          "maybe_explain": "1\tSIMPLE\tcards\tNULL\tref\tcards_board_active,fk_cards_1,cards_board_column_active\tcards_board_active\t404\tconst,const,const,const\t1\t100.00\tUsing where; Using filesort"
+        },
+        "delete_us": 188696
+      }
+    ]
+  },
+  "median": {
+    "wide": {
+      "delete_us": 191017,
+      "named_page_40_us": 1986,
+      "named_count_40_us": 287245,
+      "maybe_page_40_us": 2809,
+      "maybe_count_40_us": 106156
+    },
+    "ordered_compact": {
+      "delete_us": 186451,
+      "named_page_40_us": 336865,
+      "named_count_40_us": 295128,
+      "maybe_page_40_us": 329392,
+      "maybe_count_40_us": 292491
+    },
+    "filter_compact": {
+      "delete_us": 188696,
+      "named_page_40_us": 329197,
+      "named_count_40_us": 309128,
+      "maybe_page_40_us": 337817,
+      "maybe_count_40_us": 290842
+    }
+  }
+}
