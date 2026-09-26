@@ -1,0 +1,330 @@
+{
+  "fixture_cards": 100,
+  "workload": "scoped",
+  "rounds": 1,
+  "client": "rust",
+  "host_logical_cpus": 32,
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 32,
+        "errors": {},
+        "p50_ms": 26.97,
+        "p95_ms": 63.81,
+        "p99_ms": 88.94,
+        "path_requests": [
+          7976,
+          7976,
+          7975,
+          7975
+        ],
+        "path_response_bytes": [
+          4554296,
+          12785528,
+          190690225,
+          334120600
+        ],
+        "requests": 31902,
+        "response_bytes": 542150649,
+        "rps": 1061.6,
+        "seconds": 30.05,
+        "generator_cpu_seconds": 3.43,
+        "server_resources": {
+          "processes_peak": 17,
+          "pss_mib_start": 4887.4,
+          "pss_mib_peak": 5776.8,
+          "pss_mib_end": 5776.8,
+          "cpu_seconds": 470.76,
+          "cpu_cores_average": 15.67,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 64,
+        "errors": {},
+        "p50_ms": 55.88,
+        "p95_ms": 126.3,
+        "p99_ms": 163.1,
+        "path_requests": [
+          7987,
+          7987,
+          7986,
+          7986
+        ],
+        "path_response_bytes": [
+          4560577,
+          12803161,
+          190953246,
+          334581456
+        ],
+        "requests": 31946,
+        "response_bytes": 542898440,
+        "rps": 1061.8,
+        "seconds": 30.09,
+        "generator_cpu_seconds": 3.46,
+        "server_resources": {
+          "processes_peak": 17,
+          "pss_mib_start": 5776.8,
+          "pss_mib_peak": 5914.5,
+          "pss_mib_end": 5841.5,
+          "cpu_seconds": 473.14,
+          "cpu_cores_average": 15.72,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 128,
+        "errors": {},
+        "p50_ms": 104.26,
+        "p95_ms": 273.2,
+        "p99_ms": 395.83,
+        "path_requests": [
+          8099,
+          8099,
+          8098,
+          8098
+        ],
+        "path_response_bytes": [
+          4624529,
+          12982697,
+          193631278,
+          339273808
+        ],
+        "requests": 32394,
+        "response_bytes": 550512312,
+        "rps": 1071.9,
+        "seconds": 30.22,
+        "generator_cpu_seconds": 3.58,
+        "server_resources": {
+          "processes_peak": 17,
+          "pss_mib_start": 5842.0,
+          "pss_mib_peak": 5915.6,
+          "pss_mib_end": 5834.8,
+          "cpu_seconds": 478.0,
+          "cpu_cores_average": 15.82,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 256,
+        "errors": {},
+        "p50_ms": 198.11,
+        "p95_ms": 502.93,
+        "p99_ms": 596.24,
+        "path_requests": [
+          8002,
+          8002,
+          8001,
+          8001
+        ],
+        "path_response_bytes": [
+          4569142,
+          12827206,
+          191311911,
+          335209896
+        ],
+        "requests": 32006,
+        "response_bytes": 543918155,
+        "rps": 1052.2,
+        "seconds": 30.42,
+        "generator_cpu_seconds": 3.7,
+        "server_resources": {
+          "processes_peak": 17,
+          "pss_mib_start": 5835.8,
+          "pss_mib_peak": 5920.9,
+          "pss_mib_end": 5898.8,
+          "cpu_seconds": 480.17,
+          "cpu_cores_average": 15.78,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 32,
+        "errors": {},
+        "p50_ms": 10.89,
+        "p95_ms": 18.33,
+        "p99_ms": 19.41,
+        "path_requests": [
+          22250,
+          22250,
+          22249,
+          22249
+        ],
+        "path_response_bytes": [
+          11881500,
+          33575250,
+          500624749,
+          869068189
+        ],
+        "requests": 88998,
+        "response_bytes": 1415149688,
+        "rps": 2965.7,
+        "seconds": 30.01,
+        "generator_cpu_seconds": 3.57,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 39.3,
+          "pss_mib_peak": 39.9,
+          "pss_mib_end": 39.9,
+          "cpu_seconds": 294.86,
+          "cpu_cores_average": 9.83,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 64,
+        "errors": {},
+        "p50_ms": 23.0,
+        "p95_ms": 33.27,
+        "p99_ms": 34.72,
+        "path_requests": [
+          21941,
+          21941,
+          21940,
+          21940
+        ],
+        "path_response_bytes": [
+          11716494,
+          33108969,
+          493671940,
+          856998340
+        ],
+        "requests": 87762,
+        "response_bytes": 1395495743,
+        "rps": 2923.5,
+        "seconds": 30.02,
+        "generator_cpu_seconds": 3.54,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 39.9,
+          "pss_mib_peak": 42.7,
+          "pss_mib_end": 42.7,
+          "cpu_seconds": 294.47,
+          "cpu_cores_average": 9.81,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 128,
+        "errors": {},
+        "p50_ms": 46.11,
+        "p95_ms": 63.34,
+        "p99_ms": 66.59,
+        "path_requests": [
+          21654,
+          21653,
+          21653,
+          21653
+        ],
+        "path_response_bytes": [
+          11563236,
+          32674377,
+          487214153,
+          845787833
+        ],
+        "requests": 86613,
+        "response_bytes": 1377239599,
+        "rps": 2883.2,
+        "seconds": 30.04,
+        "generator_cpu_seconds": 3.71,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 42.7,
+          "pss_mib_peak": 47.6,
+          "pss_mib_end": 47.0,
+          "cpu_seconds": 293.03,
+          "cpu_cores_average": 9.75,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 256,
+        "errors": {},
+        "p50_ms": 85.79,
+        "p95_ms": 115.13,
+        "p99_ms": 118.67,
+        "path_requests": [
+          22954,
+          22954,
+          22954,
+          22954
+        ],
+        "path_response_bytes": [
+          12257436,
+          34637586,
+          516487954,
+          896606194
+        ],
+        "requests": 91816,
+        "response_bytes": 1459989170,
+        "rps": 3053.2,
+        "seconds": 30.07,
+        "generator_cpu_seconds": 3.99,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 47.0,
+          "pss_mib_peak": 61.4,
+          "pss_mib_end": 60.4,
+          "cpu_seconds": 304.53,
+          "cpu_cores_average": 10.13,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      }
+    ]
+  },
+  "sample_parity": {
+    "board_shape": true,
+    "card_shape": true,
+    "activity_shape": true,
+    "description_html": true,
+    "first_page_count": true,
+    "first_page_bytes": {
+      "fizzy": 24885,
+      "rizzy": 23775
+    }
+  },
+  "comparison": [
+    {
+      "concurrency": 32,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 2.794,
+      "p95_ratio_fizzy_over_rizzy": 3.481
+    },
+    {
+      "concurrency": 64,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 2.753,
+      "p95_ratio_fizzy_over_rizzy": 3.796
+    },
+    {
+      "concurrency": 128,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 2.69,
+      "p95_ratio_fizzy_over_rizzy": 4.313
+    },
+    {
+      "concurrency": 256,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 2.902,
+      "p95_ratio_fizzy_over_rizzy": 4.368
+    }
+  ]
+}

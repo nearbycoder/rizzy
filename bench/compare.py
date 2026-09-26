@@ -9,14 +9,18 @@ Example:
 import argparse
 import atexit
 import concurrent.futures
+import itertools
 import json
 import os
+import resource
+import subprocess
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 from collections import Counter
+from pathlib import Path
 
 
 def request(target, path, method="GET", payload=None, with_headers=False):
@@ -40,8 +44,8 @@ def shape(value):
     return type(value).__name__
 
 
-def fixture(target, count, on_board=None):
-    board = request(target, "/boards", "POST", {"board": {"name": f"Rizzy benchmark {int(time.time())}"}})
+def fixture(target, count, on_board=None, board_name=None):
+    board = request(target, "/boards", "POST", {"board": {"name": board_name or f"Rizzy benchmark {int(time.time())}"}})
     board_id = board["id"]
     if on_board:
         on_board(board_id)
@@ -61,30 +65,113 @@ def run(target, paths, concurrency, seconds):
     deadline = time.monotonic() + seconds
     starts = time.monotonic()
     samples, failures = [], Counter()
+    path_requests = Counter()
+    sequence = itertools.count()
     lock = threading.Lock()
 
-    def worker(worker_id):
-        local, errs = [], Counter()
-        n = worker_id
+    def worker(_worker_id):
+        local, errs, local_paths = [], Counter(), Counter()
         while time.monotonic() < deadline:
+            path_index = next(sequence) % len(paths)
             t = time.perf_counter()
             try:
-                request(target, paths[n % len(paths)])
+                request(target, paths[path_index])
                 local.append(time.perf_counter()-t)
+                local_paths[path_index] += 1
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
                 errs[str(getattr(e, "code", type(e).__name__))] += 1
-            n += concurrency
         with lock:
             samples.extend(local)
             failures.update(errs)
+            path_requests.update(local_paths)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         list(pool.map(worker, range(concurrency)))
     elapsed = time.monotonic()-starts
     return {"concurrency": concurrency, "seconds": round(elapsed, 2),
             "requests": len(samples), "errors": dict(failures),
+            "path_requests": [path_requests[index] for index in range(len(paths))],
             "rps": round(len(samples)/elapsed, 1), "p50_ms": pct(samples, .50),
             "p95_ms": pct(samples, .95), "p99_ms": pct(samples, .99)}
+
+
+def process_sample(root_pid):
+    """Read CPU, proportional memory, and I/O for one Linux process tree."""
+    if root_pid is None:
+        return None
+    entries = {}
+    for directory in Path("/proc").iterdir():
+        if not directory.name.isdigit():
+            continue
+        try:
+            fields = (directory / "stat").read_text().rsplit(")", 1)[1].split()
+            entries[int(directory.name)] = (int(fields[1]), int(fields[11]) + int(fields[12]))
+        except (OSError, IndexError, ValueError):
+            continue
+    if root_pid not in entries:
+        raise RuntimeError(f"Benchmark server PID {root_pid} is not running")
+    pids = {root_pid}
+    while True:
+        children = {pid for pid, (parent, _) in entries.items() if parent in pids}
+        if children <= pids:
+            break
+        pids |= children
+    pss_kib = read_bytes = write_bytes = 0
+    for pid in pids:
+        try:
+            for line in Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
+                if line.startswith("Pss:"):
+                    pss_kib += int(line.split()[1])
+                    break
+            for line in Path(f"/proc/{pid}/io").read_text().splitlines():
+                if line.startswith("read_bytes:"):
+                    read_bytes += int(line.split()[1])
+                elif line.startswith("write_bytes:"):
+                    write_bytes += int(line.split()[1])
+        except (OSError, ValueError):
+            continue
+    ticks = sum(entries[pid][1] for pid in pids if pid in entries)
+    return {"processes": len(pids), "cpu_seconds": ticks / os.sysconf("SC_CLK_TCK"),
+            "pss_mib": pss_kib / 1024, "read_mib": read_bytes / 1048576,
+            "write_mib": write_bytes / 1048576}
+
+
+def run_rust(target, paths, concurrency, seconds, load_binary):
+    env = {**os.environ, "LOAD_URL": target["url"], "LOAD_ACCOUNT": target["account"],
+           "LOAD_TOKEN": target["token"], "LOAD_PATHS_JSON": json.dumps(paths),
+           "LOAD_CONCURRENCY": str(concurrency), "LOAD_SECONDS": str(seconds)}
+    server_pid = target.get("pid")
+    before = process_sample(server_pid)
+    child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    process = subprocess.Popen([load_binary], env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    samples = [before] if before else []
+    while process.poll() is None:
+        if server_pid:
+            samples.append(process_sample(server_pid))
+        time.sleep(0.5)
+    output, error = process.communicate()
+    if process.returncode:
+        raise RuntimeError(f"Rust load generator exited {process.returncode}: {error.strip()}")
+    result = json.loads(output)
+    child_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    result["generator_cpu_seconds"] = round(
+        child_after.ru_utime + child_after.ru_stime - child_before.ru_utime - child_before.ru_stime, 2)
+    if server_pid:
+        after = process_sample(server_pid)
+        samples.append(after)
+        elapsed = result["seconds"]
+        result["server_resources"] = {
+            "processes_peak": max(item["processes"] for item in samples),
+            "pss_mib_start": round(before["pss_mib"], 1),
+            "pss_mib_peak": round(max(item["pss_mib"] for item in samples), 1),
+            "pss_mib_end": round(after["pss_mib"], 1),
+            "cpu_seconds": round(after["cpu_seconds"] - before["cpu_seconds"], 2),
+            "cpu_cores_average": round((after["cpu_seconds"] - before["cpu_seconds"]) / elapsed, 2),
+            "read_mib": round(after["read_mib"] - before["read_mib"], 2),
+            "write_mib": round(after["write_mib"] - before["write_mib"], 2),
+        }
+    return result
 
 
 def main():
@@ -93,12 +180,16 @@ def main():
     parser.add_argument("--seconds", type=float, default=10)
     parser.add_argument("--rounds", type=int, default=1,
                         help="repeat each level, alternating which server runs first")
+    parser.add_argument("--client", choices=("python", "rust"), default="python")
+    parser.add_argument("--load-binary", default="target/release/rizzy_load")
     parser.add_argument("--concurrency", default="1,8,32")
     parser.add_argument("--workload", choices=("mixed", "scoped"), default="mixed",
                         help="scoped excludes the account-wide board list")
     args = parser.parse_args()
     if args.cards < 1 or args.seconds <= 0 or args.rounds < 1:
         parser.error("--cards, --seconds, and --rounds must be positive")
+    if args.client == "rust" and not Path(args.load_binary).is_file():
+        parser.error(f"Build the Rust load client first: cargo build --release --bin rizzy_load")
     targets = {}
     for name in ("FIZZY", "RIZZY"):
         keys = [f"{name}_{field}" for field in ("URL", "ACCOUNT", "TOKEN")]
@@ -107,14 +198,19 @@ def main():
             continue
         if absent:
             parser.error("Missing " + ", ".join(absent))
-        targets[name.lower()] = {field.lower(): os.environ[f"{name}_{field}"] for field in ("URL", "ACCOUNT", "TOKEN")}
+        target = {field.lower(): os.environ[f"{name}_{field}"] for field in ("URL", "ACCOUNT", "TOKEN")}
+        if os.getenv(f"{name}_PID"):
+            target["pid"] = int(os.environ[f"{name}_PID"])
+        targets[name.lower()] = target
     if not targets:
         parser.error("Set at least one complete FIZZY_* or RIZZY_* target")
     results = {"fixture_cards": args.cards, "workload": args.workload,
-               "rounds": args.rounds, "runs": {}}
+               "rounds": args.rounds, "client": args.client,
+               "host_logical_cpus": os.cpu_count(), "runs": {}}
     paths = {}
     samples = {}
     created_boards = []
+    board_name = f"Rizzy benchmark {time.time_ns()}"
 
     def cleanup():
         for target, board_id in reversed(created_boards):
@@ -125,7 +221,9 @@ def main():
 
     atexit.register(cleanup)
     for name, target in targets.items():
-        board, number = fixture(target, args.cards, lambda board_id: created_boards.append((target, board_id)))
+        board, number = fixture(target, args.cards,
+                                lambda board_id: created_boards.append((target, board_id)),
+                                board_name)
         filtered_cards = f"/cards?board_ids%5B%5D={board}"
         activities = f"/activities?board_ids%5B%5D={board}"
         paths[name] = [f"/boards/{board}", f"/cards/{number}", filtered_cards, activities]
@@ -144,6 +242,13 @@ def main():
         assert int(activity_headers["X-Total-Count"]) == args.cards, (name, "activity total count", activity_headers["X-Total-Count"])
         samples[name] = {"board_shape": shape(board_sample), "card_shape": shape(card_sample),
                          "activity_shape":shape(activity_sample),
+                         "board_name": board_sample["name"],
+                         "card_semantics": {key: card_sample[key] for key in
+                                            ("title", "description", "status", "closed",
+                                             "postponed", "golden", "has_attachments", "tags")},
+                         "first_page_titles": [card["title"] for card in page_sample],
+                         "activity_actions": [event["action"] for event in activity_sample],
+                         "activity_descriptions": [event["description"] for event in activity_sample],
                          "card_description_html": card_sample["description_html"],
                          "first_page_count": len(page_sample), "first_page_bytes": len(json.dumps(page_sample))}
         for path in paths[name]:
@@ -154,6 +259,11 @@ def main():
         results["sample_parity"] = {"board_shape": left["board_shape"] == right["board_shape"],
                                     "card_shape": left["card_shape"] == right["card_shape"],
                                     "activity_shape": left["activity_shape"] == right["activity_shape"],
+                                    "board_name": left["board_name"] == right["board_name"],
+                                    "card_semantics": left["card_semantics"] == right["card_semantics"],
+                                    "first_page_titles": left["first_page_titles"] == right["first_page_titles"],
+                                    "activity_actions": left["activity_actions"] == right["activity_actions"],
+                                    "activity_descriptions": left["activity_descriptions"] == right["activity_descriptions"],
                                     "description_html": left["card_description_html"] == right["card_description_html"],
                                     "first_page_count": left["first_page_count"] == right["first_page_count"],
                                     "first_page_bytes": {name: sample["first_page_bytes"] for name, sample in samples.items()}}
@@ -167,7 +277,9 @@ def main():
             if round_number % 2 == 0:
                 names.reverse()
             for name in names:
-                result = run(targets[name], paths[name], concurrency, args.seconds)
+                result = (run_rust(targets[name], paths[name], concurrency, args.seconds,
+                                   args.load_binary) if args.client == "rust" else
+                          run(targets[name], paths[name], concurrency, args.seconds))
                 result["round"] = round_number
                 results["runs"].setdefault(name, []).append(result)
                 print(f"{name} c={concurrency} round={round_number}: {result}",
