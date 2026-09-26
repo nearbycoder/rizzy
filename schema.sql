@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   name TEXT NOT NULL,
   cards_count INTEGER NOT NULL DEFAULT 0,
   auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS account_cancellations (
   id TEXT PRIMARY KEY,

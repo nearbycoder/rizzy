@@ -212,7 +212,12 @@ def run(archive_path):
             with sqlite3.connect(database) as db:
                 imported_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?",
                                          (created["account"],)).fetchone()[0]
-                assert db.execute("SELECT name FROM accounts WHERE id=?", (imported_id,)).fetchone()[0] == account["name"]
+                imported_account = db.execute(
+                    "SELECT name,created_at,updated_at FROM accounts WHERE id=?", (imported_id,)
+                ).fetchone()
+                assert imported_account[0] == account["name"]
+                if account["name"] != "Import" or account.get("cards_count", 0) != 0:
+                    assert_fresh(imported_account[2], import_started)
                 for user in users:
                     actual = db.execute("SELECT created_at,updated_at FROM users WHERE id=? AND account_id=?",
                                         (user["id"], imported_id)).fetchone()
@@ -403,6 +408,8 @@ def run(archive_path):
                 Path(output).write_bytes(reexport_bytes)
             with zipfile.ZipFile(io.BytesIO(reexport_bytes)) as z:
                 names = z.namelist()
+                reexported_account = json.loads(z.read("data/account.json"))
+                assert reexported_account["updated_at"] == imported_account[2]
                 for group, expected in counts.items():
                     actual = sum(name.startswith(f"data/{group}/") for name in names)
                     assert actual == expected, ("reexport", group, actual, expected)
@@ -549,6 +556,18 @@ def main():
                            cwd=ROOT, check=True,
                            env={**os.environ, "RIZZY_TRANSFER_TEST_OUTPUT": str(archive_path)})
         run(archive_path)
+        if not args.archive:
+            same_name_archive = Path(temp) / "account-named-import.zip"
+            with zipfile.ZipFile(archive_path) as source, zipfile.ZipFile(same_name_archive, "w") as target:
+                for item in source.infolist():
+                    content = source.read(item.filename)
+                    if item.filename == "data/account.json":
+                        account = json.loads(content)
+                        assert account["cards_count"] > 0
+                        account["name"] = "Import"
+                        content = json.dumps(account).encode()
+                    target.writestr(item, content)
+            run(same_name_archive)
 
 
 if __name__ == "__main__":

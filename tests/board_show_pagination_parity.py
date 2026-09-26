@@ -93,6 +93,19 @@ def json_pages(target, board, first_card):
             target["name"], suffix, conditional_status)
         assert int(conditional_headers["X-Total-Count"]) == total
 
+    _, before_headers, before_body = board_json(target, board)
+    expect(target, "/account/settings", "PUT",
+           {"account": {"name": "Renamed benchmark"}}, status=204)
+    status, renamed_headers, renamed_body = board_json(target, board, etag=before_headers["ETag"])
+    assert status == 200 and renamed_body == before_body
+    assert renamed_headers["ETag"] != before_headers["ETag"], target["name"]
+    expect(target, "/account/settings", "PUT",
+           {"account": {"name": "Renamed benchmark"}}, status=204)
+    repeated_status, repeated_headers, repeated_body = board_json(
+        target, board, etag=renamed_headers["ETag"])
+    assert repeated_status == 304 and repeated_body is None, target["name"]
+    assert repeated_headers["ETag"] == renamed_headers["ETag"]
+
 
 def main():
     with tempfile.TemporaryDirectory(prefix="rizzy-board-page-parity-") as temporary:

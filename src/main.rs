@@ -820,6 +820,7 @@ fn pagination_headers(
 #[derive(Clone)]
 struct Principal {
     account_id: String,
+    account_updated_at: String,
     user_id: String,
     role: String,
     permission: String,
@@ -851,7 +852,7 @@ impl Principal {
 async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Principal> {
     let slug: i64 = slug.parse().map_err(|_| missing())?;
     let (identity_id, permission) = identity_auth(app, headers).await?;
-    let r = sqlx::query("SELECT a.id account_id,u.id user_id,u.role,EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) cancelled FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
+    let r = sqlx::query("SELECT a.id account_id,a.updated_at account_updated_at,u.id user_id,u.role,EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) cancelled FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.identity_id=? AND a.external_account_id=? AND u.active=1")
         .bind(identity_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED,"Invalid token or account"))?;
     if r.get::<i64, _>("cancelled") != 0 {
@@ -863,6 +864,7 @@ async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Princip
     }
     Ok(Principal {
         account_id: r.get("account_id"),
+        account_updated_at: r.get("account_updated_at"),
         user_id: r.get("user_id"),
         role: r.get("role"),
         permission,
@@ -1260,6 +1262,7 @@ async fn webhook_payload(app: &App, row: &SqliteRow, host: &str) -> Result<Strin
     let creator_id: String = row.get("creator_id");
     let principal = Principal {
         account_id,
+        account_updated_at: row.get("account_updated_at"),
         user_id: creator_id,
         slug,
         role: "owner".into(),
@@ -1363,7 +1366,7 @@ async fn send_webhook(url: &str, secret: &str, timestamp: &str, body: &str) -> V
 }
 
 async fn process_webhook_delivery(app: &App, delivery_id: &str, host: &str) -> Result<()> {
-    let row = sqlx::query("SELECT d.*,w.url,w.signing_secret,e.creator_id,e.created_at event_created_at,a.external_account_id FROM webhook_deliveries d JOIN webhooks w ON w.id=d.webhook_id JOIN events e ON e.id=d.event_id JOIN accounts a ON a.id=d.account_id WHERE d.id=?")
+    let row = sqlx::query("SELECT d.*,w.url,w.signing_secret,e.creator_id,e.created_at event_created_at,a.external_account_id,a.updated_at account_updated_at FROM webhook_deliveries d JOIN webhooks w ON w.id=d.webhook_id JOIN events e ON e.id=d.event_id JOIN accounts a ON a.id=d.account_id WHERE d.id=?")
         .bind(delivery_id).fetch_one(&app.db).await.map_err(db_err)?;
     let timestamp: String = row.get("event_created_at");
     let timestamp = chrono::DateTime::parse_from_rfc3339(&timestamp)
@@ -2351,6 +2354,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .execute(&db).await?;
     let account_columns = sqlx::query("PRAGMA table_info(accounts)")
         .fetch_all(&db)
+        .await?;
+    if !account_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "updated_at")
+    {
+        sqlx::query("ALTER TABLE accounts ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+            .execute(&db)
+            .await?;
+    }
+    sqlx::query("UPDATE accounts SET updated_at=created_at WHERE updated_at=''")
+        .execute(&db)
+        .await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS accounts_updated_at_insert AFTER INSERT ON accounts WHEN NEW.updated_at='' BEGIN UPDATE accounts SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        .execute(&db)
+        .await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS accounts_updated_at_name AFTER UPDATE OF name ON accounts WHEN NEW.name IS NOT OLD.name BEGIN UPDATE accounts SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.id; END")
+        .execute(&db)
         .await?;
     if !account_columns
         .iter()
@@ -4139,7 +4159,7 @@ async fn my_identity(
 ) -> Result<Json<Value>> {
     let (identity_id, _) = identity_auth(&app, &headers).await?;
     check_my_scope(&app, &identity_id, &uri).await?;
-    let rows=sqlx::query("SELECT a.id account_id,a.external_account_id,a.name,a.created_at,u.id user_id,u.role FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=? AND u.active=1 AND u.role!='system' AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) ORDER BY a.created_at")
+    let rows=sqlx::query("SELECT a.id account_id,a.external_account_id,a.name,a.created_at,a.updated_at account_updated_at,u.id user_id,u.role FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=? AND u.active=1 AND u.role!='system' AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) ORDER BY a.created_at")
         .bind(&identity_id).fetch_all(&app.db).await.map_err(db_err)?;
     let host = base(&headers);
     let mut accounts = Vec::new();
@@ -4147,6 +4167,7 @@ async fn my_identity(
         let slug: i64 = r.get("external_account_id");
         let p = Principal {
             account_id: r.get("account_id"),
+            account_updated_at: r.get("account_updated_at"),
             user_id: r.get("user_id"),
             role: r.get("role"),
             permission: "read".into(),
@@ -5998,6 +6019,8 @@ async fn show_board(
             "page:{page}:board:{}:total:{total}:",
             r.get::<&str, _>("updated_at")
         ));
+        etag_salt.push_str(&p.account_updated_at);
+        etag_salt.push(':');
         let rows = sqlx::query("SELECT id,updated_at FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND column_id IS NULL ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT ? OFFSET ?")
             .bind(&id)
             .bind(limit)

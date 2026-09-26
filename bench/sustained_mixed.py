@@ -3,6 +3,7 @@
 
 import argparse
 import concurrent.futures
+import hashlib
 import itertools
 import json
 import os
@@ -310,8 +311,13 @@ def main():
     server_cpus = available[:args.server_cpus]
     os.sched_setaffinity(0, available[args.server_cpus:])
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
+    with RUST.open("rb") as binary:
+        binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
     result = {"source_revision": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], cwd=SOURCE, text=True).strip(),
+              "rizzy_revision": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+              "rizzy_binary_sha256": binary_sha256,
               "workload": "four JSON reads plus create/edit/comment/close/read per unit",
               "initial_cards": args.cards, "seconds_per_target": args.seconds,
               "clients": args.clients, "source_puma_workers": args.server_cpus,

@@ -62,6 +62,13 @@ def main():
                     time.sleep(.05)
             else:
                 raise RuntimeError("Rizzy server did not start")
+            api(target, "/account/settings", "PUT",
+                {"account": {"name": "Transfer Account"}}, 204)
+            with sqlite3.connect(db_path) as db:
+                account_times = db.execute(
+                    "SELECT created_at,updated_at FROM accounts WHERE external_account_id=?",
+                    (int(account),)).fetchone()
+            assert account_times and account_times[1] > account_times[0]
             owner = next(user for user in api(target, "/users") if user["role"] == "owner")
             with sqlite3.connect(db_path) as db:
                 settings_record = db.execute(
@@ -218,6 +225,8 @@ def main():
                 assert archive.getinfo(f"storage/{image['key']}").compress_type == zipfile.ZIP_STORED
                 account_data = json.loads(archive.read("data/account.json"))
                 assert account_data["id"] == account_id and account_data["join_code"]["account_id"] == account_id
+                assert (account_data["name"], account_data["created_at"], account_data["updated_at"]) == (
+                    "Transfer Account", *account_times)
                 system_user = next(json.loads(archive.read(path)) for path in names
                                    if path.startswith("data/users/")
                                    and json.loads(archive.read(path))["role"] == "system")

@@ -563,9 +563,13 @@ async fn apply_archive(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-    sqlx::query("UPDATE accounts SET name=?,cards_count=? WHERE id=?")
+    let cards_count = integer(&archive.account, "cards_count", 0);
+    sqlx::query("UPDATE accounts SET name=?,cards_count=?,updated_at=CASE WHEN name<>? OR cards_count<>? THEN ? ELSE updated_at END WHERE id=?")
         .bind(source_name)
-        .bind(integer(&archive.account, "cards_count", 0))
+        .bind(cards_count)
+        .bind(source_name)
+        .bind(cards_count)
+        .bind(&imported_at)
         .bind(account_id)
         .execute(&mut *tx)
         .await

@@ -323,7 +323,7 @@ async fn emit_account(
         "created_at":created,
         "external_account_id":row.get::<i64,_>("external_account_id"),
         "name":row.get::<String,_>("name"),
-        "updated_at":created,
+        "updated_at":row.get::<String,_>("updated_at"),
         "join_code":{
             "id":row.get::<String,_>("join_id"),
             "account_id":account_id,
