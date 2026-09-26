@@ -3,6 +3,7 @@ use axum::{body::Body, http::Request};
 use base64::Engine as _;
 use futures_util::StreamExt;
 use md5::Md5;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tokio::fs;
@@ -130,7 +131,62 @@ fn variable_image(content_type: &str) -> bool {
     )
 }
 
-fn embed_html(blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Variation {
+    operation: String,
+    width: u32,
+    height: u32,
+    format: Option<String>,
+}
+
+fn variation_key(app: &App, operation: &str, width: u32, height: u32) -> String {
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&Variation {
+            operation: operation.to_owned(),
+            width,
+            height,
+            format: None,
+        })
+        .expect("static variation"),
+    );
+    let signature = hmac_sha256(&app.qr_secret, &format!("storage_variation:{payload}"));
+    format!("{payload}--{signature}")
+}
+
+fn verified_variation(app: &App, key: &str) -> Result<Variation> {
+    let (payload, signature) = key.rsplit_once("--").ok_or_else(missing)?;
+    let expected = hmac_sha256(&app.qr_secret, &format!("storage_variation:{payload}"));
+    if signature.len() != expected.len()
+        || signature
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            })
+            != 0
+    {
+        return Err(missing());
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|_| missing())?;
+    let variation: Variation = serde_json::from_slice(&bytes).map_err(|_| missing())?;
+    if !matches!(variation.operation.as_str(), "limit" | "fill")
+        || variation.width == 0
+        || variation.height == 0
+        || variation.width > 4096
+        || variation.height > 4096
+        || !matches!(
+            variation.format.as_deref(),
+            None | Some("jpeg" | "png" | "gif" | "webp")
+        )
+    {
+        return Err(missing());
+    }
+    Ok(variation)
+}
+
+fn embed_html(app: &App, blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
     let filename: String = blob.get("filename");
     let content_type: String = blob.get("content_type");
     let size: i64 = blob.get("byte_size");
@@ -139,8 +195,9 @@ fn embed_html(blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool) -> String
         "/{slug}/rails/active_storage/blobs/redirect/{signed_id}/{}",
         encoded_filename(&filename)
     );
+    let variation = variation_key(app, "limit", 1024, 768);
     let variant = format!(
-        "/{slug}/rails/active_storage/representations/redirect/{signed_id}/preview/{}",
+        "/{slug}/rails/active_storage/representations/redirect/{signed_id}/{variation}/{}",
         encoded_filename(&filename)
     );
     let safe_name = escape(&filename);
@@ -286,8 +343,8 @@ pub(super) async fn render_rich_text(
             plain_input.push_str(&format!("[{}]", filename));
             replacements.push((
                 token.clone(),
-                embed_html(&blob, value, slug, true),
-                embed_html(&blob, value, slug, false),
+                embed_html(app, &blob, value, slug, true),
+                embed_html(app, &blob, value, slug, false),
             ));
             attached = true;
         } else {
@@ -638,6 +695,11 @@ pub(super) async fn purge_card_storage_tx(
 
 pub(super) async fn remove_files(keys: Vec<String>) {
     for key in keys {
+        if let Err(error) = fs::remove_dir_all(storage_dir().join("variants").join(&key)).await {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("storage variant cleanup failed for {key}: {error}");
+            }
+        }
         for path in [
             storage_dir().join(&key),
             storage_dir().join(format!("{key}.thumb")),
@@ -1096,6 +1158,133 @@ async fn ensure_large_variant(key: &str, content_type: &str) -> Result<PathBuf> 
     Ok(target)
 }
 
+async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Result<PathBuf> {
+    let variation = verified_variation(app, variation_key)?;
+    let declared: String = blob.get("content_type");
+    if !variable_image(&declared) {
+        return Err(missing());
+    }
+    let format = variation
+        .format
+        .as_deref()
+        .unwrap_or(match declared.as_str() {
+            "image/png" => "png",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            _ => "jpeg",
+        });
+    let image_format = match format {
+        "png" => image::ImageFormat::Png,
+        "gif" => image::ImageFormat::Gif,
+        "webp" => image::ImageFormat::WebP,
+        _ => image::ImageFormat::Jpeg,
+    };
+    let extension = if format == "jpeg" { "jpg" } else { format }.to_owned();
+    let key: String = blob.get("storage_key");
+    let signature = variation_key.rsplit_once("--").ok_or_else(missing)?.1;
+    let directory = storage_dir().join("variants").join(&key);
+    let target = directory.join(format!("{signature}.{extension}"));
+    if fs::metadata(&target).await.is_ok() {
+        return Ok(target);
+    }
+    fs::create_dir_all(&directory)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?;
+    let source = storage_dir().join(&key);
+    let output = target.clone();
+    tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
+        let picture = image::ImageReader::open(source)
+            .map_err(|error| error.to_string())?
+            .with_guessed_format()
+            .map_err(|error| error.to_string())?
+            .decode()
+            .map_err(|error| error.to_string())?;
+        let picture = if variation.operation == "fill" {
+            picture.resize_to_fill(
+                variation.width,
+                variation.height,
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else if picture.width() > variation.width || picture.height() > variation.height {
+            picture.resize(
+                variation.width,
+                variation.height,
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else {
+            picture
+        };
+        let temporary = output.with_extension(format!("{extension}.{}.tmp", random_token()));
+        picture
+            .save_with_format(&temporary, image_format)
+            .map_err(|error| error.to_string())?;
+        std::fs::rename(temporary, output).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?;
+    Ok(target)
+}
+
+pub(super) async fn show_representation(
+    State(app): Shared,
+    Path((account, signed_id, variation_key, _filename)): Path<(String, String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, _) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    ensure_variation(&app, &blob, &variation_key).await?;
+    let token = random_token();
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    sqlx::query("INSERT INTO storage_download_tokens(token_hash,blob_id,disposition,variant,expires_at) VALUES(?,?,?,?,?)")
+        .bind(hash(&token))
+        .bind(blob.get::<String, _>("id"))
+        .bind(disposition)
+        .bind(format!("v:{variation_key}"))
+        .bind(expires_in(5))
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    let filename: String = blob.get("filename");
+    let location = format!(
+        "{}/{account}/rails/active_storage/disk/{token}/{}",
+        base(&headers),
+        encoded_filename(&filename)
+    );
+    Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
+}
+
+pub(super) async fn proxy_representation(
+    State(app): Shared,
+    Path((account, signed_id, variation_key, _filename)): Path<(String, String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, public) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    serve_blob_file(
+        &app,
+        &blob,
+        &format!("v:{variation_key}"),
+        disposition,
+        None,
+        if public {
+            "max-age=3155695200, public, immutable"
+        } else {
+            "max-age=3155695200, private, immutable"
+        },
+    )
+    .await
+}
+
 pub(super) async fn download_file(
     State(app): Shared,
     Path((account, token, _filename)): Path<(String, String, String)>,
@@ -1105,7 +1294,15 @@ pub(super) async fn download_file(
         .bind(hash(&token)).bind(slug).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     let variant: String = blob.get("variant");
     let disposition: String = blob.get("disposition");
-    serve_blob_file(&blob, &variant, &disposition, None, "public, max-age=300").await
+    serve_blob_file(
+        &app,
+        &blob,
+        &variant,
+        &disposition,
+        None,
+        "public, max-age=300",
+    )
+    .await
 }
 
 pub(super) async fn proxy_blob(
@@ -1121,6 +1318,7 @@ pub(super) async fn proxy_blob(
         "inline"
     };
     let mut response = serve_blob_file(
+        &app,
         &blob,
         "original",
         disposition,
@@ -1141,6 +1339,7 @@ pub(super) async fn proxy_blob(
 }
 
 async fn serve_blob_file(
+    app: &App,
     blob: &DbRow,
     variant: &str,
     requested_disposition: &str,
@@ -1149,13 +1348,26 @@ async fn serve_blob_file(
 ) -> Result<Response> {
     let key: String = blob.get("storage_key");
     let declared: String = blob.get("content_type");
-    let path = if variant == "large" {
+    let path = if let Some(variation_key) = variant.strip_prefix("v:") {
+        ensure_variation(app, blob, variation_key).await?
+    } else if variant == "large" {
         ensure_large_variant(&key, &declared).await?
     } else {
         storage_dir().join(&key)
     };
     let mut file = fs::File::open(&path).await.map_err(|_| missing())?;
     let length = file.metadata().await.map_err(|_| missing())?.len();
+    let declared = if let Some(key) = variant.strip_prefix("v:") {
+        match verified_variation(app, key)?.format.as_deref() {
+            Some("jpeg") => "image/jpeg".to_owned(),
+            Some("png") => "image/png".to_owned(),
+            Some("gif") => "image/gif".to_owned(),
+            Some("webp") => "image/webp".to_owned(),
+            _ => declared,
+        }
+    } else {
+        declared
+    };
     let lowercase = declared.to_ascii_lowercase();
     let dangerous = !declared.is_ascii()
         || lowercase.starts_with("text/html")
@@ -1299,8 +1511,9 @@ pub(super) async fn show_avatar(
     if let Some(avatar) = avatar {
         let signed_id: String = avatar.get("signed_id");
         let filename: String = avatar.get("filename");
+        let variation = variation_key(&app, "fill", 256, 256);
         let location = format!(
-            "{}/{account}/rails/active_storage/representations/redirect/{signed_id}/thumb/{}?disposition=inline",
+            "{}/{account}/rails/active_storage/representations/redirect/{signed_id}/{variation}/{}?disposition=inline",
             base(&headers),
             encoded_filename(&filename)
         );

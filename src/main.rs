@@ -3210,6 +3210,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(storage::show_blob),
         )
         .route(
+            "/{account}/rails/active_storage/representations/redirect/{signed_id}/{variation_key}/{filename}",
+            get(storage::show_representation),
+        )
+        .route(
+            "/{account}/rails/active_storage/representations/proxy/{signed_id}/{variation_key}/{filename}",
+            get(storage::proxy_representation),
+        )
+        .route(
+            "/{account}/rails/active_storage/representations/{signed_id}/{variation_key}/{filename}",
+            get(storage::show_representation),
+        )
+        .route(
             "/{account}/rails/active_storage/disk/thumb/{token}/{filename}",
             get(storage::download_avatar_thumbnail),
         )

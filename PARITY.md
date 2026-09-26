@@ -21,7 +21,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, VAPID push queue/delivery, timed multipart text/HTML email bundles, and expiring unsubscribe links | No |
-| Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, and common formatted text | No |
+| Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, common formatted text, and signed limit/fill image representation routes | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
 | SQLite and MySQL deployment parity | SQLite runtime; MySQL 8.4.11 core, search, notification, webhook, account import/cancellation, device transfer, deletion cleanup, partial schema recovery, and two-process write and worker checks on this branch | No |
@@ -114,10 +114,12 @@ The [route registration inventory](docs/route-coverage.md) compares the pinned
 source's dispatchable controller actions with Rizzy's path and method table:
 all 211 application routes and three Turbo Native navigation routes are now
 registered. The Turbo Native responses match the source's HTML text. Rizzy now
-registers the legacy blob redirect alias and blob proxy; a live paired test
-compares full bytes, private/public access, single byte ranges, and disposition.
-Three general Active Storage representation and 14 Action Mailbox framework
-routes remain unmatched. Route
+registers all nine Active Storage routes. Paired tests compare original blob
+bytes, private/public access, single byte ranges, and disposition, plus signed
+image representation redirects, proxy, alias, tampering, cache policy, and
+cleanup. Rizzy cannot yet decode Rails variation keys, process every source
+transformation, or reproduce libvips variant bytes. Fourteen Action Mailbox
+framework routes remain unmatched. Route
 registration alone does not prove behavioral parity for any of these areas.
 
 Rizzy's card and comment FTS5 indexes now use the Porter tokenizer from Fizzy's pinned SQLite search schema. `tests/search.py` checks stemmed title and comment queries such as `running`/`run`, `authentication`/`authenticate`, and `walking`/`walk`. `tests/search_stemming_migration.py` downgrades a populated disposable index to the older tokenizer, restarts Rizzy, and verifies both existing index row counts and stemmed matches. The pinned Fizzy search model and card-search suites pass 16 tests and 65 assertions; its custom MySQL stemmer suite passes 25 tests and 50 assertions. Full query grammar, Unicode tokenization, relevance ordering, and the production MySQL adapter still need direct parity checks.
