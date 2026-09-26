@@ -116,7 +116,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "card_not_nows",
-        query: "SELECT NULL id,c.account_id,c.id card_id,c.updated_at created_at,c.updated_at,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_postponed' ORDER BY e.created_at DESC LIMIT 1),c.creator_id) user_id FROM cards c WHERE c.account_id=? AND c.postponed=1 ORDER BY c.id",
+        query: "SELECT id,account_id,card_id,created_at,updated_at,user_id FROM card_not_nows WHERE account_id=? ORDER BY card_id",
         booleans: &[],
         json_fields: &[],
     },

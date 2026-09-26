@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare anonymous public-board and Maybe-column reads on equal fixtures."""
+"""Compare anonymous public-board, Maybe, and Not Now reads on equal fixtures."""
 import argparse
 import json
 import re
@@ -65,8 +65,15 @@ def sample(target, board_id, column_id, key, count):
     assert status == 200
     titles = sorted(set(re.findall(r"Public benchmark maybe \d{4}", stream.decode())))
     assert len(titles) == 15, (target["name"], titles)
+    not_now_path = path + "/columns/not_now"
+    status, _, not_now = html_response(target, not_now_path)
+    assert status == 200
+    not_now_titles = sorted(set(re.findall(r"Public benchmark not_now \d{4}", not_now.decode())))
+    assert len(not_now_titles) == min(15, count // 10), (target["name"], not_now_titles)
+    assert "card__closed-date" in not_now.decode()
     return {"board_html_bytes": len(raw), "stream_html_bytes": len(stream),
-            "column_counts": counts, "stream_titles": titles}, path, stream_path
+            "not_now_html_bytes": len(not_now), "column_counts": counts,
+            "stream_titles": titles, "not_now_titles": not_now_titles}, path, stream_path, not_now_path
 
 
 def main():
@@ -86,18 +93,20 @@ def main():
             for target in targets:
                 board, named, key = fixture(target, args.cards,
                                             lambda target, board: created.append((target, board)))
-                samples[target["name"]], board_path, stream_path = sample(
+                samples[target["name"]], board_path, stream_path, not_now_path = sample(
                     target, board, named, key, args.cards)
-                paths[target["name"]] = {"board": board_path, "stream": stream_path}
+                paths[target["name"]] = {"board": board_path, "stream": stream_path,
+                                         "not_now": not_now_path}
             assert samples["fizzy"]["column_counts"] == samples["rizzy"]["column_counts"]
             assert samples["fizzy"]["stream_titles"] == samples["rizzy"]["stream_titles"]
+            assert samples["fizzy"]["not_now_titles"] == samples["rizzy"]["not_now_titles"]
             for target in targets:
                 for path in paths[target["name"]].values():
                     for _ in range(5):
                         status, _, _ = html_response(target, path)
                         assert status == 200
             results = {"fixture_cards": args.cards, "sample_parity": samples, "runs": {}}
-            for label in ("board", "stream"):
+            for label in ("board", "stream", "not_now"):
                 results["runs"][label] = {}
                 for concurrency in map(int, args.concurrency.split(",")):
                     for target in targets:

@@ -379,7 +379,9 @@ fn validate_references(archive: &Archive) -> ImportResult<()> {
                 "card_goldnesses" | "card_activity_spikes" => check(record, "card_id", "cards")?,
                 "card_not_nows" => {
                     check(record, "card_id", "cards")?;
-                    check(record, "user_id", "users")?;
+                    if maybe_field(record, "user_id").is_some() {
+                        check(record, "user_id", "users")?;
+                    }
                 }
                 "watches" => {
                     check(record, "card_id", "cards")?;
@@ -772,8 +774,20 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for not_now in records(&archive, "card_not_nows") {
+        let card_id = field(not_now, "card_id")?;
+        let created_at = field(not_now, "created_at")?;
+        sqlx::query("INSERT INTO card_not_nows(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .bind(field(not_now, "id")?)
+            .bind(account_id)
+            .bind(card_id)
+            .bind(maybe_field(not_now, "user_id"))
+            .bind(created_at)
+            .bind(maybe_field(not_now, "updated_at").unwrap_or(created_at))
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
         sqlx::query("UPDATE cards SET postponed=1 WHERE id=? AND account_id=?")
-            .bind(field(not_now, "card_id")?)
+            .bind(card_id)
             .bind(account_id)
             .execute(&mut *tx)
             .await

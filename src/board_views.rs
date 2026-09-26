@@ -92,6 +92,7 @@ struct PublicPreviewMeta {
     assignees: Vec<(String, String)>,
     image: Option<String>,
     closure: Option<(String, String)>,
+    not_now: Option<(String, Option<String>)>,
 }
 
 async fn public_preview_metadata(
@@ -150,6 +151,21 @@ async fn public_preview_metadata(
                 Some((row.get("created_at"), row.get("name")));
         }
     }
+    if cards
+        .iter()
+        .any(|card| card.get::<i64, _>("postponed") != 0)
+    {
+        for row in rows_for_ids(
+            app,
+            "SELECT n.card_id,n.created_at,u.name FROM card_not_nows n LEFT JOIN users u ON u.id=n.user_id WHERE n.card_id IN (",
+            &ids,
+        )
+        .await?
+        {
+            metadata.entry(row.get("card_id")).or_default().not_now =
+                Some((row.get("created_at"), row.get("name")));
+        }
+    }
     for item in metadata.values_mut() {
         item.tags.sort_by_key(|tag| tag.to_lowercase());
         item.assignees.sort_by_key(|(_, name)| name.to_lowercase());
@@ -157,7 +173,7 @@ async fn public_preview_metadata(
     Ok(metadata)
 }
 
-fn public_familiar_name(name: &str) -> String {
+pub(super) fn public_familiar_name(name: &str) -> String {
     let names: Vec<&str> = name.split_whitespace().collect();
     if names.len() <= 1 {
         return name.to_owned();
@@ -169,6 +185,16 @@ fn public_familiar_name(name: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!("{}\u{a0}{initials}", names[0])
+}
+
+pub(super) fn public_stamp_date(raw: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|value| value.format("%b %d, %Y").to_string())
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f")
+                .map(|value| value.format("%b %d, %Y").to_string())
+        })
+        .unwrap_or_default()
 }
 
 fn public_avatar(account: &str, user_id: &str, name: &str) -> String {
@@ -269,18 +295,16 @@ fn render_public_preview(
         let (date, closer) = meta
             .closure
             .as_ref()
-            .map(|(raw, name)| {
-                (
-                    chrono::DateTime::parse_from_rfc3339(raw)
-                        .map(|value| value.format("%b %d, %Y").to_string())
-                        .unwrap_or_default(),
-                    name.as_str(),
-                )
-            })
+            .map(|(raw, name)| (public_stamp_date(raw), name.as_str()))
             .unwrap_or_default();
         html.push_str(&format!("<div class=\"card__closed\"><span class=\"card__closed-title\" data-text=\"Done\">Done</span><strong class=\"card__closed-date\">{date}</strong><span class=\"card__closed-by-line\">by <span class=\"card__closed-by\">{}</span></span></div>", escape(closer)));
     } else if postponed {
-        html.push_str("<div class=\"card__closed\"><span class=\"card__closed-title\" data-text=\"Not Now\">Not Now</span></div>");
+        let (date, by) = meta
+            .not_now
+            .as_ref()
+            .map(|(raw, name)| (public_stamp_date(raw), name.as_deref().unwrap_or("")))
+            .unwrap_or_default();
+        html.push_str(&format!("<div class=\"card__closed\"><span class=\"card__closed-title\" data-text=\"Not Now\">Not Now</span><strong class=\"card__closed-date\">{date}</strong><span class=\"card__closed-by-line\">by <span class=\"card__closed-by\">{}</span></span></div>", escape(&public_familiar_name(by))));
     }
     html.push_str("</div></div><footer class=\"card__footer\">");
     html.push_str(&format!(

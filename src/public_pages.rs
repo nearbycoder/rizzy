@@ -6,7 +6,7 @@ use axum::{
 use sqlx::Row;
 use std::collections::HashMap;
 
-use super::{Result, Shared, base, db_err, escape, missing, published_board, storage};
+use super::{Result, Shared, base, board_views, db_err, escape, missing, published_board, storage};
 
 fn shell(
     title: &str,
@@ -276,9 +276,11 @@ pub(super) async fn card(
     } else {
         None
     };
-    let state = if card.get::<i64, _>("closed") != 0 {
+    let closed = card.get::<i64, _>("closed") != 0;
+    let postponed = card.get::<i64, _>("postponed") != 0;
+    let state = if closed {
         "Done".to_owned()
-    } else if card.get::<i64, _>("postponed") != 0 {
+    } else if postponed {
         "Not Now".to_owned()
     } else {
         column.unwrap_or_else(|| "Maybe?".to_owned())
@@ -306,7 +308,28 @@ pub(super) async fn card(
     content.push_str(&description_html);
     content.push_str("</div></div><div class=\"card__stage\">");
     content.push_str(&escape(&state));
-    content.push_str("</div></div><ol class=\"steps txt-small margin-block\">");
+    content.push_str("</div>");
+    if closed || postponed {
+        let sql = if closed {
+            "SELECT c.created_at,u.name FROM closures c LEFT JOIN users u ON u.id=c.user_id WHERE c.card_id=?"
+        } else {
+            "SELECT n.created_at,u.name FROM card_not_nows n LEFT JOIN users u ON u.id=n.user_id WHERE n.card_id=?"
+        };
+        if let Some(stamp) = sqlx::query(sql)
+            .bind(&card_id)
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?
+        {
+            let date = board_views::public_stamp_date(&stamp.get::<String, _>("created_at"));
+            let by = board_views::public_familiar_name(
+                &stamp.get::<Option<String>, _>("name").unwrap_or_default(),
+            );
+            let label = if closed { "Done" } else { "Not Now" };
+            content.push_str(&format!("<div class=\"card__closed\"><span class=\"card__closed-title\" data-text=\"{label}\">{label}</span><strong class=\"card__closed-date\">{date}</strong><span class=\"card__closed-by-line\">by <span class=\"card__closed-by\">{}</span></span></div>", escape(&by)));
+        }
+    }
+    content.push_str("</div><ol class=\"steps txt-small margin-block\">");
     for step in steps {
         content.push_str("<li class=\"step\"><input class=\"checkbox\" type=\"checkbox\" disabled");
         if step.get::<i64, _>("completed") != 0 {

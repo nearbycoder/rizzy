@@ -1,0 +1,285 @@
+{
+  "fixture_cards": 100,
+  "sample_parity": {
+    "fizzy": {
+      "board_html_bytes": 41642,
+      "stream_html_bytes": 88183,
+      "not_now_html_bytes": 74377,
+      "column_counts": {
+        "maybe": "2",
+        "not_now": "10",
+        "named": "10",
+        "closed": "10"
+      },
+      "stream_titles": [
+        "Public benchmark maybe 0085",
+        "Public benchmark maybe 0086",
+        "Public benchmark maybe 0087",
+        "Public benchmark maybe 0088",
+        "Public benchmark maybe 0089",
+        "Public benchmark maybe 0090",
+        "Public benchmark maybe 0091",
+        "Public benchmark maybe 0092",
+        "Public benchmark maybe 0093",
+        "Public benchmark maybe 0094",
+        "Public benchmark maybe 0095",
+        "Public benchmark maybe 0096",
+        "Public benchmark maybe 0097",
+        "Public benchmark maybe 0098",
+        "Public benchmark maybe 0099"
+      ],
+      "not_now_titles": [
+        "Public benchmark not_now 0000",
+        "Public benchmark not_now 0001",
+        "Public benchmark not_now 0002",
+        "Public benchmark not_now 0003",
+        "Public benchmark not_now 0004",
+        "Public benchmark not_now 0005",
+        "Public benchmark not_now 0006",
+        "Public benchmark not_now 0007",
+        "Public benchmark not_now 0008",
+        "Public benchmark not_now 0009"
+      ]
+    },
+    "rizzy": {
+      "board_html_bytes": 15442,
+      "stream_html_bytes": 28941,
+      "not_now_html_bytes": 21898,
+      "column_counts": {
+        "maybe": "2",
+        "not_now": "10",
+        "named": "10",
+        "closed": "10"
+      },
+      "stream_titles": [
+        "Public benchmark maybe 0085",
+        "Public benchmark maybe 0086",
+        "Public benchmark maybe 0087",
+        "Public benchmark maybe 0088",
+        "Public benchmark maybe 0089",
+        "Public benchmark maybe 0090",
+        "Public benchmark maybe 0091",
+        "Public benchmark maybe 0092",
+        "Public benchmark maybe 0093",
+        "Public benchmark maybe 0094",
+        "Public benchmark maybe 0095",
+        "Public benchmark maybe 0096",
+        "Public benchmark maybe 0097",
+        "Public benchmark maybe 0098",
+        "Public benchmark maybe 0099"
+      ],
+      "not_now_titles": [
+        "Public benchmark not_now 0000",
+        "Public benchmark not_now 0001",
+        "Public benchmark not_now 0002",
+        "Public benchmark not_now 0003",
+        "Public benchmark not_now 0004",
+        "Public benchmark not_now 0005",
+        "Public benchmark not_now 0006",
+        "Public benchmark not_now 0007",
+        "Public benchmark not_now 0008",
+        "Public benchmark not_now 0009"
+      ]
+    }
+  },
+  "runs": {
+    "board": {
+      "fizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 1.01,
+          "requests": 106,
+          "errors": {},
+          "rps": 105.4,
+          "p50_ms": 9.09,
+          "p95_ms": 10.86,
+          "p99_ms": 12.36
+        },
+        {
+          "concurrency": 8,
+          "seconds": 1.02,
+          "requests": 911,
+          "errors": {},
+          "rps": 891.3,
+          "p50_ms": 8.53,
+          "p95_ms": 11.2,
+          "p99_ms": 20.03
+        },
+        {
+          "concurrency": 32,
+          "seconds": 1.02,
+          "requests": 1904,
+          "errors": {},
+          "rps": 1868.9,
+          "p50_ms": 15.05,
+          "p95_ms": 29.63,
+          "p99_ms": 42.63
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 1.0,
+          "requests": 3916,
+          "errors": {},
+          "rps": 3915.1,
+          "p50_ms": 0.25,
+          "p95_ms": 0.34,
+          "p99_ms": 0.44
+        },
+        {
+          "concurrency": 8,
+          "seconds": 1.0,
+          "requests": 6159,
+          "errors": {},
+          "rps": 6152.4,
+          "p50_ms": 1.23,
+          "p95_ms": 2.09,
+          "p99_ms": 2.52
+        },
+        {
+          "concurrency": 32,
+          "seconds": 1.0,
+          "requests": 7710,
+          "errors": {},
+          "rps": 7691.1,
+          "p50_ms": 3.86,
+          "p95_ms": 7.33,
+          "p99_ms": 9.23
+        }
+      ]
+    },
+    "stream": {
+      "fizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 1.0,
+          "requests": 109,
+          "errors": {},
+          "rps": 108.9,
+          "p50_ms": 9.26,
+          "p95_ms": 10.52,
+          "p99_ms": 10.97
+        },
+        {
+          "concurrency": 8,
+          "seconds": 1.01,
+          "requests": 866,
+          "errors": {},
+          "rps": 860.3,
+          "p50_ms": 9.08,
+          "p95_ms": 11.59,
+          "p99_ms": 17.55
+        },
+        {
+          "concurrency": 32,
+          "seconds": 1.02,
+          "requests": 1823,
+          "errors": {},
+          "rps": 1795.9,
+          "p50_ms": 15.84,
+          "p95_ms": 30.78,
+          "p99_ms": 42.7
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 1.0,
+          "requests": 2033,
+          "errors": {},
+          "rps": 2031.7,
+          "p50_ms": 0.5,
+          "p95_ms": 0.61,
+          "p99_ms": 0.76
+        },
+        {
+          "concurrency": 8,
+          "seconds": 1.0,
+          "requests": 3315,
+          "errors": {},
+          "rps": 3308.1,
+          "p50_ms": 2.45,
+          "p95_ms": 3.24,
+          "p99_ms": 3.71
+        },
+        {
+          "concurrency": 32,
+          "seconds": 1.01,
+          "requests": 2541,
+          "errors": {},
+          "rps": 2519.2,
+          "p50_ms": 12.47,
+          "p95_ms": 14.14,
+          "p99_ms": 25.12
+        }
+      ]
+    },
+    "not_now": {
+      "fizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 1.01,
+          "requests": 125,
+          "errors": {},
+          "rps": 124.3,
+          "p50_ms": 7.6,
+          "p95_ms": 10.77,
+          "p99_ms": 13.34
+        },
+        {
+          "concurrency": 8,
+          "seconds": 1.01,
+          "requests": 1006,
+          "errors": {},
+          "rps": 998.5,
+          "p50_ms": 7.76,
+          "p95_ms": 9.58,
+          "p99_ms": 18.35
+        },
+        {
+          "concurrency": 32,
+          "seconds": 1.02,
+          "requests": 1908,
+          "errors": {},
+          "rps": 1872.1,
+          "p50_ms": 14.91,
+          "p95_ms": 28.1,
+          "p99_ms": 40.12
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 1.0,
+          "requests": 3000,
+          "errors": {},
+          "rps": 2999.3,
+          "p50_ms": 0.32,
+          "p95_ms": 0.43,
+          "p99_ms": 0.59
+        },
+        {
+          "concurrency": 8,
+          "seconds": 1.0,
+          "requests": 3332,
+          "errors": {},
+          "rps": 3324.3,
+          "p50_ms": 2.41,
+          "p95_ms": 3.39,
+          "p99_ms": 3.95
+        },
+        {
+          "concurrency": 32,
+          "seconds": 1.01,
+          "requests": 2682,
+          "errors": {},
+          "rps": 2663.1,
+          "p50_ms": 12.09,
+          "p95_ms": 13.14,
+          "p99_ms": 13.75
+        }
+      ]
+    }
+  }
+}

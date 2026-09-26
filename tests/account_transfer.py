@@ -70,7 +70,16 @@ def main():
                            f'sgid="{embed["attachable_sgid"]}"></action-text-attachment></p>')
             card = api(target, f"/boards/{board['id']}/cards", "POST", {
                 "card": {"title": "Transfer card", "description": description,
-                         "image": image["signed_id"]}}, 201)
+                        "image": image["signed_id"]}}, 201)
+            postponed_card = api(target, f"/boards/{board['id']}/cards", "POST", {
+                "card": {"title": "Postponed transfer card",
+                         "description": "<p>Postponed transfer body</p>"}}, 201)
+            mutate(target, f"/cards/{postponed_card['number']}/not_now")
+            with sqlite3.connect(db_path) as db:
+                postponed_record = db.execute(
+                    "SELECT id,user_id,created_at FROM card_not_nows WHERE card_id=?",
+                    (postponed_card["id"],)).fetchone()
+            assert postponed_record and postponed_record[1] == owner["id"]
             step = api(target, f"/cards/{card['number']}/steps", "POST",
                        {"step": {"content": "First step"}}, 201)
             comment = api(target, f"/cards/{card['number']}/comments", "POST",
@@ -106,7 +115,7 @@ def main():
                              f"data/active_storage_blobs/{embed['id']}.json",
                              f"storage/{image['key']}", f"storage/{embed['key']}"):
                     assert path in names, path
-                for directory in ("tags", "taggings", "assignments", "closures", "card_goldnesses",
+                for directory in ("tags", "taggings", "assignments", "closures", "card_goldnesses", "card_not_nows",
                                   "watches", "reactions", "board_publications", "webhooks"):
                     assert any(name.startswith(f"data/{directory}/") for name in names), directory
                 assert archive.read(f"storage/{image['key']}") == IMAGE
@@ -120,6 +129,9 @@ def main():
                 assert system_user["email_address"] is None and system_user["identity_id"] is None
                 card_data = json.loads(archive.read(f"data/cards/{card['id']}.json"))
                 assert card_data["title"] == "Transfer card" and "description" not in card_data
+                not_now_data = json.loads(archive.read(f"data/card_not_nows/{postponed_record[0]}.json"))
+                assert (not_now_data["card_id"], not_now_data["user_id"], not_now_data["created_at"]) == (
+                    postponed_card["id"], owner["id"], postponed_record[2])
                 rich_texts = [json.loads(archive.read(name)) for name in names
                               if name.startswith("data/action_text_rich_texts/")]
                 assert any(item["record_id"] == card["id"]

@@ -272,6 +272,16 @@ CREATE TABLE IF NOT EXISTS closures (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS closures_user_created ON closures(user_id,created_at);
+CREATE TABLE IF NOT EXISTS card_not_nows (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  card_id TEXT NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS card_not_nows_account ON card_not_nows(account_id);
+CREATE INDEX IF NOT EXISTS card_not_nows_user ON card_not_nows(user_id);
 CREATE TABLE IF NOT EXISTS card_activity_spikes (
   card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

@@ -113,6 +113,10 @@ def run(target, suffix):
         assert f'id="columns_card_{doing["id"]}"' in doing_preview
         assert 'card__column-name--current' in doing_preview
         assert 'Assigned to' in doing_preview and owner["name"].split()[0] in doing_preview
+        not_now_column, _ = anonymous(target, path + "/columns/not_now")
+        not_now_preview = preview(not_now_column, not_now["id"])
+        assert re.search(r'<strong class="card__closed-date">[^<]+</strong>', not_now_preview)
+        assert re.search(r'<span class="card__closed-by">[^<]+</span>', not_now_preview)
         done_column, _ = anonymous(target, path + "/columns/closed")
         assert 'class="card__closed"' in preview(done_column, done["id"])
 
@@ -132,6 +136,10 @@ def run(target, suffix):
         with urllib.request.urlopen(image_url, timeout=10) as image:
             assert image.status == 200 and image.read() == IMAGE
         assert "public" in card_headers.get("Cache-Control", "")
+        for marked in (not_now, done):
+            marked_html, _ = anonymous(target, path + f"/cards/{marked['number']}")
+            assert re.search(r'<strong class="card__closed-date">[^<]+</strong>', marked_html)
+            assert re.search(r'<span class="card__closed-by">[^<]+</span>', marked_html)
         api(target, f"/boards/{board_id}/publication", "DELETE", expected=204)
         anonymous(target, path, 404)
         anonymous(target, card_path, 404)
