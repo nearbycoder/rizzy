@@ -70,7 +70,14 @@ def main():
                     "LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.user_id=?",
                     (owner["id"],)).fetchone()
             assert settings_record and settings_record[4] == "every_few_hours"
-            board = api(target, "/boards", "POST", {"board": {"name": "Transfer probe"}}, 201)
+            board = api(target, "/boards", "POST", {"board": {"name": "Transfer probe",
+                                                                "auto_postpone_period_in_days": 90}}, 201)
+            with sqlite3.connect(db_path) as db:
+                entropy_records = db.execute(
+                    "SELECT id,account_id,container_type,container_id,created_at,updated_at "
+                    "FROM entropy_records WHERE account_id=(SELECT account_id FROM boards WHERE id=?) "
+                    "ORDER BY container_type", (board["id"],)).fetchall()
+            assert len(entropy_records) == 2
             with sqlite3.connect(db_path) as db:
                 access_record = db.execute(
                     "SELECT r.id,r.account_id,r.created_at,r.updated_at,x.involvement,x.accessed_at "
@@ -143,6 +150,7 @@ def main():
             assert publication_record[1] == account_id
             assert access_record[1] == account_id
             assert settings_record[1] == account_id
+            assert all(row[1] == account_id for row in entropy_records)
             for _ in range(120):
                 state = api(target, f"/account/exports/{export_id}")
                 if state["status"] in ("completed", "failed"):
@@ -193,6 +201,13 @@ def main():
                         settings_data["bundle_email_frequency"], settings_data["timezone_name"]) == (
                     account_id, owner["id"], settings_record[2], settings_record[3],
                     settings_record[4], settings_record[5])
+                for entropy_record in entropy_records:
+                    entropy_data = json.loads(archive.read(f"data/entropies/{entropy_record[0]}.json"))
+                    assert (entropy_data["account_id"], entropy_data["container_type"],
+                            entropy_data["container_id"], entropy_data["created_at"],
+                            entropy_data["updated_at"]) == entropy_record[1:]
+                    assert entropy_data["auto_postpone_period"] == (
+                        30 if entropy_record[2] == "Account" else 90) * 86400
                 publication_data = json.loads(archive.read(
                     f"data/board_publications/{publication_record[0]}.json"))
                 assert (publication_data["account_id"], publication_data["board_id"], publication_data["key"],

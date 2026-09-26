@@ -50,7 +50,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "entropies",
-        query: "SELECT NULL id,a.id account_id,a.auto_postpone_period_in_days*86400 auto_postpone_period,a.id container_id,'Account' container_type,a.created_at,a.created_at updated_at FROM accounts a WHERE a.id=? UNION ALL SELECT NULL,b.account_id,b.auto_postpone_period_in_days*86400,b.id,'Board',b.created_at,b.updated_at FROM boards b WHERE b.account_id=? AND b.entropy_override=1",
+        query: "SELECT r.id,r.account_id,a.auto_postpone_period_in_days*86400 auto_postpone_period,r.container_id,r.container_type,r.created_at,r.updated_at FROM entropy_records r JOIN accounts a ON a.id=r.container_id WHERE r.account_id=? AND r.container_type='Account' UNION ALL SELECT r.id,r.account_id,b.auto_postpone_period_in_days*86400,r.container_id,r.container_type,r.created_at,r.updated_at FROM entropy_records r JOIN boards b ON b.id=r.container_id WHERE r.account_id=? AND r.container_type='Board' ORDER BY container_type,container_id",
         booleans: &[],
         json_fields: &[],
     },

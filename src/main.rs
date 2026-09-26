@@ -1758,6 +1758,31 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::query("ALTER TABLE accounts ADD COLUMN auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30")
             .execute(&db).await?;
     }
+    let legacy_entropies = sqlx::query("SELECT a.id AS container_id,a.id AS account_id,'Account' AS container_type,a.created_at AS timestamp FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM entropy_records e WHERE e.container_type='Account' AND e.container_id=a.id) UNION ALL SELECT b.id,b.account_id,'Board',b.updated_at FROM boards b WHERE b.entropy_override=1 AND NOT EXISTS(SELECT 1 FROM entropy_records e WHERE e.container_type='Board' AND e.container_id=b.id)")
+        .fetch_all(&db).await?;
+    if !legacy_entropies.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_entropies {
+            let timestamp: String = row.get("timestamp");
+            sqlx::query("INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                .bind(id())
+                .bind(row.get::<String, _>("account_id"))
+                .bind(row.get::<String, _>("container_type"))
+                .bind(row.get::<String, _>("container_id"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_account_insert AFTER INSERT ON accounts BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.id,'Account',NEW.id,NEW.created_at,NEW.created_at); END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_account_update AFTER UPDATE OF auto_postpone_period_in_days ON accounts WHEN NEW.auto_postpone_period_in_days<>OLD.auto_postpone_period_in_days BEGIN UPDATE entropy_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE container_type='Account' AND container_id=NEW.id; UPDATE cards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE account_id=NEW.id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_board_insert AFTER INSERT ON boards WHEN NEW.entropy_override=1 BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,'Board',NEW.id,NEW.created_at,NEW.created_at); END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_board_update AFTER UPDATE OF auto_postpone_period_in_days,entropy_override ON boards WHEN NEW.entropy_override=1 AND (OLD.entropy_override=0 OR NEW.auto_postpone_period_in_days<>OLD.auto_postpone_period_in_days) BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,'Board',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(container_type,container_id) DO UPDATE SET updated_at=excluded.updated_at; UPDATE cards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.id; END")
+        .execute(&db).await?;
     sqlx::query(
         "CREATE UNIQUE INDEX IF NOT EXISTS boards_publication_key ON boards(publication_key)",
     )
@@ -4875,8 +4900,8 @@ async fn update_account_entropy(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,updated_at=? WHERE account_id=? AND entropy_override=0")
-        .bind(days).bind(now()).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("UPDATE boards SET auto_postpone_period_in_days=? WHERE account_id=? AND entropy_override=0")
+        .bind(days).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     Ok(if form {
         (

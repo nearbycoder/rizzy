@@ -663,7 +663,13 @@ async fn apply_archive(
     }
     for entropy in records(&archive, "entropies") {
         let period = integer(entropy, "auto_postpone_period", 30 * 86400) / 86400;
-        match field(entropy, "container_type")? {
+        let container_type = field(entropy, "container_type")?;
+        let container_id = if container_type == "Account" {
+            account_id
+        } else {
+            field(entropy, "container_id")?
+        };
+        match container_type {
             "Account" => {
                 sqlx::query("UPDATE accounts SET auto_postpone_period_in_days=? WHERE id=?")
                     .bind(period)
@@ -681,6 +687,22 @@ async fn apply_archive(
                 }
             }
             _ => return Err("Unsupported entropy container".into()),
+        }
+        // Fizzy's entropy importer updates the destination account's existing
+        // entropy in place, while board entropies are inserted from the archive.
+        if container_type == "Board" {
+            let changed = sqlx::query("UPDATE entropy_records SET id=?,created_at=?,updated_at=? WHERE account_id=? AND container_type='Board' AND container_id=?")
+                .bind(field(entropy, "id")?)
+                .bind(field(entropy, "created_at")?)
+                .bind(field(entropy, "updated_at")?)
+                .bind(account_id)
+                .bind(container_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            if changed.rows_affected() != 1 {
+                return Err("Board entropy metadata was not restored".into());
+            }
         }
     }
     for publication in records(&archive, "board_publications") {

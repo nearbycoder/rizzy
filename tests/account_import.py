@@ -93,7 +93,7 @@ def run(archive_path):
         users = [json.loads(z.read(name)) for name in z.namelist() if name.startswith("data/users/")]
         owner = next(user for user in users if user["role"] == "owner")
         counts = {group: sum(name.startswith(f"data/{group}/") for name in z.namelist())
-                  for group in ("user_settings", "boards", "columns", "tags", "accesses", "cards", "comments", "steps",
+                  for group in ("user_settings", "boards", "columns", "tags", "accesses", "entropies", "cards", "comments", "steps",
                                 "assignments", "taggings", "closures", "card_goldnesses",
                                 "card_not_nows", "card_activity_spikes", "watches", "pins",
                                 "reactions", "mentions", "events", "notifications",
@@ -125,6 +125,8 @@ def run(archive_path):
                           if name.startswith("data/accesses/")]
         setting_records = [json.loads(z.read(name)) for name in z.namelist()
                            if name.startswith("data/user_settings/")]
+        entropy_records = [json.loads(z.read(name)) for name in z.namelist()
+                           if name.startswith("data/entropies/")]
         publication_records = [json.loads(z.read(name)) for name in z.namelist()
                                if name.startswith("data/board_publications/")]
         spike_records = [json.loads(z.read(name)) for name in z.namelist()
@@ -176,6 +178,7 @@ def run(archive_path):
                 queries = {
                     "accesses": "SELECT COUNT(*) FROM access_records WHERE account_id=?",
                     "user_settings": "SELECT COUNT(*) FROM user_settings_records WHERE account_id=?",
+                    "entropies": "SELECT COUNT(*) FROM entropy_records WHERE account_id=?",
                     "comments": "SELECT COUNT(*) FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=?",
                     "steps": "SELECT COUNT(*) FROM steps s JOIN cards c ON c.id=s.card_id WHERE c.account_id=?",
                     "taggings": "SELECT COUNT(*) FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=?",
@@ -234,6 +237,27 @@ def run(archive_path):
                         (setting["id"],)).fetchone()
                     assert actual == (setting["user_id"], setting["bundle_email_frequency"],
                                       setting.get("timezone_name"), setting["created_at"], setting["updated_at"])
+                restored_entropies = {}
+                for entropy in entropy_records:
+                    container_id = imported_id if entropy["container_type"] == "Account" else entropy["container_id"]
+                    actual = db.execute(
+                        "SELECT id,account_id,created_at,updated_at FROM entropy_records "
+                        "WHERE container_type=? AND container_id=?",
+                        (entropy["container_type"], container_id)).fetchone()
+                    assert actual and actual[1] == imported_id
+                    restored_entropies[(entropy["container_type"], container_id)] = actual
+                    if entropy["container_type"] == "Account":
+                        assert actual[0] != entropy["id"]
+                    else:
+                        assert (actual[0], actual[2], actual[3]) == (
+                            entropy["id"], entropy["created_at"], entropy["updated_at"])
+                    if entropy["container_type"] == "Account":
+                        days = db.execute("SELECT auto_postpone_period_in_days FROM accounts WHERE id=?",
+                                          (imported_id,)).fetchone()[0]
+                    else:
+                        days = db.execute("SELECT auto_postpone_period_in_days FROM boards WHERE id=?",
+                                          (container_id,)).fetchone()[0]
+                    assert days * 86400 == entropy["auto_postpone_period"]
                 for publication in publication_records:
                     actual = db.execute("SELECT board_id,key,created_at,updated_at FROM board_publications WHERE id=?",
                                         (publication["id"],)).fetchone()
@@ -350,6 +374,17 @@ def run(archive_path):
                     restored = json.loads(z.read(f"data/user_settings/{source_setting['id']}.json"))
                     assert {key: restored[key] for key in ("user_id", "bundle_email_frequency", "timezone_name", "created_at", "updated_at")} == {
                         key: source_setting[key] for key in ("user_id", "bundle_email_frequency", "timezone_name", "created_at", "updated_at")}
+                for source_entropy in entropy_records:
+                    container_id = imported_id if source_entropy["container_type"] == "Account" else source_entropy["container_id"]
+                    record = restored_entropies[(source_entropy["container_type"], container_id)]
+                    restored = json.loads(z.read(f"data/entropies/{record[0]}.json"))
+                    assert {key: restored[key] for key in ("account_id", "auto_postpone_period", "container_id", "container_type", "created_at", "updated_at")} == {
+                        "account_id": imported_id,
+                        "auto_postpone_period": source_entropy["auto_postpone_period"],
+                        "container_id": container_id,
+                        "container_type": source_entropy["container_type"],
+                        "created_at": record[2],
+                        "updated_at": record[3]}
                 for source_publication in publication_records:
                     restored = json.loads(z.read(f"data/board_publications/{source_publication['id']}.json"))
                     assert {key: restored[key] for key in ("board_id", "key", "created_at", "updated_at")} == {

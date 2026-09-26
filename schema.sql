@@ -181,6 +181,19 @@ CREATE TABLE IF NOT EXISTS board_publications (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS board_publications_account ON board_publications(account_id);
+CREATE TABLE IF NOT EXISTS entropy_records (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  container_type TEXT NOT NULL CHECK(container_type IN ('Account','Board')),
+  container_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(container_type,container_id)
+);
+CREATE INDEX IF NOT EXISTS entropy_records_account ON entropy_records(account_id);
+CREATE TRIGGER IF NOT EXISTS entropy_records_board_delete AFTER DELETE ON boards BEGIN
+  DELETE FROM entropy_records WHERE container_type='Board' AND container_id=OLD.id;
+END;
 CREATE TABLE IF NOT EXISTS accesses (
   board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
