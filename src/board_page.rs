@@ -461,6 +461,7 @@ pub(super) async fn show(
     app: &App,
     principal: &Principal,
     board: &SqliteRow,
+    page: i64,
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
@@ -481,8 +482,11 @@ pub(super) async fn show(
     for row in count_rows {
         counts.insert(row.get("group_key"), row.get("total"));
     }
-    let maybe = sqlx::query("SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.board_id=? AND c.column_id IS NULL AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT 15")
+    let (offset, limit) = page_window(page);
+    let maybe = sqlx::query("SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.board_id=? AND c.column_id IS NULL AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT ? OFFSET ?")
         .bind(&board_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;

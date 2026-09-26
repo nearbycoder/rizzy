@@ -4408,12 +4408,13 @@ async fn board_data_version(app: &App) -> Option<i64> {
         .ok()
 }
 
-fn board_etag_key(p: &Principal, board_id: &str, headers: &HeaderMap) -> String {
+fn board_etag_key(p: &Principal, board_id: &str, page: i64, headers: &HeaderMap) -> String {
     format!(
-        "{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}",
         p.account_id,
         p.user_id,
         board_id,
+        page,
         etag_timezone(headers).unwrap_or_default()
     )
 }
@@ -5890,11 +5891,13 @@ async fn show_board(
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
+    OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let r = board(&app, &p, &id).await?;
+    let mut query = parse_card_query(raw.clone());
+    let page = query.page;
     if !headers.contains_key("x-rizzy-json-request") {
-        let mut query = parse_card_query(raw.clone());
         if let Some(filter_id) = query.filter_id.as_deref() {
             let fields: String = sqlx::query_scalar(
                 "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
@@ -5918,13 +5921,13 @@ async fn show_board(
                 .await?
                 .into_response()
         } else {
-            let key = board_etag_key(&p, &id, &headers);
+            let key = board_etag_key(&p, &id, page, &headers);
             if let Some(response) = cached_board_not_modified(&app, &key, &headers).await {
                 return Ok(response);
             }
             let before = board_data_version(&app).await;
-            let response =
-                conditional_html_response(board_page::show(&app, &p, &r).await?.0, &headers);
+            let html = board_page::show(&app, &p, &r, page).await?;
+            let response = conditional_html_response(html.0, &headers);
             if let Some(etag) = response
                 .headers()
                 .get(header::ETAG)
@@ -5936,7 +5939,18 @@ async fn show_board(
             response
         });
     }
-    Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND column_id IS NULL")
+        .bind(&id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(pagination_headers(
+        Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response(),
+        total,
+        page,
+        &uri,
+        &headers,
+    ))
 }
 fn board_filter_used(query: &CardQuery) -> bool {
     !query.terms.is_empty()
