@@ -2172,9 +2172,30 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     sqlx::query("CREATE TRIGGER IF NOT EXISTS access_records_insert AFTER INSERT ON accesses BEGIN INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(NEW.board_id,NEW.user_id,'0'||substr(lower(hex(randomblob(16))),1,24),(SELECT account_id FROM boards WHERE id=NEW.board_id),strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')); END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS access_records_update AFTER UPDATE OF involvement,accessed_at ON accesses BEGIN UPDATE access_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.board_id AND user_id=NEW.user_id; END")
-        .execute(&db).await?;
+    let access_update_sql = "CREATE TRIGGER access_records_update AFTER UPDATE OF involvement,accessed_at ON accesses WHEN NEW.involvement IS NOT OLD.involvement OR NEW.accessed_at IS NOT OLD.accessed_at BEGIN UPDATE access_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.board_id AND user_id=NEW.user_id; END";
+    let access_update_existing: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='access_records_update'",
+    )
+    .fetch_optional(&db)
+    .await?;
+    if access_update_existing
+        .as_deref()
+        .is_none_or(|sql| !sql.contains("WHEN NEW.involvement IS NOT OLD.involvement"))
+    {
+        let mut tx = db.begin().await?;
+        sqlx::query("DROP TRIGGER IF EXISTS access_records_update")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(access_update_sql).execute(&mut *tx).await?;
+        tx.commit().await?;
+    }
     sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT b.id,u.id,CASE WHEN b.creator_id=u.id THEN 'watching' ELSE 'access_only' END FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.all_access=1 AND u.active=1 AND u.role!='system'")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_insert AFTER INSERT ON accesses BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.user_id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_update AFTER UPDATE OF involvement,accessed_at ON accesses WHEN NEW.involvement IS NOT OLD.involvement OR NEW.accessed_at IS NOT OLD.accessed_at BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.user_id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_delete AFTER DELETE ON accesses BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.user_id; END")
         .execute(&db).await?;
     let account_columns = sqlx::query("PRAGMA table_info(accounts)")
         .fetch_all(&db)

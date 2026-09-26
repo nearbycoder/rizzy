@@ -1144,6 +1144,16 @@ async fn apply_archive(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
+    // The source bulk importer bypasses Access's user touch callback.
+    for user in records(&archive, "users") {
+        sqlx::query("UPDATE users SET updated_at=? WHERE id=? AND account_id=?")
+            .bind(field(user, "updated_at")?)
+            .bind(field(user, "id")?)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     sqlx::query("UPDATE accounts SET cards_count=MAX(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?")
         .bind(account_id).bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     let timestamp = now();
