@@ -1,6 +1,52 @@
 //! Durable Action Text record identities for inline card, comment, and board text.
 use super::{Result, db_err, id};
-use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool, Transaction};
+use std::collections::HashSet;
+
+pub(super) async fn present_ids(
+    db: &SqlitePool,
+    record_type: &str,
+    name: &str,
+    ids: &[String],
+) -> Result<HashSet<String>> {
+    if ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut query =
+        QueryBuilder::<Sqlite>::new("SELECT record_id FROM rich_text_records WHERE record_type=");
+    query
+        .push_bind(record_type)
+        .push(" AND name=")
+        .push_bind(name)
+        .push(" AND record_id IN (");
+    let mut values = query.separated(",");
+    for id in ids {
+        values.push_bind(id);
+    }
+    values.push_unseparated(")");
+    Ok(query
+        .build_query_scalar()
+        .fetch_all(db)
+        .await
+        .map_err(db_err)?
+        .into_iter()
+        .collect())
+}
+
+pub(super) async fn ensure(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    record_type: &str,
+    record_id: &str,
+    name: &str,
+    timestamp: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO NOTHING")
+        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
+        .bind(timestamp).bind(timestamp)
+        .execute(&mut **tx).await.map_err(db_err)?;
+    Ok(())
+}
 
 pub(super) async fn sync(
     tx: &mut Transaction<'_, Sqlite>,

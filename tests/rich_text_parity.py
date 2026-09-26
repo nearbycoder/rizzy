@@ -8,6 +8,7 @@ from card_image_parity import call
 
 
 CASES = [
+    "",
     "Plain text",
     '<p>Hello <strong>world</strong> &amp; <a href="https://example.com">link</a></p>',
     "<p>Next<br>line</p><ul><li>One</li><li>Two</li></ul>",
@@ -45,6 +46,9 @@ def run(target):
         updated = request(target, f"/cards/{first['number']}.json", "PATCH",
                           {"card": {"description": "<h2>Header</h2><p>Body</p>"}})
         result["updated"] = (updated["description"], updated["description_html"])
+        cleared = request(target, f"/cards/{first['number']}.json", "PATCH",
+                          {"card": {"description": ""}})
+        result["cleared"] = (cleared["description"], cleared["description_html"])
         comment = request(target, f"/cards/{first['number']}/comments", "POST",
                           {"comment": {"body": "<p>Look <em>here</em> &amp; email me@example.com</p>"}})
         result["comment"] = (comment["body"]["plain_text"], comment["body"]["html"])

@@ -1495,8 +1495,15 @@ async fn card_json(
     let board_id: String = r.get("board_id");
     let creator: String = r.get("creator_id");
     let description: String = r.get("description");
-    let (description_plain, description_html, has_attachments) =
+    let (description_plain, mut description_html, has_attachments) =
         storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
+    if description.is_empty()
+        && rich_text_records::present_ids(&app.db, "Card", "description", std::slice::from_ref(&id))
+            .await?
+            .is_empty()
+    {
+        description_html.clear();
+    }
     let number: i64 = r.get("number");
     let tags: Vec<String> = sqlx::query_scalar("SELECT t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title").bind(&id).fetch_all(&app.db).await.map_err(db_err)?;
     let b = board(app, p, &board_id).await?;
@@ -1549,6 +1556,15 @@ async fn cards_json_batch(
         return Ok(Vec::new());
     }
     let card_ids = unique_ids(cards.iter().map(|c| c.get::<String, _>("id")));
+    let empty_description_ids = unique_ids(
+        cards
+            .iter()
+            .filter(|c| c.get::<String, _>("description").is_empty())
+            .map(|c| c.get::<String, _>("id")),
+    );
+    let present_descriptions =
+        rich_text_records::present_ids(&app.db, "Card", "description", &empty_description_ids)
+            .await?;
     let board_ids = unique_ids(cards.iter().map(|c| c.get::<String, _>("board_id")));
     let column_ids = unique_ids(
         cards
@@ -1620,8 +1636,11 @@ async fn cards_json_batch(
         let board_id: String = card.get("board_id");
         let number: i64 = card.get("number");
         let description: String = card.get("description");
-        let (description_plain, description_html, has_attachments) =
+        let (description_plain, mut description_html, has_attachments) =
             storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
+        if description.is_empty() && !present_descriptions.contains(&card_id) {
+            description_html.clear();
+        }
         let assigned = assignee_values.get(&card_id).cloned().unwrap_or_default();
         let assignees: Vec<Value> = assigned
             .iter()
@@ -7246,6 +7265,15 @@ async fn activity_items(
         .collect();
     let card_ids = unique_ids(events.iter().map(|e| e.get::<String, _>("card_id")));
     let card_rows = rows_for_ids(app, "SELECT * FROM cards WHERE id IN (", &card_ids).await?;
+    let empty_description_ids = unique_ids(
+        card_rows
+            .iter()
+            .filter(|c| c.get::<String, _>("description").is_empty())
+            .map(|c| c.get::<String, _>("id")),
+    );
+    let present_descriptions =
+        rich_text_records::present_ids(&app.db, "Card", "description", &empty_description_ids)
+            .await?;
     let board_ids = unique_ids(
         card_rows
             .iter()
@@ -7334,8 +7362,11 @@ async fn activity_items(
         let number: i64 = c.get("number");
         let title: String = c.get("title");
         let description: String = c.get("description");
-        let (description_plain, description_html, has_attachments) =
+        let (description_plain, mut description_html, has_attachments) =
             storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
+        if description.is_empty() && !present_descriptions.contains(&id) {
+            description_html.clear();
+        }
         let assigned = assignments.get(&id).cloned().unwrap_or_default();
         let assignees: Vec<Value> = assigned
             .iter()
@@ -8762,6 +8793,17 @@ async fn create_card(
         &timestamp,
     )
     .await?;
+    if v.get("description").and_then(Value::as_str) == Some("") {
+        rich_text_records::ensure(
+            &mut tx,
+            &p.account_id,
+            "Card",
+            &id,
+            "description",
+            &timestamp,
+        )
+        .await?;
+    }
     storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
     storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
     sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
@@ -9292,6 +9334,17 @@ async fn update_card(
         &timestamp,
     )
     .await?;
+    if v.get("description").and_then(Value::as_str) == Some("") {
+        rich_text_records::ensure(
+            &mut tx,
+            &p.account_id,
+            "Card",
+            &c.get::<String, _>("id"),
+            "description",
+            &timestamp,
+        )
+        .await?;
+    }
     let replaced_image_keys =
         storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), image_value).await?;
     let removed_embed_keys =
