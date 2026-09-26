@@ -1804,6 +1804,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    rich_text_records::migrate(&db).await?;
     for (name, definition) in [
         (
             "cards_touch_board_insert",
@@ -6401,6 +6402,16 @@ async fn create_board(
             &timestamp,
         )
         .await?;
+    } else if v.get("public_description") == Some(&Value::Null) {
+        rich_text_records::ensure_null(
+            &mut tx,
+            &p.account_id,
+            "Board",
+            &id,
+            "description",
+            &timestamp,
+        )
+        .await?;
     }
     sqlx::query("INSERT INTO accesses(board_id,user_id,involvement) VALUES(?,?,'watching')")
         .bind(&id)
@@ -6444,6 +6455,13 @@ async fn update_board(
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
     let v = nested(&body, "board");
+    if v.as_object().is_none_or(serde_json::Map::is_empty) {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status":400,"error":"Bad Request"})),
+        )
+            .into_response());
+    }
     let name = string(v, "name").unwrap_or_else(|| b.get("name"));
     if name.trim().is_empty() {
         return Err(bad("name is required"));
@@ -6461,27 +6479,52 @@ async fn update_board(
         Some(Value::Null) => String::new(),
         _ => string(v, "public_description").unwrap_or_else(|| b.get("public_description")),
     };
-    let timestamp = now();
+    let old_description: String = b.get("public_description");
+    let rich_null: Option<i64> = sqlx::query_scalar("SELECT body_is_null FROM rich_text_records WHERE record_type='Board' AND record_id=? AND name='description'")
+        .bind(&id).fetch_optional(&app.db).await.map_err(db_err)?;
+    let description_changed = match v.get("public_description") {
+        Some(Value::Null) => !old_description.is_empty() || rich_null != Some(1),
+        Some(Value::String(_)) => old_description != public_description || rich_null != Some(0),
+        _ => false,
+    };
+    let board_changed = name != b.get::<String, _>("name")
+        || all != (b.get::<i64, _>("all_access") != 0)
+        || days != b.get::<i64, _>("auto_postpone_period_in_days")
+        || description_changed;
+    let timestamp = if board_changed {
+        now()
+    } else {
+        b.get("updated_at")
+    };
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE boards SET name=?,all_access=?,auto_postpone_period_in_days=?,entropy_override=?,public_description=?,updated_at=? WHERE id=?")
         .bind(name).bind(all as i64).bind(days).bind(override_days as i64).bind(&public_description).bind(&timestamp).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
     if v.get("public_description") == Some(&Value::Null) {
-        sqlx::query("DELETE FROM rich_text_records WHERE record_type='Board' AND record_id=? AND name='description'")
-            .bind(&id).execute(&mut *tx).await.map_err(db_err)?;
-    } else {
+        rich_text_records::ensure_null(
+            &mut tx,
+            &p.account_id,
+            "Board",
+            &id,
+            "description",
+            &timestamp,
+        )
+        .await?;
+    } else if v
+        .get("public_description")
+        .and_then(Value::as_str)
+        .is_some()
+    {
         rich_text_records::sync(
             &mut tx,
             &p.account_id,
             "Board",
             &id,
             "description",
-            &b.get::<String, _>("public_description"),
+            &old_description,
             &public_description,
             &timestamp,
         )
         .await?;
-    }
-    if v.get("public_description").and_then(Value::as_str) == Some("") {
         rich_text_records::ensure(
             &mut tx,
             &p.account_id,

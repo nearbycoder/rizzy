@@ -16,7 +16,7 @@ pub(super) async fn present_ids(
         QueryBuilder::<Sqlite>::new("SELECT record_id FROM rich_text_records WHERE record_type=");
     query
         .push_bind(record_type)
-        .push(" AND name=")
+        .push(" AND body_is_null=0 AND name=")
         .push_bind(name)
         .push(" AND record_id IN (");
     let mut values = query.separated(",");
@@ -41,7 +41,22 @@ pub(super) async fn ensure(
     name: &str,
     timestamp: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO NOTHING")
+    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=1")
+        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
+        .bind(timestamp).bind(timestamp)
+        .execute(&mut **tx).await.map_err(db_err)?;
+    Ok(())
+}
+
+pub(super) async fn ensure_null(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    record_type: &str,
+    record_id: &str,
+    name: &str,
+    timestamp: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=1,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=0")
         .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
         .bind(timestamp).bind(timestamp)
         .execute(&mut **tx).await.map_err(db_err)?;
@@ -61,10 +76,27 @@ pub(super) async fn sync(
     if old_body == new_body || (old_body.is_empty() && new_body.is_empty()) {
         return Ok(());
     }
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET updated_at=excluded.updated_at")
+    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at")
         .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
         .bind(timestamp).bind(timestamp)
         .execute(&mut **tx).await.map_err(db_err)?;
+    Ok(())
+}
+
+pub(super) async fn migrate(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+    let columns = sqlx::query("PRAGMA table_info(rich_text_records)")
+        .fetch_all(db)
+        .await?;
+    if !columns
+        .iter()
+        .any(|column| column.get::<String, _>("name") == "body_is_null")
+    {
+        sqlx::query(
+            "ALTER TABLE rich_text_records ADD COLUMN body_is_null INTEGER NOT NULL DEFAULT 0",
+        )
+        .execute(db)
+        .await?;
+    }
     Ok(())
 }
 

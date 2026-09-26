@@ -372,6 +372,7 @@ CREATE TABLE IF NOT EXISTS rich_text_records (
   name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  body_is_null INTEGER NOT NULL DEFAULT 0,
   UNIQUE(record_type,record_id,name)
 );
 CREATE INDEX IF NOT EXISTS rich_text_records_account ON rich_text_records(account_id);
