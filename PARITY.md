@@ -24,8 +24,12 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, and common formatted text | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
-| SQLite and MySQL deployment parity | SQLite only | No |
+| SQLite and MySQL deployment parity | SQLite runtime; MySQL schema initialization and seed only on this branch | No |
 | Comparative performance and scale proof | Scoped reads plus 30- and 60-second mixed API runs through 256 clients | No |
+
+The [MySQL port status](docs/mysql-port.md) records the schema and seed smoke
+check, the still-missing MySQL runtime work, and the database comparison needed
+before deployment parity or a greater-scale claim can be made.
 
 The [60-second mixed API benchmark](bench/results/sustained-mixed-100-2026-09-26.json) uses fresh source and Rust databases, 100 initial cards, 32 clients, the same eight logical server CPUs, and two reversed-order rounds. Each completed unit makes five JSON reads and four card writes. With board JSON and account ETag state included, Rizzy completed 90.99–91.10 units/s versus Fizzy's 25.61–28.03, with no HTTP errors and matching final card, event, and comment formulas. The artifact records the pinned Fizzy revision, Rizzy commit, and release binary hash. It compared sampled response shapes, content, counts, and pagination headers before timing. This verifies a faster result for this workload, not one-for-one application speed or maximum scale: the apps have different process models and unimplemented browser and background behaviors, and SQLite writes serialize. `tests/board_show_pagination_parity.py` checks signed-in board pages one and two, their separate ETags, and 304 responses against disposable Fizzy and Rizzy databases.
 
