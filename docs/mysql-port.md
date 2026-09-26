@@ -171,3 +171,10 @@ two-client run and these four rounds did not reproduce it. That transient
 source failure still needs diagnosis. Larger datasets, a concurrency sweep,
 multiple application processes, full background jobs, and representative
 browser workflows remain necessary before claiming greater scale.
+After the invite, email, and access changes, a clean-build eight-client
+two-round run at commit `73d0e50` completed with matching samples, verified
+stored counts, and zero HTTP errors. Fizzy completed 24.37 and 23.43 units/s;
+Rizzy completed 169.39 and 62.54 units/s. The corresponding ratios were 6.95×
+and 2.67×. The raw artifact is
+`bench/results/mysql_mixed_after_join_2026-09-26.json`. The larger spread in
+Rizzy throughput needs investigation before drawing a capacity conclusion.
