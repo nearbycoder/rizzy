@@ -943,9 +943,9 @@ async fn record_event(
     let timestamp = now();
     let event_id = id();
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
-        .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp)
+        .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
     queue_webhooks(
         &mut tx,
@@ -1988,6 +1988,24 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
+    let event_columns = sqlx::query("PRAGMA table_info(events)")
+        .fetch_all(&db)
+        .await?;
+    if !event_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "updated_at")
+    {
+        sqlx::query("ALTER TABLE events ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+            .execute(&db)
+            .await?;
+        sqlx::query("UPDATE events SET updated_at=created_at WHERE updated_at=''")
+            .execute(&db)
+            .await?;
+    }
+    // Legacy writers and test fixtures may still omit the column on insert.
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS events_updated_at_insert AFTER INSERT ON events WHEN NEW.updated_at='' BEGIN UPDATE events SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        .execute(&db)
+        .await?;
     let tag_columns = sqlx::query("PRAGMA table_info(tags)")
         .fetch_all(&db)
         .await?;
@@ -8560,9 +8578,9 @@ async fn create_card(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
         .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&id).bind(&p.user_id)
-        .bind(&id).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     queue_webhooks(
         &mut tx,
         &p.account_id,
@@ -8803,9 +8821,9 @@ async fn publish_card(
     sqlx::query("UPDATE cards SET status='published',title=CASE WHEN trim(title)='' THEN 'Untitled' ELSE title END,created_at=?,updated_at=? WHERE id=?")
         .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
     let event_id = id();
-    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
         .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&card_id).bind(&p.user_id)
-        .bind(&card_id).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&card_id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     queue_webhooks(
         &mut tx,
         &p.account_id,

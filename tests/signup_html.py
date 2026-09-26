@@ -26,7 +26,7 @@ def main():
                     urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())}
         email = "browser-owner@example.test"
         try:
-            assert request(item, "/signup", accept="text/html")[0] == 302
+            assert request(item, "/signup", accept="text/html")[0] == 301
             status, _, signin = request(item, "/session/new", accept="text/html")
             assert status == 200 and b'href="/signup/new"' in signin
             status, _, page = request(item, "/signup/new", accept="text/html")

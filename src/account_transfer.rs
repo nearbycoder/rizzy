@@ -164,7 +164,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "events",
-        query: "SELECT id,account_id,action,board_id,created_at,creator_id,eventable_id,eventable_type,particulars,created_at updated_at FROM events WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,action,board_id,created_at,creator_id,eventable_id,eventable_type,particulars,updated_at FROM events WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &["particulars"],
     },

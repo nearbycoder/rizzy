@@ -49,9 +49,9 @@ pub(super) async fn playground(
             .bind(created_at)
             .execute(&mut **tx)
             .await?;
-        sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")
+        sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
             .bind(id()).bind(account_id).bind(&board_id).bind(&card_id).bind(owner_id)
-            .bind(&card_id).bind(created_at).execute(&mut **tx).await?;
+            .bind(&card_id).bind(created_at).bind(created_at).execute(&mut **tx).await?;
     }
     sqlx::query("UPDATE accounts SET cards_count=? WHERE id=?")
         .bind(cards.len() as i64)

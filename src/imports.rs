@@ -943,10 +943,11 @@ async fn apply_archive(
         };
         let particulars = serde_json::to_string(event.get("particulars").unwrap_or(&json!({})))
             .map_err(|e| e.to_string())?;
-        sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
             .bind(field(event,"id")?).bind(account_id).bind(field(event,"board_id")?).bind(card_id)
             .bind(field(event,"creator_id")?).bind(eventable_type).bind(eventable_id)
             .bind(field(event,"action")?).bind(particulars).bind(field(event,"created_at")?)
+            .bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for notification in records(&archive, "notifications") {

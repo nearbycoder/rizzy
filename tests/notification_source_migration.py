@@ -22,6 +22,9 @@ def main():
     marker = "source_id TEXT NOT NULL,\n  source_type TEXT NOT NULL DEFAULT 'Event',"
     old_schema = schema.replace(marker, "source_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,\n  source_type TEXT NOT NULL DEFAULT 'Event',")
     assert old_schema != schema
+    event_table = "  particulars TEXT NOT NULL DEFAULT '{}',\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL DEFAULT ''\n);"
+    assert event_table in old_schema
+    old_schema = old_schema.replace(event_table, "  particulars TEXT NOT NULL DEFAULT '{}',\n  created_at TEXT NOT NULL\n);")
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "old-notifications.sqlite3"
         db = sqlite3.connect(database)
@@ -63,6 +66,9 @@ def main():
             db = sqlite3.connect(database)
             assert db.execute("SELECT COUNT(*) FROM notifications WHERE id='old-notice'").fetchone()[0] == 1
             assert not any(row[3] == "source_id" for row in db.execute("PRAGMA foreign_key_list(notifications)"))
+            assert db.execute("SELECT created_at,updated_at FROM events WHERE id='event'").fetchone() == (STAMP, STAMP)
+            db.execute("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,created_at) VALUES('legacy-writer','account','board','card-event','owner','Card','card-event','card_published',?)", (STAMP,))
+            assert db.execute("SELECT updated_at FROM events WHERE id='legacy-writer'").fetchone()[0] == STAMP
             db.execute("INSERT INTO mentions(id,account_id,mentionee_id,mentioner_id,source_type,source_id,created_at,updated_at) VALUES('mention','account','owner','owner','Card','card-mention',?,?)", (STAMP, STAMP))
             db.execute("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,created_at,updated_at) VALUES('mention-notice','account','owner','owner','card-mention','mention','Mention',?,?)", (STAMP, STAMP))
             db.commit()

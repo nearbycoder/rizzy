@@ -35,6 +35,7 @@ FRESH_UPDATE_TABLES = {
     "watches": "watches",
     "mentions": "mentions",
     "filters": "filters",
+    "events": "events",
     "notifications": "notifications",
     "notification_bundles": "notification_bundles",
     "webhook_deliveries": "webhook_deliveries",
@@ -400,6 +401,12 @@ def run(archive_path):
                 for group, expected in counts.items():
                     actual = sum(name.startswith(f"data/{group}/") for name in names)
                     assert actual == expected, ("reexport", group, actual, expected)
+                for group, sample in imported_samples.items():
+                    if sample is None:
+                        continue
+                    restored = json.loads(z.read(f"data/{group}/{sample['id']}.json"))
+                    assert restored["created_at"] == sample["created_at"], (group, "reexport creation time")
+                    assert_fresh(restored["updated_at"], import_started)
                 for blob_id, source_bytes in original_bytes.items():
                     blob = json.loads(z.read(f"data/active_storage_blobs/{blob_id}.json"))
                     assert z.read(f"storage/{blob['key']}") == source_bytes

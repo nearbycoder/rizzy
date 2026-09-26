@@ -455,7 +455,8 @@ CREATE TABLE IF NOT EXISTS events (
   eventable_id TEXT NOT NULL,
   action TEXT NOT NULL,
   particulars TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS events_account_recent ON events(account_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS events_board_recent ON events(board_id,created_at DESC,id DESC);
