@@ -6215,6 +6215,44 @@ fn valid_entropy(days: i64) -> Result<i64> {
         Err(bad("invalid auto_postpone_period_in_days"))
     }
 }
+fn entropy_days_from_json(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|number| number.trunc() as i64)),
+        Value::String(value) => {
+            // Entropy's Rails setter calls to_i, accepting a leading integer
+            // even when a JSON value is a string such as "7days".
+            let value = value.trim_start();
+            let mut length = 0;
+            for (index, character) in value.char_indices() {
+                if index == 0 && matches!(character, '+' | '-') {
+                    length = character.len_utf8();
+                } else if character.is_ascii_digit() {
+                    length = index + character.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            Some(value[..length].parse::<i64>().unwrap_or(0))
+        }
+        Value::Null => Some(0),
+        Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+fn entropy_parameter_error(status: StatusCode) -> Response {
+    match status {
+        StatusCode::BAD_REQUEST => {
+            (status, Json(json!({"status":400,"error":"Bad Request"}))).into_response()
+        }
+        StatusCode::INTERNAL_SERVER_ERROR => (
+            status,
+            Json(json!({"status":500,"error":"Internal Server Error"})),
+        )
+            .into_response(),
+        _ => status.into_response(),
+    }
+}
 async fn account_json(app: &App, p: &Principal) -> Result<Value> {
     let row = sqlx::query("SELECT id,name,cards_count,created_at,auto_postpone_period_in_days FROM accounts WHERE id=?")
         .bind(&p.account_id).fetch_one(&app.db).await.map_err(db_err)?;
@@ -6841,7 +6879,7 @@ async fn update_account_entropy(
         if method == Method::POST && fields.get("_method").map(String::as_str) != Some("put") {
             return Err(missing());
         }
-        json!({"entropy":{"auto_postpone_period_in_days":fields.get("entropy[auto_postpone_period_in_days]").and_then(|value| value.parse::<i64>().ok())}})
+        json!({"entropy":{"auto_postpone_period_in_days":fields.get("entropy[auto_postpone_period_in_days]")}})
     } else {
         if method == Method::POST {
             return Err(missing());
@@ -6851,18 +6889,19 @@ async fn update_account_entropy(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     p.account_admin()?;
-    let days = nested(&body, "entropy")
-        .get("auto_postpone_period_in_days")
-        .and_then(Value::as_i64);
-    let days = match days {
-        Some(days) => days,
-        None if form => return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
-        None => return Err(bad("auto_postpone_period_in_days is required")),
+    let Some(value) = nested(&body, "entropy").get("auto_postpone_period_in_days") else {
+        return Ok(entropy_parameter_error(if form {
+            StatusCode::UNPROCESSABLE_ENTITY
+        } else {
+            StatusCode::BAD_REQUEST
+        }));
+    };
+    let Some(days) = entropy_days_from_json(value) else {
+        return Ok(entropy_parameter_error(StatusCode::INTERNAL_SERVER_ERROR));
     };
     let days = match valid_entropy(days) {
         Ok(days) => days,
-        Err(_) if form => return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
-        Err(error) => return Err(error),
+        Err(_) => return Ok(entropy_parameter_error(StatusCode::UNPROCESSABLE_ENTITY)),
     };
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE accounts SET auto_postpone_period_in_days=? WHERE id=?")
@@ -7945,20 +7984,25 @@ async fn update_board_entropy(
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
     Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
-    let days = nested(&body, "board")
-        .get("auto_postpone_period_in_days")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| bad("auto_postpone_period_in_days is required"))?;
-    let days = valid_entropy(days)?;
+    let Some(value) = nested(&body, "board").get("auto_postpone_period_in_days") else {
+        return Ok(entropy_parameter_error(StatusCode::BAD_REQUEST));
+    };
+    let Some(days) = entropy_days_from_json(value) else {
+        return Ok(entropy_parameter_error(StatusCode::INTERNAL_SERVER_ERROR));
+    };
+    let days = match valid_entropy(days) {
+        Ok(days) => days,
+        Err(_) => return Ok(entropy_parameter_error(StatusCode::UNPROCESSABLE_ENTITY)),
+    };
     sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,entropy_override=1,updated_at=? WHERE id=? AND account_id=?")
         .bind(days).bind(now()).bind(&id).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
     let b = board(&app, &p, &id).await?;
-    Ok(Json(board_detail(&app, &p, &b, &base(&headers)).await?))
+    Ok(Json(board_detail(&app, &p, &b, &base(&headers)).await?).into_response())
 }
 async fn delete_board(
     State(app): Shared,
@@ -8151,7 +8195,11 @@ async fn show_column(
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let total: i64 = sqlx::query_scalar(named_column_count_sql(app.mysql))
-        .bind(&board_id).bind(&column_id).fetch_one(&app.db).await.map_err(db_err)?;
+        .bind(&board_id)
+        .bind(&column_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
     let rows = sqlx::query("SELECT c.*,(SELECT name FROM boards WHERE id=c.board_id) AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c WHERE c.board_id=? AND c.column_id=? AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT ? OFFSET ?")
         .bind(&board_id).bind(&column_id).bind(limit).bind(offset)
         .fetch_all(&app.db).await.map_err(db_err)?;
@@ -8249,7 +8297,11 @@ async fn column_stream_markup(
 ) -> Result<String> {
     let id: String = c.get("id");
     let count: i64 = sqlx::query_scalar(named_column_count_sql(app.mysql))
-        .bind(board_id).bind(&id).fetch_one(&app.db).await.map_err(db_err)?;
+        .bind(board_id)
+        .bind(&id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
     Ok(board_page::named_column_html(
         p.slug,
         board_id,
