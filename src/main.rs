@@ -747,14 +747,24 @@ fn page_window(page: i64) -> (i64, i64) {
     let offset = prior + (page - 5).max(0) * 100;
     (offset, sizes[(page - 1).min(3) as usize])
 }
+fn geared_page_count(total: i64) -> i64 {
+    match total {
+        ..=15 => 1,
+        16..=45 => 2,
+        46..=95 => 3,
+        96..=195 => 4,
+        _ => 5 + (total - 196) / 100,
+    }
+}
 fn paginated(items: Value, total: i64, page: i64, uri: &Uri, headers: &HeaderMap) -> Response {
     let mut response = Json(items).into_response();
     response.headers_mut().insert(
         "x-total-count",
         HeaderValue::from_str(&total.to_string()).expect("count header"),
     );
-    let (offset, limit) = page_window(page);
-    if offset + limit < total {
+    // GearedPagination emits a next link on an out-of-range page because only
+    // the exact last page suppresses it.
+    if page != geared_page_count(total) {
         let mut pairs: Vec<(String, String)> = uri
             .query()
             .map(|q| {
