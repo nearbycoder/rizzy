@@ -349,6 +349,24 @@ This supports higher throughput through application-process scaling on this
 local, four-board API workload. The shared account card counter and database
 remain contention points; other routes, larger datasets, durability under
 failure, and multiple hosts still need direct tests.
+
+The [1,000-card four-board direct comparison](../bench/results/mysql-cluster-1000-4boards-c32-30s-2026-09-26.json)
+extends that workload to two reversed-order 30-second rounds at 32 clients on
+the same four app CPUs. One process completed 192.62 and 190.88 workflows/s;
+four processes completed 255.00 and 241.17, gains of 32.4% and 26.3%. All
+four phases had zero HTTP errors and the expected card, event, and comment
+counts. The measured gain is smaller than on the 500-card fixture and remains
+one-host, four-board evidence.
+
+The [1,000-card Fizzy/Rizzy MySQL comparison](../bench/results/mysql-mixed-1000-c32-30s-2026-09-26.json)
+used four Fizzy Puma workers or one Rizzy process on those four CPUs. In its
+clean reversed-order pair, Rizzy completed 135.26 workflows/s versus Fizzy's
+21.11 with zero HTTP errors and verified counts. The other Fizzy phase failed
+one PATCH with an ActiveSearch shard deadlock, so the two-round comparison is
+not fully clean and its 27.19 workflows/s cannot be used as a paired
+throughput result. The Rust binary hash and source revisions are in the
+artifacts; the source and Rust apps still have incomplete feature parity.
+
 The write-path audit found additional routes that update cards without first
 locking their parent board, including draft publication, steps, triage, watches,
 and reactions. `tests/mysql_cluster.py` now checks 400 distinct cards through
