@@ -18,7 +18,9 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
+
+from auth import call as auth_call, cookie
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +87,7 @@ def main():
             "RIZZY_SEED_EMAIL": email,
             "RIZZY_DISABLE_WEBHOOK_DELIVERY": "1",
             "RIZZY_DISABLE_PUSH_DELIVERY": "1",
+            "RIZZY_DEV_MAGIC_LINKS": "1",
         }
         subprocess.run([BINARY, "init-db"], cwd=ROOT, env=env, check=True, capture_output=True)
         seed = subprocess.run(
@@ -123,6 +126,7 @@ def main():
             )
             number = card["number"]
             assert [item["number"] for item in call(base, token, scope + "/cards")] == [number]
+            assert [item["id"] for item in call(base, token, scope + "/search?q=" + quote("MySQL card"))] == [card["id"]]
             column = call(
                 base, token, scope + f"/boards/{board['id']}/columns", "POST",
                 {"column": {"name": "MySQL column"}}, 201,
@@ -162,6 +166,59 @@ def main():
                 base, token, scope + f"/cards/{number}/comments", "POST",
                 {"comment": {"body": "MySQL comment"}}, 201,
             )
+            assert [item["id"] for item in call(base, token, scope + "/search?q=" + quote("comment"))] == [card["id"]]
+            stemmed = call(
+                base, token, scope + f"/boards/{board['id']}/cards", "POST",
+                {"card": {"title": "Running authentication"}}, 201,
+            )
+            stemmed_number = stemmed["number"]
+            assert [item["id"] for item in call(base, token, scope + "/search?q=run")] == [stemmed["id"]]
+            assert [item["id"] for item in call(base, token, scope + "/search?q=authenticate")] == [stemmed["id"]]
+            assert [item["id"] for item in call(base, token, scope + "/cards?terms%5B%5D=authenticate")] == [stemmed["id"]]
+            _, login_headers = auth_call(port, "/session", "POST", {"email_address": email}, status=201)
+            pending = cookie(login_headers, "pending_authentication_token")
+            _, login_headers = auth_call(
+                port, "/session/magic_link", "POST",
+                {"code": login_headers["X-Magic-Link-Code"]}, [pending],
+            )
+            session = cookie(login_headers, "session_token")
+            html_request = urllib.request.Request(
+                base + scope + "/search?q=run",
+                headers={"Accept": "text/html", "Cookie": session},
+            )
+            with urllib.request.urlopen(html_request, timeout=8) as response:
+                html = response.read().decode()
+            assert "authentication" in html and 'class="search__title"' in html, html[:4000]
+            prompt_request = urllib.request.Request(
+                base + scope + "/prompts/cards?filter=authenticate",
+                headers={"Accept": "text/html", "Cookie": session},
+            )
+            with urllib.request.urlopen(prompt_request, timeout=8) as response:
+                assert "Running authentication" in response.read().decode()
+            walk = call(
+                base, token, scope + f"/cards/{stemmed_number}/comments", "POST",
+                {"comment": {"body": "Walking swiftly"}}, 201,
+            )
+            assert [item["id"] for item in call(base, token, scope + "/search?q=walk")] == [stemmed["id"]]
+            call(
+                base, token, scope + f"/cards/{stemmed_number}/comments/{walk['id']}", "PUT",
+                {"comment": {"body": "Sprinting swiftly"}},
+            )
+            assert call(base, token, scope + "/search?q=walk") == []
+            assert [item["id"] for item in call(base, token, scope + "/search?q=sprint")] == [stemmed["id"]]
+            call(
+                base, token, scope + f"/cards/{stemmed_number}/comments/{walk['id']}",
+                "DELETE", expected=204,
+            )
+            assert call(base, token, scope + "/search?q=sprint") == []
+            call(
+                base, token, scope + f"/cards/{stemmed_number}", "PUT",
+                {"card": {"title": "Jumping authentication"}},
+            )
+            # The title-change system comment intentionally retains the old title.
+            assert [item["id"] for item in call(base, token, scope + "/search?q=jump")] == [stemmed["id"]]
+            call(base, token, scope + f"/cards/{stemmed_number}", "DELETE", expected=204)
+            assert call(base, token, scope + "/search?q=jump") == []
             call(base, token, scope + f"/cards/{number}/closure", "POST", expected=204)
             loaded = call(base, token, scope + f"/cards/{number}")
             assert loaded["closed"] is True and loaded["title"] == "MySQL card", loaded
@@ -171,7 +228,7 @@ def main():
             assert len(call(base, token, scope + "/activities")) >= 3
             metadata_checked = check_metadata(url, account)
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, public board, comment, close, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, public board, comment, search, close, reads{detail}")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise

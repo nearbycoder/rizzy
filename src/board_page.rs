@@ -135,7 +135,7 @@ pub(super) async fn show_filtered(
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
     let (offset, limit) = page_window(query.page);
-    let mut count = cards_query("SELECT COUNT(*)", principal, query);
+    let mut count = cards_query("SELECT COUNT(*)", principal, query, app.mysql);
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -146,6 +146,7 @@ pub(super) async fn show_filtered(
         "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name",
         principal,
         query,
+        app.mysql,
     );
     builder
         .push(format!(" ORDER BY {order} LIMIT "))

@@ -48,6 +48,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod my_menu;
+mod mysql_search;
 mod notification_mail;
 mod notification_page;
 mod passkeys;
@@ -779,10 +780,14 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     .await?;
     if table_count == 0 {
         sqlx::raw_sql(schema).execute(&db).await?;
-    } else if table_count != expected_tables {
-        return Err(format!("expected {expected_tables} Rizzy tables, found {table_count}").into());
+    } else if table_count < expected_tables {
+        return Err(format!(
+            "expected at least {expected_tables} Rizzy tables, found {table_count}"
+        )
+        .into());
     }
     validate_mysql_schema(&db, schema).await?;
+    mysql_search::setup(&db).await?;
     let installed: HashSet<String> = sqlx::query_scalar(
         "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=DATABASE()",
     )
@@ -1120,7 +1125,12 @@ async fn system_user(app: &App, p: &Principal) -> Result<String> {
     let user_id = id();
     let timestamp = now();
     let email = format!("system+{}@rizzy.invalid", p.account_id);
-    sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+    let insert_identity = if app.mysql {
+        "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+    };
+    sqlx::query(insert_identity)
         .bind(&identity_id)
         .bind(&email)
         .bind(&timestamp)
@@ -1132,8 +1142,19 @@ async fn system_user(app: &App, p: &Principal) -> Result<String> {
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    sqlx::query("INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-        .bind(&user_id).bind(&p.account_id).bind(&identity_id).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+    let insert_user = if app.mysql {
+        "INSERT IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)"
+    } else {
+        "INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)"
+    };
+    sqlx::query(insert_user)
+        .bind(&user_id)
+        .bind(&p.account_id)
+        .bind(&identity_id)
+        .bind(&timestamp)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
     sqlx::query_scalar("SELECT id FROM users WHERE account_id=? AND role='system'")
         .bind(&p.account_id)
         .fetch_one(&app.db)
@@ -1160,6 +1181,11 @@ async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> 
         &timestamp,
     )
     .await?;
+    if app.mysql {
+        mysql_search::sync_comment(&mut tx, &p.account_id, &comment_id)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     Ok(())
 }
@@ -3905,9 +3931,21 @@ async fn request_magic_link_inner(
     if let Some((identity_id, purpose)) = identity_id {
         let code = loop {
             let candidate = magic_code();
-            let inserted=sqlx::query("INSERT OR IGNORE INTO magic_links(id,identity_id,code,purpose,expires_at,created_at) VALUES(?,?,?,?,?,?)")
-                .bind(id()).bind(&identity_id).bind(&candidate).bind(purpose).bind(&expires).bind(now())
-                .execute(&app.db).await.map_err(db_err)?;
+            let insert_magic_link = if app.mysql {
+                "INSERT IGNORE INTO magic_links(id,identity_id,code,purpose,expires_at,created_at) VALUES(?,?,?,?,?,?)"
+            } else {
+                "INSERT OR IGNORE INTO magic_links(id,identity_id,code,purpose,expires_at,created_at) VALUES(?,?,?,?,?,?)"
+            };
+            let inserted = sqlx::query(insert_magic_link)
+                .bind(id())
+                .bind(&identity_id)
+                .bind(&candidate)
+                .bind(purpose)
+                .bind(&expires)
+                .bind(now())
+                .execute(&app.db)
+                .await
+                .map_err(db_err)?;
             if inserted.rows_affected() == 1 {
                 break candidate;
             }
@@ -4912,10 +4950,29 @@ async fn prompt_cards(
                 rows.push(exact);
             }
         }
-        if let Some(search) = fts_query(filter) {
-            let matched = sqlx::query("SELECT c.number,c.title FROM cards c JOIN (SELECT id AS card_id FROM cards WHERE rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ?) UNION ALL SELECT card_id FROM comments WHERE rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ?)) hits ON hits.card_id=c.id WHERE c.account_id=? AND c.status='published' AND EXISTS(SELECT 1 FROM accesses a WHERE a.board_id=c.board_id AND a.user_id=?) ORDER BY c.created_at DESC,c.id DESC LIMIT 10")
-                .bind(&search).bind(&search).bind(&p.account_id).bind(&p.user_id)
-                .fetch_all(&app.db).await.map_err(db_err)?;
+        let search = if app.mysql {
+            mysql_search::query(filter, &p.account_id)
+        } else {
+            fts_query(filter)
+        };
+        if let Some(search) = search {
+            let matched = if app.mysql {
+                let table = mysql_search::table(&p.account_id);
+                let statement = format!(
+                    "SELECT c.number,c.title FROM cards c WHERE c.account_id=? AND c.status='published' AND EXISTS(SELECT 1 FROM accesses a WHERE a.board_id=c.board_id AND a.user_id=?) AND EXISTS(SELECT 1 FROM `{table}` s WHERE s.card_id=c.id AND MATCH(s.account_key,s.content,s.title) AGAINST(? IN BOOLEAN MODE)) ORDER BY c.created_at DESC,c.id DESC LIMIT 10"
+                );
+                sqlx::query(&statement)
+                    .bind(&p.account_id)
+                    .bind(&p.user_id)
+                    .bind(&search)
+                    .fetch_all(&app.db)
+                    .await
+                    .map_err(db_err)?
+            } else {
+                sqlx::query("SELECT c.number,c.title FROM cards c JOIN (SELECT id AS card_id FROM cards WHERE rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ?) UNION ALL SELECT card_id FROM comments WHERE rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ?)) hits ON hits.card_id=c.id WHERE c.account_id=? AND c.status='published' AND EXISTS(SELECT 1 FROM accesses a WHERE a.board_id=c.board_id AND a.user_id=?) ORDER BY c.created_at DESC,c.id DESC LIMIT 10")
+                    .bind(&search).bind(&search).bind(&p.account_id).bind(&p.user_id)
+                    .fetch_all(&app.db).await.map_err(db_err)?
+            };
             rows.extend(matched);
         }
     } else {
@@ -6297,7 +6354,7 @@ async fn show_board(
         });
     }
     let total: i64 = if filtered {
-        let mut count = cards_query("SELECT COUNT(*)", &p, &query);
+        let mut count = cards_query("SELECT COUNT(*)", &p, &query, app.mysql);
         count
             .build_query_scalar()
             .fetch_one(&app.db)
@@ -7565,7 +7622,12 @@ fn time_window(input: &str) -> Option<(String, String)> {
     };
     Some((format(start), format(end)))
 }
-fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBuilder<'a, Db> {
+fn cards_query<'a>(
+    select: &str,
+    p: &'a Principal,
+    q: &'a CardQuery,
+    mysql: bool,
+) -> QueryBuilder<'a, Db> {
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id="
     ));
@@ -7682,15 +7744,28 @@ fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBui
         separated.push_unseparated("))");
     }
     if !q.terms.is_empty() {
-        let searches: Option<Vec<String>> = q.terms.iter().map(|term| fts_query(term)).collect();
-        if let Some(searches) = searches {
-            let search = searches.join(" AND ");
-            builder.push(" AND (c.rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ")
-                .push_bind(search.clone())
-                .push(") OR c.id IN (SELECT m.card_id FROM comments m WHERE m.rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ")
-                .push_bind(search).push(")))");
+        if mysql {
+            if let Some(search) = mysql_search::query(&q.terms.join(" "), &p.account_id) {
+                let table = mysql_search::table(&p.account_id);
+                builder
+                    .push(format!(" AND EXISTS (SELECT 1 FROM `{table}` s WHERE s.card_id=c.id AND MATCH(s.account_key,s.content,s.title) AGAINST("))
+                    .push_bind(search)
+                    .push(" IN BOOLEAN MODE))");
+            } else {
+                builder.push(" AND 1=0");
+            }
         } else {
-            builder.push(" AND 1=0");
+            let searches: Option<Vec<String>> =
+                q.terms.iter().map(|term| fts_query(term)).collect();
+            if let Some(searches) = searches {
+                let search = searches.join(" AND ");
+                builder.push(" AND (c.rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ")
+                    .push_bind(search.clone())
+                    .push(") OR c.id IN (SELECT m.card_id FROM comments m WHERE m.rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ")
+                    .push_bind(search).push(")))");
+            } else {
+                builder.push(" AND 1=0");
+            }
         }
     }
     builder
@@ -7810,6 +7885,35 @@ async fn search_cards(
             };
             return Ok(paginated(json!(items), 1, page, &uri, &headers));
         }
+    }
+    if app.mysql {
+        let Some(search) = mysql_search::query(term, &p.account_id) else {
+            return Ok(paginated(json!([]), 0, page, &uri, &headers));
+        };
+        let table = mysql_search::table(&p.account_id);
+        let filter = format!(
+            " FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id=? AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) AND EXISTS (SELECT 1 FROM `{table}` s WHERE s.card_id=c.id AND MATCH(s.account_key,s.content,s.title) AGAINST(? IN BOOLEAN MODE))"
+        );
+        let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){filter}"))
+            .bind(&p.account_id)
+            .bind(&p.user_id)
+            .bind(&search)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+        let rows = sqlx::query(&format!(
+            "SELECT c.*{filter} ORDER BY c.created_at DESC,c.id DESC LIMIT ? OFFSET ?"
+        ))
+        .bind(&p.account_id)
+        .bind(&p.user_id)
+        .bind(&search)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+        let items = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
+        return Ok(paginated(json!(items), total, page, &uri, &headers));
     }
     let Some(search) = fts_query(term) else {
         return Ok(paginated(json!([]), 0, page, &uri, &headers));
@@ -9097,7 +9201,7 @@ async fn list_cards(
     let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
     let order = card_sort_order(&query);
-    let mut count = cards_query("SELECT COUNT(*)", &p, &query);
+    let mut count = cards_query("SELECT COUNT(*)", &p, &query, app.mysql);
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -9109,7 +9213,7 @@ async fn list_cards(
     } else {
         "SELECT c.*,b.name AS board_name"
     };
-    let mut builder = cards_query(select, &p, &query);
+    let mut builder = cards_query(select, &p, &query, app.mysql);
     builder
         .push(format!(" ORDER BY {order} LIMIT "))
         .push_bind(limit)
@@ -9152,7 +9256,7 @@ async fn card_previews(
     let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
     let order = card_sort_order(&query);
-    let mut count = cards_query("SELECT COUNT(*)", &p, &query);
+    let mut count = cards_query("SELECT COUNT(*)", &p, &query, app.mysql);
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -9162,6 +9266,7 @@ async fn card_previews(
         "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name",
         &p,
         &query,
+        app.mysql,
     );
     builder
         .push(format!(" ORDER BY {order} LIMIT "))
@@ -9682,6 +9787,11 @@ async fn create_card(
     )
     .await?;
     create_new_mentions(&mut tx, &p, &board_id, &id, "Card", &id, &description).await?;
+    if app.mysql {
+        mysql_search::sync_card(&mut tx, &p.account_id, &id)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     drop(writer);
     let c = card(&app, &p, &number.to_string()).await?;
@@ -9968,6 +10078,11 @@ async fn publish_card(
         &c.get::<String, _>("description"),
     )
     .await?;
+    if app.mysql {
+        mysql_search::sync_card(&mut tx, &p.account_id, &card_id)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     if headers.contains_key("x-rizzy-json-request") {
         return Ok(StatusCode::CREATED.into_response());
@@ -10213,6 +10328,11 @@ async fn update_card(
                 .await
                 .map_err(db_err)?;
         }
+    }
+    if app.mysql && changed {
+        mysql_search::sync_card(&mut tx, &p.account_id, &c.get::<String, _>("id"))
+            .await
+            .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
     if let Some(upload) = input.image {
@@ -10901,6 +11021,22 @@ async fn move_card(
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
+        if app.mysql {
+            mysql_search::sync_card(&mut tx, &p.account_id, &card_id)
+                .await
+                .map_err(db_err)?;
+            let comment_ids: Vec<String> =
+                sqlx::query_scalar("SELECT id FROM comments WHERE card_id=?")
+                    .bind(&card_id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            for comment_id in comment_ids {
+                mysql_search::sync_comment(&mut tx, &p.account_id, &comment_id)
+                    .await
+                    .map_err(db_err)?;
+            }
+        }
         tx.commit().await.map_err(db_err)?;
         record_event(&app,&p,&destination,&c.get::<String,_>("id"),"Card",&c.get::<String,_>("id"),"card_board_changed",json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")})).await?;
         let who = escape(&actor_name(&app, &p).await?);
@@ -11392,6 +11528,11 @@ async fn create_comment(
         &content,
     )
     .await?;
+    if app.mysql {
+        mysql_search::sync_comment(&mut tx, &p.account_id, &id)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     record_event(
         &app,
@@ -11633,6 +11774,11 @@ async fn update_comment_data(
         &content,
     )
     .await?;
+    if app.mysql {
+        mysql_search::sync_comment(&mut tx, &p.account_id, id)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
     let r = comment_row(&app, &c, &id).await?;
@@ -11677,6 +11823,11 @@ async fn delete_comment(
         .map_err(db_err)?;
     if done.rows_affected() == 0 {
         return Err(missing());
+    }
+    if app.mysql {
+        mysql_search::remove(&mut tx, &p.account_id, "Comment", &comment)
+            .await
+            .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;

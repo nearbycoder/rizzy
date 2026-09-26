@@ -2,7 +2,9 @@ use axum::response::{Html, IntoResponse, Response};
 use regex::{Regex, RegexBuilder};
 use sqlx::Row;
 
-use super::{App, Principal, Result, SearchQuery, card, db_err, escape, fts_query, page_window};
+use super::{
+    App, Principal, Result, SearchQuery, card, db_err, escape, fts_query, mysql_search, page_window,
+};
 
 fn matcher(query: &str) -> Option<Regex> {
     let mut words: Vec<String> = query
@@ -115,9 +117,37 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
     let mut found = 0;
     let mut next = false;
     if let Some(term) = term {
-        if let Some(search) = fts_query(term) {
+        let search = if app.mysql {
+            mysql_search::query(term, &p.account_id)
+        } else {
+            fts_query(term)
+        };
+        if let Some(search) = search {
             let (offset, limit) = page_window(page);
-            let rows = sqlx::query(
+            let rows = if app.mysql {
+                let table = mysql_search::table(&p.account_id);
+                let statement = format!(
+                    r"SELECT CASE WHEN s.searchable_type='Card' THEN 'card' ELSE 'comment' END kind,
+                     CASE WHEN s.searchable_type='Comment' THEN s.searchable_id ELSE NULL END hit_id,
+                     c.number,c.title,c.description,b.name board_name,m.body comment_body
+                     FROM `{table}` s JOIN cards c ON c.id=s.card_id JOIN boards b ON b.id=c.board_id
+                     LEFT JOIN comments m ON m.id=s.searchable_id AND s.searchable_type='Comment'
+                     WHERE s.account_id=? AND c.status='published'
+                     AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
+                     AND MATCH(s.account_key,s.content,s.title) AGAINST(? IN BOOLEAN MODE)
+                     ORDER BY s.created_at DESC,s.searchable_id DESC LIMIT ? OFFSET ?"
+                );
+                sqlx::query(&statement)
+                    .bind(&p.account_id)
+                    .bind(&p.user_id)
+                    .bind(&search)
+                    .bind(limit + 1)
+                    .bind(offset)
+                    .fetch_all(&app.db)
+                    .await
+                    .map_err(db_err)?
+            } else {
+                sqlx::query(
                 r"WITH hits AS (
                    SELECT 'card' kind,c.id card_id,NULL hit_id,c.created_at hit_at FROM cards c
                      WHERE c.rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ?)
@@ -142,9 +172,10 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
             .bind(&p.user_id)
             .bind(limit + 1)
             .bind(offset)
-            .fetch_all(&app.db)
-            .await
-            .map_err(db_err)?;
+                .fetch_all(&app.db)
+                .await
+                .map_err(db_err)?
+            };
             next = rows.len() as i64 > limit;
             let pattern = matcher(term);
             for row in rows.into_iter().take(limit as usize) {
