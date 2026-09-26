@@ -279,3 +279,17 @@ artifact is `bench/results/mysql_mixed_500cards_c32_20s_2026-09-26.json`.
 Both runs used the pinned Fizzy source and the release binary hash recorded
 in each artifact. The source deadlock is intermittent, so repeated rounds are
 needed before making a stable throughput or maximum-scale claim.
+
+At 500 initial cards and 64 clients, two reversed-order 20-second rounds from
+clean commit `89afdd6` completed Rizzy's full load at 168.92 and 146.98
+units/s, with zero HTTP errors and verified card, event, and comment counts.
+Fizzy returned one `PATCH /cards` HTTP 500 in each round after 9.54 and 9.34
+seconds. Both source logs report MySQL error 1213 in the ActiveSearch shard
+upsert. The source rates before failure, 26.72 and 27.31 units/s, are **not**
+paired comparisons with the full Rizzy runs; partially completed source
+workflows also make their stored counts differ from a completed-unit formula.
+The raw result is
+`bench/results/mysql_mixed_500cards_c64_20s_2026-09-26.json`. This shows
+Rizzy sustained this particular local workload at 64 clients while the
+source encountered an error under the same setup. It does not establish a
+maximum client count, multi-host scale, or whole-application speed.
