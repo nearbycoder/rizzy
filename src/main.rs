@@ -109,6 +109,34 @@ async fn lock_board_for_write(
     }
     Ok(())
 }
+async fn begin_card_board_write<'a>(
+    app: &'a App,
+    card_id: &str,
+    board_id: &str,
+) -> Result<(sqlx::Transaction<'a, Db>, String)> {
+    let mut current_board = board_id.to_owned();
+    for _ in 0..16 {
+        let mut tx = begin_write(app).await.map_err(db_err)?;
+        lock_board_for_write(&mut tx, &current_board, app.mysql).await?;
+        if app.mysql {
+            // Callers can hold a stale card snapshot after a move. Acquire the
+            // board lock first, then lock and recheck the card before writing.
+            let actual_board: String =
+                sqlx::query_scalar("SELECT board_id FROM cards WHERE id=? FOR UPDATE")
+                    .bind(card_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            if actual_board != current_board {
+                tx.rollback().await.map_err(db_err)?;
+                current_board = actual_board;
+                continue;
+            }
+        }
+        return Ok((tx, current_board));
+    }
+    Err(err(StatusCode::CONFLICT, "Card moved during write"))
+}
 struct NotificationHtmlCacheEntry {
     version: (i64, Option<String>, i64),
     html: String,
@@ -1313,35 +1341,7 @@ async fn record_event(
 ) -> Result<()> {
     let timestamp = now();
     let event_id = id();
-    let mut event_board_id = board_id.to_owned();
-    let mut board_rechecks = 0;
-    let mut tx = loop {
-        let mut tx = begin_write(app).await.map_err(db_err)?;
-        lock_board_for_write(&mut tx, &event_board_id, app.mysql).await?;
-        if !app.mysql {
-            break tx;
-        }
-        // A card can move after its caller reads it. Lock the card only after
-        // the board, then retry under the current board when that happened.
-        let current_board: String =
-            sqlx::query_scalar("SELECT board_id FROM cards WHERE id=? FOR UPDATE")
-                .bind(card_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(db_err)?;
-        if current_board == event_board_id {
-            break tx;
-        }
-        tx.rollback().await.map_err(db_err)?;
-        event_board_id = current_board;
-        board_rechecks += 1;
-        if board_rechecks == 16 {
-            return Err(err(
-                StatusCode::CONFLICT,
-                "Card moved during event creation",
-            ));
-        }
-    };
+    let (mut tx, event_board_id) = begin_card_board_write(app, card_id, board_id).await?;
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&event_id).bind(&p.account_id).bind(&event_board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
         .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
@@ -1379,7 +1379,12 @@ async fn record_event(
 }
 async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Result<()> {
     let timestamp = now();
-    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    let board_id: String = sqlx::query_scalar("SELECT board_id FROM cards WHERE id=?")
+        .bind(card_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let (mut tx, _) = begin_card_board_write(app, card_id, &board_id).await?;
     let statement = if app.mysql {
         "INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)"
     } else {

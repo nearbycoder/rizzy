@@ -421,3 +421,14 @@ and optionally uses a MySQL CLI to seed 32 same-board drafts for this race.
 Six fresh-account runs passed after the fix, with all 32 cards published and
 exactly 32 publication events in the final run. This checks one board on one
 host, not every draft callback, notification delivery, or multi-host case.
+
+Assignment/title contention later exposed another MySQL 1213 deadlock. An
+activity-spike callback held the card while its update trigger waited for the
+board, while a title edit held the board and waited for that card. Event and
+activity-spike writes now share a board-first transaction helper that locks
+and rechecks the card's current board after moves. The expanded four-process
+cluster test passed eleven fresh-account runs with 200 assignment/title pairs;
+six runs also passed 200 tag/title pairs using one shared tag. The test
+samples returned assignments, tags, and final titles. The MySQL core flow and
+600 two-process SQLite card workflows passed after this change. These checks
+do not cover every callback or prove multi-host capacity.

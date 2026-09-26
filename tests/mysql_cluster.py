@@ -282,10 +282,57 @@ def main():
             assert all(value["board"]["id"] == (board["id"] if index < 100 else destination["id"])
                        for index, (_, value, _) in enumerate(reverse))
 
+            status, users, _ = call(bases[0], account, token, "/users")
+            assert status == 200, status
+            owner_id = next(user["id"] for user in users if user["role"] == "owner")
+
+            def mixed_assignment_write(item):
+                index, kind = item
+                number = results[index][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/assignments", "POST",
+                                {"assignee_id": owner_id})
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Assigned title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                assignment_mixed = list(pool.map(mixed_assignment_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, assignment_mixed)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+
+            def mixed_tag_write(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/taggings", "POST",
+                                {"tag_title": "cluster-tag"})
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Tagged title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                tag_mixed = list(pool.map(mixed_tag_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, tag_mixed)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+            for index in (0, 99, 199):
+                assigned_number = results[index][1]["number"]
+                status, assigned, _ = call(bases[index % 4], account, token,
+                                            f"/cards/{assigned_number}")
+                assert status == 200 and assigned["title"] == f"Assigned title {index}"
+                assert any(user["id"] == owner_id for user in assigned["assignees"])
+                tagged_number = results[index + 200][1]["number"]
+                status, tagged, _ = call(bases[index % 4], account, token,
+                                          f"/cards/{tagged_number}")
+                assert status == 200 and tagged["title"] == f"Tagged title {index}"
+                assert "cluster-tag" in tagged["tags"]
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, step CRUD, mixed step/title, watch/title, triage/title, reaction/title, move/title writes, and opposite-direction moves across four processes")
+            print("MySQL cluster passed: 400 unique cards, step CRUD, mixed step/title, watch/title, triage/title, reaction/title, move/title, assignment/title, tag/title writes, and opposite-direction moves across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()
