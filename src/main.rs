@@ -124,6 +124,7 @@ fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Reque
     if !path.ends_with(".json")
         || path.contains("/client_configurations/")
         || path == "/manifest.json"
+        || path == "/error.css"
     {
         return request;
     }
@@ -176,6 +177,80 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
             .insert("x-rizzy-write-request", HeaderValue::from_static("1"));
     }
     next.run(request).await
+}
+async fn prevent_request_forgery(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let exempt = path.ends_with("/notifications/unsubscribe")
+        || path.contains("/collections/")
+        || path == "/manifest.json"
+        || path == "/service-worker"
+        || path == "/service-worker.js"
+        || path.starts_with("/assets/")
+        || path.starts_with("/app-icon");
+    if exempt {
+        return next.run(request).await;
+    }
+    let headers = request.headers();
+    let safe = matches!(request.method().as_str(), "GET" | "HEAD" | "QUERY");
+    if !safe {
+        let origin_matches = match headers.get(header::ORIGIN) {
+            None => true,
+            Some(origin) => origin.to_str().is_ok_and(|origin| origin == base(headers)),
+        };
+        let site = headers
+            .get("sec-fetch-site")
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_lowercase);
+        let site_allowed = match site.as_deref() {
+            Some("same-origin" | "same-site") => true,
+            None => {
+                headers.contains_key("x-rizzy-json-request")
+                    || (!secure_request(headers)
+                        && env::var("RIZZY_FORCE_SSL").as_deref() != Ok("1")
+                        && !env::var("RIZZY_PUBLIC_URL")
+                            .is_ok_and(|url| url.starts_with("https://")))
+            }
+            _ => false,
+        };
+        if !origin_matches || !site_allowed {
+            if headers.contains_key("x-rizzy-json-request") {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({"status":422,"error":"Unprocessable Content"})),
+                )
+                    .into_response();
+            }
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Html(include_str!("../static/422.html")),
+            )
+                .into_response();
+        }
+    }
+    let mut response = next.run(request).await;
+    if response.status() == StatusCode::NOT_FOUND {
+        return response;
+    }
+    let vary = response
+        .headers()
+        .get(header::VARY)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !vary
+        .split(',')
+        .any(|value| value.trim().eq_ignore_ascii_case("Sec-Fetch-Site"))
+    {
+        let new_vary = if vary.is_empty() {
+            "Sec-Fetch-Site".to_owned()
+        } else {
+            format!("{vary}, Sec-Fetch-Site")
+        };
+        if let Ok(value) = HeaderValue::from_str(&new_vary) {
+            response.headers_mut().insert(header::VARY, value);
+        }
+    }
+    response
 }
 async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next) -> Response {
     let session_cookie = cookie_value(request.headers(), "session_token").is_some();
@@ -1986,6 +2061,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/public/collections/{id}", get(legacy_public_board_root))
         .route("/public/collections/{id}/", get(legacy_public_board_root))
         .route("/manifest.json", get(pwa::manifest))
+        .route(
+            "/error.css",
+            get(|| async {
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+                        (header::CACHE_CONTROL, "public, max-age=300"),
+                    ],
+                    include_str!("../static/error.css"),
+                )
+            }),
+        )
         .route("/service-worker", get(pwa::service_worker))
         .route("/service-worker.js", get(pwa::service_worker))
         .route("/assets/pwa/{filename}", get(pwa::asset))
@@ -2475,6 +2562,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             register_pwa_on_pages,
         ))
         .with_state(app)
+        .layer(middleware::from_fn(prevent_request_forgery))
         .layer(middleware::from_fn(mark_request_format));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
     if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
