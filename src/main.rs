@@ -6334,23 +6334,30 @@ async fn update_board(
         .and_then(Value::as_i64);
     let days = valid_entropy(requested_days.unwrap_or(b.get("auto_postpone_period_in_days")))?;
     let override_days = requested_days.is_some() || b.get::<i64, _>("entropy_override") != 0;
-    let public_description =
-        string(v, "public_description").unwrap_or_else(|| b.get("public_description"));
+    let public_description = match v.get("public_description") {
+        Some(Value::Null) => String::new(),
+        _ => string(v, "public_description").unwrap_or_else(|| b.get("public_description")),
+    };
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE boards SET name=?,all_access=?,auto_postpone_period_in_days=?,entropy_override=?,public_description=?,updated_at=? WHERE id=?")
         .bind(name).bind(all as i64).bind(days).bind(override_days as i64).bind(&public_description).bind(&timestamp).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
-    rich_text_records::sync(
-        &mut tx,
-        &p.account_id,
-        "Board",
-        &id,
-        "description",
-        &b.get::<String, _>("public_description"),
-        &public_description,
-        &timestamp,
-    )
-    .await?;
+    if v.get("public_description") == Some(&Value::Null) {
+        sqlx::query("DELETE FROM rich_text_records WHERE record_type='Board' AND record_id=? AND name='description'")
+            .bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+    } else {
+        rich_text_records::sync(
+            &mut tx,
+            &p.account_id,
+            "Board",
+            &id,
+            "description",
+            &b.get::<String, _>("public_description"),
+            &public_description,
+            &timestamp,
+        )
+        .await?;
+    }
     if v.get("public_description").and_then(Value::as_str) == Some("") {
         rich_text_records::ensure(
             &mut tx,
@@ -9379,7 +9386,10 @@ async fn update_card(
     if status == "published" && title.trim().is_empty() {
         title = "Untitled".into();
     }
-    let description = string(v, "description").unwrap_or_else(|| c.get("description"));
+    let description = match v.get("description") {
+        Some(Value::Null) => String::new(),
+        _ => string(v, "description").unwrap_or_else(|| c.get("description")),
+    };
     let (plain_description, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &description).await?;
     let search_text = search_content(plain_description);
@@ -9432,17 +9442,22 @@ async fn update_card(
         .await
         .map_err(db_err)?;
     }
-    rich_text_records::sync(
-        &mut tx,
-        &p.account_id,
-        "Card",
-        &c.get::<String, _>("id"),
-        "description",
-        &c.get::<String, _>("description"),
-        &description,
-        &timestamp,
-    )
-    .await?;
+    if v.get("description") == Some(&Value::Null) {
+        sqlx::query("DELETE FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'")
+            .bind(c.get::<String, _>("id")).execute(&mut *tx).await.map_err(db_err)?;
+    } else {
+        rich_text_records::sync(
+            &mut tx,
+            &p.account_id,
+            "Card",
+            &c.get::<String, _>("id"),
+            "description",
+            &c.get::<String, _>("description"),
+            &description,
+            &timestamp,
+        )
+        .await?;
+    }
     if v.get("description").and_then(Value::as_str) == Some("") {
         rich_text_records::ensure(
             &mut tx,
