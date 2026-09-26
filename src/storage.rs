@@ -53,6 +53,23 @@ pub(super) async fn image_url_for_card(app: &App, p: &Principal, card_id: &str) 
     })
 }
 
+pub(super) async fn public_image_url_for_card(
+    app: &App,
+    slug: i64,
+    account_id: &str,
+    card_id: &str,
+) -> Result<Option<String>> {
+    let row = sqlx::query("SELECT b.signed_id,b.filename FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='Card' AND a.name='image' AND a.record_id=? AND a.account_id=?")
+        .bind(card_id).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
+    Ok(row.map(|row| {
+        format!(
+            "/{slug}/rails/active_storage/blobs/redirect/{}/{}",
+            row.get::<String, _>("signed_id"),
+            encoded_filename(&row.get::<String, _>("filename"))
+        )
+    }))
+}
+
 pub(super) async fn image_urls_for_cards(
     app: &App,
     p: &Principal,

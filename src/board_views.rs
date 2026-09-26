@@ -216,9 +216,35 @@ async fn public_view(
     );
     for card in &rows {
         let number: i64 = card.get("number");
+        let title: String = card.get("title");
+        let board_name: String = card.get("board_name");
+        let creator: Option<String> = card.get("creator_name");
+        let creator = creator.unwrap_or_default();
+        let initials = creator
+            .split_whitespace()
+            .take(2)
+            .filter_map(|word| word.chars().next())
+            .collect::<String>()
+            .to_uppercase();
+        let date_label = |raw: String| {
+            chrono::DateTime::parse_from_rfc3339(&raw)
+                .map(|date| {
+                    if date.date_naive() == Utc::now().date_naive() {
+                        "TODAY".to_owned()
+                    } else {
+                        date.format("%b %-d").to_string().to_uppercase()
+                    }
+                })
+                .unwrap_or_default()
+        };
+        let created = date_label(card.get("created_at"));
+        let updated = date_label(card.get("last_active_at"));
         body.push_str(&format!(
-            "<li><a href=\"/{account}/public/boards/{key}/cards/{number}\">{}</a></li>",
-            escape(&card.get::<String, _>("title"))
+            "<li class=\"public-card-preview\"><a class=\"public-card-preview__link\" href=\"/{account}/public/boards/{key}/cards/{number}\"><div class=\"public-card-preview__top\"><span>{number}</span><span>{}</span></div><h3>{}</h3><div class=\"public-card-preview__meta\"><span class=\"public-card-preview__avatar\">{}</span><span>ADDED {created} <span class=\"public-card-preview__separator\">|</span> UPDATED {updated}<br>BY {}</span></div></a></li>",
+            escape(&board_name).to_uppercase(),
+            escape(&title),
+            escape(&initials),
+            escape(&creator),
         ));
     }
     if total == 0 {

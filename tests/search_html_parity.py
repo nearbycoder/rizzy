@@ -41,7 +41,9 @@ def source_target():
 def rust_target(temp, *, release=False):
     db = Path(temp) / "search-html.sqlite3"
     email = "search-html@example.com"
-    env = {**os.environ, "RIZZY_DATABASE_URL": f"sqlite://{db}", "RIZZY_SEED_EMAIL": email}
+    env = {**os.environ, "RIZZY_DATABASE_URL": f"sqlite://{db}",
+           "RIZZY_STORAGE_DIR": str(Path(temp) / "storage"),
+           "RIZZY_SEED_EMAIL": email}
     subprocess.run(["cargo", "build", "--release" if release else "--quiet"], cwd=ROOT, check=True)
     binary = ROOT / "target/release/rizzy" if release else BINARY
     seeded = subprocess.run([binary, "seed"], cwd=ROOT, env=env,

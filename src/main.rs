@@ -50,6 +50,7 @@ mod my_menu;
 mod notification_mail;
 mod notification_page;
 mod passkeys;
+mod public_pages;
 mod push_delivery;
 mod push_subscriptions;
 mod pwa;
@@ -1919,7 +1920,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/boards/{id}/entropy",
             axum::routing::put(update_board_entropy).patch(update_board_entropy),
         )
-        .route("/{account}/public/boards/{key}", get(public_board))
+        .route("/{account}/public/boards/{key}", get(public_pages::board))
         .route(
             "/{account}/public/boards/{key}/columns/stream",
             get(board_views::public_stream),
@@ -1938,7 +1939,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/public/boards/{key}/cards/{number}",
-            get(public_card),
+            get(public_pages::card),
         )
         .route(
             "/{account}/boards/{id}",
@@ -5512,7 +5513,7 @@ async fn unpublish_board(
 }
 async fn published_board(app: &App, account: &str, key: &str) -> Result<SqliteRow> {
     let account: i64 = account.parse().map_err(|_| missing())?;
-    sqlx::query("SELECT b.* FROM boards b JOIN accounts a ON a.id=b.account_id WHERE a.external_account_id=? AND b.publication_key=?")
+    sqlx::query("SELECT b.*,a.name account_name FROM boards b JOIN accounts a ON a.id=b.account_id WHERE a.external_account_id=? AND b.publication_key=?")
         .bind(account).bind(key).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)
 }
 fn public_page(title: &str, body: &str) -> Html<String> {
@@ -5521,75 +5522,6 @@ fn public_page(title: &str, body: &str) -> Html<String> {
         escape(title)
     ))
 }
-async fn public_board(
-    State(app): Shared,
-    Path((account, key)): Path<(String, String)>,
-) -> Result<Html<String>> {
-    let board = published_board(&app, &account, &key).await?;
-    let board_id: String = board.get("id");
-    let rows = sqlx::query("SELECT number,title FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 ORDER BY golden DESC,last_active_at DESC LIMIT 100")
-        .bind(board_id).fetch_all(&app.db).await.map_err(db_err)?;
-    let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
-        .bind(board.get::<String, _>("id"))
-        .fetch_all(&app.db)
-        .await
-        .map_err(db_err)?;
-    let mut body = format!(
-        "<h1>{}</h1><p>{}</p><nav><a href=\"/{account}/public/boards/{key}/columns/stream\">Maybe?</a> · <a href=\"/{account}/public/boards/{key}/columns/not_now\">Not now</a> · <a href=\"/{account}/public/boards/{key}/columns/closed\">Done</a>",
-        escape(&board.get::<String, _>("name")),
-        escape(&board.get::<String, _>("public_description"))
-    );
-    for column in columns {
-        body.push_str(&format!(
-            " · <a href=\"/{account}/public/boards/{key}/columns/{}\">{}</a>",
-            column.get::<String, _>("id"),
-            escape(&column.get::<String, _>("name"))
-        ));
-    }
-    body.push_str("</nav><ul>");
-    for row in rows {
-        let number: i64 = row.get("number");
-        body.push_str(&format!(
-            "<li><a href=\"/{account}/public/boards/{key}/cards/{number}\">{}</a></li>",
-            escape(&row.get::<String, _>("title"))
-        ));
-    }
-    body.push_str("</ul>");
-    Ok(public_page(&board.get::<String, _>("name"), &body))
-}
-async fn public_card(
-    State(app): Shared,
-    Path((account, key, number)): Path<(String, String, String)>,
-) -> Result<Html<String>> {
-    let board = published_board(&app, &account, &key).await?;
-    let number: i64 = number.parse().map_err(|_| missing())?;
-    let card = sqlx::query(
-        "SELECT title,description FROM cards WHERE board_id=? AND number=? AND status='published'",
-    )
-    .bind(board.get::<String, _>("id"))
-    .bind(number)
-    .fetch_optional(&app.db)
-    .await
-    .map_err(db_err)?
-    .ok_or_else(missing)?;
-    let title: String = card.get("title");
-    let slug: i64 = account.parse().map_err(|_| missing())?;
-    let (_, description_html, _) = storage::render_rich_text(
-        &app,
-        &board.get::<String, _>("account_id"),
-        slug,
-        &card.get::<String, _>("description"),
-    )
-    .await?;
-    let body = format!(
-        "<nav><a href=\"/{account}/public/boards/{key}\">{}</a></nav><h1>{}</h1><article>{}</article>",
-        escape(&board.get::<String, _>("name")),
-        escape(&title),
-        description_html
-    );
-    Ok(public_page(&title, &body))
-}
-
 async fn checked_column(
     app: &App,
     p: &Principal,
