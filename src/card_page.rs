@@ -10,13 +10,23 @@ use super::{
 const TEMPLATE: &str = include_str!("../static/card.html");
 const NEW_COMMENT: &str = include_str!("../static/new_comment.html");
 
-pub(super) fn new_comment_form(principal: &Principal, card: &SqliteRow) -> String {
+pub(super) fn new_comment_form(
+    principal: &Principal,
+    card: &SqliteRow,
+    first_comment: bool,
+) -> String {
+    let placeholder = if first_comment && card.get::<String, _>("creator_id") == principal.user_id {
+        "Next, add some notes, context, pictures, or video about this…"
+    } else {
+        "Type your comment…"
+    };
     let values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("NUMBER", card.get::<i64, _>("number").to_string()),
         ("CARD_ID", escape(&card.get::<String, _>("id"))),
         ("BOARD_ID", escape(&card.get::<String, _>("board_id"))),
         ("USER_ID", escape(&principal.user_id)),
+        ("COMMENT_PLACEHOLDER", placeholder.to_owned()),
     ]);
     render_template(NEW_COMMENT, &values)
 }
@@ -160,6 +170,7 @@ pub(super) async fn show(
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
+    let first_comment = comments.is_empty();
     let rows = sqlx::query("SELECT r.id,r.content,r.reacter_id,r.reactable_id,u.name FROM reactions r JOIN users u ON u.id=r.reacter_id WHERE r.account_id=? AND ((r.reactable_type='Card' AND r.reactable_id=?) OR (r.reactable_type='Comment' AND r.reactable_id IN (SELECT id FROM comments WHERE card_id=?))) ORDER BY r.created_at,r.id")
         .bind(&principal.account_id)
         .bind(&card_id)
@@ -299,7 +310,10 @@ pub(super) async fn show(
         ),
         ("COMMENTS", comment_html),
         ("REACTIONS", card_reactions),
-        ("NEW_COMMENT_FORM", new_comment_form(principal, card)),
+        (
+            "NEW_COMMENT_FORM",
+            new_comment_form(principal, card, first_comment),
+        ),
         (
             "COMMENT_WATCHERS",
             super::card_controls::watcher_section(app, principal, &card_id).await?,

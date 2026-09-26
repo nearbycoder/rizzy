@@ -3,11 +3,11 @@
   <div class="comment__content"><div class="comment__body">
   <form id="comment-form" action="/{{ACCOUNT}}/cards/{{NUMBER}}/comments" method="post">
     <label class="for-screen-reader" for="comment">Add a comment</label>
-    <lexxy-editor id="comment" name="comment[body]" required placeholder="Add your thoughts…" data-direct-upload-url="/{{ACCOUNT}}/rails/active_storage/direct_uploads" data-blob-url-template="/{{ACCOUNT}}/rails/active_storage/blobs/redirect/:signed_id/:filename">
+    <lexxy-editor id="comment" name="comment[body]" required placeholder="{{COMMENT_PLACEHOLDER}}" data-direct-upload-url="/{{ACCOUNT}}/rails/active_storage/direct_uploads" data-blob-url-template="/{{ACCOUNT}}/rails/active_storage/blobs/redirect/:signed_id/:filename">
       <lexxy-prompt trigger="@" src="/{{ACCOUNT}}/prompts/boards/{{BOARD_ID}}/users" name="mention"></lexxy-prompt>
       <lexxy-prompt trigger="#" src="/{{ACCOUNT}}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt>
     </lexxy-editor>
-    <button class="comment__submit" type="submit">Post</button><p class="error" role="alert" id="comment-error"></p>
+    <button class="comment__submit" type="submit" title="Post this comment (Ctrl+Enter)" disabled>Post</button><p class="error" role="alert" id="comment-error"></p>
   </form>
   </div></div>
 </div>

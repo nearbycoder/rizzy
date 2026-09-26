@@ -11151,7 +11151,7 @@ async fn create_comment(
     if wants_turbo_stream(&headers) {
         let target = format!("new_comment_card_{}", escape(&c.get::<String, _>("id")));
         let comment = comment_edit_page::rendered_comment_frame(&app, &p, &c, &r).await?;
-        let fresh_form = card_page::new_comment_form(&p, &c);
+        let fresh_form = card_page::new_comment_form(&p, &c, false);
         return Ok((
             [(header::CONTENT_TYPE, "text/vnd.turbo-stream.html; charset=utf-8")],
             format!("<turbo-stream action=\"before\" target=\"{target}\"><template>{comment}</template></turbo-stream><turbo-stream action=\"update\" target=\"{target}\"><template>{fresh_form}</template></turbo-stream>"),

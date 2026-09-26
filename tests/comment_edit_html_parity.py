@@ -35,6 +35,8 @@ def check(target):
         assert status == 201, (target["name"], "card", status)
         card = json.loads(raw)
         number = card["number"]
+        status, _, first_card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200 and "Next, add some notes, context, pictures, or video about this…".encode() in first_card_html
         status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
                                  {"comment":{"body":"Original comment"}}, bearer=True)
         assert status == 201, (target["name"], "comment", status)
@@ -52,6 +54,7 @@ def check(target):
         new_target = f"new_comment_card_{card['id']}".encode()
         status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200 and new_target in card_html
+        assert b'Type your comment\xe2\x80\xa6' in card_html
         for marker in (f'messages_card_{card["id"]}'.encode(),
                        f'comment_watchers_card_{card["id"]}'.encode(),
                        b'aria-label="Messages"', b'comment__avatar',
@@ -81,7 +84,7 @@ def check(target):
         status, _, raw = request(target, f"{index_path}/{flat_id}", "PUT",
                                  {"body":"Flat JSON update"}, bearer=True)
         assert status == 200 and json.loads(raw)["body"]["plain_text"] == "Flat JSON update"
-        for marker in (b"turbo-frame", b"Original comment", b"comment[body]", b"Save", b"Cancel", b"Delete", b"lexxy-editor"):
+        for marker in (b"turbo-frame", b"Original comment", b"comment[body]", b"Save", b"Cancel", b"Delete", b"lexxy-editor", b"comment__avatar"):
             assert marker in body, (target["name"], marker)
         status, _, _ = request(target, path + "/edit.json", bearer=True)
         assert status == 406, (target["name"], "JSON edit", status)
