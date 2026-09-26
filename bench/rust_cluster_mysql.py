@@ -14,7 +14,31 @@ from pathlib import Path
 from sustained_mixed import (ROOT, RUST, first_difference, fixture, preflight,
                              prepare_rust, run_load, start_server, stop_server)
 from sustained_mixed_mysql import (create_databases, drop_databases, observed_counts,
-                                   rust_env, verify_counts)
+                                   mysql_query, rust_env, verify_counts)
+
+
+def cluster_counts(args, database):
+    if args.boards == 1:
+        return observed_counts(args.mysql_client, args.mysql_socket, database)
+    board_ids = "SELECT id FROM boards WHERE name LIKE 'Mixed workload %'"
+    statement = ("SELECT (SELECT COUNT(*) FROM cards WHERE board_id IN (" + board_ids + ")), "
+                 "(SELECT COUNT(*) FROM events WHERE board_id IN (" + board_ids + ")), "
+                 "(SELECT COUNT(*) FROM comments WHERE card_id IN "
+                 "(SELECT id FROM cards WHERE board_id IN (" + board_ids + ")))")
+    values = [int(value) for value in mysql_query(
+        args.mysql_client, args.mysql_socket, database, statement).split("\t")]
+    return dict(zip(("cards", "events", "comments"), values))
+
+
+def checked_counts(args, database, units):
+    if args.boards == 1:
+        return verify_counts(args.mysql_client, args.mysql_socket,
+                             database, args.cards, units)
+    actual = cluster_counts(args, database)
+    expected = {"cards": args.cards + units, "events": args.cards + 4 * units,
+                "comments": 3 * units}
+    assert actual == expected, (database, actual, expected)
+    return actual
 
 
 def run_round(args, server_cpus, order):
@@ -46,7 +70,17 @@ def run_round(args, server_cpus, order):
                           "token": credentials["token"]}
                 targets[count] = target
                 shapes[count] = preflight(target)
-                boards[count], paths[count], samples[count] = fixture(target, args.cards)
+                if args.boards == 1:
+                    boards[count], paths[count], samples[count] = fixture(target, args.cards)
+                else:
+                    boards[count], paths[count], samples[count] = [], [], []
+                    for index in range(args.boards):
+                        board, path, sample = fixture(
+                            target, args.cards // args.boards,
+                            board_name=f"Mixed workload {index}")
+                        boards[count].append(board)
+                        paths[count].append(path)
+                        samples[count].append(sample)
             if difference := first_difference(shapes[1], shapes[4]):
                 raise AssertionError("preflight: " + difference)
             if difference := first_difference(samples[1], samples[4]):
@@ -57,15 +91,13 @@ def run_round(args, server_cpus, order):
                                   args.seconds, args.clients)
                 result["runs"][str(count)] = sample
                 if sample["errors"]:
-                    sample["observed_counts"] = observed_counts(
-                        args.mysql_client, args.mysql_socket, names[count])
+                    sample["observed_counts"] = cluster_counts(args, names[count])
                     sample["valid_for_throughput_comparison"] = False
                     result["paired_comparable"] = False
                 else:
                     try:
-                        sample["verified_counts"] = verify_counts(
-                            args.mysql_client, args.mysql_socket, names[count],
-                            args.cards, sample["units_completed"])
+                        sample["verified_counts"] = checked_counts(
+                            args, names[count], sample["units_completed"])
                         sample["valid_for_throughput_comparison"] = True
                     except AssertionError as error:
                         sample["count_verification_error"] = str(error)
@@ -95,6 +127,7 @@ def main():
     parser.add_argument("--seconds", type=float, default=20)
     parser.add_argument("--clients", type=int, default=32)
     parser.add_argument("--cards", type=int, default=500)
+    parser.add_argument("--boards", type=int, default=1)
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--server-cpus", type=int, default=4)
     parser.add_argument("--mysql-client", default="/tmp/rizzy-mysql8/bin/mysql")
@@ -103,8 +136,11 @@ def main():
     parser.add_argument("--mysql-port", type=int, default=33080)
     parser.add_argument("--output")
     args = parser.parse_args()
-    if min(args.seconds, args.clients, args.cards, args.rounds, args.server_cpus) <= 0:
+    if min(args.seconds, args.clients, args.cards, args.boards,
+           args.rounds, args.server_cpus) <= 0:
         parser.error("all numeric arguments must be positive")
+    if args.cards % args.boards:
+        parser.error("cards must be divisible by boards")
     available = sorted(os.sched_getaffinity(0))
     if len(available) <= args.server_cpus:
         parser.error("leave at least one CPU for the load generator")
@@ -119,7 +155,8 @@ def main():
                   ["git", "status", "--porcelain"], cwd=ROOT)),
               "rizzy_binary_sha256": binary_sha256,
               "workload": "four JSON reads plus create/edit/comment/close/read per unit",
-              "initial_cards": args.cards, "seconds_per_target": args.seconds,
+              "initial_cards": args.cards, "boards": args.boards,
+              "seconds_per_target": args.seconds,
               "clients": args.clients, "server_cpus": server_cpus,
               "load_generator_cpus": sorted(os.sched_getaffinity(0)), "rounds": []}
     for number in range(args.rounds):

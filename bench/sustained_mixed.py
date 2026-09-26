@@ -119,9 +119,9 @@ def stop_server(process):
         process.wait(timeout=5)
 
 
-def fixture(target, cards):
+def fixture(target, cards, board_name="Mixed workload"):
     board, _ = expect(target, "/boards", "POST",
-                      {"board": {"name": "Mixed workload"}}, 201)
+                      {"board": {"name": board_name}}, 201)
     board_id = board["id"]
     first = None
     for index in range(cards):
@@ -199,11 +199,15 @@ def run_load(target, board_id, paths, seconds, clients):
         unit_times, read_times, workflow_times, errors = [], [], [], []
         urls = target.get("urls")
         worker_target = {**target, "url": urls[worker_index % len(urls)]} if urls else target
+        boards = board_id if isinstance(board_id, list) else [board_id]
+        board_index = (worker_index // (len(urls) if urls else 1)) % len(boards)
+        worker_board = boards[board_index]
+        worker_paths = paths[board_index] if isinstance(board_id, list) else paths
         while time.monotonic() < deadline and not stop.is_set():
             beginning = time.perf_counter()
             try:
-                reads = read_four(worker_target, paths)
-                result = workflow(worker_target, board_id, next(sequence))
+                reads = read_four(worker_target, worker_paths)
+                result = workflow(worker_target, worker_board, next(sequence))
                 read_times.extend(reads)
                 workflow_times.append(sum(result["timings"].values()))
                 unit_times.append(time.perf_counter() - beginning)
@@ -211,7 +215,7 @@ def run_load(target, board_id, paths, seconds, clients):
                 errors.append(f"{type(error).__name__}: {str(error)[:180]}")
                 stop.set()
         return unit_times, read_times, workflow_times, errors, (
-            worker_index % len(urls) if urls else 0)
+            worker_index % len(urls) if urls else 0), board_index
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=clients) as pool:
         workers = list(pool.map(worker, range(clients)))
@@ -239,6 +243,10 @@ def run_load(target, board_id, paths, seconds, clients):
         result["units_by_process"] = [
             sum(len(worker[0]) for worker in workers if worker[4] == index)
             for index in range(len(target["urls"]))]
+    if isinstance(board_id, list):
+        result["units_by_board"] = [
+            sum(len(worker[0]) for worker in workers if worker[5] == index)
+            for index in range(len(board_id))]
     return result
 
 
