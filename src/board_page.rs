@@ -6,8 +6,8 @@ use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
 use super::{
-    App, CardQuery, Principal, Result, card_page::render_template, cards_page, cards_query, db_err,
-    escape, page_window,
+    App, CardQuery, Principal, Result, card_page::render_template, card_sort_order, cards_page,
+    cards_query, db_err, escape, page_window,
 };
 
 const TEMPLATE: &str = include_str!("../static/board.html");
@@ -141,14 +141,10 @@ pub(super) async fn show_filtered(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let order = match query.sorted_by.as_deref() {
-        Some("oldest") => "c.created_at ASC",
-        Some("newest") => "c.created_at DESC",
-        _ => "c.last_active_at DESC",
-    };
+    let order = card_sort_order(query);
     let mut builder = cards_query("SELECT c.*", principal, query);
     builder
-        .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
+        .push(format!(" ORDER BY {order} LIMIT "))
         .push_bind(limit)
         .push(" OFFSET ")
         .push_bind(offset);

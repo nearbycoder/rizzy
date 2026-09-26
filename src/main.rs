@@ -6665,6 +6665,13 @@ struct CardQuery {
     assignment_status: Option<String>,
     page: i64,
 }
+fn card_sort_order(query: &CardQuery) -> &'static str {
+    match query.sorted_by.as_deref() {
+        Some("oldest") => "c.created_at ASC,c.id ASC",
+        Some("newest") => "c.created_at DESC,c.id DESC",
+        _ => "c.last_active_at DESC,c.id DESC",
+    }
+}
 fn parse_card_query(raw: Option<String>) -> CardQuery {
     let mut q = CardQuery {
         page: 1,
@@ -8170,11 +8177,7 @@ async fn list_cards(
     let p = principal(&app, &headers, &account).await?;
     let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
-    let order = match query.sorted_by.as_deref() {
-        Some("oldest") => "c.created_at ASC",
-        Some("newest") => "c.created_at DESC",
-        _ => "c.last_active_at DESC",
-    };
+    let order = card_sort_order(&query);
     let mut count = cards_query("SELECT COUNT(*)", &p, &query);
     let total: i64 = count
         .build_query_scalar()
@@ -8189,7 +8192,7 @@ async fn list_cards(
     };
     let mut builder = cards_query(select, &p, &query);
     builder
-        .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
+        .push(format!(" ORDER BY {order} LIMIT "))
         .push_bind(limit)
         .push(" OFFSET ")
         .push_bind(offset);
@@ -8229,11 +8232,7 @@ async fn card_previews(
         .unwrap_or_default();
     let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
-    let order = match query.sorted_by.as_deref() {
-        Some("oldest") => "c.created_at ASC",
-        Some("newest") => "c.created_at DESC",
-        _ => "c.last_active_at DESC",
-    };
+    let order = card_sort_order(&query);
     let mut count = cards_query("SELECT COUNT(*)", &p, &query);
     let total: i64 = count
         .build_query_scalar()
@@ -8246,7 +8245,7 @@ async fn card_previews(
         &query,
     );
     builder
-        .push(format!(" ORDER BY {order},c.id DESC LIMIT "))
+        .push(format!(" ORDER BY {order} LIMIT "))
         .push_bind(limit)
         .push(" OFFSET ")
         .push_bind(offset);
