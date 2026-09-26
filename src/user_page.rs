@@ -97,6 +97,7 @@ pub(super) fn edit(
     user: &SqliteRow,
     email: &str,
     error: Option<&str>,
+    has_avatar: bool,
 ) -> Html<String> {
     let id: String = user.get("id");
     let name: String = user.get("name");
@@ -104,9 +105,15 @@ pub(super) fn edit(
     let error = error
         .map(|message| format!("<p class=\"form-error\">{}</p>", escape(message)))
         .unwrap_or_default();
+    let remove_avatar = if has_avatar {
+        "<button type=\"button\" id=\"remove-avatar\" class=\"button button--secondary\">Remove avatar</button>"
+    } else {
+        ""
+    };
     let content = format!(
-        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form></div>",
+        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><div class=\"profile-avatar-controls\"><label class=\"profile-avatar-upload\"><img id=\"avatar-preview\" class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><input id=\"avatar-file\" type=\"file\" name=\"user[avatar]\" accept=\"image/jpeg,image/png,image/gif,image/webp\" data-direct-upload-url=\"/{}/rails/active_storage/direct_uploads\"><span>Choose avatar</span></label>{remove_avatar}</div><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form></div><script type=\"module\">import {{ start }} from '/assets/lexxy/activestorage.esm.js'; start(); const input=document.getElementById('avatar-file'); const preview=document.getElementById('avatar-preview'); let temporary; input.addEventListener('change',()=>{{if(temporary)URL.revokeObjectURL(temporary); if(input.files[0]){{temporary=URL.createObjectURL(input.files[0]);preview.src=temporary}}}}); document.getElementById('remove-avatar')?.addEventListener('click',async()=>{{if(!confirm('Are you sure you want to remove your avatar? This cannot be undone.'))return;const response=await fetch('{path}/avatar',{{method:'DELETE',headers:{{Accept:'application/json'}}}});if(response.ok)location.href='{path}';else alert('Could not remove avatar')}});</script>",
         escape(&name),
+        principal.slug,
         escape(&name),
         escape(email)
     );

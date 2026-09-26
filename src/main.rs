@@ -4257,7 +4257,13 @@ async fn edit_user(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(user_page::edit(&p, &u, &email, None))
+    let has_avatar: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE record_type='User' AND name='avatar' AND record_id=? AND account_id=?")
+        .bind(u.get::<String, _>("id"))
+        .bind(&p.account_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(user_page::edit(&p, &u, &email, None, has_avatar > 0))
 }
 fn can_change_user(p: &Principal, u: &SqliteRow) -> Result<()> {
     if p.user_id == u.get::<String, _>("id")
@@ -4287,6 +4293,9 @@ async fn update_user(
             match key.as_ref() {
                 "user[name]" => {
                     user.insert("name".into(), json!(value.into_owned()));
+                }
+                "user[avatar]" if !value.is_empty() => {
+                    user.insert("avatar".into(), json!(value.into_owned()));
                 }
                 "_method" => {
                     fields.insert("_method".into(), json!(value.into_owned()));
@@ -4325,9 +4334,15 @@ async fn update_user(
                     .fetch_one(&app.db)
                     .await
                     .map_err(db_err)?;
+            let has_avatar: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE record_type='User' AND name='avatar' AND record_id=? AND account_id=?")
+                .bind(u.get::<String, _>("id"))
+                .bind(&p.account_id)
+                .fetch_one(&app.db)
+                .await
+                .map_err(db_err)?;
             return Ok((
                 StatusCode::UNPROCESSABLE_ENTITY,
-                user_page::edit(&p, &u, &email, Some("Name can't be blank")),
+                user_page::edit(&p, &u, &email, Some("Name can't be blank"), has_avatar > 0),
             )
                 .into_response());
         }
