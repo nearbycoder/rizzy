@@ -627,6 +627,15 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .find(|(key, _)| *key == name)
         .map(|(_, value)| value.to_string())
 }
+fn etag_timezone(headers: &HeaderMap) -> Option<String> {
+    let cookie = cookie_value(headers, "timezone")?;
+    let encoded = format!("timezone={}", cookie.trim_matches('"'));
+    let decoded = url::form_urlencoded::parse(encoded.as_bytes()).next()?.1;
+    decoded
+        .parse::<chrono_tz::Tz>()
+        .ok()
+        .map(|zone| zone.to_string())
+}
 fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, max_age: i64, secure: bool) {
     let secure_part = if secure { "; Secure" } else { "" };
     let cookie =
@@ -4050,7 +4059,11 @@ async fn active_user(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
         .ok_or_else(missing)
 }
 fn conditional_html_response(body: String, headers: &HeaderMap) -> Response {
-    let etag = format!("W/\"{}\"", hash(&body));
+    let mut digest = Sha256::new();
+    digest.update(etag_timezone(headers).unwrap_or_default().as_bytes());
+    digest.update([0]);
+    digest.update(body.as_bytes());
+    let etag = format!("W/\"{}\"", hex::encode(digest.finalize()));
     let not_modified = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
@@ -7793,8 +7806,11 @@ async fn notification_tray(
     let etag = format!(
         "W/\"{}\"",
         hash(&format!(
-            "tray:{}:{}:{}:{include_read:?}:{version:?}",
-            p.account_id, p.user_id, json_request
+            "tray:{}:{}:{}:{include_read:?}:{version:?}:{:?}",
+            p.account_id,
+            p.user_id,
+            json_request,
+            etag_timezone(&headers)
         ))
     );
     let not_modified = headers

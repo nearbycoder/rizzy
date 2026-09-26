@@ -1105,7 +1105,10 @@ pub(super) async fn show_avatar(
         "<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\" class=\"avatar\" aria-hidden=\"true\"><rect width=\"100%\" height=\"100%\" rx=\"50\" fill=\"{color}\"/><text x=\"50%\" y=\"50%\" fill=\"#FFFFFF\" text-anchor=\"middle\" dy=\"0.35em\"{width} font-family=\"-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif\" font-size=\"230\" font-weight=\"800\" letter-spacing=\"-5\">{}</text></svg>",
         escape(&initials)
     );
-    let etag = format!("\"{}\"", hash(&format!("{user_id}:{name}")));
+    let etag = format!(
+        "\"{}\"",
+        hash(&format!("{user_id}:{name}:{:?}", etag_timezone(&headers)))
+    );
     let own_session = if let Some(token) = cookie_value(&headers, "session_token") {
         let session_user: Option<String> = sqlx::query_scalar("SELECT u.id FROM sessions s JOIN users u ON u.identity_id=s.identity_id WHERE s.token_hash=? AND u.account_id=? AND u.active=1")
             .bind(hash(&token)).bind(user.get::<String, _>("account_id"))
