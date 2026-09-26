@@ -8187,6 +8187,30 @@ fn column_input(headers: &HeaderMap, body: &[u8]) -> Result<Value> {
         serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))
     }
 }
+fn column_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+fn column_param_error(headers: &HeaderMap, status: StatusCode) -> Response {
+    let (label, html) = if status == StatusCode::BAD_REQUEST {
+        ("Bad Request", include_str!("../static/400.html"))
+    } else {
+        ("Internal Server Error", include_str!("../static/500.html"))
+    };
+    if headers.contains_key("x-rizzy-json-request") {
+        (
+            status,
+            Json(json!({"status": status.as_u16(), "error": label})),
+        )
+            .into_response()
+    } else {
+        (status, Html(html)).into_response()
+    }
+}
 async fn column_stream_markup(
     app: &App,
     p: &Principal,
@@ -8216,8 +8240,19 @@ async fn create_column(
     board(&app, &p, &board_id).await?;
     let body = column_input(&headers, &body)?;
     let v = nested(&body, "column");
-    let name = required(v, "name")?;
-    let color = string(v, "color").unwrap_or_else(|| "var(--color-card-default)".into());
+    if v.get("name").is_none() && v.get("color").is_none() {
+        return Ok(column_param_error(&headers, StatusCode::BAD_REQUEST));
+    }
+    let Some(name) = v.get("name").and_then(column_scalar) else {
+        return Ok(column_param_error(
+            &headers,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+    };
+    let color = v
+        .get("color")
+        .and_then(column_scalar)
+        .unwrap_or_else(|| "var(--color-card-default)".into());
     let mut tx = begin_write(&app).await.map_err(db_err)?;
     lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
     let position: i64 =
@@ -8281,11 +8316,25 @@ async fn update_column(
     let c = checked_column(&app, &p, &board_id, &column_id).await?;
     let body = column_input(&headers, &body)?;
     let v = nested(&body, "column");
-    let name = string(v, "name").unwrap_or_else(|| c.get("name"));
-    if name.trim().is_empty() {
-        return Err(bad("name is required"));
+    if v.get("name").is_none() && v.get("color").is_none() {
+        return Ok(column_param_error(&headers, StatusCode::BAD_REQUEST));
     }
-    let color = string(v, "color").unwrap_or_else(|| c.get("color"));
+    let name = match v.get("name") {
+        None => c.get("name"),
+        Some(value) => match column_scalar(value) {
+            Some(value) => value,
+            None => {
+                return Ok(column_param_error(
+                    &headers,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+        },
+    };
+    let color = match v.get("color") {
+        None => c.get("color"),
+        Some(value) => column_scalar(value).unwrap_or_else(|| "var(--color-card-default)".into()),
+    };
     if name != c.get::<String, _>("name") || color != c.get::<String, _>("color") {
         let timestamp = now();
         let mut tx = begin_write(&app).await.map_err(db_err)?;

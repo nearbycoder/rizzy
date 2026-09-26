@@ -1,0 +1,102 @@
+{
+  "cards": 30000,
+  "deleted_column_cards": 10000,
+  "trials": 3,
+  "read_repetitions": 100,
+  "variants": {
+    "wide": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.019,
+        "count_ms": 0.255,
+        "nullify_ms": 35.384,
+        "touch_ms": 20.26
+      },
+      "samples": [
+        {
+          "read_ms": 0.019,
+          "count_ms": 0.259,
+          "nullify_ms": 35.158,
+          "touch_ms": 20.363
+        },
+        {
+          "read_ms": 0.018,
+          "count_ms": 0.254,
+          "nullify_ms": 35.384,
+          "touch_ms": 20.14
+        },
+        {
+          "read_ms": 0.019,
+          "count_ms": 0.255,
+          "nullify_ms": 35.609,
+          "touch_ms": 20.26
+        }
+      ]
+    },
+    "pair": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "median_ms": {
+        "read_ms": 2.371,
+        "count_ms": 1.949,
+        "nullify_ms": 19.225,
+        "touch_ms": 20.606
+      },
+      "samples": [
+        {
+          "read_ms": 2.31,
+          "count_ms": 1.903,
+          "nullify_ms": 18.97,
+          "touch_ms": 20.606
+        },
+        {
+          "read_ms": 2.371,
+          "count_ms": 1.949,
+          "nullify_ms": 19.225,
+          "touch_ms": 20.127
+        },
+        {
+          "read_ms": 2.445,
+          "count_ms": 2.005,
+          "nullify_ms": 19.383,
+          "touch_ms": 20.73
+        }
+      ]
+    },
+    "partial_order": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.027,
+        "count_ms": 1.978,
+        "nullify_ms": 34.527,
+        "touch_ms": 21.216
+      },
+      "samples": [
+        {
+          "read_ms": 0.027,
+          "count_ms": 1.978,
+          "nullify_ms": 32.049,
+          "touch_ms": 21.216
+        },
+        {
+          "read_ms": 0.027,
+          "count_ms": 1.943,
+          "nullify_ms": 34.527,
+          "touch_ms": 20.331
+        },
+        {
+          "read_ms": 0.027,
+          "count_ms": 1.982,
+          "nullify_ms": 36.351,
+          "touch_ms": 28.967
+        }
+      ]
+    }
+  }
+}
