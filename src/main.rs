@@ -9164,27 +9164,50 @@ async fn update_card(
     let search_text = search_content(plain_description);
     let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
     let custom_last_active_at = timestamp_param(v, "last_active_at")?;
-    let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
+    let last_active_at = custom_last_active_at
+        .clone()
+        .unwrap_or_else(|| c.get("last_active_at"));
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     if let Some(upload) = &input.image {
         storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
     }
     let uploaded_image = input.image.as_ref().map(|upload| json!(upload.signed_id));
-    sqlx::query(
-        "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
-    )
-    .bind(&title)
-    .bind(&description)
-    .bind(&search_text)
-    .bind(&status)
-    .bind(&created_at)
-    .bind(&timestamp)
-    .bind(&last_active_at)
-    .bind(c.get::<String, _>("id"))
-    .execute(&mut *tx)
-    .await
-    .map_err(db_err)?;
+    let image_value = uploaded_image.as_ref().or(v.get("image"));
+    let image_changed = if let Some(value) = image_value {
+        let current: Option<String> = sqlx::query_scalar("SELECT b.signed_id FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='Card' AND a.name='image' AND a.record_id=?")
+            .bind(c.get::<String, _>("id"))
+            .fetch_optional(&mut *tx).await.map_err(db_err)?;
+        match value {
+            Value::Null => current.is_some(),
+            Value::String(signed_id) => current.as_deref() != Some(signed_id),
+            _ => true,
+        }
+    } else {
+        false
+    };
+    let changed = title != old_title
+        || description != c.get::<String, _>("description")
+        || search_text != c.get::<String, _>("search_text")
+        || created_at != c.get::<String, _>("created_at")
+        || last_active_at != c.get::<String, _>("last_active_at")
+        || image_changed;
+    if changed {
+        sqlx::query(
+            "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
+        )
+        .bind(&title)
+        .bind(&description)
+        .bind(&search_text)
+        .bind(&status)
+        .bind(&created_at)
+        .bind(&timestamp)
+        .bind(&last_active_at)
+        .bind(c.get::<String, _>("id"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    }
     rich_text_records::sync(
         &mut tx,
         &p.account_id,
@@ -9196,13 +9219,8 @@ async fn update_card(
         &timestamp,
     )
     .await?;
-    let replaced_image_keys = storage::attach_card_image_tx(
-        &mut tx,
-        &p,
-        &c.get::<String, _>("id"),
-        uploaded_image.as_ref().or(v.get("image")),
-    )
-    .await?;
+    let replaced_image_keys =
+        storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), image_value).await?;
     let removed_embed_keys =
         storage::sync_embeds_tx(&mut tx, &p, "Card", &c.get::<String, _>("id"), &description)
             .await?;
@@ -9217,6 +9235,14 @@ async fn update_card(
             &description,
         )
         .await?;
+        if !changed {
+            sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+                .bind(&timestamp)
+                .bind(c.get::<String, _>("board_id"))
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
     }
     tx.commit().await.map_err(db_err)?;
     if let Some(upload) = input.image {
