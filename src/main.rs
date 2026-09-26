@@ -1144,6 +1144,51 @@ fn geared_page_count(total: i64) -> i64 {
 fn paginated(items: Value, total: i64, page: i64, uri: &Uri, headers: &HeaderMap) -> Response {
     pagination_headers(Json(items).into_response(), total, page, uri, headers)
 }
+fn card_page_etag(rows: &[DbRow]) -> String {
+    let mut digest = Sha256::new();
+    for row in rows {
+        digest.update(row.get::<String, _>("id").as_bytes());
+        digest.update([0]);
+        digest.update(row.get::<String, _>("updated_at").as_bytes());
+        digest.update([0]);
+    }
+    format!("W/\"{}\"", hex::encode(&digest.finalize()[..16]))
+}
+fn cached_card_page(
+    etag: &str,
+    total: i64,
+    page: i64,
+    uri: &Uri,
+    headers: &HeaderMap,
+) -> Option<Response> {
+    let candidates = headers.get(header::IF_NONE_MATCH)?.to_str().ok()?;
+    if !candidates
+        .split(',')
+        .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+    {
+        return None;
+    }
+    Some(with_card_page_headers(
+        pagination_headers(
+            StatusCode::NOT_MODIFIED.into_response(),
+            total,
+            page,
+            uri,
+            headers,
+        ),
+        etag,
+    ))
+}
+fn with_card_page_headers(mut response: Response, etag: &str) -> Response {
+    response
+        .headers_mut()
+        .insert(header::ETAG, HeaderValue::from_str(etag).expect("hex ETag"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    response
+}
 fn pagination_headers(
     mut response: Response,
     total: i64,
@@ -10423,51 +10468,18 @@ async fn column_cards(
     if headers.contains_key("x-rizzy-card-fragment") {
         return Ok(Html(cards_page::previews(&app, &p, &rows).await?).into_response());
     }
-    // Fizzy's fresh_when validator is based on the cards in this page, so an
-    // edit on another page leaves this response cacheable.
-    let mut digest = Sha256::new();
-    for row in &rows {
-        digest.update(row.get::<String, _>("id").as_bytes());
-        digest.update([0]);
-        digest.update(row.get::<String, _>("updated_at").as_bytes());
-        digest.update([0]);
+    // Fizzy's fresh_when validator is based on this page's cards.
+    let etag = card_page_etag(&rows);
+    if let Some(response) = cached_card_page(&etag, total, page, &uri, &headers) {
+        return Ok(response);
     }
-    let etag = format!("W/\"{}\"", hex::encode(&digest.finalize()[..16]));
-    let not_modified = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            value
-                .split(',')
-                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
-        });
-    let mut response = if not_modified {
-        pagination_headers(
-            StatusCode::NOT_MODIFIED.into_response(),
-            total,
-            page,
-            &uri,
-            &headers,
-        )
-    } else {
-        let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
-        paginated(json!(out), total, page, &uri, &headers)
-    };
+    let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
+    let mut response = paginated(json!(out), total, page, &uri, &headers);
     response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&etag).expect("hex ETag"),
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
     );
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("max-age=0, private, must-revalidate"),
-    );
-    if !not_modified {
-        response.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json; charset=utf-8"),
-        );
-    }
-    Ok(response)
+    Ok(with_card_page_headers(response, &etag))
 }
 async fn show_card(
     State(app): Shared,
