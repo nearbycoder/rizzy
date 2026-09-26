@@ -666,6 +666,15 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
         .max_connections(database_pool_size())
         .connect(url)
         .await?;
+    // A dedicated connection keeps the server-wide lock while the pool runs DDL.
+    // Concurrent processes must not both decide that an empty schema needs setup.
+    let mut setup_lock = sqlx::AnyConnection::connect(url).await?;
+    let locked: Option<i64> = sqlx::query_scalar("SELECT GET_LOCK('rizzy_schema_init',30)")
+        .fetch_one(&mut setup_lock)
+        .await?;
+    if locked != Some(1) {
+        return Err("Timed out waiting for MySQL schema initialization lock".into());
+    }
     let schema = include_str!("../schema.mysql.sql");
     let expected_tables = schema
         .lines()
@@ -717,6 +726,9 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     sqlx::query("INSERT IGNORE INTO app_secrets(name,value) VALUES('qr_codes',?)")
         .bind(random_token())
         .execute(&db)
+        .await?;
+    sqlx::query("SELECT RELEASE_LOCK('rizzy_schema_init')")
+        .execute(&mut setup_lock)
         .await?;
     Ok(db)
 }

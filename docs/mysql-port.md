@@ -24,6 +24,12 @@ then seeded one account, two users, one join code, and one access token. The
 generated partial unique, foreign key, and check constraints rejected invalid
 inserts. A fresh database and an existing database both passed the MySQL core
 smoke, and the SQLite unit, join, smoke, and account export checks passed.
+`tests/mysql_cluster.py` starts two initializers and two web processes against
+one database, then verifies 80 concurrent card creations get unique numbers
+and the correct paginated total. The first concurrent initialization probe
+found a table-creation race; a MySQL advisory lock now serializes setup, and
+the fresh-database rerun passed. This checks correctness at small scale, not
+a maximum capacity or a faster-than-Fizzy result.
 SQLx 0.8.6's `Any` adapter treats MariaDB's `LONGTEXT` as binary data; the
 local `vendor/sqlx-mysql` patch decodes that server type as UTF-8 for Rizzy's
 text-only schema. This patch and the schema need a direct MySQL 8.x run;
