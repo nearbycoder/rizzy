@@ -82,13 +82,17 @@ def sample(size, epoch, trial):
                 changes = ",bulk_touch_epoch=bulk_touch_epoch+1" if epoch else ""
                 statements = [
                     ("lock", f"SELECT id FROM boards WHERE id={board} FOR UPDATE"),
-                    ("guard", f"INSERT INTO card_bulk_touches(board_id) VALUES({board})"),
+                ]
+                if not epoch:
+                    statements.append(("guard", f"INSERT INTO card_bulk_touches(board_id) VALUES({board})"))
+                statements.extend([
                     ("nullify", f"UPDATE cards SET column_id=NULL{changes} WHERE board_id={board} AND column_id={column}"),
                     ("touch_cards", f"UPDATE cards SET updated_at='2026-09-26T00:00:00.000Z'{changes} WHERE board_id={board}"),
                     ("delete_column", f"DELETE FROM `columns` WHERE id={column} AND board_id={board}"),
-                    ("unguard", f"DELETE FROM card_bulk_touches WHERE board_id={board}"),
-                    ("touch_board", f"UPDATE boards SET updated_at='2026-09-26T00:00:00.000Z' WHERE id={board}"),
-                ]
+                ])
+                if not epoch:
+                    statements.append(("unguard", f"DELETE FROM card_bulk_touches WHERE board_id={board}"))
+                statements.append(("touch_board", f"UPDATE boards SET updated_at='2026-09-26T00:00:00.000Z' WHERE id={board}"))
                 sql = "SET @total=SYSDATE(6); START TRANSACTION; "
                 for name, statement in statements:
                     sql += (f"SET @started=SYSDATE(6); {statement}; "
