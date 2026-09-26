@@ -7050,8 +7050,8 @@ fn parse_activity_query(raw: Option<String>) -> ActivityQuery {
     if let Some(raw) = raw {
         for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
             match key.as_ref() {
-                "creator_ids[]" => query.creators.push(value.into_owned()),
-                "board_ids[]" => query.boards.push(value.into_owned()),
+                "creator_ids" | "creator_ids[]" => query.creators.push(value.into_owned()),
+                "board_ids" | "board_ids[]" => query.boards.push(value.into_owned()),
                 "page" => query.page = value.parse::<i64>().unwrap_or(1).max(1),
                 _ => {}
             }
