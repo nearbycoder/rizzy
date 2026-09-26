@@ -40,7 +40,9 @@ def main():
                 assert db.execute("SELECT COUNT(*) FROM card_activity_spikes WHERE card_id=?", (first["id"],)).fetchone()[0] == 0
             call(port, f"/{account}/cards/{first['number']}/assignments", "POST", {"assignee_id": owner}, bearer=token, status=204)
             with sqlite3.connect(database) as db:
-                assert db.execute("SELECT COUNT(*) FROM card_activity_spikes WHERE card_id=?", (first["id"],)).fetchone()[0] == 1
+                first_spike = db.execute("SELECT id FROM card_activity_spikes WHERE card_id=?", (first["id"],)).fetchone()
+                assert first_spike and first_spike[0]
+            with sqlite3.connect(database) as db:
                 old = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
                 db.execute("UPDATE card_activity_spikes SET updated_at=? WHERE card_id=?", (old, first["id"]))
                 db.execute("UPDATE cards SET updated_at=? WHERE id=?", (old, first["id"]))
@@ -58,7 +60,8 @@ def main():
             call(port, f"/{account}/cards/{first['number']}/closure", "POST", bearer=token, status=204)
             call(port, f"/{account}/cards/{first['number']}/closure", "DELETE", bearer=token, status=204)
             with sqlite3.connect(database) as db:
-                assert db.execute("SELECT COUNT(*) FROM card_activity_spikes WHERE card_id=?", (first["id"],)).fetchone()[0] == 1
+                replacement = db.execute("SELECT id FROM card_activity_spikes WHERE card_id=?", (first["id"],)).fetchone()
+                assert replacement and replacement[0] != first_spike[0]
 
             with sqlite3.connect(database) as db:
                 account_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?", (account,)).fetchone()[0]
@@ -76,6 +79,25 @@ def main():
                 call(port, f"/{account}/cards/{third['number']}/comments", "POST", {"comment": {"body": f"Comment {index}"}}, bearer=token, status=201)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM card_activity_spikes WHERE card_id=?", (third["id"],)).fetchone()[0] == 0
+            repeat = card("Repeated assignment spike")
+            call(port, f"/{account}/cards/{repeat['number']}/assignments", "POST",
+                 {"assignee_id": owner}, bearer=token, status=204)
+            with sqlite3.connect(database) as db:
+                repeat_spike = db.execute("SELECT id FROM card_activity_spikes WHERE card_id=?",
+                                          (repeat["id"],)).fetchone()
+            assert repeat_spike
+            for _ in range(2):
+                call(port, f"/{account}/cards/{repeat['number']}/assignments", "POST",
+                     {"assignee_id": owner}, bearer=token, status=204)
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT id FROM card_activity_spikes WHERE card_id=?",
+                                  (repeat["id"],)).fetchone() == repeat_spike
+            call(port, f"/{account}/cards/{first['number']}", "DELETE", bearer=token, status=204)
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT COUNT(*) FROM card_activity_spikes WHERE card_id=?", (first["id"],)).fetchone()[0] == 0
+            call(port, f"/{account}/boards/{board['id']}", "DELETE", bearer=token, status=204)
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT COUNT(*) FROM card_activity_spikes WHERE account_id=?", (account_id,)).fetchone()[0] == 0
         finally:
             stop(server)
     print("activity-spike and stalled-index checks passed")

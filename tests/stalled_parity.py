@@ -5,6 +5,7 @@ import os
 import sqlite3
 import time
 import urllib.parse
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,8 +30,8 @@ def seed_spike(name, board_name, card_title, card_id, old, db_path):
     else:
         with sqlite3.connect(db_path) as db:
             account_id = db.execute("SELECT account_id FROM cards WHERE id=?", (card_id,)).fetchone()[0]
-            db.execute("INSERT INTO card_activity_spikes(card_id,account_id,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at",
-                       (card_id, account_id, old, old))
+            db.execute("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at",
+                       (str(uuid.uuid4()), card_id, account_id, old, old))
             db.execute("UPDATE cards SET updated_at=? WHERE id=?", (old, card_id))
 
 

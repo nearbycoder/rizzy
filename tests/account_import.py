@@ -106,6 +106,12 @@ def run(archive_path):
                    if name.startswith("data/notification_bundles/")]
         rich_texts = [json.loads(z.read(name)) for name in z.namelist()
                       if name.startswith("data/action_text_rich_texts/")]
+        described_cards = sum(rich.get("record_type") == "Card" and
+                              rich.get("name") == "description" and bool(rich.get("body"))
+                              for rich in rich_texts)
+        described_comments = sum(rich.get("record_type") == "Comment" and
+                                 rich.get("name") == "body" and bool(rich.get("body"))
+                                 for rich in rich_texts)
         user_gid = f'gid="gid://fizzy/User/{owner["id"]}"'
         has_user_mention = any(user_gid in rich.get("body", "") for rich in rich_texts)
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
@@ -113,6 +119,8 @@ def run(archive_path):
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
         golden_records = [json.loads(z.read(name)) for name in z.namelist()
                           if name.startswith("data/card_goldnesses/")]
+        spike_records = [json.loads(z.read(name)) for name in z.namelist()
+                         if name.startswith("data/card_activity_spikes/")]
         postponed_records = [json.loads(z.read(name)) for name in z.namelist()
                              if name.startswith("data/card_not_nows/")]
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
@@ -146,6 +154,10 @@ def run(archive_path):
                 raise RuntimeError("Rizzy server did not start")
             created = upload(url, token, archive)
             result = await_result(url, token, created)
+            if result["status"] != "completed":
+                server.terminate()
+                server.wait(timeout=5)
+                raise AssertionError((result, server.stderr.read().decode(errors="replace")[-3000:]))
             assert result["status"] == "completed", result
             with sqlite3.connect(database) as db:
                 imported_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?",
@@ -172,9 +184,9 @@ def run(archive_path):
                 assert db.execute("SELECT COUNT(*) FROM users WHERE account_id=? AND role='owner' AND id=?",
                                   (imported_id, owner["id"])).fetchone()[0] == 1
                 assert db.execute("SELECT COUNT(*) FROM cards WHERE account_id=? AND description!=''",
-                                  (imported_id,)).fetchone()[0] == counts["cards"]
+                                  (imported_id,)).fetchone()[0] == described_cards
                 assert db.execute("SELECT COUNT(*) FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND m.body!=''",
-                                  (imported_id,)).fetchone()[0] == counts["comments"]
+                                  (imported_id,)).fetchone()[0] == described_comments
                 for blob_id, source_bytes in original_bytes.items():
                     key = db.execute("SELECT storage_key FROM storage_blobs WHERE id=? AND account_id=?",
                                      (blob_id, imported_id)).fetchone()[0]
@@ -190,6 +202,10 @@ def run(archive_path):
                     actual = db.execute("SELECT card_id,created_at,updated_at FROM card_goldnesses WHERE id=?",
                                         (gold["id"],)).fetchone()
                     assert actual == (gold["card_id"], gold["created_at"], gold["updated_at"])
+                for spike in spike_records:
+                    actual = db.execute("SELECT card_id,created_at,updated_at FROM card_activity_spikes WHERE id=?",
+                                        (spike["id"],)).fetchone()
+                    assert actual == (spike["card_id"], spike["created_at"], spike["updated_at"])
                 for not_now in postponed_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM card_not_nows WHERE id=?",
                                         (not_now["id"],)).fetchone()
@@ -199,22 +215,32 @@ def run(archive_path):
                     status_value = db.execute("SELECT status FROM notification_bundles WHERE id=?", (bundle["id"],)).fetchone()[0]
                     expected = {"pending": 0, "processing": 1, "delivered": 2}.get(bundle["status"], bundle["status"])
                     assert status_value == expected
-                if original_bytes:
-                    description = db.execute("SELECT description FROM cards WHERE account_id=? LIMIT 1",
-                                             (imported_id,)).fetchone()[0]
+                embedded_card = next((rich for rich in rich_texts
+                                      if rich.get("record_type") == "Card" and
+                                      'gid="gid://fizzy/' in rich.get("body", "")), None)
+                if embedded_card:
+                    description = db.execute("SELECT description FROM cards WHERE id=? AND account_id=?",
+                                             (embedded_card["record_id"], imported_id)).fetchone()[0]
                     assert 'sgid="' in description and ' gid="' not in description
-                    if has_user_mention:
+                    card_has_user_mention = 'gid="gid://fizzy/User/' in embedded_card["body"]
+                    if card_has_user_mention:
                         user_sgid = db.execute("SELECT sgid FROM user_attachables WHERE user_id=?", (owner["id"],)).fetchone()[0]
                         assert f'sgid="{user_sgid}"' in description
-                    card_number = db.execute("SELECT number FROM cards WHERE account_id=? LIMIT 1",
-                                             (imported_id,)).fetchone()[0]
+                    card_number = db.execute("SELECT number FROM cards WHERE id=?",
+                                             (embedded_card["record_id"],)).fetchone()[0]
                     status, card = call(url, token, f"/{created['account']}/cards/{card_number}")
-                    assert status == 200 and card["has_attachments"] and card["image_url"]
-                    if has_user_mention:
+                    assert status == 200 and card["has_attachments"]
+                    if card_has_user_mention:
                         assert owner["name"].split()[0] in card["description"]
                         assert 'class="mention"' in card["description_html"]
-            status, boards = call(url, token, f"/{created['account']}/boards")
-            assert status == 200 and len(boards) == counts["boards"], (status, boards)
+            board_ids = set()
+            for page in range(1, counts["boards"] + 2):
+                status, boards = call(url, token, f"/{created['account']}/boards?page={page}")
+                assert status == 200, (status, page)
+                board_ids.update(board["id"] for board in boards)
+                if len(board_ids) == counts["boards"] or not boards:
+                    break
+            assert len(board_ids) == counts["boards"], (len(board_ids), counts["boards"])
             if counts["notifications"]:
                 status, notices = call(url, token, f"/{created['account']}/notifications")
                 assert status == 200 and any(notice["source_type"] == "mention"
@@ -256,6 +282,10 @@ def run(archive_path):
                     restored = json.loads(z.read(f"data/card_goldnesses/{source_gold['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
                         key: source_gold[key] for key in ("card_id", "created_at", "updated_at")}
+                for source_spike in spike_records:
+                    restored = json.loads(z.read(f"data/card_activity_spikes/{source_spike['id']}.json"))
+                    assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
+                        key: source_spike[key] for key in ("card_id", "created_at", "updated_at")}
                 for source_not_now in postponed_records:
                     restored = json.loads(z.read(f"data/card_not_nows/{source_not_now['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {

@@ -122,7 +122,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "card_activity_spikes",
-        query: "SELECT NULL id,account_id,card_id,created_at,updated_at FROM card_activity_spikes WHERE account_id=? ORDER BY card_id",
+        query: "SELECT id,account_id,card_id,created_at,updated_at FROM card_activity_spikes WHERE account_id=? ORDER BY card_id",
         booleans: &[],
         json_fields: &[],
     },

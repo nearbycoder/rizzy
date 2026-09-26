@@ -376,7 +376,10 @@ fn validate_references(archive: &Archive) -> ImportResult<()> {
                     check(record, "card_id", "cards")?;
                     check(record, "user_id", "users")?;
                 }
-                "card_goldnesses" | "card_activity_spikes" => check(record, "card_id", "cards")?,
+                "card_goldnesses" => check(record, "card_id", "cards")?,
+                // Fizzy exports can contain account-scoped spikes whose card
+                // is absent from the same archive.
+                "card_activity_spikes" => {}
                 "card_not_nows" => {
                     check(record, "card_id", "cards")?;
                     if maybe_field(record, "user_id").is_some() {
@@ -805,8 +808,8 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for spike in records(&archive, "card_activity_spikes") {
-        sqlx::query("INSERT INTO card_activity_spikes(card_id,account_id,created_at,updated_at) VALUES(?,?,?,?)")
-            .bind(field(spike,"card_id")?).bind(account_id).bind(field(spike,"created_at")?)
+        sqlx::query("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+            .bind(field(spike,"id")?).bind(field(spike,"card_id")?).bind(account_id).bind(field(spike,"created_at")?)
             .bind(field(spike,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for watch in records(&archive, "watches") {

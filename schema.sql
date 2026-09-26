@@ -291,12 +291,17 @@ CREATE TABLE IF NOT EXISTS card_not_nows (
 CREATE INDEX IF NOT EXISTS card_not_nows_account ON card_not_nows(account_id);
 CREATE INDEX IF NOT EXISTS card_not_nows_user ON card_not_nows(user_id);
 CREATE TABLE IF NOT EXISTS card_activity_spikes (
-  card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  card_id TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS card_activity_spikes_account_updated ON card_activity_spikes(account_id,updated_at);
+CREATE TRIGGER IF NOT EXISTS cards_delete_activity_spikes AFTER DELETE ON cards
+BEGIN
+  DELETE FROM card_activity_spikes WHERE card_id=OLD.id;
+END;
 CREATE TABLE IF NOT EXISTS steps (
   id TEXT PRIMARY KEY,
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,

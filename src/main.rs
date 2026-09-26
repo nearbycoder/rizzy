@@ -626,9 +626,17 @@ async fn record_event(
 }
 async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Result<()> {
     let timestamp = now();
-    sqlx::query("INSERT INTO card_activity_spikes(card_id,account_id,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at")
-        .bind(card_id).bind(account_id).bind(&timestamp).bind(&timestamp)
-        .execute(&app.db).await.map_err(db_err)?;
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at")
+        .bind(uuid::Uuid::now_v7().to_string()).bind(card_id).bind(account_id).bind(&timestamp).bind(&timestamp)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     Ok(())
 }
 async fn queue_webhooks(
@@ -1302,6 +1310,59 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    let spike_columns = sqlx::query("PRAGMA table_info(card_activity_spikes)")
+        .fetch_all(&db)
+        .await?;
+    if !spike_columns
+        .iter()
+        .any(|row| row.get::<String, _>("name") == "id")
+    {
+        sqlx::query("ALTER TABLE card_activity_spikes ADD COLUMN id TEXT")
+            .execute(&db)
+            .await?;
+    }
+    let spikes_missing_ids =
+        sqlx::query("SELECT card_id FROM card_activity_spikes WHERE id IS NULL")
+            .fetch_all(&db)
+            .await?;
+    if !spikes_missing_ids.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in spikes_missing_ids {
+            sqlx::query("UPDATE card_activity_spikes SET id=? WHERE card_id=? AND id IS NULL")
+                .bind(uuid::Uuid::now_v7().to_string())
+                .bind(row.get::<String, _>("card_id"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+    }
+    let spike_fks = sqlx::query("PRAGMA foreign_key_list(card_activity_spikes)")
+        .fetch_all(&db)
+        .await?;
+    if spike_fks
+        .iter()
+        .any(|row| row.get::<String, _>("table") == "cards")
+    {
+        let mut tx = db.begin().await?;
+        sqlx::query("DROP TRIGGER IF EXISTS cards_delete_activity_spikes")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("CREATE TABLE card_activity_spikes_rebuilt (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, card_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO card_activity_spikes_rebuilt(id,account_id,card_id,created_at,updated_at) SELECT id,account_id,card_id,created_at,updated_at FROM card_activity_spikes")
+            .execute(&mut *tx).await?;
+        sqlx::query("DROP TABLE card_activity_spikes")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("ALTER TABLE card_activity_spikes_rebuilt RENAME TO card_activity_spikes")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS cards_delete_activity_spikes AFTER DELETE ON cards BEGIN DELETE FROM card_activity_spikes WHERE card_id=OLD.id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS card_activity_spikes_account_updated ON card_activity_spikes(account_id,updated_at)")
+        .execute(&db).await?;
     sqlx::query("INSERT OR IGNORE INTO user_attachables(user_id,account_id,sgid) SELECT id,account_id,lower(hex(randomblob(32))) FROM users")
         .execute(&db).await?;
     migrate_notification_sources(&db).await?;
