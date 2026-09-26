@@ -145,7 +145,7 @@ def run(archive_path):
                                  rich.get("name") == "body" and bool(rich.get("body"))
                                  for rich in rich_texts)
         user_gid = f'gid="gid://fizzy/User/{owner["id"]}"'
-        has_user_mention = any(user_gid in rich.get("body", "") for rich in rich_texts)
+        has_user_mention = any(user_gid in (rich.get("body") or "") for rich in rich_texts)
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
         dated_cards = [json.loads(z.read(name)) for name in z.namelist()
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
@@ -336,13 +336,13 @@ def run(archive_path):
                     assert_fresh(actual[4], import_started)
                 imported_rich_texts = {
                     row[0]: row[1:] for row in db.execute(
-                        "SELECT id,record_type,record_id,name,created_at,updated_at "
+                        "SELECT id,record_type,record_id,name,created_at,updated_at,body_is_null "
                         "FROM rich_text_records WHERE account_id=?", (imported_id,))}
                 assert len(imported_rich_texts) == len(rich_texts)
                 for rich in rich_texts:
                     assert imported_rich_texts[rich["id"]] == (
                         rich["record_type"], rich["record_id"], rich["name"],
-                        rich["created_at"], rich["updated_at"])
+                        rich["created_at"], rich["updated_at"], int(rich["body"] is None))
                 for not_now in postponed_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM card_not_nows WHERE id=?",
                                         (not_now["id"],)).fetchone()
@@ -354,7 +354,7 @@ def run(archive_path):
                     assert status_value == expected
                 embedded_card = next((rich for rich in rich_texts
                                       if rich.get("record_type") == "Card" and
-                                      'gid="gid://fizzy/' in rich.get("body", "")), None)
+                                      'gid="gid://fizzy/' in (rich.get("body") or "")), None)
                 if embedded_card:
                     description = db.execute("SELECT description FROM cards WHERE id=? AND account_id=?",
                                              (embedded_card["record_id"], imported_id)).fetchone()[0]
@@ -477,7 +477,7 @@ def run(archive_path):
                     expected = source_bundle["status"] if isinstance(source_bundle["status"], str) else ("pending", "processing", "delivered")[source_bundle["status"]]
                     assert bundle["status"] == expected
                 if has_user_mention:
-                    assert any(user_gid in json.loads(z.read(name)).get("body", "")
+                    assert any(user_gid in (json.loads(z.read(name)).get("body") or "")
                                for name in names if name.startswith("data/action_text_rich_texts/"))
             duplicate = upload(url, token, archive)
             conflict = await_result(url, token, duplicate)

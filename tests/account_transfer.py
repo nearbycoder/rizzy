@@ -72,7 +72,12 @@ def main():
             assert settings_record and settings_record[4] == "every_few_hours"
             board = api(target, "/boards", "POST", {"board": {"name": "Transfer probe",
                                                                 "auto_postpone_period_in_days": 90}}, 201)
+            api(target, f"/boards/{board['id']}", "PATCH",
+                {"board": {"public_description": ""}})
             with sqlite3.connect(db_path) as db:
+                board_rich_id = db.execute(
+                    "SELECT id FROM rich_text_records WHERE record_type='Board' "
+                    "AND record_id=? AND name='description'", (board["id"],)).fetchone()[0]
                 entropy_records = db.execute(
                     "SELECT id,account_id,container_type,container_id,created_at,updated_at "
                     "FROM entropy_records WHERE account_id=(SELECT account_id FROM boards WHERE id=?) "
@@ -268,6 +273,9 @@ def main():
                     postponed_card["id"], owner["id"], postponed_record[2])
                 rich_texts = [json.loads(archive.read(name)) for name in names
                               if name.startswith("data/action_text_rich_texts/")]
+                board_rich_data = json.loads(archive.read(
+                    f"data/action_text_rich_texts/{board_rich_id}.json"))
+                assert board_rich_data["record_id"] == board["id"] and board_rich_data["body"] is None
                 assert f"data/action_text_rich_texts/{rich_record[0]}.json" in names
                 rich_record_data = json.loads(archive.read(f"data/action_text_rich_texts/{rich_record[0]}.json"))
                 assert (rich_record_data["created_at"], rich_record_data["updated_at"]) == rich_record[1:]

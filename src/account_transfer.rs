@@ -206,7 +206,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "action_text_rich_texts",
-        query: "SELECT r.id,r.account_id,c.description body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN cards c ON c.id=r.record_id WHERE r.account_id=? AND r.record_type='Card' AND r.name='description' UNION ALL SELECT r.id,r.account_id,m.body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN comments m ON m.id=r.record_id WHERE r.account_id=? AND r.record_type='Comment' AND r.name='body' UNION ALL SELECT r.id,r.account_id,b.public_description body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN boards b ON b.id=r.record_id WHERE r.account_id=? AND r.record_type='Board' AND r.name='description'",
+        query: "SELECT r.id,r.account_id,CASE WHEN r.body_is_null=1 THEN NULL ELSE c.description END body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN cards c ON c.id=r.record_id WHERE r.account_id=? AND r.record_type='Card' AND r.name='description' UNION ALL SELECT r.id,r.account_id,CASE WHEN r.body_is_null=1 THEN NULL ELSE m.body END body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN comments m ON m.id=r.record_id WHERE r.account_id=? AND r.record_type='Comment' AND r.name='body' UNION ALL SELECT r.id,r.account_id,CASE WHEN r.body_is_null=1 THEN NULL ELSE b.public_description END body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN boards b ON b.id=r.record_id WHERE r.account_id=? AND r.record_type='Board' AND r.name='description'",
         booleans: &[],
         json_fields: &[],
     },
@@ -283,7 +283,11 @@ async fn emit_record_set(
         let mut value = row_value(&row, record_set)?;
         if record_set.directory == "action_text_rich_texts" {
             if let Some(body) = value["body"].as_str() {
-                value["body"] = json!(portable_rich_text(body, blobs));
+                value["body"] = if body.trim().is_empty() {
+                    Value::Null
+                } else {
+                    json!(portable_rich_text(body, blobs))
+                };
             }
         }
         if record_set.directory == "notification_bundles" {
