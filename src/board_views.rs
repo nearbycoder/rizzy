@@ -142,13 +142,13 @@ async fn public_preview_metadata(
     if cards.iter().any(|card| card.get::<i64, _>("closed") != 0) {
         for row in rows_for_ids(
             app,
-            "SELECT cl.card_id,cl.created_at,u.name FROM closures cl JOIN users u ON u.id=cl.user_id WHERE cl.card_id IN (",
+            "SELECT cl.card_id,cl.created_at,u.name FROM closures cl LEFT JOIN users u ON u.id=cl.user_id WHERE cl.card_id IN (",
             &ids,
         )
         .await?
         {
             metadata.entry(row.get("card_id")).or_default().closure =
-                Some((row.get("created_at"), row.get("name")));
+                Some((row.get("created_at"), row.get::<Option<String>, _>("name").unwrap_or_default()));
         }
     }
     if cards

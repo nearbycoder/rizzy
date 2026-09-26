@@ -374,7 +374,9 @@ fn validate_references(archive: &Archive) -> ImportResult<()> {
                 }
                 "closures" => {
                     check(record, "card_id", "cards")?;
-                    check(record, "user_id", "users")?;
+                    if maybe_field(record, "user_id").is_some() {
+                        check(record, "user_id", "users")?;
+                    }
                 }
                 "card_goldnesses" => check(record, "card_id", "cards")?,
                 // Fizzy exports can contain account-scoped spikes whose card
@@ -754,10 +756,14 @@ async fn apply_archive(
     }
     for closure in records(&archive, "closures") {
         let card_id = field(closure, "card_id")?;
-        sqlx::query("INSERT INTO closures(card_id,user_id,created_at) VALUES(?,?,?)")
+        let created_at = field(closure, "created_at")?;
+        sqlx::query("INSERT INTO closures(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .bind(field(closure, "id")?)
+            .bind(account_id)
             .bind(card_id)
-            .bind(field(closure, "user_id")?)
-            .bind(field(closure, "created_at")?)
+            .bind(maybe_field(closure, "user_id"))
+            .bind(created_at)
+            .bind(maybe_field(closure, "updated_at").unwrap_or(created_at))
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;

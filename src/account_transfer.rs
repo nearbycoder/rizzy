@@ -104,7 +104,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "closures",
-        query: "SELECT NULL id,c.account_id,z.card_id,z.created_at,z.created_at updated_at,z.user_id FROM closures z JOIN cards c ON c.id=z.card_id WHERE c.account_id=? ORDER BY z.card_id",
+        query: "SELECT id,account_id,card_id,created_at,updated_at,user_id FROM closures WHERE account_id=? ORDER BY card_id",
         booleans: &[],
         json_fields: &[],
     },

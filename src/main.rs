@@ -1326,6 +1326,43 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    let closure_columns = sqlx::query("PRAGMA table_info(closures)")
+        .fetch_all(&db)
+        .await?;
+    if !closure_columns
+        .iter()
+        .any(|row| row.get::<String, _>("name") == "id")
+    {
+        let mut tx = db.begin().await?;
+        sqlx::query("CREATE TABLE closures_rebuilt (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, card_id TEXT NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            .execute(&mut *tx).await?;
+        let legacy = sqlx::query("SELECT z.card_id,c.account_id,z.user_id,z.created_at FROM closures z JOIN cards c ON c.id=z.card_id")
+            .fetch_all(&mut *tx).await?;
+        for row in legacy {
+            let timestamp: String = row.get("created_at");
+            sqlx::query("INSERT INTO closures_rebuilt(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                .bind(id())
+                .bind(row.get::<String, _>("account_id"))
+                .bind(row.get::<String, _>("card_id"))
+                .bind(row.get::<Option<String>, _>("user_id"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx).await?;
+        }
+        sqlx::query("DROP TABLE closures").execute(&mut *tx).await?;
+        sqlx::query("ALTER TABLE closures_rebuilt RENAME TO closures")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
+    sqlx::query("CREATE INDEX IF NOT EXISTS closures_user_created ON closures(user_id,created_at)")
+        .execute(&db)
+        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS closures_account_created ON closures(account_id,created_at)",
+    )
+    .execute(&db)
+    .await?;
     let spike_columns = sqlx::query("PRAGMA table_info(card_activity_spikes)")
         .fetch_all(&db)
         .await?;
@@ -1458,8 +1495,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .await?;
         }
     }
-    sqlx::query("INSERT OR IGNORE INTO closures(card_id,user_id,created_at) SELECT c.id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id),COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
-        .execute(&db).await?;
+    let legacy_closures = sqlx::query("SELECT c.id,c.account_id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id) AS user_id,COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) AS created_at FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
+        .fetch_all(&db).await?;
+    if !legacy_closures.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_closures {
+            let timestamp: String = row.get("created_at");
+            sqlx::query("INSERT OR IGNORE INTO closures(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                .bind(id())
+                .bind(row.get::<String, _>("account_id"))
+                .bind(row.get::<String, _>("id"))
+                .bind(row.get::<String, _>("user_id"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
     let legacy_goldnesses = sqlx::query("SELECT c.id,c.account_id,c.updated_at FROM cards c WHERE c.golden=1 AND NOT EXISTS(SELECT 1 FROM card_goldnesses g WHERE g.card_id=c.id)")
         .fetch_all(&db).await?;
     if !legacy_goldnesses.is_empty() {
@@ -8383,7 +8435,9 @@ async fn set_flag(
     } else {
         value
     };
-    if flag == "golden" && c.get::<i64, _>("golden") == value {
+    if (flag == "golden" && c.get::<i64, _>("golden") == value)
+        || (flag == "closed" && c.get::<i64, _>("closed") == value)
+    {
         return Ok(StatusCode::NO_CONTENT);
     }
     let sql = match (flag, value) {
@@ -8459,9 +8513,12 @@ async fn set_flag(
             .map_err(db_err)?;
     }
     if flag == "closed" && value == 1 {
-        sqlx::query("INSERT OR IGNORE INTO closures(card_id,user_id,created_at) VALUES(?,?,?)")
+        sqlx::query("INSERT INTO closures(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .bind(id())
+            .bind(&p.account_id)
             .bind(c.get::<String, _>("id"))
             .bind(&p.user_id)
+            .bind(&timestamp)
             .bind(&timestamp)
             .execute(&mut *tx)
             .await

@@ -119,6 +119,8 @@ def run(archive_path):
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
         golden_records = [json.loads(z.read(name)) for name in z.namelist()
                           if name.startswith("data/card_goldnesses/")]
+        closure_records = [json.loads(z.read(name)) for name in z.namelist()
+                           if name.startswith("data/closures/")]
         spike_records = [json.loads(z.read(name)) for name in z.namelist()
                          if name.startswith("data/card_activity_spikes/")]
         watch_records = [json.loads(z.read(name)) for name in z.namelist()
@@ -204,6 +206,11 @@ def run(archive_path):
                     actual = db.execute("SELECT card_id,created_at,updated_at FROM card_goldnesses WHERE id=?",
                                         (gold["id"],)).fetchone()
                     assert actual == (gold["card_id"], gold["created_at"], gold["updated_at"])
+                for closure in closure_records:
+                    actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM closures WHERE id=?",
+                                        (closure["id"],)).fetchone()
+                    assert actual == (closure["card_id"], closure.get("user_id"),
+                                      closure["created_at"], closure["updated_at"])
                 for spike in spike_records:
                     actual = db.execute("SELECT card_id,created_at,updated_at FROM card_activity_spikes WHERE id=?",
                                         (spike["id"],)).fetchone()
@@ -303,6 +310,10 @@ def run(archive_path):
                     restored = json.loads(z.read(f"data/card_goldnesses/{source_gold['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
                         key: source_gold[key] for key in ("card_id", "created_at", "updated_at")}
+                for source_closure in closure_records:
+                    restored = json.loads(z.read(f"data/closures/{source_closure['id']}.json"))
+                    assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {
+                        key: source_closure[key] for key in ("card_id", "user_id", "created_at", "updated_at")}
                 for source_spike in spike_records:
                     restored = json.loads(z.read(f"data/card_activity_spikes/{source_spike['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {

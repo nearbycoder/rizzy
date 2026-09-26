@@ -267,9 +267,12 @@ CREATE TABLE IF NOT EXISTS storage_download_tokens (
   expires_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS closures (
-  card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id),
-  created_at TEXT NOT NULL
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  card_id TEXT NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS closures_user_created ON closures(user_id,created_at);
 CREATE TABLE IF NOT EXISTS card_goldnesses (

@@ -106,6 +106,11 @@ def main():
                     (card["id"],)).fetchone()
             assert spike_record
             mutate(target, f"/cards/{card['number']}/closure")
+            with sqlite3.connect(db_path) as db:
+                closure_record = db.execute(
+                    "SELECT id,account_id,user_id,created_at,updated_at FROM closures WHERE card_id=?",
+                    (card["id"],)).fetchone()
+            assert closure_record and closure_record[2] == owner["id"]
             mutate(target, f"/cards/{card['number']}/reactions", payload={"reaction": {"content": "👍"}})
             mutate(target, f"/boards/{board['id']}/publication")
             mutate(target, f"/boards/{board['id']}/webhooks", payload={
@@ -116,6 +121,7 @@ def main():
             export_id = exported["id"]
             with sqlite3.connect(db_path) as db:
                 account_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?", (account,)).fetchone()[0]
+            assert closure_record[1] == account_id
             for _ in range(120):
                 state = api(target, f"/account/exports/{export_id}")
                 if state["status"] in ("completed", "failed"):
@@ -150,6 +156,10 @@ def main():
                 gold_data = json.loads(archive.read(f"data/card_goldnesses/{gold_record[0]}.json"))
                 assert (gold_data["card_id"], gold_data["created_at"], gold_data["updated_at"]) == (
                     card["id"], gold_record[1], gold_record[2])
+                closure_data = json.loads(archive.read(f"data/closures/{closure_record[0]}.json"))
+                assert (closure_data["account_id"], closure_data["card_id"], closure_data["user_id"],
+                        closure_data["created_at"], closure_data["updated_at"]) == (
+                    account_id, card["id"], owner["id"], closure_record[3], closure_record[4])
                 spike_data = json.loads(archive.read(f"data/card_activity_spikes/{spike_record[0]}.json"))
                 assert (spike_data["card_id"], spike_data["created_at"], spike_data["updated_at"]) == (
                     card["id"], spike_record[1], spike_record[2])
