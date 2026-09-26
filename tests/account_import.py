@@ -135,6 +135,11 @@ def run(archive_path):
                          if name.startswith("data/watches/")]
         postponed_records = [json.loads(z.read(name)) for name in z.namelist()
                              if name.startswith("data/card_not_nows/")]
+        imported_samples = {
+            group: next((json.loads(z.read(name)) for name in z.namelist()
+                         if name.startswith(f"data/{group}/")), None)
+            for group in ("boards", "cards")
+        }
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "rizzy.sqlite3"
@@ -164,6 +169,7 @@ def run(archive_path):
                     time.sleep(.05)
             else:
                 raise RuntimeError("Rizzy server did not start")
+            import_started = datetime.now(timezone.utc)
             created = upload(url, token, archive)
             result = await_result(url, token, created)
             if result["status"] != "completed":
@@ -175,6 +181,16 @@ def run(archive_path):
                 imported_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?",
                                          (created["account"],)).fetchone()[0]
                 assert db.execute("SELECT name FROM accounts WHERE id=?", (imported_id,)).fetchone()[0] == account["name"]
+                for group, sample in imported_samples.items():
+                    if sample is None:
+                        continue
+                    table = group
+                    created_at, updated_at = db.execute(
+                        f"SELECT created_at,updated_at FROM {table} WHERE id=? AND account_id=?",
+                        (sample["id"], imported_id)).fetchone()
+                    assert created_at == sample["created_at"], (group, "creation time")
+                    updated = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                    assert import_started <= updated <= datetime.now(timezone.utc), (group, "fresh update time")
                 queries = {
                     "accesses": "SELECT COUNT(*) FROM access_records WHERE account_id=?",
                     "user_settings": "SELECT COUNT(*) FROM user_settings_records WHERE account_id=?",

@@ -532,6 +532,7 @@ async fn apply_archive(
         .get("join_code")
         .ok_or("Missing join_code")?;
     let join_code = field(join, "code")?;
+    let imported_at = now();
     let mut tx = app.db.begin().await.map_err(|e| e.to_string())?;
     let system_identity: String =
         sqlx::query_scalar("SELECT identity_id FROM users WHERE account_id=? AND role='system'")
@@ -651,7 +652,7 @@ async fn apply_archive(
         sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
             .bind(field(board,"id")?).bind(account_id).bind(field(board,"creator_id")?)
             .bind(field(board,"name")?).bind(boolean(board,"all_access",true))
-            .bind(field(board,"created_at")?).bind(field(board,"updated_at")?)
+            .bind(field(board,"created_at")?).bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for column in records(&archive, "columns") {
@@ -776,7 +777,7 @@ async fn apply_archive(
             .bind(maybe_field(card,"column_id")).bind(field(card,"creator_id")?)
             .bind(integer(card,"number",0)).bind(field(card,"title")?).bind(field(card,"status")?)
             .bind(maybe_field(card,"due_on"))
-            .bind(field(card,"created_at")?).bind(field(card,"updated_at")?)
+            .bind(field(card,"created_at")?).bind(&imported_at)
             .bind(field(card,"last_active_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for comment in records(&archive, "comments") {
@@ -1132,6 +1133,14 @@ async fn apply_archive(
             .bind(record_type).bind(record_id).bind(field(attachment,"name")?)
             .bind(field(attachment,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
+    // Card insert triggers touch their board, but Fizzy's bulk importer bypasses
+    // callbacks and gives every imported board one fresh update timestamp.
+    sqlx::query("UPDATE boards SET updated_at=? WHERE account_id=?")
+        .bind(&imported_at)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     sqlx::query("UPDATE accounts SET cards_count=MAX(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?")
         .bind(account_id).bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     let timestamp = now();
