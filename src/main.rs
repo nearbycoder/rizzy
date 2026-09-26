@@ -55,6 +55,7 @@ mod push_subscriptions;
 mod pwa;
 mod reaction_page;
 mod rich_text;
+mod search_page;
 mod session_transfer;
 mod signup_page;
 mod signup_seed;
@@ -6033,10 +6034,25 @@ async fn list_tags(
     }).collect();
     Ok(paginated(json!(items), total, page, &uri, &headers))
 }
-#[derive(Deserialize)]
 struct SearchQuery {
     q: Option<String>,
     page: Option<i64>,
+}
+fn parse_search_query(raw: Option<String>) -> SearchQuery {
+    let mut query = SearchQuery {
+        q: None,
+        page: None,
+    };
+    if let Some(raw) = raw {
+        for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+            match key.as_ref() {
+                "q" => query.q = Some(value.into_owned()),
+                "page" => query.page = value.parse().ok(),
+                _ => {}
+            }
+        }
+    }
+    query
 }
 fn fts_query(raw: &str) -> Option<String> {
     let balanced = raw.chars().filter(|ch| *ch == '"').count() % 2 == 0;
@@ -6079,10 +6095,14 @@ async fn search_cards(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Query(query): Query<SearchQuery>,
+    RawQuery(raw): RawQuery,
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    let query = parse_search_query(raw);
+    if !headers.contains_key("x-rizzy-json-request") {
+        return search_page::show(&app, &p, &query).await;
+    }
     let page = query.page.unwrap_or(1).clamp(1, 102);
     let Some(term) = query.q.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(paginated(json!([]), 0, page, &uri, &headers));
