@@ -911,7 +911,7 @@ async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> 
     let comment_id = id();
     let (plain, _, _) = storage::render_rich_text(app, &p.account_id, p.slug, body).await?;
     let content = search_content(plain);
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&comment_id).bind(card_id).bind(system).bind(body).bind(content).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     rich_text_records::sync(
@@ -940,7 +940,7 @@ async fn record_event(
 ) -> Result<()> {
     let timestamp = now();
     let event_id = id();
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
         .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
@@ -978,7 +978,7 @@ async fn record_event(
 }
 async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Result<()> {
     let timestamp = now();
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
     sqlx::query("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at")
         .bind(uuid::Uuid::now_v7().to_string()).bind(card_id).bind(account_id).bind(&timestamp).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
@@ -9169,7 +9169,9 @@ async fn update_card(
         .unwrap_or_else(|| c.get("last_active_at"));
     let timestamp = now();
     let _writer = app.write_lock.lock().await;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    // Reserve the SQLite writer before reading attachment state in this transaction.
+    // A deferred WAL read cannot be promoted after another process commits a write.
+    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
     if let Some(upload) = &input.image {
         storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
     }
@@ -9407,7 +9409,7 @@ async fn set_flag(
     };
     let timestamp = now();
     let _writer = app.write_lock.lock().await;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
     if flag == "golden" {
         sqlx::query(sql)
             .bind(effective_value)
@@ -10358,7 +10360,7 @@ async fn create_comment(
     let created_at =
         timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
     let _writer = app.write_lock.lock().await;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id)
         .bind(c.get::<String, _>("id"))
