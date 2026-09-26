@@ -48,7 +48,7 @@ pub(super) async fn show(
             .bind(&p.account_id).fetch_all(&app.db),
         sqlx::query(users_statement)
             .bind(&p.account_id).fetch_all(&app.db),
-        sqlx::query("SELECT id,fields FROM filters WHERE account_id=? AND creator_id=? ORDER BY updated_at DESC")
+        sqlx::query("SELECT id,updated_at FROM filters WHERE account_id=? AND creator_id=? ORDER BY updated_at DESC")
             .bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db),
         sqlx::query("SELECT a.external_account_id,a.name FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=? AND u.active=1 AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) ORDER BY a.created_at")
             .bind(&identity_id).fetch_all(&app.db),
@@ -86,33 +86,6 @@ pub(super) async fn show(
         ));
     }
     body.push_str(&section("Boards", &board_items));
-    let mut view_items = menu_link(
-        &format!("/{}/cards?expand_all=true", p.slug),
-        "Create a custom view",
-        "custom",
-        "create",
-    );
-    for row in filters {
-        let id: String = row.get("id");
-        let fields: String = row.get("fields");
-        let label = serde_json::from_str::<Value>(&fields)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("terms")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-            .filter(|term| !term.is_empty())
-            .unwrap_or_else(|| "Saved view".into());
-        view_items.push_str(&menu_link(
-            &format!("/{}/cards?filter_id={id}", p.slug),
-            &label,
-            "bookmark",
-            &id,
-        ));
-    }
-    body.push_str(&section("Custom views", &view_items));
     let mut tag_items = String::new();
     for row in tags {
         let id: String = row.get("id");
@@ -199,7 +172,13 @@ pub(super) async fn show(
         &body,
         "</body></html>",
     ].concat();
-    let etag = format!("W/\"{}\"", hex::encode(Sha256::digest(page.as_bytes())));
+    let mut digest = Sha256::new();
+    digest.update(page.as_bytes());
+    for filter in filters {
+        digest.update(filter.get::<String, _>("id").as_bytes());
+        digest.update(filter.get::<String, _>("updated_at").as_bytes());
+    }
+    let etag = format!("W/\"{}\"", hex::encode(digest.finalize()));
     let mut response = if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())

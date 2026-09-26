@@ -2,8 +2,10 @@
 """Compare the account navigation menu and conditional caching with Fizzy."""
 import json
 import os
+import re
 import sqlite3
 import time
+import urllib.parse
 
 from draft_workflow_parity import login, request, NoRedirect
 import http.cookiejar
@@ -42,12 +44,52 @@ def check(target):
         assert status == 200 and changed_headers["ETag"] != etag, (target["name"], "updated menu", status)
         assert board_name.encode() in changed_body, (target["name"], "board in menu")
         assert f"/{account}/boards/{board['id']}".encode() in changed_body, (target["name"], "board link")
+        status, _, raw = request(target, f"/{account}/boards/{board['id']}/cards", "POST",
+                                 {"card":{"title":"Saved menu card"}}, bearer=True)
+        assert status == 201
+        number = json.loads(raw)["number"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/taggings", "POST",
+                               {"tag_title":"menufilter"}, bearer=True)
+        assert status == 204
+        status, _, raw = request(target, f"/{account}/tags", bearer=True)
+        assert status == 200
+        tag_id = next(tag["id"] for tag in json.loads(raw) if tag["title"] == "menufilter")
+        status, _, board_html = request(target, f"/{account}/boards/{board['id']}", accept="text/html")
+        assert status == 200
+        status, menu_before_save, _ = request(target, path, accept="text/html")
+        assert status == 200
+        with sqlite3.connect(target["db"]) as db:
+            filters_before = db.execute("SELECT COUNT(*) FROM filters").fetchone()[0]
+        csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', board_html)
+        csrf = csrf_match.group(1).decode() if csrf_match else None
+        fields = urllib.parse.urlencode({"board_ids[]":board["id"], "tag_ids[]":tag_id}).encode()
+        status, _, stream = request(target, f"/{account}/filters", "POST", fields,
+                                    accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and b"Delete custom view" in stream, (target["name"], "save view", status)
+        match = re.search(rb'/filters/([a-z0-9]+)', stream)
+        assert match, (target["name"], "saved view ID", stream[:250])
+        filter_id = match.group(1).decode()
+        status, filter_headers, filtered_menu = request(target, path, accept="text/html")
+        assert status == 200 and board_name.encode() in filtered_menu and b"#menufilter" in filtered_menu
+        with sqlite3.connect(target["db"]) as db:
+            filter_count = db.execute("SELECT COUNT(*) FROM filters").fetchone()[0]
+        assert filter_count == filters_before + 1 and filter_headers["ETag"] != menu_before_save["ETag"]
+        assert f"/cards?filter_id={filter_id}".encode() not in filtered_menu
+        assert b"Custom views" not in filtered_menu
+        status, _, _ = request(target, f"/{account}/filters/{filter_id}", "DELETE", b"",
+                               accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200, (target["name"], "delete view", status)
+        status, cleared_headers, cleared_menu = request(target, path, accept="text/html")
+        assert status == 200 and cleared_headers["ETag"] != filter_headers["ETag"]
+        assert f"/cards?filter_id={filter_id}".encode() not in cleared_menu
+        with sqlite3.connect(target["db"]) as db:
+            assert db.execute("SELECT COUNT(*) FROM filters").fetchone()[0] == filters_before
     finally:
         status, _, _ = request(target, f"/{account}/boards/{board['id']}", "DELETE", bearer=True)
         assert status == 204, (target["name"], "delete board", status)
     status, _, _ = request(target, path, accept="application/json")
     assert status == 406, (target["name"], "JSON menu", status)
-    return {"show":200,"unchanged":304,"board_changed":200,"json":406}
+    return {"show":200,"unchanged":304,"board_changed":200,"saved_view":200,"json":406}
 
 
 def main():
