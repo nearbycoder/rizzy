@@ -189,6 +189,17 @@ CREATE TABLE IF NOT EXISTS accesses (
   PRIMARY KEY(board_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS accesses_user_board ON accesses(user_id,board_id);
+CREATE TABLE IF NOT EXISTS access_records (
+  board_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  id TEXT NOT NULL UNIQUE,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(board_id,user_id),
+  FOREIGN KEY(board_id,user_id) REFERENCES accesses(board_id,user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS access_records_account ON access_records(account_id);
 CREATE TABLE IF NOT EXISTS columns (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),

@@ -64,6 +64,12 @@ def main():
                 raise RuntimeError("Rizzy server did not start")
             owner = next(user for user in api(target, "/users") if user["role"] == "owner")
             board = api(target, "/boards", "POST", {"board": {"name": "Transfer probe"}}, 201)
+            with sqlite3.connect(db_path) as db:
+                access_record = db.execute(
+                    "SELECT r.id,r.account_id,r.created_at,r.updated_at,x.involvement,x.accessed_at "
+                    "FROM access_records r JOIN accesses x ON x.board_id=r.board_id AND x.user_id=r.user_id "
+                    "WHERE r.board_id=? AND r.user_id=?", (board["id"], owner["id"])).fetchone()
+            assert access_record and access_record[4] == "watching"
             image = upload(target)
             embed = upload(target)
             description = (f'<p>Hello <strong>world</strong></p><p><action-text-attachment '
@@ -128,6 +134,7 @@ def main():
                 account_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?", (account,)).fetchone()[0]
             assert closure_record[1] == account_id
             assert publication_record[1] == account_id
+            assert access_record[1] == account_id
             for _ in range(120):
                 state = api(target, f"/account/exports/{export_id}")
                 if state["status"] in ("completed", "failed"):
@@ -166,6 +173,12 @@ def main():
                 assert (closure_data["account_id"], closure_data["card_id"], closure_data["user_id"],
                         closure_data["created_at"], closure_data["updated_at"]) == (
                     account_id, card["id"], owner["id"], closure_record[3], closure_record[4])
+                access_data = json.loads(archive.read(f"data/accesses/{access_record[0]}.json"))
+                assert (access_data["account_id"], access_data["board_id"], access_data["user_id"],
+                        access_data["created_at"], access_data["updated_at"], access_data["involvement"],
+                        access_data["accessed_at"]) == (
+                    account_id, board["id"], owner["id"], access_record[2], access_record[3],
+                    access_record[4], access_record[5])
                 publication_data = json.loads(archive.read(
                     f"data/board_publications/{publication_record[0]}.json"))
                 assert (publication_data["account_id"], publication_data["board_id"], publication_data["key"],

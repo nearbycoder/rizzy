@@ -719,6 +719,18 @@ async fn apply_archive(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
+        let changed = sqlx::query("UPDATE access_records SET id=?,created_at=?,updated_at=? WHERE board_id=? AND user_id=?")
+            .bind(field(access, "id")?)
+            .bind(field(access, "created_at")?)
+            .bind(field(access, "updated_at")?)
+            .bind(field(access, "board_id")?)
+            .bind(field(access, "user_id")?)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        if changed.rows_affected() != 1 {
+            return Err("Access metadata was not restored".into());
+        }
     }
     for card in records(&archive, "cards") {
         if let Some(due_on) = maybe_field(card, "due_on") {

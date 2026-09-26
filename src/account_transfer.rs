@@ -68,7 +68,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "accesses",
-        query: "SELECT NULL id,x.accessed_at,b.account_id,x.board_id,COALESCE(x.accessed_at,b.created_at) created_at,x.involvement,COALESCE(x.accessed_at,b.created_at) updated_at,x.user_id FROM accesses x JOIN boards b ON b.id=x.board_id WHERE b.account_id=? ORDER BY x.board_id,x.user_id",
+        query: "SELECT r.id,x.accessed_at,r.account_id,x.board_id,r.created_at,x.involvement,r.updated_at,x.user_id FROM accesses x JOIN access_records r ON r.board_id=x.board_id AND r.user_id=x.user_id WHERE r.account_id=? ORDER BY x.board_id,x.user_id",
         booleans: &[],
         json_fields: &[],
     },

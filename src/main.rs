@@ -1698,6 +1698,26 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE accesses SET involvement='watching' WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=accesses.board_id AND b.creator_id=accesses.user_id)")
             .execute(&db).await?;
     }
+    let legacy_accesses = sqlx::query("SELECT x.board_id,x.user_id,b.account_id,b.created_at,COALESCE(x.accessed_at,b.created_at) AS updated_at FROM accesses x JOIN boards b ON b.id=x.board_id WHERE NOT EXISTS(SELECT 1 FROM access_records r WHERE r.board_id=x.board_id AND r.user_id=x.user_id)")
+        .fetch_all(&db).await?;
+    if !legacy_accesses.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_accesses {
+            sqlx::query("INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                .bind(row.get::<String, _>("board_id"))
+                .bind(row.get::<String, _>("user_id"))
+                .bind(id())
+                .bind(row.get::<String, _>("account_id"))
+                .bind(row.get::<String, _>("created_at"))
+                .bind(row.get::<String, _>("updated_at"))
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS access_records_insert AFTER INSERT ON accesses BEGIN INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(NEW.board_id,NEW.user_id,'0'||substr(lower(hex(randomblob(16))),1,24),(SELECT account_id FROM boards WHERE id=NEW.board_id),strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')); END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS access_records_update AFTER UPDATE OF involvement,accessed_at ON accesses BEGIN UPDATE access_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.board_id AND user_id=NEW.user_id; END")
+        .execute(&db).await?;
     sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT b.id,u.id,CASE WHEN b.creator_id=u.id THEN 'watching' ELSE 'access_only' END FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.all_access=1 AND u.active=1 AND u.role!='system'")
         .execute(&db).await?;
     let account_columns = sqlx::query("PRAGMA table_info(accounts)")

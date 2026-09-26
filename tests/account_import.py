@@ -93,7 +93,7 @@ def run(archive_path):
         users = [json.loads(z.read(name)) for name in z.namelist() if name.startswith("data/users/")]
         owner = next(user for user in users if user["role"] == "owner")
         counts = {group: sum(name.startswith(f"data/{group}/") for name in z.namelist())
-                  for group in ("boards", "columns", "tags", "cards", "comments", "steps",
+                  for group in ("boards", "columns", "tags", "accesses", "cards", "comments", "steps",
                                 "assignments", "taggings", "closures", "card_goldnesses",
                                 "card_not_nows", "card_activity_spikes", "watches", "pins",
                                 "reactions", "mentions", "events", "notifications",
@@ -121,6 +121,8 @@ def run(archive_path):
                           if name.startswith("data/card_goldnesses/")]
         closure_records = [json.loads(z.read(name)) for name in z.namelist()
                            if name.startswith("data/closures/")]
+        access_records = [json.loads(z.read(name)) for name in z.namelist()
+                          if name.startswith("data/accesses/")]
         publication_records = [json.loads(z.read(name)) for name in z.namelist()
                                if name.startswith("data/board_publications/")]
         spike_records = [json.loads(z.read(name)) for name in z.namelist()
@@ -170,6 +172,7 @@ def run(archive_path):
                                          (created["account"],)).fetchone()[0]
                 assert db.execute("SELECT name FROM accounts WHERE id=?", (imported_id,)).fetchone()[0] == account["name"]
                 queries = {
+                    "accesses": "SELECT COUNT(*) FROM access_records WHERE account_id=?",
                     "comments": "SELECT COUNT(*) FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=?",
                     "steps": "SELECT COUNT(*) FROM steps s JOIN cards c ON c.id=s.card_id WHERE c.account_id=?",
                     "taggings": "SELECT COUNT(*) FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=?",
@@ -213,6 +216,13 @@ def run(archive_path):
                                         (closure["id"],)).fetchone()
                     assert actual == (closure["card_id"], closure.get("user_id"),
                                       closure["created_at"], closure["updated_at"])
+                for access in access_records:
+                    actual = db.execute(
+                        "SELECT r.board_id,r.user_id,x.involvement,x.accessed_at,r.created_at,r.updated_at "
+                        "FROM access_records r JOIN accesses x ON x.board_id=r.board_id AND x.user_id=r.user_id "
+                        "WHERE r.id=?", (access["id"],)).fetchone()
+                    assert actual == (access["board_id"], access["user_id"], access["involvement"],
+                                      access.get("accessed_at"), access["created_at"], access["updated_at"])
                 for publication in publication_records:
                     actual = db.execute("SELECT board_id,key,created_at,updated_at FROM board_publications WHERE id=?",
                                         (publication["id"],)).fetchone()
@@ -321,6 +331,10 @@ def run(archive_path):
                     restored = json.loads(z.read(f"data/closures/{source_closure['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {
                         key: source_closure[key] for key in ("card_id", "user_id", "created_at", "updated_at")}
+                for source_access in access_records:
+                    restored = json.loads(z.read(f"data/accesses/{source_access['id']}.json"))
+                    assert {key: restored[key] for key in ("board_id", "user_id", "involvement", "accessed_at", "created_at", "updated_at")} == {
+                        key: source_access[key] for key in ("board_id", "user_id", "involvement", "accessed_at", "created_at", "updated_at")}
                 for source_publication in publication_records:
                     restored = json.loads(z.read(f"data/board_publications/{source_publication['id']}.json"))
                     assert {key: restored[key] for key in ("board_id", "key", "created_at", "updated_at")} == {
