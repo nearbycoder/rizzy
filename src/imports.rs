@@ -587,15 +587,18 @@ async fn apply_archive(
             let email = maybe_field(user, "email_address")
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("missing+{user_id}@rizzy.invalid"));
-            sqlx::query(
-                "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)",
-            )
-            .bind(id())
-            .bind(&email)
-            .bind(field(user, "created_at")?)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+            let insert_identity = if app.mysql {
+                "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+            } else {
+                "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+            };
+            sqlx::query(insert_identity)
+                .bind(id())
+                .bind(&email)
+                .bind(field(user, "created_at")?)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
             sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
                 .bind(email)
                 .fetch_one(&mut *tx)
@@ -611,9 +614,24 @@ async fn apply_archive(
     for settings in records(&archive, "user_settings") {
         let user_id = field(settings, "user_id")?;
         let frequency = field(settings, "bundle_email_frequency")?;
-        sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
-            .bind(user_id).bind(account_id).bind(frequency).execute(&mut *tx).await.map_err(|e| e.to_string())?;
-        sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name")
+        let update_notifications = if app.mysql {
+            "INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON DUPLICATE KEY UPDATE bundle_email_frequency=VALUES(bundle_email_frequency)"
+        } else {
+            "INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency"
+        };
+        sqlx::query(update_notifications)
+            .bind(user_id)
+            .bind(account_id)
+            .bind(frequency)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let update_timezone = if app.mysql {
+            "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON DUPLICATE KEY UPDATE timezone_name=VALUES(timezone_name)"
+        } else {
+            "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name"
+        };
+        sqlx::query(update_timezone)
             .bind(user_id)
             .bind(account_id)
             .bind(maybe_field(settings, "timezone_name"))
@@ -641,8 +659,16 @@ async fn apply_archive(
             .bind(id()).bind(account_id).bind(system_identity).bind(now())
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
-    sqlx::query("INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE account_id=? AND role!='system'")
-        .bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    let insert_settings = if app.mysql {
+        "INSERT IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE account_id=? AND role!='system'"
+    } else {
+        "INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE account_id=? AND role!='system'"
+    };
+    sqlx::query(insert_settings)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     for tag in records(&archive, "tags") {
         sqlx::query("INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)")
             .bind(field(tag, "id")?)
@@ -1160,8 +1186,17 @@ async fn apply_archive(
             .await
             .map_err(|e| e.to_string())?;
     }
-    sqlx::query("UPDATE accounts SET cards_count=MAX(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?")
-        .bind(account_id).bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    let repair_count = if app.mysql {
+        "UPDATE accounts SET cards_count=GREATEST(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?"
+    } else {
+        "UPDATE accounts SET cards_count=MAX(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?"
+    };
+    sqlx::query(repair_count)
+        .bind(account_id)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     let timestamp = now();
     let completed = sqlx::query("UPDATE imports SET status='completed',completed_at=?,updated_at=? WHERE id=? AND status='processing'")
         .bind(&timestamp).bind(&timestamp).bind(import_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
@@ -1240,7 +1275,9 @@ pub(super) async fn worker(app: Arc<App>) {
             Ok(()) => {}
             Err(error) => {
                 eprintln!("import {import_id} failed: {error}");
-                let reason = if error.contains("UNIQUE constraint") || error.contains("PRIMARY KEY")
+                let reason = if error.contains("UNIQUE constraint")
+                    || error.contains("PRIMARY KEY")
+                    || error.contains("1062 (23000)")
                 {
                     "conflict"
                 } else {

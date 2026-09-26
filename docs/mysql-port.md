@@ -67,6 +67,17 @@ before creating a session. The matching SQLite link flow was compared with
 Fizzy in `tests/session_transfer_parity.py`, and its generation, redemption,
 expiry, and race checks passed again after this change. The MySQL test checks
 Rizzy only.
+`tests/mysql_account_import.py` restores a populated account ZIP on MySQL,
+checking 43 records across 23 groups, two original file payloads, account
+name and card count. It also checks that a cross-account reference leaves no
+restored records and that a second import of the same ZIP reports a conflict
+without adding cards. The import worker now uses MySQL upserts and scalar
+`GREATEST` where SQLite used `ON CONFLICT` and scalar `MAX`. A new MySQL board
+update trigger supplies the entropy metadata expected during restore. The
+full SQLite account import regression still passes. The default fixture is a
+Rizzy-created Fizzy-format ZIP; direct restoration of a ZIP exported by the
+pinned Fizzy application on MySQL and wider archive variants remain to be
+verified.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,

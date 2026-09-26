@@ -106,6 +106,19 @@ BEGIN
   END IF;
 END;
 
+-- trigger: boards_after_update
+CREATE TRIGGER boards_after_update AFTER UPDATE ON boards FOR EACH ROW
+BEGIN
+  IF NEW.entropy_override=1 AND
+     (OLD.entropy_override=0 OR NOT (NEW.auto_postpone_period_in_days <=> OLD.auto_postpone_period_in_days)) THEN
+    INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at)
+    VALUES(CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),NEW.account_id,'Board',NEW.id,
+           CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z'),
+           CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z'))
+    ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at);
+  END IF;
+END;
+
 -- trigger: boards_after_delete
 CREATE TRIGGER boards_after_delete AFTER DELETE ON boards FOR EACH ROW
 BEGIN
