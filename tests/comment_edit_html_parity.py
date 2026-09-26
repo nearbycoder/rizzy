@@ -43,6 +43,9 @@ def check(target):
         comment_id = json.loads(raw)["id"]
         path = f"/{account}/cards/{number}/comments/{comment_id}"
         index_path = f"/{account}/cards/{number}/comments"
+        for method in ("POST", "DELETE"):
+            status, _, _ = request(target, f"/{account}/cards/{number}/closure", method, b"", bearer=True)
+            assert status == 204, (target["name"], "closure", method, status)
         status, _, raw = request(target, index_path, bearer=True)
         assert status == 200 and any(comment["id"] == comment_id for comment in json.loads(raw))
         assert request(target, index_path, accept="text/html")[0] == 406
@@ -55,11 +58,15 @@ def check(target):
         status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200 and new_target in card_html
         assert b'Type your comment\xe2\x80\xa6' in card_html
+        assert card_html.count(b'class="comment-by-system"') == 2, target["name"]
+        assert b'Full history' in card_html and b'Reopened' in card_html, target["name"]
         for marker in (f'messages_card_{card["id"]}'.encode(),
                        f'comment_watchers_card_{card["id"]}'.encode(),
                        b'aria-label="Messages"', b'comment__avatar',
-                       b'comment__content', b'comment__author', b'comment__body'):
+                       b'comment__content', b'comment__author', b'comment__body',
+                       b'data-local-time-target="agoorweekday"', b'data-local-time-target="time"'):
             assert marker in card_html, (target["name"], "message layout", marker)
+        assert re.search(rb'<time datetime="\d+" data-local-time-target="agoorweekday"', card_html), target["name"]
         status, headers, created_stream = request(target, f"/{account}/cards/{number}/comments",
                                                    "POST", {"comment":{"body":"Turbo-created comment"}},
                                                    accept="text/vnd.turbo-stream.html", csrf=csrf)

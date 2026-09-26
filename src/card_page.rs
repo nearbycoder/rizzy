@@ -81,7 +81,7 @@ pub(super) async fn update_stream(
             "<section id=\"card_container_card_{card_id}\" class=\"card-perma card-perma--draft\">{image}<div class=\"card__content\">{content}</div></section>"
         )
     } else {
-        let page = show(app, principal, card).await?.0;
+        let page = show(app, principal, card, "UTC").await?.0;
         let article = page
             .find("<article class=\"card-perma")
             .and_then(|start| {
@@ -132,6 +132,7 @@ pub(super) async fn show(
     app: &App,
     principal: &Principal,
     card: &SqliteRow,
+    timezone: &str,
 ) -> Result<Html<String>> {
     let card_id: String = card.get("id");
     let board_id: String = card.get("board_id");
@@ -297,6 +298,7 @@ pub(super) async fn show(
     let mut values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("NUMBER", number.to_string()),
+        ("TIMEZONE", escape(timezone)),
         ("CARD_ID", escape(&card_id)),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),

@@ -645,8 +645,10 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 }
 fn etag_timezone(headers: &HeaderMap) -> Option<String> {
     let cookie = cookie_value(headers, "timezone")?;
-    let encoded = format!("timezone={}", cookie.trim_matches('"'));
-    let decoded = url::form_urlencoded::parse(encoded.as_bytes()).next()?.1;
+    let value = cookie.trim_matches('"').replace('+', " ");
+    let decoded = percent_encoding::percent_decode_str(&value)
+        .decode_utf8()
+        .ok()?;
     timezone::resolve(&decoded).map(|_| decoded.into_owned())
 }
 fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, max_age: i64, secure: bool) {
@@ -9303,7 +9305,10 @@ async fn show_card(
             .into_response());
     }
     if !headers.contains_key("x-rizzy-json-request") {
-        return Ok(card_page::show(&app, &p, &c).await?.into_response());
+        let timezone = etag_timezone(&headers).unwrap_or_else(|| "UTC".into());
+        return Ok(card_page::show(&app, &p, &c, &timezone)
+            .await?
+            .into_response());
     }
     Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
 }
