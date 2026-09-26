@@ -70,7 +70,7 @@ def rust_env(directory, host, port, database):
             "RIZZY_DISABLE_PUSH_DELIVERY": "1"}
 
 
-def verify_counts(client, socket, database, initial_cards, units):
+def observed_counts(client, socket, database):
     statement = ("SELECT (SELECT COUNT(*) FROM cards WHERE board_id=b.id), "
                  "(SELECT COUNT(*) FROM events WHERE board_id=b.id), "
                  "(SELECT COUNT(*) FROM comments WHERE card_id IN "
@@ -78,9 +78,14 @@ def verify_counts(client, socket, database, initial_cards, units):
                  "FROM boards b WHERE b.name='Mixed workload'")
     actual = [int(value) for value in mysql_query(client, socket, database,
                                                   statement).split("\t")]
-    expected = [initial_cards + units, initial_cards + 4 * units, 3 * units]
-    assert actual == expected, (database, actual, expected)
     return dict(zip(("cards", "events", "comments"), actual))
+
+
+def verify_counts(client, socket, database, initial_cards, units):
+    actual = observed_counts(client, socket, database)
+    expected = [initial_cards + units, initial_cards + 4 * units, 3 * units]
+    assert list(actual.values()) == expected, (database, actual, expected)
+    return actual
 
 
 def run_pair(args, server_cpus, order):
@@ -120,19 +125,50 @@ def run_pair(args, server_cpus, order):
                 raise AssertionError("workflow shapes: " + difference)
             if difference := first_difference(samples["fizzy"], samples["rizzy"]):
                 raise AssertionError("fixture: " + difference)
-            result = {"sample_parity": samples["fizzy"], "runs": {}}
+            result = {"sample_parity": samples["fizzy"], "runs": {},
+                      "paired_comparable": True}
             for name in order:
                 active_name = name + " load"
-                result["runs"][name] = run_load(targets[name], boards[name], paths[name],
-                                                 args.seconds, args.clients)
-                assert not result["runs"][name]["errors"], (name, result["runs"][name]["errors"])
+                sample = run_load(targets[name], boards[name], paths[name],
+                                  args.seconds, args.clients)
+                result["runs"][name] = sample
                 database = source_dbs[""] if name == "fizzy" else rust_db
-                result["runs"][name]["verified_counts"] = verify_counts(
-                    args.mysql_client, args.mysql_socket, database, args.cards,
-                    result["runs"][name]["units_completed"])
-                print(f"{name}: {result['runs'][name]['units_per_second']} units/s, "
-                      f"{len(result['runs'][name]['errors'])} errors",
+                if sample["errors"]:
+                    sample["observed_counts"] = observed_counts(
+                        args.mysql_client, args.mysql_socket, database)
+                    sample["valid_for_throughput_comparison"] = False
+                    result["paired_comparable"] = False
+                else:
+                    try:
+                        sample["verified_counts"] = verify_counts(
+                            args.mysql_client, args.mysql_socket, database, args.cards,
+                            sample["units_completed"])
+                        sample["valid_for_throughput_comparison"] = True
+                    except AssertionError as error:
+                        sample["count_verification_error"] = str(error)
+                        sample["observed_counts"] = observed_counts(
+                            args.mysql_client, args.mysql_socket, database)
+                        sample["valid_for_throughput_comparison"] = False
+                        result["paired_comparable"] = False
+                print(f"{name}: {sample['units_per_second']} units/s, "
+                      f"{len(sample['errors'])} errors, "
+                      f"comparable={sample['valid_for_throughput_comparison']}",
                       file=sys.stderr, flush=True)
+            if not result["paired_comparable"]:
+                failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
+                result["diagnostics"] = {}
+                for name in processes:
+                    log = root / name / (name + ".log")
+                    if log.exists():
+                        preserved = failure_dir / f"{name}.log"
+                        preserved.write_bytes(log.read_bytes())
+                        lines = log.read_text().splitlines()
+                        result["diagnostics"][name] = {
+                            "full_log": str(preserved),
+                            "error_lines": [line for line in lines if any(
+                                marker in line for marker in
+                                ("ERROR --", "500 Internal", "Deadlocked", "1213:", "Exception"))][-20:],
+                        }
             return result
         except Exception:
             print(f"benchmark failed during {active_name}", file=sys.stderr)
@@ -197,6 +233,8 @@ def main():
         order = ("fizzy", "rizzy") if number % 2 == 0 else ("rizzy", "fizzy")
         result["rounds"].append({"number": number + 1, "order": order,
                                  **run_pair(args, server_cpus, order)})
+    result["status"] = ("complete" if all(round_["paired_comparable"] for round_ in result["rounds"])
+                        else "has_errors")
     output = json.dumps(result, indent=2) + "\n"
     if args.output:
         path = (ROOT / args.output).resolve()
@@ -205,6 +243,8 @@ def main():
         print(path)
     else:
         print(output)
+    if result["status"] != "complete":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -256,10 +256,26 @@ but Fizzy returned HTTP 500 during `PATCH /cards/818`, so that round has no
 valid paired throughput ratio. A separate 16-client run stopped on Fizzy's
 first load phase before Rizzy ran. Both failures were MySQL error 1213
 deadlocks in the pinned source's ActiveSearch MySQL shard upsert, reported as
-`ActiveSearch::AdapterError` from `CardsController#update`. The benchmark
-intentionally stops on the first HTTP error and does not count partial
+`ActiveSearch::AdapterError` from `CardsController#update`. Those runs used a
+benchmark that stopped on the first HTTP error and did not count partial
 workflows as completed units. The two failure records are
 `bench/results/mysql_mixed_500cards_c8_partial_2026-09-26.json` and
 `bench/results/mysql_mixed_500cards_c16_failed_2026-09-26.json`. A repeated,
 error-free concurrency sweep and checks with multiple app and database hosts
 are still needed to establish a greater-scale claim.
+
+The MySQL mixed benchmark now finishes the other target's load when one target
+returns an HTTP error. It writes an artifact with the failed target's observed
+database counts, error, and log excerpts, marks the round unsuitable for a
+paired throughput ratio, and exits nonzero after writing. A 100-card,
+eight-client probe reached a Fizzy MySQL search-index deadlock after 0.5
+seconds and seven completed units; Rizzy then completed its ten-second phase
+at 198.65 units/s with zero errors and verified counts. That result is in
+`bench/results/mysql_mixed_100cards_c8_failure_2026-09-26.json` and is
+reliability evidence, not a speed ratio. A separate 500-card, 32-client,
+20-second pair completed with no errors or count mismatches: Fizzy reached
+26.63 units/s and Rizzy 162.21 units/s, a 6.09× ratio for that round. Its
+artifact is `bench/results/mysql_mixed_500cards_c32_20s_2026-09-26.json`.
+Both runs used the pinned Fizzy source and the release binary hash recorded
+in each artifact. The source deadlock is intermittent, so repeated rounds are
+needed before making a stable throughput or maximum-scale claim.
