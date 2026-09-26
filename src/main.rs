@@ -7999,8 +7999,52 @@ async fn update_board_entropy(
         Ok(days) => days,
         Err(_) => return Ok(entropy_parameter_error(StatusCode::UNPROCESSABLE_ENTITY)),
     };
-    sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,entropy_override=1,updated_at=? WHERE id=? AND account_id=?")
-        .bind(days).bind(now()).bind(&id).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &id, app.mysql).await?;
+    let current = sqlx::query(
+        "SELECT auto_postpone_period_in_days,entropy_override FROM boards WHERE id=? AND account_id=?",
+    )
+    .bind(&id)
+    .bind(&p.account_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    let changed = current.get::<i64, _>("entropy_override") == 0
+        || current.get::<i64, _>("auto_postpone_period_in_days") != days;
+    if !app.mysql {
+        sqlx::query("INSERT INTO card_bulk_touches(board_id) VALUES(?)")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    sqlx::query("UPDATE boards SET auto_postpone_period_in_days=?,entropy_override=1 WHERE id=? AND account_id=?")
+        .bind(days).bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+    // SQLite's entropy trigger performs the changed-value bulk card touch.
+    // Rails also touches cards on an unchanged Entropy save; MySQL needs the
+    // explicit touch on every request because its board trigger only stores
+    // Entropy metadata. Neither path should touch the board or its columns.
+    if app.mysql || !changed {
+        let touch_cards_sql = if app.mysql {
+            "UPDATE cards SET updated_at=?,bulk_touch_epoch=bulk_touch_epoch+1 WHERE board_id=?"
+        } else {
+            "UPDATE cards SET updated_at=? WHERE board_id=?"
+        };
+        sqlx::query(touch_cards_sql)
+            .bind(now())
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    if !app.mysql {
+        sqlx::query("DELETE FROM card_bulk_touches WHERE board_id=?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
     let b = board(&app, &p, &id).await?;
     Ok(Json(board_detail(&app, &p, &b, &base(&headers)).await?).into_response())
 }

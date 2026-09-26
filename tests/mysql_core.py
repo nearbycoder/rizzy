@@ -263,8 +263,28 @@ def main():
             age_card(8)
             assert call(base, token, soon_path) == []
             age_card(0)
+            before_entropy = column_times()
+            entropy_active = mysql_scalar(url,
+                f"SELECT last_active_at FROM cards WHERE id='{card['id']}'")
+            entropy_epoch = int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'"))
+            time.sleep(.02)
             assert call(base, token, scope + f"/boards/{board['id']}/entropy", "PUT",
                         {"board": {"auto_postpone_period_in_days": 11}})["auto_postpone_period_in_days"] == 11
+            after_entropy = column_times()
+            assert tuple(a != b for a, b in zip(before_entropy, after_entropy)) == (
+                True, False, False)
+            assert mysql_scalar(url,
+                f"SELECT last_active_at FROM cards WHERE id='{card['id']}'") == entropy_active
+            assert int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'")) == entropy_epoch + 1
+            time.sleep(.02)
+            assert call(base, token, scope + f"/boards/{board['id']}/entropy", "PUT",
+                        {"board": {"auto_postpone_period_in_days": 11}})["auto_postpone_period_in_days"] == 11
+            assert tuple(a != b for a, b in zip(after_entropy, column_times())) == (
+                True, False, False)
+            assert int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'")) == entropy_epoch + 2
             age_card(10)
             assert [item["id"] for item in call(base, token, soon_path)] == [card["id"]]
             age_card(13)
