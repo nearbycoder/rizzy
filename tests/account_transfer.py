@@ -63,6 +63,13 @@ def main():
             else:
                 raise RuntimeError("Rizzy server did not start")
             owner = next(user for user in api(target, "/users") if user["role"] == "owner")
+            with sqlite3.connect(db_path) as db:
+                settings_record = db.execute(
+                    "SELECT r.id,r.account_id,r.created_at,r.updated_at,n.bundle_email_frequency,t.timezone_name "
+                    "FROM user_settings_records r JOIN notification_settings n ON n.user_id=r.user_id "
+                    "LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.user_id=?",
+                    (owner["id"],)).fetchone()
+            assert settings_record and settings_record[4] == "every_few_hours"
             board = api(target, "/boards", "POST", {"board": {"name": "Transfer probe"}}, 201)
             with sqlite3.connect(db_path) as db:
                 access_record = db.execute(
@@ -135,6 +142,7 @@ def main():
             assert closure_record[1] == account_id
             assert publication_record[1] == account_id
             assert access_record[1] == account_id
+            assert settings_record[1] == account_id
             for _ in range(120):
                 state = api(target, f"/account/exports/{export_id}")
                 if state["status"] in ("completed", "failed"):
@@ -179,6 +187,12 @@ def main():
                         access_data["accessed_at"]) == (
                     account_id, board["id"], owner["id"], access_record[2], access_record[3],
                     access_record[4], access_record[5])
+                settings_data = json.loads(archive.read(f"data/user_settings/{settings_record[0]}.json"))
+                assert (settings_data["account_id"], settings_data["user_id"],
+                        settings_data["created_at"], settings_data["updated_at"],
+                        settings_data["bundle_email_frequency"], settings_data["timezone_name"]) == (
+                    account_id, owner["id"], settings_record[2], settings_record[3],
+                    settings_record[4], settings_record[5])
                 publication_data = json.loads(archive.read(
                     f"data/board_publications/{publication_record[0]}.json"))
                 assert (publication_data["account_id"], publication_data["board_id"], publication_data["key"],

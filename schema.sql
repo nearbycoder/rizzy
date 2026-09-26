@@ -529,6 +529,14 @@ CREATE TABLE IF NOT EXISTS user_timezones (
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   timezone_name TEXT
 );
+CREATE TABLE IF NOT EXISTS user_settings_records (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS user_settings_records_account ON user_settings_records(account_id);
 CREATE TABLE IF NOT EXISTS filters (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

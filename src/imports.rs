@@ -605,15 +605,27 @@ async fn apply_archive(
     for settings in records(&archive, "user_settings") {
         let user_id = field(settings, "user_id")?;
         let frequency = field(settings, "bundle_email_frequency")?;
-        sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?)")
+        sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
             .bind(user_id).bind(account_id).bind(frequency).execute(&mut *tx).await.map_err(|e| e.to_string())?;
-        sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?)")
+        sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name")
             .bind(user_id)
             .bind(account_id)
             .bind(maybe_field(settings, "timezone_name"))
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
+        let changed = sqlx::query("UPDATE user_settings_records SET id=?,created_at=?,updated_at=? WHERE user_id=? AND account_id=?")
+            .bind(field(settings, "id")?)
+            .bind(field(settings, "created_at")?)
+            .bind(field(settings, "updated_at")?)
+            .bind(user_id)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        if changed.rows_affected() != 1 {
+            return Err("User settings metadata was not restored".into());
+        }
     }
     if !records(&archive, "users")
         .iter()

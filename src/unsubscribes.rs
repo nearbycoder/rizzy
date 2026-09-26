@@ -82,7 +82,7 @@ pub(super) async fn create(
     };
     let user_id: String = user.get("id");
     let account_id: String = user.get("account_id");
-    sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,'never') ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency='never'")
+    sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,'never') ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency='never' WHERE notification_settings.bundle_email_frequency<>'never'")
         .bind(&user_id).bind(&account_id).execute(&app.db).await.map_err(db_err)?;
     sqlx::query("DELETE FROM notification_bundles WHERE user_id=? AND status=0")
         .bind(&user_id)

@@ -1560,6 +1560,34 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .await?;
     }
     migrate_deactivated_users(&db).await?;
+    sqlx::query("INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE role!='system'")
+        .execute(&db).await?;
+    let legacy_user_settings = sqlx::query("SELECT u.id,u.account_id,u.created_at FROM users u WHERE u.role!='system' AND NOT EXISTS(SELECT 1 FROM user_settings_records r WHERE r.user_id=u.id)")
+        .fetch_all(&db).await?;
+    if !legacy_user_settings.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_user_settings {
+            let timestamp: String = row.get("created_at");
+            sqlx::query("INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+                .bind(id())
+                .bind(row.get::<String, _>("account_id"))
+                .bind(row.get::<String, _>("id"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_user_insert AFTER INSERT ON users WHEN NEW.role!='system' BEGIN INSERT INTO notification_settings(user_id,account_id) VALUES(NEW.id,NEW.account_id); INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,NEW.id,NEW.created_at,NEW.created_at); END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_frequency_update AFTER UPDATE OF bundle_email_frequency ON notification_settings WHEN NEW.bundle_email_frequency<>OLD.bundle_email_frequency BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_insert AFTER INSERT ON user_timezones WHEN NEW.timezone_name IS NOT NULL BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_update AFTER UPDATE OF timezone_name ON user_timezones WHEN OLD.timezone_name IS NOT NEW.timezone_name BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
+        .execute(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_delete AFTER DELETE ON user_timezones BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=OLD.user_id; END")
+        .execute(&db).await?;
     for table in ["cards", "comments"] {
         let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
             .fetch_all(&db)
@@ -3326,7 +3354,7 @@ async fn update_timezone(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let timezone = body.get("timezone_name").and_then(Value::as_str);
-    sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name")
+    sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name WHERE user_timezones.timezone_name IS NOT excluded.timezone_name")
         .bind(&p.user_id).bind(&p.account_id).bind(timezone).execute(&app.db).await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -6787,7 +6815,7 @@ async fn update_notification_settings(
     .fetch_optional(&app.db)
     .await
     .map_err(db_err)?;
-    sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
+    sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency WHERE notification_settings.bundle_email_frequency<>excluded.bundle_email_frequency")
         .bind(&p.user_id).bind(&p.account_id).bind(&frequency).execute(&app.db).await.map_err(db_err)?;
     if previous.as_deref() != Some(frequency.as_str()) {
         if frequency == "never" {
