@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 pub(super) async fn create(
     State(app): Shared,
@@ -12,7 +13,12 @@ pub(super) async fn create(
     // Fizzy allows cancellation only while accepting new account signups.
     if env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1") {
         let stamp = now();
-        let inserted = sqlx::query("INSERT OR IGNORE INTO account_cancellations(id,account_id,initiated_by_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+        let statement = if app.mysql {
+            "INSERT IGNORE INTO account_cancellations(id,account_id,initiated_by_id,created_at,updated_at) VALUES(?,?,?,?,?)"
+        } else {
+            "INSERT OR IGNORE INTO account_cancellations(id,account_id,initiated_by_id,created_at,updated_at) VALUES(?,?,?,?,?)"
+        };
+        let inserted = sqlx::query(statement)
             .bind(id())
             .bind(&p.account_id)
             .bind(&p.user_id)
@@ -109,7 +115,7 @@ pub(super) async fn menu(State(app): Shared, headers: HeaderMap) -> Result<Respo
 }
 
 // Runs on startup and hourly. All database records are removed in one transaction;
-// SQLite checks deferred references at commit so user/card/board deletion order is safe.
+// SQLite checks deferred references at commit, while MySQL deletes children first.
 pub(super) async fn incinerate_due(app: &App) -> std::result::Result<(), sqlx::Error> {
     let cutoff = (Utc::now() - chrono::Duration::days(30))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -125,21 +131,84 @@ pub(super) async fn incinerate_due(app: &App) -> std::result::Result<(), sqlx::E
     Ok(())
 }
 
-async fn incinerate_one(app: &App, account_id: &str) -> std::result::Result<(), sqlx::Error> {
-    let mut tx = app.db.begin().await?;
-    sqlx::query("PRAGMA defer_foreign_keys=ON")
-        .execute(&mut *tx)
+async fn mysql_account_tables(db: &DbPool) -> std::result::Result<Vec<String>, sqlx::Error> {
+    let tables: Vec<String> = sqlx::query_scalar("SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema=DATABASE() AND column_name='account_id' AND table_name<>'accounts' ORDER BY table_name")
+        .fetch_all(db)
         .await?;
-    let still_due: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM account_cancellations WHERE account_id=? AND created_at<?",
-    )
-    .bind(account_id)
-    .bind(
-        (Utc::now() - chrono::Duration::days(30))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    )
-    .fetch_one(&mut *tx)
-    .await?;
+    let known: HashSet<&str> = tables.iter().map(String::as_str).collect();
+    let references = sqlx::query("SELECT TABLE_NAME AS child_table, REFERENCED_TABLE_NAME AS parent_table FROM information_schema.key_column_usage WHERE table_schema=DATABASE() AND referenced_table_schema=DATABASE() AND referenced_table_name IS NOT NULL")
+        .fetch_all(db)
+        .await?;
+    let mut children: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut parent_counts: HashMap<String, usize> =
+        tables.iter().map(|table| (table.clone(), 0)).collect();
+    for reference in references {
+        let child: String = reference.try_get("child_table")?;
+        let parent: String = reference.try_get("parent_table")?;
+        if child != parent
+            && known.contains(child.as_str())
+            && known.contains(parent.as_str())
+            && children.entry(child).or_default().insert(parent.clone())
+        {
+            *parent_counts.get_mut(&parent).expect("known parent") += 1;
+        }
+    }
+    let mut ready: BTreeSet<String> = parent_counts
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(table, _)| table.clone())
+        .collect();
+    let mut ordered = Vec::with_capacity(tables.len());
+    while let Some(table) = ready.pop_first() {
+        if let Some(parents) = children.remove(&table) {
+            for parent in parents {
+                let count = parent_counts.get_mut(&parent).expect("known parent");
+                *count -= 1;
+                if *count == 0 {
+                    ready.insert(parent);
+                }
+            }
+        }
+        ordered.push(table);
+    }
+    if ordered.len() != tables.len() {
+        return Err(sqlx::Error::Protocol(
+            "cyclic account-scoped MySQL foreign keys".into(),
+        ));
+    }
+    Ok(ordered)
+}
+
+async fn incinerate_one(app: &App, account_id: &str) -> std::result::Result<(), sqlx::Error> {
+    let mysql_tables = if app.mysql {
+        mysql_account_tables(&app.db).await?
+    } else {
+        Vec::new()
+    };
+    let mut tx = app.db.begin().await?;
+    if !app.mysql {
+        sqlx::query("PRAGMA defer_foreign_keys=ON")
+            .execute(&mut *tx)
+            .await?;
+    }
+    let cutoff = (Utc::now() - chrono::Duration::days(30))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let still_due: i64 = if app.mysql {
+        sqlx::query_scalar::<_, String>("SELECT account_id FROM account_cancellations WHERE account_id=? AND created_at<? FOR UPDATE")
+            .bind(account_id)
+            .bind(&cutoff)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some() as i64
+    } else {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_cancellations WHERE account_id=? AND created_at<?",
+        )
+        .bind(account_id)
+        .bind(&cutoff)
+        .fetch_one(&mut *tx)
+        .await?
+    };
     if still_due == 0 {
         return Ok(());
     }
@@ -159,26 +228,36 @@ async fn incinerate_one(app: &App, account_id: &str) -> std::result::Result<(), 
     let system_identity_ids: Vec<String> = sqlx::query_scalar("SELECT identity_id FROM users WHERE account_id=? AND role='system' AND identity_id IS NOT NULL")
         .bind(account_id).fetch_all(&mut *tx).await?;
 
-    // Only account-scoped tables may be cleared. sqlite_master and table_info
-    // supply trusted schema names, including tables added in future migrations.
-    let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' ORDER BY name")
-        .fetch_all(&mut *tx).await?;
-    for table in tables {
-        if table == "accounts" {
-            continue;
-        }
-        let quoted = format!("\"{}\"", table.replace('"', "\"\""));
-        let columns = sqlx::query(&format!("PRAGMA table_info({quoted})"))
-            .fetch_all(&mut *tx)
-            .await?;
-        if columns
-            .iter()
-            .any(|column| column.get::<String, _>("name") == "account_id")
-        {
+    // Only account-scoped tables may be cleared. Schema introspection supplies
+    // trusted table names, including tables added in future migrations.
+    if app.mysql {
+        for table in mysql_tables {
+            let quoted = format!("`{}`", table.replace('`', "``"));
             sqlx::query(&format!("DELETE FROM {quoted} WHERE account_id=?"))
                 .bind(account_id)
                 .execute(&mut *tx)
                 .await?;
+        }
+    } else {
+        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' ORDER BY name")
+            .fetch_all(&mut *tx).await?;
+        for table in tables {
+            if table == "accounts" {
+                continue;
+            }
+            let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+            let columns = sqlx::query(&format!("PRAGMA table_info({quoted})"))
+                .fetch_all(&mut *tx)
+                .await?;
+            if columns
+                .iter()
+                .any(|column| column.get::<String, _>("name") == "account_id")
+            {
+                sqlx::query(&format!("DELETE FROM {quoted} WHERE account_id=?"))
+                    .bind(account_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
     }
     sqlx::query("DELETE FROM accounts WHERE id=?")

@@ -51,6 +51,14 @@ SQLite passkey flow still passes. The pinned
 Fizzy MySQL passkey controller and library suites passed 19 tests and 64
 assertions. This checks one synthetic authenticator and one local origin; real
 browser devices, multiple credentials, and deployment origins remain.
+`tests/mysql_account_cancellation.py` checks the single-tenant cancellation
+guard, immediate access loss, day-29 retention, day-31 deletion of all
+account-scoped MySQL rows and dependent comments, file cleanup, and survival
+of another account. MySQL incineration orders account-scoped tables by foreign
+key dependency and keeps foreign-key checks enabled; the cancellation row is
+locked before deletion. The SQLite cancellation regression also passes. This
+fixture does not establish parity for every account lifecycle workflow or
+concurrent incineration workers.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,
