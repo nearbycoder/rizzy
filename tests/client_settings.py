@@ -29,8 +29,15 @@ def main():
                 for prefix in ("", f"/{account}"):
                     actual, headers = call(port, prefix + path)
                     assert actual == expected
-                    assert headers["Cache-Control"] == "public, max-age=60"
-            for path in ("android_v2000.json", "ios_v2000.json", "blackberry_v1.json", "android_va.json"):
+                    assert headers["Cache-Control"] == "max-age=60, public"
+                    assert headers["Content-Type"] == "application/json; charset=utf-8"
+                    without_suffix, _ = call(port, prefix + path.removesuffix(".json"))
+                    assert without_suffix == expected
+                from_query, _ = call(port, "/client_configurations/" + platform + "_v1?format=json", accept="text/html")
+                assert from_query == expected
+            for path in ("android_v2000.json", "ios_v2000.json", "android_v1.html"):
+                call(port, "/client_configurations/" + path, status=500)
+            for path in ("blackberry_v1.json", "android_va.json"):
                 call(port, "/client_configurations/" + path, status=404)
 
             path = f"/{account}/my/timezone"

@@ -1462,7 +1462,7 @@
       "path": "/client_configurations(/:platform)_v(:version)(.:format)",
       "controller": "client_configurations",
       "action": "show",
-      "route_present": false
+      "route_present": true
     }
   ],
   "rust_routes": [
@@ -1484,15 +1484,39 @@
     },
     {
       "method": "GET",
-      "path": "/client_configurations/android_v1.json"
+      "path": "/client_configurations/{configuration}"
     },
     {
       "method": "GET",
-      "path": "/client_configurations/ios_v1.json"
+      "path": "/collections/{collection_id}/cards/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/collections/{collection_id}/cards/{id}/"
+    },
+    {
+      "method": "GET",
+      "path": "/collections/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/collections/{id}/"
+    },
+    {
+      "method": "GET",
+      "path": "/public/collections/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/public/collections/{id}/"
     },
     {
       "method": "GET",
       "path": "/manifest.json"
+    },
+    {
+      "method": "GET",
+      "path": "/error.css"
     },
     {
       "method": "GET",
@@ -1728,11 +1752,31 @@
     },
     {
       "method": "GET",
-      "path": "/{account}/client_configurations/android_v1.json"
+      "path": "/{account}/client_configurations/{configuration}"
     },
     {
       "method": "GET",
-      "path": "/{account}/client_configurations/ios_v1.json"
+      "path": "/{account}/collections/{collection_id}/cards/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/collections/{collection_id}/cards/{id}/"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/collections/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/collections/{id}/"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/public/collections/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/{account}/public/collections/{id}/"
     },
     {
       "method": "GET",
@@ -2191,6 +2235,10 @@
       "path": "/{account}/notifications/settings"
     },
     {
+      "method": "POST",
+      "path": "/{account}/notifications/settings"
+    },
+    {
       "method": "GET",
       "path": "/{account}/notifications/unsubscribe/new"
     },
@@ -2236,6 +2284,10 @@
     },
     {
       "method": "GET",
+      "path": "/{account}/cards/{number}"
+    },
+    {
+      "method": "POST",
       "path": "/{account}/cards/{number}"
     },
     {

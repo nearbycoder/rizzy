@@ -274,7 +274,7 @@ async fn block_search_engine_indexing(request: Request, next: Next) -> Response 
     if application_route
         && !matches!(
             response.status(),
-            StatusCode::NOT_FOUND | StatusCode::NOT_ACCEPTABLE
+            StatusCode::NOT_FOUND | StatusCode::NOT_ACCEPTABLE | StatusCode::INTERNAL_SERVER_ERROR
         )
         && !authentication_redirect(&response)
     {
@@ -513,6 +513,12 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
         None
     };
     let response = next.run(request).await;
+    if matches!(
+        response.status(),
+        StatusCode::NOT_FOUND | StatusCode::INTERNAL_SERVER_ERROR
+    ) {
+        return response;
+    }
     if !response
         .headers()
         .get(header::CONTENT_TYPE)
@@ -2645,11 +2651,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/", get(home))
         .route("/{account}/", get(events_page::index))
         .route("/{account}/landing", get(landing))
-        .route(
-            "/client_configurations/android_v1.json",
-            get(android_config),
-        )
-        .route("/client_configurations/ios_v1.json", get(ios_config))
+        .route("/client_configurations/{configuration}", get(client_config))
         .route("/collections/{collection_id}/cards/{id}", get(legacy_card_root))
         .route("/collections/{collection_id}/cards/{id}/", get(legacy_card_root))
         .route("/collections/{id}", get(legacy_board_root))
@@ -2751,12 +2753,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::put(update_timezone).patch(update_timezone),
         )
         .route(
-            "/{account}/client_configurations/android_v1.json",
-            get(android_config),
-        )
-        .route(
-            "/{account}/client_configurations/ios_v1.json",
-            get(ios_config),
+            "/{account}/client_configurations/{configuration}",
+            get(client_config),
         )
         .route(
             "/{account}/collections/{collection_id}/cards/{id}",
@@ -4032,12 +4030,67 @@ async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
 fn config_response(body: &'static str) -> Response {
     (
         [
-            (header::CONTENT_TYPE, "application/json"),
-            (header::CACHE_CONTROL, "public, max-age=60"),
+            (header::CONTENT_TYPE, "application/json; charset=utf-8"),
+            (header::CACHE_CONTROL, "max-age=60, public"),
         ],
         body,
     )
         .into_response()
+}
+fn client_config_error(status: StatusCode, json: bool) -> Response {
+    let (content_type, body) = match (status, json) {
+        (StatusCode::NOT_FOUND, true) => (
+            "application/json; charset=UTF-8",
+            r#"{"status":404,"error":"Not Found"}"#,
+        ),
+        (StatusCode::INTERNAL_SERVER_ERROR, true) => (
+            "application/json; charset=UTF-8",
+            r#"{"status":500,"error":"Internal Server Error"}"#,
+        ),
+        (StatusCode::NOT_FOUND, false) => (
+            "text/html; charset=UTF-8",
+            include_str!("../static/404.html"),
+        ),
+        _ => (
+            "text/html; charset=UTF-8",
+            include_str!("../static/500.html"),
+        ),
+    };
+    (status, [(header::CONTENT_TYPE, content_type)], body).into_response()
+}
+async fn client_config(headers: HeaderMap, OriginalUri(uri): OriginalUri) -> Response {
+    let name = uri.path().rsplit('/').next().unwrap_or("");
+    let (basename, extension) = name.rsplit_once('.').unwrap_or((name, ""));
+    let (platform, version) = match basename.split_once("_v") {
+        Some(parts) => parts,
+        None => return client_config_error(StatusCode::NOT_FOUND, name.ends_with(".json")),
+    };
+    let valid_route = matches!(platform, "android" | "ios")
+        && !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_digit());
+    let query_format = uri.query().and_then(|query| {
+        url::form_urlencoded::parse(query.as_bytes())
+            .find(|(key, _)| key == "format")
+            .map(|(_, value)| value.into_owned())
+    });
+    let json = if !extension.is_empty() {
+        extension == "json"
+    } else if let Some(format) = query_format {
+        format == "json"
+    } else {
+        headers
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("application/json"))
+    };
+    if !valid_route {
+        return client_config_error(StatusCode::NOT_FOUND, json);
+    }
+    match (platform, version, json) {
+        ("android", "1", true) => android_config().await,
+        ("ios", "1", true) => ios_config().await,
+        _ => client_config_error(StatusCode::INTERNAL_SERVER_ERROR, json),
+    }
 }
 async fn lexxy_asset(Path(filename): Path<String>) -> Result<Response> {
     let (content_type, body): (&str, &'static [u8]) = match filename.as_str() {

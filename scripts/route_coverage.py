@@ -69,6 +69,7 @@ def rust_routes():
 
 def normalized(path):
     path = path.replace("(.:format)", "")
+    path = path.replace("(/:platform)_v(:version)", "/{configuration}")
     path = re.sub(r'^/\{account\}(?=/|$)', '', path)
     path = re.sub(r'\{[^}]+\}|:[^/()]+|\*[^/()]+', ':*', path)
     return path or "/"
@@ -95,6 +96,8 @@ def main():
              f"Rizzy declares matching method and normalized path for {present}. "
              "This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. "
              "Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.", "",
+             "The parameterized client-configuration route is normalized as one path segment; its version and format behavior is compared with Fizzy in `tests/client_configuration_route_parity.py`. "
+             "Three legacy `collections` redirects are generated routes and excluded from the table. Rizzy serves their root and account forms, including optional JSON suffixes and trailing slashes.", "",
              "| Source controller | Routes | Method/path present in Rust |", "| --- | ---: | ---: |"]
     for controller, (total, found) in sorted(counts.items(), key=lambda item: (item[1][1] - item[1][0], item[0])):
         lines.append(f"| `{controller}` | {total} | {found} |")
