@@ -212,7 +212,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
 ];
 
-fn row_value(row: &SqliteRow, record_set: &RecordSet) -> BuildResult<Value> {
+fn row_value(row: &DbRow, record_set: &RecordSet) -> BuildResult<Value> {
     let mut object = serde_json::Map::new();
     for (index, column) in row.columns().iter().enumerate() {
         let name = column.name();
@@ -220,13 +220,19 @@ fn row_value(row: &SqliteRow, record_set: &RecordSet) -> BuildResult<Value> {
         let value = if raw.is_null() {
             Value::Null
         } else if record_set.booleans.contains(&name) {
-            json!(row.try_get::<i64, _>(index)? != 0)
+            json!(if raw.type_info().name() == "BOOLEAN" {
+                row.try_get::<bool, _>(index)?
+            } else {
+                row.try_get::<i64, _>(index)? != 0
+            })
         } else if record_set.json_fields.contains(&name) {
             serde_json::from_str(&row.try_get::<String, _>(index)?)?
         } else {
             match raw.type_info().name() {
-                "INTEGER" => json!(row.try_get::<i64, _>(index)?),
-                "REAL" => json!(row.try_get::<f64, _>(index)?),
+                "SMALLINT" | "INTEGER" | "BIGINT" => json!(row.try_get::<i64, _>(index)?),
+                "REAL" => json!(row.try_get::<f32, _>(index)? as f64),
+                "DOUBLE" => json!(row.try_get::<f64, _>(index)?),
+                "BOOLEAN" => json!(row.try_get::<bool, _>(index)?),
                 _ => json!(row.try_get::<String, _>(index)?),
             }
         };
@@ -343,7 +349,7 @@ async fn emit_account(
     Ok(())
 }
 
-pub(crate) async fn build(app: &App, export: &SqliteRow) -> BuildResult<()> {
+pub(crate) async fn build(app: &App, export: &DbRow) -> BuildResult<()> {
     let export_id: String = export.get("id");
     let account_id: String = export.get("account_id");
     let (sender, receiver) = tokio::sync::mpsc::channel(8);

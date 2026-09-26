@@ -15,7 +15,7 @@ pub(super) async fn ensure_token(app: &App, user_id: &str) -> Result<String> {
         .map_err(db_err)
 }
 
-async fn token_user(app: &App, account: &str, token: Option<&str>) -> Result<Option<SqliteRow>> {
+async fn token_user(app: &App, account: &str, token: Option<&str>) -> Result<Option<DbRow>> {
     let Some(token) = token.filter(|token| !token.is_empty()) else {
         return Ok(None);
     };

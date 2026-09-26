@@ -20,7 +20,7 @@ pub(super) fn public_key() -> Option<String> {
 }
 
 pub(super) async fn queue(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     user_id: &str,
     card_id: &str,
 ) -> Result<()> {
@@ -339,7 +339,7 @@ async fn deliver_one(
     Ok(!retry)
 }
 
-async fn process_job(app: &App, row: SqliteRow, key: &str) -> Result<usize> {
+async fn process_job(app: &App, row: DbRow, key: &str) -> Result<usize> {
     let id: String = row.get("id");
     let claimed = sqlx::query("UPDATE push_deliveries SET status=1,attempts=attempts+1,updated_at=? WHERE id=? AND status=0")
         .bind(now()).bind(&id).execute(&app.db).await.map_err(db_err)?;
@@ -450,7 +450,12 @@ mod tests {
 
     #[tokio::test]
     async fn event_and_mention_payloads_follow_fizzy_action_text() {
-        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::any::install_default_drivers();
+        let db = sqlx::any::AnyPoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         sqlx::raw_sql(include_str!("../schema.sql"))
             .execute(&db)
             .await

@@ -166,7 +166,7 @@ async fn mail_notices(app: &App, user_id: &str, start: &str, end: &str) -> Resul
 }
 
 pub(super) async fn queue(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     user_id: &str,
     timestamp: &str,
 ) -> Result<()> {
@@ -435,7 +435,7 @@ async fn send_mail(
     Ok(())
 }
 
-async fn deliver_one(app: &App, bundle: &SqliteRow) -> Result<()> {
+async fn deliver_one(app: &App, bundle: &DbRow) -> Result<()> {
     let user_id: String = bundle.get("user_id");
     let account_id: String = bundle.get("account_id");
     let Some(user) = sqlx::query("SELECT u.name,u.role,u.active,u.verified_at,i.email_address,a.name account_name,a.external_account_id,COALESCE(s.bundle_email_frequency,'every_few_hours') frequency,t.timezone_name FROM users u JOIN identities i ON i.id=u.identity_id JOIN accounts a ON a.id=u.account_id LEFT JOIN notification_settings s ON s.user_id=u.id LEFT JOIN user_timezones t ON t.user_id=u.id WHERE u.id=? AND u.account_id=? AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id)")

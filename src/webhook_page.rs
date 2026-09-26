@@ -57,7 +57,7 @@ fn actions(selected: &[String]) -> String {
 fn form(
     account: i64,
     board_id: &str,
-    webhook: Option<&SqliteRow>,
+    webhook: Option<&DbRow>,
     error: Option<&str>,
     submitted: Option<(&str, &str, &[String])>,
 ) -> Html<String> {
@@ -139,7 +139,7 @@ pub(super) async fn edit(
 pub(super) fn invalid_form(
     account: i64,
     board_id: &str,
-    webhook: Option<&SqliteRow>,
+    webhook: Option<&DbRow>,
     error: &str,
     name: &str,
     url: &str,
@@ -157,7 +157,7 @@ pub(super) fn invalid_form(
 pub(super) fn index(
     account: i64,
     board_id: &str,
-    rows: &[SqliteRow],
+    rows: &[DbRow],
     page_number: i64,
     total: i64,
     offset: i64,
@@ -201,8 +201,8 @@ pub(super) fn index(
 pub(super) fn show(
     account: i64,
     board_id: &str,
-    row: &SqliteRow,
-    deliveries: &[SqliteRow],
+    row: &DbRow,
+    deliveries: &[DbRow],
 ) -> Html<String> {
     let id: String = row.get("id");
     let path = format!(

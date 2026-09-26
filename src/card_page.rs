@@ -1,5 +1,5 @@
 use axum::response::Html;
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
 use super::{
@@ -10,11 +10,7 @@ use super::{
 const TEMPLATE: &str = include_str!("../static/card.html");
 const NEW_COMMENT: &str = include_str!("../static/new_comment.html");
 
-pub(super) fn new_comment_form(
-    principal: &Principal,
-    card: &SqliteRow,
-    first_comment: bool,
-) -> String {
+pub(super) fn new_comment_form(principal: &Principal, card: &DbRow, first_comment: bool) -> String {
     let placeholder = if first_comment && card.get::<String, _>("creator_id") == principal.user_id {
         "Next, add some notes, context, pictures, or video about this…"
     } else {
@@ -31,7 +27,7 @@ pub(super) fn new_comment_form(
     render_template(NEW_COMMENT, &values)
 }
 
-pub(super) fn edit(principal: &Principal, card: &SqliteRow) -> Html<String> {
+pub(super) fn edit(principal: &Principal, card: &DbRow) -> Html<String> {
     let card_id: String = card.get("id");
     let board_id: String = card.get("board_id");
     let number: i64 = card.get("number");
@@ -52,7 +48,7 @@ pub(super) fn edit(principal: &Principal, card: &SqliteRow) -> Html<String> {
 pub(super) async fn update_stream(
     app: &App,
     principal: &Principal,
-    card: &SqliteRow,
+    card: &DbRow,
 ) -> Result<String> {
     let card_id: String = card.get("id");
     let number: i64 = card.get("number");
@@ -131,7 +127,7 @@ pub(super) fn render_template(template: &str, values: &HashMap<&str, String>) ->
 pub(super) async fn show(
     app: &App,
     principal: &Principal,
-    card: &SqliteRow,
+    card: &DbRow,
     timezone: &str,
 ) -> Result<Html<String>> {
     let card_id: String = card.get("id");
@@ -179,7 +175,7 @@ pub(super) async fn show(
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
-    let mut reaction_rows = HashMap::<String, Vec<SqliteRow>>::new();
+    let mut reaction_rows = HashMap::<String, Vec<DbRow>>::new();
     for row in rows {
         reaction_rows
             .entry(row.get::<String, _>("reactable_id"))

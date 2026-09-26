@@ -13,10 +13,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{
-    Connection, QueryBuilder, Row, Sqlite, SqlitePool,
-    sqlite::{
-        SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions, SqliteRow,
-    },
+    Any as Db, AnyPool as DbPool, Connection, QueryBuilder, Row,
+    any::{AnyPoolOptions, AnyRow as DbRow},
+    sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -71,7 +70,7 @@ mod user_page;
 mod webhook_page;
 
 struct App {
-    db: SqlitePool,
+    db: DbPool,
     qr_secret: String,
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
@@ -611,7 +610,7 @@ fn join_code() -> String {
     format!("{}-{}-{}", &chars[..4], &chars[4..8], &chars[8..])
 }
 async fn insert_join_code_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
 ) -> std::result::Result<(), sqlx::Error> {
     loop {
@@ -879,11 +878,11 @@ async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Princip
         slug,
     })
 }
-async fn board(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
+async fn board(app: &App, p: &Principal, id: &str) -> Result<DbRow> {
     sqlx::query("SELECT b.* FROM boards b WHERE b.id=? AND b.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)")
         .bind(id.trim_end_matches(".json")).bind(&p.account_id).bind(&p.user_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)
 }
-async fn card(app: &App, p: &Principal, number: &str) -> Result<SqliteRow> {
+async fn card(app: &App, p: &Principal, number: &str) -> Result<DbRow> {
     let n: i64 = number
         .trim_end_matches(".json")
         .parse()
@@ -896,7 +895,7 @@ async fn user_json(app: &App, p: &Principal, id: &str, host: &str) -> Result<Val
         .bind(id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     Ok(user_json_row(p, &r, host))
 }
-fn user_json_row(p: &Principal, r: &SqliteRow, host: &str) -> Value {
+fn user_json_row(p: &Principal, r: &DbRow, host: &str) -> Value {
     let id: String = r.get("id");
     let role: String = r.get("role");
     let email: Option<String> = if role == "system" {
@@ -1035,7 +1034,7 @@ async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Re
     Ok(())
 }
 async fn queue_webhooks(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     board_id: &str,
     event_id: &str,
@@ -1053,7 +1052,7 @@ async fn queue_webhooks(
 }
 
 async fn referenced_users(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     content: &str,
 ) -> Result<Vec<String>> {
@@ -1084,7 +1083,7 @@ async fn referenced_users(
 }
 
 async fn queue_notifications(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     board_id: &str,
     card_id: &str,
@@ -1153,7 +1152,7 @@ async fn queue_notifications(
 }
 
 async fn create_new_mentions(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     board_id: &str,
     card_id: &str,
@@ -1264,7 +1263,7 @@ mod webhook_security_tests {
     }
 }
 
-async fn webhook_payload(app: &App, row: &SqliteRow, host: &str) -> Result<String> {
+async fn webhook_payload(app: &App, row: &DbRow, host: &str) -> Result<String> {
     let account_id: String = row.get("account_id");
     let slug: i64 = row.get("external_account_id");
     let creator_id: String = row.get("creator_id");
@@ -1462,7 +1461,7 @@ async fn webhook_worker(app: Arc<App>) {
         }
     }
 }
-async fn board_json(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
+async fn board_json(app: &App, p: &Principal, r: &DbRow, host: &str) -> Result<Value> {
     let creator: String = r.get("creator_id");
     let id: String = r.get("id");
     let present = if r.get::<Option<String>, _>("publication_key").is_some()
@@ -1484,7 +1483,7 @@ async fn board_json(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Resu
 }
 fn board_json_row(
     p: &Principal,
-    r: &SqliteRow,
+    r: &DbRow,
     host: &str,
     creator: Value,
     description_present: bool,
@@ -1508,7 +1507,7 @@ fn board_json_row(
 async fn boards_json_batch(
     app: &App,
     p: &Principal,
-    boards: &[SqliteRow],
+    boards: &[DbRow],
     host: &str,
 ) -> Result<Vec<Value>> {
     if boards.is_empty() {
@@ -1558,7 +1557,7 @@ async fn boards_json_batch(
         })
         .collect()
 }
-async fn board_detail(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
+async fn board_detail(app: &App, p: &Principal, r: &DbRow, host: &str) -> Result<Value> {
     let mut out = board_json(app, p, r, host).await?;
     if r.get::<i64, _>("all_access") == 0 {
         let ids: Vec<String> =
@@ -1571,7 +1570,7 @@ async fn board_detail(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Re
     }
     Ok(out)
 }
-fn column_json(p: &Principal, r: &SqliteRow, host: &str) -> Value {
+fn column_json(p: &Principal, r: &DbRow, host: &str) -> Value {
     let id: String = r.get("id");
     let board: String = r.get("board_id");
     let stored: String = r.get("color");
@@ -1596,7 +1595,7 @@ fn column_json(p: &Principal, r: &SqliteRow, host: &str) -> Value {
 async fn card_json(
     app: &App,
     p: &Principal,
-    r: &SqliteRow,
+    r: &DbRow,
     host: &str,
     with_steps: bool,
 ) -> Result<Value> {
@@ -1658,7 +1657,7 @@ async fn card_json(
 async fn cards_json_batch(
     app: &App,
     p: &Principal,
-    cards: &[SqliteRow],
+    cards: &[DbRow],
     host: &str,
 ) -> Result<Vec<Value>> {
     if cards.is_empty() {
@@ -1800,8 +1799,12 @@ async fn cards_json_batch(
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    sqlx::any::install_default_drivers();
     let url =
         env::var("RIZZY_DATABASE_URL").unwrap_or_else(|_| "sqlite://data/rizzy.sqlite3".into());
+    if !url.starts_with("sqlite:") {
+        return Err("MySQL schema and query migration is not complete".into());
+    }
     if url.starts_with("sqlite://data/") {
         std::fs::create_dir_all("data")?;
     }
@@ -1816,9 +1819,26 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(12)
         .clamp(1, 64);
-    let db = SqlitePoolOptions::new()
-        .max_connections(pool_size)
-        .connect_with(options.clone())
+    let setup_connection = SqliteConnection::connect_with(&options).await?;
+    drop(setup_connection);
+    let db = AnyPoolOptions::new()
+        .max_connections(if url.contains(":memory:") {
+            1
+        } else {
+            pool_size
+        })
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("PRAGMA foreign_keys=ON")
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("PRAGMA busy_timeout=5000")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&url)
         .await?;
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
@@ -3182,7 +3202,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Error>> {
+async fn seed(db: &DbPool) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let account_id = id();
     let identity_id = id();
     let user_id = id();
@@ -3229,7 +3249,7 @@ async fn seed(db: &SqlitePool) -> std::result::Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-async fn backfill_system_users(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+async fn backfill_system_users(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
     let accounts = sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM users u WHERE u.account_id=a.id AND u.role='system')")
         .fetch_all(db).await?;
     for account in accounts {
@@ -3256,7 +3276,7 @@ async fn backfill_system_users(db: &SqlitePool) -> std::result::Result<(), sqlx:
     Ok(())
 }
 
-async fn migrate_deactivated_users(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+async fn migrate_deactivated_users(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
     let mut connection = db.acquire().await?;
     let columns = sqlx::query("PRAGMA table_info(users)")
         .fetch_all(&mut *connection)
@@ -3308,7 +3328,7 @@ async fn migrate_deactivated_users(db: &SqlitePool) -> std::result::Result<(), s
     Ok(())
 }
 
-async fn migrate_notification_sources(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+async fn migrate_notification_sources(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
     let mut connection = db.acquire().await?;
     let foreign_keys = sqlx::query("PRAGMA foreign_key_list(notifications)")
         .fetch_all(&mut *connection)
@@ -4440,7 +4460,7 @@ async fn delete_token(
             .into_response()
     })
 }
-async fn active_user(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
+async fn active_user(app: &App, p: &Principal, id: &str) -> Result<DbRow> {
     sqlx::query("SELECT * FROM users WHERE id=? AND account_id=? AND active=1 AND role!='system'")
         .bind(id.trim_end_matches(".json"))
         .bind(&p.account_id)
@@ -4577,7 +4597,7 @@ async fn remember_board_etag(app: &App, key: String, before: Option<i64>, etag: 
     }
 }
 
-fn prompt_user_item(p: &Principal, row: &SqliteRow) -> String {
+fn prompt_user_item(p: &Principal, row: &DbRow) -> String {
     let id: String = row.get("id");
     let name: String = row.get("name");
     let sgid: String = row.get("sgid");
@@ -4640,7 +4660,7 @@ struct PromptCardQuery {
     filter: Option<String>,
 }
 
-fn prompt_card_item(slug: i64, row: &SqliteRow) -> String {
+fn prompt_card_item(slug: i64, row: &DbRow) -> String {
     let number: i64 = row.get("number");
     let title: String = row.get("title");
     let label = format!("#{number} {}", escape(&title));
@@ -4758,7 +4778,7 @@ async fn edit_user(
         .map_err(db_err)?;
     Ok(user_page::edit(&p, &u, &email, None, has_avatar > 0))
 }
-fn can_change_user(p: &Principal, u: &SqliteRow) -> Result<()> {
+fn can_change_user(p: &Principal, u: &DbRow) -> Result<()> {
     if p.user_id == u.get::<String, _>("id")
         || ((p.role == "owner" || p.role == "admin") && u.get::<String, _>("role") != "owner")
     {
@@ -4912,7 +4932,7 @@ async fn delete_user(
 }
 
 async fn clean_inaccessible_board_data(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     board_id: &str,
     user_id: &str,
 ) -> Result<()> {
@@ -6222,13 +6242,7 @@ fn validate_webhook_url(raw: &str) -> Result<String> {
     }
     Ok(trimmed.to_owned())
 }
-async fn webhook_json(
-    app: &App,
-    p: &Principal,
-    b: &SqliteRow,
-    w: &SqliteRow,
-    host: &str,
-) -> Result<Value> {
+async fn webhook_json(app: &App, p: &Principal, b: &DbRow, w: &DbRow, host: &str) -> Result<Value> {
     let id: String = w.get("id");
     let board_id: String = b.get("id");
     let actions: Value =
@@ -6241,12 +6255,7 @@ async fn webhook_json(
         "board":board_json(app,p,b,host).await?}),
     )
 }
-async fn webhook_row(
-    app: &App,
-    p: &Principal,
-    board_id: &str,
-    webhook_id: &str,
-) -> Result<SqliteRow> {
+async fn webhook_row(app: &App, p: &Principal, board_id: &str, webhook_id: &str) -> Result<DbRow> {
     sqlx::query("SELECT * FROM webhooks WHERE id=? AND board_id=? AND account_id=?")
         .bind(webhook_id)
         .bind(board_id)
@@ -7016,7 +7025,7 @@ async fn unpublish_board(
     }
     Ok(StatusCode::NO_CONTENT)
 }
-async fn published_board(app: &App, account: &str, key: &str) -> Result<SqliteRow> {
+async fn published_board(app: &App, account: &str, key: &str) -> Result<DbRow> {
     let account: i64 = account.parse().map_err(|_| missing())?;
     sqlx::query("SELECT b.*,a.name account_name FROM boards b JOIN accounts a ON a.id=b.account_id WHERE a.external_account_id=? AND b.publication_key=?")
         .bind(account).bind(key).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)
@@ -7032,7 +7041,7 @@ async fn checked_column(
     p: &Principal,
     board_id: &str,
     column_id: &str,
-) -> Result<SqliteRow> {
+) -> Result<DbRow> {
     board(app, p, board_id).await?;
     sqlx::query("SELECT * FROM columns WHERE id=? AND board_id=? AND account_id=?")
         .bind(column_id.trim_end_matches(".json"))
@@ -7324,7 +7333,7 @@ fn time_window(input: &str) -> Option<(String, String)> {
     };
     Some((format(start), format(end)))
 }
-fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBuilder<'a, Sqlite> {
+fn cards_query<'a>(select: &str, p: &'a Principal, q: &'a CardQuery) -> QueryBuilder<'a, Db> {
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id="
     ));
@@ -7624,7 +7633,7 @@ fn activities_query<'a>(
     select: &str,
     p: &'a Principal,
     q: &'a ActivityQuery,
-) -> QueryBuilder<'a, Sqlite> {
+) -> QueryBuilder<'a, Db> {
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=e.board_id WHERE e.account_id="
     ));
@@ -7642,11 +7651,11 @@ fn activities_query<'a>(
     }
     builder
 }
-async fn rows_for_ids(app: &App, prefix: &str, ids: &[String]) -> Result<Vec<SqliteRow>> {
+async fn rows_for_ids(app: &App, prefix: &str, ids: &[String]) -> Result<Vec<DbRow>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let mut builder = QueryBuilder::<Sqlite>::new(prefix);
+    let mut builder = QueryBuilder::<Db>::new(prefix);
     let mut separated = builder.separated(",");
     for id in ids {
         separated.push_bind(id);
@@ -7654,13 +7663,12 @@ async fn rows_for_ids(app: &App, prefix: &str, ids: &[String]) -> Result<Vec<Sql
     separated.push_unseparated(")");
     builder.build().fetch_all(&app.db).await.map_err(db_err)
 }
-async fn assignment_rows_for_cards(app: &App, ids: &[String]) -> Result<Vec<SqliteRow>> {
+async fn assignment_rows_for_cards(app: &App, ids: &[String]) -> Result<Vec<DbRow>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT card_id,assignee_id FROM assignments WHERE card_id IN (",
-    );
+    let mut builder =
+        QueryBuilder::<Db>::new("SELECT card_id,assignee_id FROM assignments WHERE card_id IN (");
     let mut separated = builder.separated(",");
     for id in ids {
         separated.push_bind(id);
@@ -7728,7 +7736,7 @@ fn event_assignee_names(ids: &[Value], users: &HashMap<String, Value>) -> String
 }
 fn activity_description(
     p: &Principal,
-    event: &SqliteRow,
+    event: &DbRow,
     title: &str,
     particulars: &Value,
     users: &HashMap<String, Value>,
@@ -7790,7 +7798,7 @@ fn activity_description(
 async fn activity_items(
     app: &App,
     p: &Principal,
-    events: &[SqliteRow],
+    events: &[DbRow],
     host: &str,
 ) -> Result<Vec<Value>> {
     if events.is_empty() {
@@ -8167,7 +8175,7 @@ async fn update_notification_settings(
     }
 }
 
-async fn notification_json(app: &App, p: &Principal, row: &SqliteRow, host: &str) -> Result<Value> {
+async fn notification_json(app: &App, p: &Principal, row: &DbRow, host: &str) -> Result<Value> {
     let card_id: String = row.get("card_id");
     let card = sqlx::query(
         "SELECT c.*,b.name board_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.id=?",
@@ -8307,7 +8315,7 @@ async fn notification_json(app: &App, p: &Principal, row: &SqliteRow, host: &str
 async fn notification_items(
     app: &App,
     p: &Principal,
-    rows: Vec<SqliteRow>,
+    rows: Vec<DbRow>,
     host: &str,
 ) -> Result<Vec<Value>> {
     if rows.is_empty() {
@@ -8325,7 +8333,7 @@ async fn notification_items(
             .filter(|row| row.get::<String, _>("source_type") == "Mention")
             .map(|row| row.get::<String, _>("source_id")),
     );
-    let cards: HashMap<String, SqliteRow> = rows_for_ids(
+    let cards: HashMap<String, DbRow> = rows_for_ids(
         app,
         "SELECT c.*,b.name board_name FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.id IN (",
         &card_ids,
@@ -8355,13 +8363,13 @@ async fn notification_items(
             .into_iter()
             .map(|row| (row.get("id"), column_json(p, &row, host)))
             .collect();
-    let events: HashMap<String, SqliteRow> =
+    let events: HashMap<String, DbRow> =
         rows_for_ids(app, "SELECT * FROM events WHERE id IN (", &event_ids)
             .await?
             .into_iter()
             .map(|row| (row.get("id"), row))
             .collect();
-    let mentions: HashMap<String, SqliteRow> =
+    let mentions: HashMap<String, DbRow> =
         rows_for_ids(app, "SELECT * FROM mentions WHERE id IN (", &mention_ids)
             .await?
             .into_iter()
@@ -10782,7 +10790,7 @@ async fn list_steps(
         .map_err(db_err)?;
     Ok(Json(json!(rows.iter().map(|r|json!({"id":r.get::<String,_>("id"),"content":r.get::<String,_>("content"),"completed":r.get::<i64,_>("completed")!=0})).collect::<Vec<_>>())))
 }
-async fn step_row(app: &App, card_id: &str, step: &str) -> Result<SqliteRow> {
+async fn step_row(app: &App, card_id: &str, step: &str) -> Result<DbRow> {
     sqlx::query("SELECT * FROM steps WHERE id=? AND card_id=?")
         .bind(step)
         .bind(card_id)
@@ -10791,7 +10799,7 @@ async fn step_row(app: &App, card_id: &str, step: &str) -> Result<SqliteRow> {
         .map_err(db_err)?
         .ok_or_else(missing)
 }
-fn step_value(row: &SqliteRow) -> Value {
+fn step_value(row: &DbRow) -> Value {
     json!({"id":row.get::<String,_>("id"),"content":row.get::<String,_>("content"),"completed":row.get::<i64,_>("completed")!=0})
 }
 async fn show_step(
@@ -10963,7 +10971,7 @@ async fn delete_step(
     tx.commit().await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
-async fn comment_row(app: &App, card: &SqliteRow, id: &str) -> Result<SqliteRow> {
+async fn comment_row(app: &App, card: &DbRow, id: &str) -> Result<DbRow> {
     sqlx::query("SELECT * FROM comments WHERE id=? AND card_id=?")
         .bind(id.trim_end_matches(".json"))
         .bind(card.get::<String, _>("id"))
@@ -10975,8 +10983,8 @@ async fn comment_row(app: &App, card: &SqliteRow, id: &str) -> Result<SqliteRow>
 async fn comment_json(
     app: &App,
     p: &Principal,
-    card: &SqliteRow,
-    r: &SqliteRow,
+    card: &DbRow,
+    r: &DbRow,
     host: &str,
 ) -> Result<Value> {
     let id: String = r.get("id");
@@ -11508,7 +11516,7 @@ async fn toggle_self_assignment(
     }
 }
 
-async fn assignment_stream(app: &App, p: &Principal, c: &SqliteRow) -> Result<Response> {
+async fn assignment_stream(app: &App, p: &Principal, c: &DbRow) -> Result<Response> {
     let card_id: String = c.get("id");
     let meta = assignment_page::meta(app, p, c).await?;
     let picker = assignment_page::picker(app, p, c).await?;
@@ -11529,7 +11537,7 @@ async fn assignment_stream(app: &App, p: &Principal, c: &SqliteRow) -> Result<Re
 async fn toggle_assignment_to(
     app: &App,
     p: &Principal,
-    c: &SqliteRow,
+    c: &DbRow,
     assignee_id: &str,
 ) -> Result<StatusCode> {
     let board_id: String = c.get("board_id");
@@ -11666,7 +11674,7 @@ async fn list_pins(
 async fn reaction_json(
     app: &App,
     p: &Principal,
-    r: &SqliteRow,
+    r: &DbRow,
     host: &str,
     number: i64,
     comment: Option<&str>,
@@ -11687,7 +11695,7 @@ async fn reaction_json(
 async fn reactions_for(
     app: &App,
     p: &Principal,
-    c: &SqliteRow,
+    c: &DbRow,
     comment: Option<&str>,
     host: &str,
 ) -> Result<Value> {
@@ -11724,7 +11732,7 @@ fn reaction_body(headers: &HeaderMap, body: &Bytes) -> Result<Value> {
 async fn create_reaction(
     app: &App,
     p: &Principal,
-    c: &SqliteRow,
+    c: &DbRow,
     comment: Option<&str>,
     host: &str,
     headers: &HeaderMap,
@@ -11783,7 +11791,7 @@ async fn create_reaction(
 async fn delete_reaction(
     app: &App,
     p: &Principal,
-    c: &SqliteRow,
+    c: &DbRow,
     comment: Option<&str>,
     reaction: &str,
     headers: &HeaderMap,

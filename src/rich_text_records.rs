@@ -1,10 +1,10 @@
 //! Durable Action Text record identities for inline card, comment, and board text.
 use super::{Result, db_err, id};
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Any as Db, AnyPool as DbPool, QueryBuilder, Row, Transaction};
 use std::collections::HashSet;
 
 pub(super) async fn present_ids(
-    db: &SqlitePool,
+    db: &DbPool,
     record_type: &str,
     name: &str,
     ids: &[String],
@@ -13,7 +13,7 @@ pub(super) async fn present_ids(
         return Ok(HashSet::new());
     }
     let mut query =
-        QueryBuilder::<Sqlite>::new("SELECT record_id FROM rich_text_records WHERE record_type=");
+        QueryBuilder::<Db>::new("SELECT record_id FROM rich_text_records WHERE record_type=");
     query
         .push_bind(record_type)
         .push(" AND body_is_null=0 AND name=")
@@ -34,7 +34,7 @@ pub(super) async fn present_ids(
 }
 
 pub(super) async fn ensure(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     record_type: &str,
     record_id: &str,
@@ -49,7 +49,7 @@ pub(super) async fn ensure(
 }
 
 pub(super) async fn ensure_null(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     record_type: &str,
     record_id: &str,
@@ -64,7 +64,7 @@ pub(super) async fn ensure_null(
 }
 
 pub(super) async fn sync(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     record_type: &str,
     record_id: &str,
@@ -83,7 +83,7 @@ pub(super) async fn sync(
     Ok(())
 }
 
-pub(super) async fn migrate(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn migrate(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
     let columns = sqlx::query("PRAGMA table_info(rich_text_records)")
         .fetch_all(db)
         .await?;
@@ -100,7 +100,7 @@ pub(super) async fn migrate(db: &SqlitePool) -> std::result::Result<(), sqlx::Er
     Ok(())
 }
 
-pub(super) async fn backfill(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn backfill(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
     let sources = [
         (
             "Card",

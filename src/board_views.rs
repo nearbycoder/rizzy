@@ -47,7 +47,7 @@ async fn cards_for_view(
     column_id: Option<&str>,
     page: i64,
     public: bool,
-) -> Result<(Vec<SqliteRow>, i64)> {
+) -> Result<(Vec<DbRow>, i64)> {
     let (offset, limit) = page_window(page);
     let published = if public && matches!(view, View::Closed) {
         " AND c.status='published'"
@@ -97,7 +97,7 @@ struct PublicPreviewMeta {
 
 async fn public_preview_metadata(
     app: &App,
-    cards: &[SqliteRow],
+    cards: &[DbRow],
     slug: i64,
 ) -> Result<HashMap<String, PublicPreviewMeta>> {
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
@@ -228,7 +228,7 @@ pub(super) fn public_html_title(title: &str) -> String {
 fn render_public_preview(
     account: &str,
     key: &str,
-    card: &SqliteRow,
+    card: &DbRow,
     meta: &PublicPreviewMeta,
     columns: &[(String, String)],
 ) -> String {

@@ -2,7 +2,7 @@ use axum::{
     http::header,
     response::{Html, IntoResponse, Response},
 };
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
 use super::{
@@ -128,7 +128,7 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
 pub(super) async fn show_filtered(
     app: &App,
     principal: &Principal,
-    board: &SqliteRow,
+    board: &DbRow,
     query: &CardQuery,
     raw_query: Option<&str>,
 ) -> Result<Html<String>> {
@@ -219,7 +219,7 @@ fn column_html(
     title: &str,
     color: &str,
     count: i64,
-    cards: Option<&Vec<SqliteRow>>,
+    cards: Option<&Vec<DbRow>>,
     rendered_cards: Option<&str>,
     path: &str,
     add_card: bool,
@@ -459,7 +459,7 @@ pub(super) async fn drop_column_response(
 pub(super) async fn show(
     app: &App,
     principal: &Principal,
-    board: &SqliteRow,
+    board: &DbRow,
     page: i64,
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");

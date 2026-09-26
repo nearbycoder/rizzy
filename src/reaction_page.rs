@@ -76,7 +76,7 @@ fn render(
 pub(super) async fn reactions_html(
     app: &App,
     p: &Principal,
-    card: &SqliteRow,
+    card: &DbRow,
     comment: Option<&str>,
 ) -> Result<String> {
     let (kind, target) = if let Some(comment) = comment {
@@ -97,9 +97,9 @@ pub(super) async fn reactions_html(
 
 pub(super) fn reaction_frame(
     p: &Principal,
-    card: &SqliteRow,
+    card: &DbRow,
     comment: Option<&str>,
-    rows: &[SqliteRow],
+    rows: &[DbRow],
 ) -> String {
     let (kind, target, path) = if let Some(comment) = comment {
         (

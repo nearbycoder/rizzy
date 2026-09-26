@@ -43,7 +43,7 @@ pub(super) async fn new(
     Ok(response)
 }
 
-pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result<String> {
+pub(super) async fn picker(app: &App, p: &Principal, card: &DbRow) -> Result<String> {
     let card_id: String = card.get("id");
     let number: i64 = card.get("number");
     let account = p.slug;
@@ -75,7 +75,7 @@ pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result
     ))
 }
 
-pub(super) async fn tags(app: &App, p: &Principal, card: &SqliteRow) -> Result<String> {
+pub(super) async fn tags(app: &App, p: &Principal, card: &DbRow) -> Result<String> {
     let card_id: String = card.get("id");
     let board_id: String = card.get("board_id");
     let number: i64 = card.get("number");

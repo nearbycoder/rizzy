@@ -76,7 +76,7 @@ fn client_challenge(client_data: &str) -> Result<String> {
     required(&data, "challenge")
 }
 
-async fn consume_challenge(app: &App, challenge: &str, purpose: &str) -> Result<SqliteRow> {
+async fn consume_challenge(app: &App, challenge: &str, purpose: &str) -> Result<DbRow> {
     sqlx::query("DELETE FROM passkey_challenges WHERE challenge=? AND purpose=? AND expires_at>? RETURNING identity_id,state_json")
         .bind(challenge)
         .bind(purpose)
@@ -261,7 +261,7 @@ pub(super) async fn register(
         .into_response())
 }
 
-async fn owned_passkey(app: &App, headers: &HeaderMap, id: &str) -> Result<SqliteRow> {
+async fn owned_passkey(app: &App, headers: &HeaderMap, id: &str) -> Result<DbRow> {
     let (identity_id, _) = identity_auth(app, headers).await?;
     sqlx::query("SELECT * FROM passkeys WHERE id=? AND identity_id=?")
         .bind(id)

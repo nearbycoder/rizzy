@@ -99,7 +99,7 @@ fn export_rich_text(raw: &str, blobs: &HashMap<String, &ExportBlob>) -> String {
     inner
 }
 
-fn export_view(row: &SqliteRow, host: &str, slug: i64) -> Value {
+fn export_view(row: &DbRow, host: &str, slug: i64) -> Value {
     let id: String = row.get("id");
     let mut value = json!({
         "id": id,
@@ -352,7 +352,7 @@ pub(super) async fn download(
 
 async fn export_card(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(Value, Vec<ExportBlob>), sqlx::Error> {
     let card_id: String = row.get("id");
     let number: i64 = row.get("number");
@@ -473,7 +473,7 @@ pub(crate) fn write_archive(
 
 async fn build_user(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let export_id: String = row.get("id");
     let account_id: String = row.get("account_id");
@@ -513,7 +513,7 @@ async fn build_user(
     Ok(())
 }
 
-async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
+async fn send_completion_email(app: &App, row: &DbRow) -> Result<()> {
     let Ok(sendmail) = env::var("RIZZY_SENDMAIL") else {
         return Ok(());
     };
@@ -570,7 +570,7 @@ async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
 
 async fn run_one(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match row.get::<String, _>("kind").as_str() {
         "user" => build_user(app, row).await,

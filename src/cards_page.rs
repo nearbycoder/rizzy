@@ -1,5 +1,5 @@
 use axum::response::Html;
-use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
+use sqlx::{Any as Db, QueryBuilder, Row, any::AnyRow as DbRow};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
@@ -38,7 +38,7 @@ struct PreviewMeta {
     assignees: Vec<(String, String)>,
 }
 
-async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<String, PreviewMeta>> {
+async fn preview_metadata(app: &App, cards: &[DbRow]) -> Result<HashMap<String, PreviewMeta>> {
     let mut metadata = HashMap::new();
     if cards.is_empty() {
         return Ok(metadata);
@@ -68,7 +68,7 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
             "",
         ),
     ];
-    let mut builder = QueryBuilder::<Sqlite>::new("");
+    let mut builder = QueryBuilder::<Db>::new("");
     for (index, (relation, suffix)) in relations.iter().enumerate() {
         if index > 0 {
             builder.push(" UNION ALL ");
@@ -100,11 +100,7 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
     Ok(metadata)
 }
 
-pub(super) async fn previews(
-    app: &App,
-    principal: &Principal,
-    cards: &[SqliteRow],
-) -> Result<String> {
+pub(super) async fn previews(app: &App, principal: &Principal, cards: &[DbRow]) -> Result<String> {
     let metadata = preview_metadata(app, cards).await?;
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
     let images = storage::image_urls_for_cards(app, principal, &ids).await?;
@@ -328,7 +324,7 @@ fn choice_group(
     html
 }
 
-fn board_label(boards: &[SqliteRow], selected: &[String]) -> String {
+fn board_label(boards: &[DbRow], selected: &[String]) -> String {
     let selected: HashSet<&str> = selected.iter().map(String::as_str).collect();
     let names: Vec<String> = if selected.is_empty() {
         if boards.len() == 1 {
@@ -358,7 +354,7 @@ fn board_label(boards: &[SqliteRow], selected: &[String]) -> String {
 pub(super) async fn show(
     app: &App,
     principal: &Principal,
-    cards: &[SqliteRow],
+    cards: &[DbRow],
     total: i64,
     query: &CardQuery,
     raw: Option<&str>,

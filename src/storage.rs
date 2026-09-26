@@ -130,7 +130,7 @@ fn variable_image(content_type: &str) -> bool {
     )
 }
 
-fn embed_html(blob: &SqliteRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
+fn embed_html(blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
     let filename: String = blob.get("filename");
     let content_type: String = blob.get("content_type");
     let size: i64 = blob.get("byte_size");
@@ -350,7 +350,7 @@ pub(super) async fn render_rich_text(
 }
 
 pub(super) async fn attach_card_image_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     card_id: &str,
     value: Option<&Value>,
@@ -490,7 +490,7 @@ pub(super) async fn receive_multipart_image(
 }
 
 pub(super) async fn store_multipart_image_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     upload: &PendingUpload,
 ) -> Result<()> {
@@ -506,7 +506,7 @@ pub(super) async fn store_multipart_image_tx(
 }
 
 pub(super) async fn purge_card_images_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     card_id: Option<&str>,
     board_id: Option<&str>,
@@ -544,7 +544,7 @@ pub(super) async fn purge_card_images_tx(
 }
 
 pub(super) async fn sync_embeds_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     record_type: &str,
     record_id: &str,
@@ -601,7 +601,7 @@ pub(super) async fn sync_embeds_tx(
 }
 
 pub(super) async fn purge_card_storage_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     card_id: Option<&str>,
     board_id: Option<&str>,
@@ -720,7 +720,7 @@ pub(super) async fn prepare_user_avatar(
 }
 
 pub(super) async fn attach_user_avatar_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     user_id: &str,
     blob_id: Option<&str>,
@@ -747,7 +747,7 @@ pub(super) async fn attach_user_avatar_tx(
 }
 
 pub(super) async fn purge_user_avatar_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     user_id: &str,
 ) -> Result<Vec<String>> {

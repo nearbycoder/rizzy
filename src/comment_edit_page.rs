@@ -57,8 +57,8 @@ pub(super) fn comment_frame(
 pub(super) async fn rendered_comment_frame(
     app: &App,
     principal: &Principal,
-    card: &SqliteRow,
-    comment: &SqliteRow,
+    card: &DbRow,
+    comment: &DbRow,
 ) -> Result<String> {
     let creator_id: String = comment.get("creator_id");
     let creator = sqlx::query("SELECT name,role FROM users WHERE id=? AND account_id=?")

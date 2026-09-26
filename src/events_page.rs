@@ -6,7 +6,7 @@ use axum::{
 use chrono::{DateTime, NaiveDate, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use serde_json::json;
-use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
+use sqlx::{Any as Db, QueryBuilder, Row, any::AnyRow as DbRow};
 use std::{
     sync::{Arc, Weak},
     time::{Duration, Instant},
@@ -181,7 +181,7 @@ fn cache_headers(mut response: Response, etag: &str) -> Response {
     response
 }
 
-fn base_query<'a>(select: &str, p: &'a Principal, params: &'a Params) -> QueryBuilder<'a, Sqlite> {
+fn base_query<'a>(select: &str, p: &'a Principal, params: &'a Params) -> QueryBuilder<'a, Db> {
     let mut query = QueryBuilder::new(format!(
         "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=e.board_id JOIN users u ON u.id=e.creator_id LEFT JOIN comments m ON m.id=e.eventable_id AND e.eventable_type='Comment' WHERE e.account_id="
     ));
@@ -208,7 +208,7 @@ fn base_query<'a>(select: &str, p: &'a Principal, params: &'a Params) -> QueryBu
     query
 }
 
-fn column_clause(query: &mut QueryBuilder<'_, Sqlite>, column: &str) {
+fn column_clause(query: &mut QueryBuilder<'_, Db>, column: &str) {
     match column {
         "added" => {
             query.push(" AND e.action IN ('card_published','card_reopened')");
@@ -229,7 +229,7 @@ struct Column {
     title: &'static str,
     index: usize,
     count: i64,
-    events: Vec<SqliteRow>,
+    events: Vec<DbRow>,
 }
 
 struct Timeline {
@@ -352,7 +352,7 @@ fn excerpt(text: &str) -> String {
     escape(&short)
 }
 
-fn render_event(event: &SqliteRow, account: i64) -> String {
+fn render_event(event: &DbRow, account: i64) -> String {
     let id: String = event.get("id");
     let action: String = event.get("action");
     let number: i64 = event.get("number");
@@ -650,7 +650,7 @@ pub(super) async fn user_events(
 pub(super) async fn user_fragment(
     app: &App,
     p: &Principal,
-    user: &SqliteRow,
+    user: &DbRow,
     headers: &HeaderMap,
     raw: Option<String>,
 ) -> Result<String> {
