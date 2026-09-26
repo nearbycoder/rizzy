@@ -29,6 +29,16 @@ def run(target):
         for index in range(17):
             status, _, raw = request(target, board_path + "/cards", "POST", {"card": {"title": f"{marker} card {index:02d}"}}, bearer=True)
             assert status == 201, (status, raw[:200])
+            if index == 0:
+                tagged_number = json.loads(raw)["number"]
+                owner_id = json.loads(raw)["creator"]["id"]
+        tag_title = f"tag{marker}"
+        status, _, _ = request(target, f"/{account}/cards/{tagged_number}/taggings", "POST",
+                               {"tag_title": tag_title}, bearer=True)
+        assert status == 204, (target["name"], "tag", status)
+        status, _, raw = request(target, f"/{account}/tags", bearer=True)
+        assert status == 200
+        tag_id = next(tag["id"] for tag in json.loads(raw) if tag["title"] == tag_title)
         special = {}
         for state in ("closed", "not_now"):
             title = f"{state} separate {marker}"
@@ -63,6 +73,11 @@ def run(target):
             assert status == 204 and "Watching for new cards" in html()
         explicit_default = html("?indexed_by=all&sorted_by=latest")
         assert GRID not in explicit_default
+        tagged = html("?tag_ids%5B%5D=" + urllib.parse.quote(tag_id))
+        assert GRID in tagged and f"{marker} card 00" in tagged and f"{marker} card 01" not in tagged
+        if target["name"] == "rizzy":
+            assert 'name="tag_ids[]"' in plain and f'value="{tag_id}"' in plain
+            assert re.search(rf'name="tag_ids\[\]" value="{re.escape(tag_id)}" checked', tagged)
         closed = html("?indexed_by=closed")
         assert GRID in closed and special["closed"] in closed and special["not_now"] not in closed
         postponed = html("?indexed_by=not_now")
@@ -79,8 +94,27 @@ def run(target):
         assert GRID in oldest and f"{marker} card 00" in oldest and f"{marker} card 16" not in oldest
         empty = html("?terms%5B%5D=notpresentzzzz")
         assert "No cards match this filter" in empty
-        return {"columns_without_filter": True, "special_filters": True,
-                "term_pages": (first_numbers, second_numbers), "oldest": True, "empty": True}
+        status, _, _ = request(target, f"/{account}/cards/{tagged_number}/self_assignment.json",
+                               "POST", b"", bearer=True)
+        assert status == 204, (target["name"], "self assignment", status)
+        owner = urllib.parse.quote(owner_id)
+        assigned = html("?assignee_ids%5B%5D=" + owner)
+        assert f"{marker} card 00" in assigned and f"{marker} card 01" not in assigned
+        unassigned = html("?assignment_status=unassigned")
+        assert f"{marker} card 00" not in unassigned and f"{marker} card 02" in unassigned
+        created_by = html("?creator_ids%5B%5D=" + owner)
+        assert f"{marker} card 00" in created_by
+        closed_by = html("?closer_ids%5B%5D=" + owner)
+        assert special["closed"] in closed_by and special["not_now"] not in closed_by
+        if target["name"] == "rizzy":
+            for field, page in (("assignee_ids[]", assigned), ("creator_ids[]", created_by),
+                                ("closer_ids[]", closed_by)):
+                assert f'name="{field}"' in plain
+                assert re.search(rf'name="{re.escape(field)}" value="{re.escape(owner_id)}" checked', page)
+            assert 'name="assignment_status" value="unassigned" checked' in unassigned
+        return {"columns_without_filter": True, "special_filters": True, "tag_filter": True,
+                "term_pages": (first_numbers, second_numbers), "oldest": True, "empty": True,
+                "people_filters": True}
     finally:
         status, _, _ = request(target, board_path, "DELETE", bearer=True)
         assert status == 204, status

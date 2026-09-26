@@ -38,17 +38,19 @@ fn column_color_class(color: &str) -> &'static str {
     }
 }
 
-fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
+async fn filter_form(
+    app: &App,
+    principal: &Principal,
+    board_id: &str,
+    query: &CardQuery,
+) -> Result<String> {
+    let account = principal.slug;
     let term = query.terms.first().map(String::as_str).unwrap_or("");
     let mut preserved = String::new();
     for (key, values) in [
         ("terms[]", query.terms.iter().skip(1).collect::<Vec<_>>()),
         ("card_ids[]", query.card_ids.iter().collect()),
         ("column_ids[]", query.column_ids.iter().collect()),
-        ("tag_ids[]", query.tag_ids.iter().collect()),
-        ("assignee_ids[]", query.assignee_ids.iter().collect()),
-        ("creator_ids[]", query.creator_ids.iter().collect()),
-        ("closer_ids[]", query.closer_ids.iter().collect()),
     ] {
         for value in values {
             preserved.push_str(&format!(
@@ -58,7 +60,6 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
         }
     }
     for (key, value) in [
-        ("assignment_status", query.assignment_status.as_deref()),
         ("creation", query.creation.as_deref()),
         ("closure", query.closure.as_deref()),
     ] {
@@ -81,6 +82,58 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
     };
     let index = query.indexed_by.as_deref().unwrap_or("all");
     let sort = query.sorted_by.as_deref().unwrap_or("latest");
+    let tags = sqlx::query("SELECT id,title FROM tags WHERE account_id=? ORDER BY title,id")
+        .bind(&principal.account_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let tag_choices = if tags.is_empty() {
+        "<p class=\"filter-choices__empty\">No tags yet</p>".to_owned()
+    } else {
+        tags.iter()
+            .map(|tag| {
+                let id: String = tag.get("id");
+                let title: String = tag.get("title");
+                format!(
+                    "<label class=\"filter-choice\"><input type=\"checkbox\" name=\"tag_ids[]\" value=\"{}\"{}><span>#{}</span></label>",
+                    escape(&id),
+                    if query.tag_ids.contains(&id) { " checked" } else { "" },
+                    escape(&title)
+                )
+            })
+            .collect::<String>()
+    };
+    let users =
+        sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 ORDER BY name,id")
+            .bind(&principal.account_id)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
+    let user_choices = |name: &str, selected: &[String]| {
+        users.iter()
+            .map(|user| {
+                let id: String = user.get("id");
+                let display_name: String = user.get("name");
+                format!(
+                    "<label class=\"filter-choice\"><input type=\"checkbox\" name=\"{name}\" value=\"{}\"{}><span>{}</span></label>",
+                    escape(&id),
+                    if selected.contains(&id) { " checked" } else { "" },
+                    escape(&display_name)
+                )
+            })
+            .collect::<String>()
+    };
+    let assignee_choices = format!(
+        "<label class=\"filter-choice\"><input type=\"checkbox\" name=\"assignment_status\" value=\"unassigned\"{}><span>No one</span></label>{}",
+        if query.assignment_status.as_deref() == Some("unassigned") {
+            " checked"
+        } else {
+            ""
+        },
+        user_choices("assignee_ids[]", &query.assignee_ids)
+    );
+    let creator_choices = user_choices("creator_ids[]", &query.creator_ids);
+    let closer_choices = user_choices("closer_ids[]", &query.closer_ids);
     let clear = if !query.terms.is_empty()
         || !matches!(index, "all")
         || !matches!(sort, "latest")
@@ -99,10 +152,27 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
     } else {
         String::new()
     };
-    format!(
-        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<details class=\"filter-more\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"filter-more__fields\"><label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><button class=\"button\" type=\"submit\">Filter</button></div></details>{clear}</form>",
+    Ok(format!(
+        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<details class=\"filter-more\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷{}</summary><div class=\"filter-more__fields\"><label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><fieldset class=\"filter-choices\"><legend>Tagged</legend>{tag_choices}</fieldset><fieldset class=\"filter-choices\"><legend>Assigned to</legend>{assignee_choices}</fieldset><fieldset class=\"filter-choices\"><legend>Added by</legend>{creator_choices}</fieldset><fieldset class=\"filter-choices\"><legend>Closed by</legend>{closer_choices}</fieldset><button class=\"button\" type=\"submit\">Filter</button></div></details>{clear}</form>",
         escape(board_id),
         escape(term),
+        if query.tag_ids.is_empty()
+            && query.assignee_ids.is_empty()
+            && query.creator_ids.is_empty()
+            && query.closer_ids.is_empty()
+            && query.assignment_status.is_none()
+        {
+            String::new()
+        } else {
+            format!(
+                "<span class=\"filter-count\">{}</span>",
+                query.tag_ids.len()
+                    + query.assignee_ids.len()
+                    + query.creator_ids.len()
+                    + query.closer_ids.len()
+                    + usize::from(query.assignment_status.is_some())
+            )
+        },
         [
             ("all", "Open"),
             ("closed", "Done"),
@@ -122,7 +192,7 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
         .iter()
         .map(|(value, label)| option(value, label, Some(sort)))
         .collect::<String>(),
-    )
+    ))
 }
 
 pub(super) async fn show_filtered(
@@ -209,7 +279,10 @@ pub(super) async fn show_filtered(
             ),
         ),
         ("ADD_COLUMN", String::new()),
-        ("FILTER_FORM", filter_form(principal.slug, &board_id, query)),
+        (
+            "FILTER_FORM",
+            filter_form(app, principal, &board_id, query).await?,
+        ),
         ("COLUMNS", list),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))
@@ -585,7 +658,7 @@ pub(super) async fn show(
         ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
         ("SETTINGS_LINK", format!("<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",escape(&board_id),escape(&board_name),escape(&board_name))),
         ("ADD_COLUMN", "<button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button>".to_owned()),
-        ("FILTER_FORM", filter_form(account, &board_id, &CardQuery::default())),
+        ("FILTER_FORM", filter_form(app, principal, &board_id, &CardQuery::default()).await?),
         ("COLUMNS", column_markup),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))
