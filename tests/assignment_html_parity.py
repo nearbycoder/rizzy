@@ -42,8 +42,13 @@ def check(target):
         path = f"/{account}/cards/{number}/assignments"
         status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200 and f"meta_card_{card_id}".encode() in card_html, (target["name"], status, card_id, re.findall(rb'id="[^"]*meta[^"]*"', card_html)[:12])
+        for marker in (b"card__meta-avatars--author", b"card__meta-avatars--assignees",
+                       b"card__meta-text--added", b"card__meta-text--updated",
+                       b"card__meta-text--assignees"):
+            assert marker in card_html, (target["name"], marker)
         if target["name"] == "rizzy":
             assert b'id="assignment-dialog"' in card_html
+            assert f'src="/{account}/users/{owner_id}/avatar"'.encode() in card_html
         csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', card_html)
         csrf = csrf_match.group(1).decode() if csrf_match else None
         status, headers, body = request(target, path + "/new", accept="text/html")
@@ -66,6 +71,7 @@ def check(target):
             assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], status, stream[:200])
             assert b'action="replace"' in stream and f'meta_card_{card_id}'.encode() in stream
             assert f'assignment_card_{card_id}'.encode() in stream
+            assert b"card__meta-avatars--assignees" in stream
             return stream
         stream = turbo_toggle(path + f"?assignee_id={owner_id}")
         assert b"Not assigned" in stream
@@ -79,7 +85,12 @@ def check(target):
         assert status == 200 and re.search(rb'aria-checked="true"', body)
         status, _, _ = request(target, f"/{account}/cards/{number}/self_assignment", "POST", b"", bearer=True)
         assert status == 204
-        return {"picker":200,"cache":304,"json_picker":406,"toggle":204,"turbo_toggle":200,"self_assignment":200}
+        status, _, _ = request(target, f"/{account}/cards/{number}/closure", "POST", b"", bearer=True)
+        assert status == 204
+        status, _, closed_html = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200
+        assert re.search(rb'id="assignees_card_' + card_id.encode() + rb'".{0,400}? hidden>', closed_html, re.S), target["name"]
+        return {"picker":200,"cache":304,"json_picker":406,"toggle":204,"turbo_toggle":200,"self_assignment":200,"closed_picker_hidden":True}
     finally:
         for board_id in boards:
             status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)

@@ -11505,7 +11505,7 @@ async fn toggle_self_assignment(
 
 async fn assignment_stream(app: &App, p: &Principal, c: &SqliteRow) -> Result<Response> {
     let card_id: String = c.get("id");
-    let meta = assignment_page::meta(app, c).await?;
+    let meta = assignment_page::meta(app, p, c).await?;
     let picker = assignment_page::picker(app, p, c).await?;
     let stream = format!(
         "<turbo-stream action=\"replace\" method=\"morph\" target=\"meta_card_{}\"><template>{meta}</template></turbo-stream>{picker}",

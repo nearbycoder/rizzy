@@ -290,7 +290,10 @@ pub(super) async fn show(
         ("TITLE_HTML", board_views::public_html_title(&title)),
         ("DESCRIPTION_HTML", description_html),
         ("DESCRIPTION_VALUE", escape(&description)),
-        ("ASSIGNMENT_META", assignment_page::meta(app, card).await?),
+        (
+            "ASSIGNMENT_META",
+            assignment_page::meta(app, principal, card).await?,
+        ),
         ("COMMENTS", comment_html),
         ("REACTIONS", card_reactions),
         ("NEW_COMMENT_FORM", new_comment_form(principal, card)),
