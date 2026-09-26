@@ -139,21 +139,46 @@ pub(super) async fn redeem(
     headers: HeaderMap,
 ) -> Result<Response> {
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let transfer = sqlx::query(
-        "DELETE FROM identity_transfers WHERE token=? AND created_at>=? RETURNING identity_id",
-    )
-    .bind(&token)
-    .bind(active_cutoff())
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_err)?;
-    let Some(transfer) = transfer else {
+    let cutoff = active_cutoff();
+    let identity_id: Option<String> = if app.mysql {
+        let found = sqlx::query_scalar(
+            "SELECT identity_id FROM identity_transfers WHERE token=? AND created_at>=? FOR UPDATE",
+        )
+        .bind(&token)
+        .bind(&cutoff)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if found.is_some() {
+            let deleted =
+                sqlx::query("DELETE FROM identity_transfers WHERE token=? AND created_at>=?")
+                    .bind(&token)
+                    .bind(&cutoff)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            if deleted.rows_affected() == 0 {
+                return Ok(StatusCode::BAD_REQUEST.into_response());
+            }
+        }
+        found
+    } else {
+        sqlx::query_scalar(
+            "DELETE FROM identity_transfers WHERE token=? AND created_at>=? RETURNING identity_id",
+        )
+        .bind(&token)
+        .bind(&cutoff)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+    };
+    let Some(identity_id) = identity_id else {
         return Ok(StatusCode::BAD_REQUEST.into_response());
     };
     let session = random_token();
     sqlx::query("INSERT INTO sessions(id,identity_id,token_hash,user_agent,signup_pending,created_at) VALUES(?,?,?,?,0,?)")
         .bind(id())
-        .bind(transfer.get::<String, _>("identity_id"))
+        .bind(identity_id)
         .bind(hash(&session))
         .bind(headers.get(header::USER_AGENT).and_then(|value| value.to_str().ok()))
         .bind(now())

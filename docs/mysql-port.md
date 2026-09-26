@@ -59,6 +59,14 @@ key dependency and keeps foreign-key checks enabled; the cancellation row is
 locked before deletion. The SQLite cancellation regression also passes. This
 fixture does not establish parity for every account lifecycle workflow or
 concurrent incineration workers.
+`tests/mysql_session_transfer.py` now checks device transfer link creation,
+revocation, QR rendering, redemption by PUT and PATCH, replay rejection,
+four-hour expiry, and simultaneous redemption with exactly one winner.
+MySQL redemption locks the transfer row and deletes it in the same transaction
+before creating a session. The matching SQLite link flow was compared with
+Fizzy in `tests/session_transfer_parity.py`, and its generation, redemption,
+expiry, and race checks passed again after this change. The MySQL test checks
+Rizzy only.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,
