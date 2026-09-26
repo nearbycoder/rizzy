@@ -110,6 +110,13 @@ The [conditional board HTML benchmark](bench/results/board-html-conditional-2026
 
 The first fidelity gate is to run each upstream API controller test against an equivalent Rust route and compare status, response fields, authorization, and database side effects. The second is visual and interaction testing for each original view. The third is benchmark comparison using parity checked responses and equal data volumes.
 
+The [route registration inventory](docs/route-coverage.md) compares the pinned
+source's dispatchable controller actions with Rizzy's path and method table:
+all 211 application routes and three Turbo Native navigation routes are now
+registered. The Turbo Native responses match the source's HTML text. Five
+Active Storage and 14 Action Mailbox framework routes remain unmatched. Route
+registration alone does not prove behavioral parity for any of these areas.
+
 Rizzy's card and comment FTS5 indexes now use the Porter tokenizer from Fizzy's pinned SQLite search schema. `tests/search.py` checks stemmed title and comment queries such as `running`/`run`, `authentication`/`authenticate`, and `walking`/`walk`. `tests/search_stemming_migration.py` downgrades a populated disposable index to the older tokenizer, restarts Rizzy, and verifies both existing index row counts and stemmed matches. The pinned Fizzy search model and card-search suites pass 16 tests and 65 assertions; its custom MySQL stemmer suite passes 25 tests and 50 assertions. Full query grammar, Unicode tokenization, relevance ordering, and the production MySQL adapter still need direct parity checks.
 
 The pinned `api/flat_json_params_test.rb` suite passes 24 tests and 131 assertions. `tests/flat_json_params.py` exercises all 24 equivalent flat-JSON requests in Rizzy, including signup on a fresh account, and checks stored changes for representative records across boards, cards, columns, steps, reactions, notification preferences, join codes, account settings, users, tokens, webhooks, and push subscriptions. This establishes the tested flat-JSON parameter convention, not broader API response or permission parity.

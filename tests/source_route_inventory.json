@@ -1,0 +1,1427 @@
+{
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "routes": [
+    {
+      "verb": "GET",
+      "path": "/",
+      "controller": "events",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/account/cancellation(.:format)",
+      "controller": "account/cancellations",
+      "action": "create"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/account/entropy(.:format)",
+      "controller": "account/entropies",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/account/entropy(.:format)",
+      "controller": "account/entropies",
+      "action": "update"
+    },
+    {
+      "verb": "GET",
+      "path": "/account/join_code/edit(.:format)",
+      "controller": "account/join_codes",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/account/join_code(.:format)",
+      "controller": "account/join_codes",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/account/join_code(.:format)",
+      "controller": "account/join_codes",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/account/join_code(.:format)",
+      "controller": "account/join_codes",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/account/join_code(.:format)",
+      "controller": "account/join_codes",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/account/settings(.:format)",
+      "controller": "account/settings",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/account/settings(.:format)",
+      "controller": "account/settings",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/account/settings(.:format)",
+      "controller": "account/settings",
+      "action": "update"
+    },
+    {
+      "verb": "POST",
+      "path": "/account/exports(.:format)",
+      "controller": "account/exports",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/account/exports/:id(.:format)",
+      "controller": "account/exports",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/account/imports(.:format)",
+      "controller": "account/imports",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/account/imports/new(.:format)",
+      "controller": "account/imports",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/account/imports/:id(.:format)",
+      "controller": "account/imports",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:user_id/avatar(.:format)",
+      "controller": "users/avatars",
+      "action": "show"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/users/:user_id/avatar(.:format)",
+      "controller": "users/avatars",
+      "action": "destroy"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/users/:user_id/role(.:format)",
+      "controller": "users/roles",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/users/:user_id/role(.:format)",
+      "controller": "users/roles",
+      "action": "update"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:user_id/events(.:format)",
+      "controller": "users/events",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:user_id/push_subscriptions(.:format)",
+      "controller": "users/push_subscriptions",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/users/:user_id/push_subscriptions(.:format)",
+      "controller": "users/push_subscriptions",
+      "action": "create"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/users/:user_id/push_subscriptions/:id(.:format)",
+      "controller": "users/push_subscriptions",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:user_id/email_addresses/:email_address_token/confirmation(.:format)",
+      "controller": "users/email_addresses/confirmations",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/users/:user_id/email_addresses/:email_address_token/confirmation(.:format)",
+      "controller": "users/email_addresses/confirmations",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/users/:user_id/email_addresses(.:format)",
+      "controller": "users/email_addresses",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:user_id/email_addresses/new(.:format)",
+      "controller": "users/email_addresses",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/users/:user_id/data_exports(.:format)",
+      "controller": "users/data_exports",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:user_id/data_exports/:id(.:format)",
+      "controller": "users/data_exports",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/users(.:format)",
+      "controller": "users",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:id/edit(.:format)",
+      "controller": "users",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/:id(.:format)",
+      "controller": "users",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/users/:id(.:format)",
+      "controller": "users",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/users/:id(.:format)",
+      "controller": "users",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/users/:id(.:format)",
+      "controller": "users",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/transfer_token(.:format)",
+      "controller": "transfer_tokens",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/accesses(.:format)",
+      "controller": "boards/accesses",
+      "action": "index"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/boards/:board_id/involvement(.:format)",
+      "controller": "boards/involvements",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/boards/:board_id/involvement(.:format)",
+      "controller": "boards/involvements",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/boards/:board_id/publication(.:format)",
+      "controller": "boards/publications",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/boards/:board_id/publication(.:format)",
+      "controller": "boards/publications",
+      "action": "create"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/boards/:board_id/entropy(.:format)",
+      "controller": "boards/entropies",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/boards/:board_id/entropy(.:format)",
+      "controller": "boards/entropies",
+      "action": "update"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/columns/not_now(.:format)",
+      "controller": "boards/columns/not_nows",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/columns/stream(.:format)",
+      "controller": "boards/columns/streams",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/columns/closed(.:format)",
+      "controller": "boards/columns/closeds",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/columns/:column_id/cards(.:format)",
+      "controller": "boards/columns/cards",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/columns(.:format)",
+      "controller": "boards/columns",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/boards/:board_id/columns(.:format)",
+      "controller": "boards/columns",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/columns/:id(.:format)",
+      "controller": "boards/columns",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/boards/:board_id/columns/:id(.:format)",
+      "controller": "boards/columns",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/boards/:board_id/columns/:id(.:format)",
+      "controller": "boards/columns",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/boards/:board_id/columns/:id(.:format)",
+      "controller": "boards/columns",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/boards/:board_id/cards(.:format)",
+      "controller": "cards",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/boards/:board_id/webhooks/:webhook_id/activation(.:format)",
+      "controller": "webhooks/activations",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/webhooks/:webhook_id/deliveries(.:format)",
+      "controller": "webhooks/deliveries",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/webhooks(.:format)",
+      "controller": "webhooks",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/boards/:board_id/webhooks(.:format)",
+      "controller": "webhooks",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/webhooks/new(.:format)",
+      "controller": "webhooks",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/webhooks/:id/edit(.:format)",
+      "controller": "webhooks",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:board_id/webhooks/:id(.:format)",
+      "controller": "webhooks",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/boards/:board_id/webhooks/:id(.:format)",
+      "controller": "webhooks",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/boards/:board_id/webhooks/:id(.:format)",
+      "controller": "webhooks",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/boards/:board_id/webhooks/:id(.:format)",
+      "controller": "webhooks",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards(.:format)",
+      "controller": "boards",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/boards(.:format)",
+      "controller": "boards",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/new(.:format)",
+      "controller": "boards",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:id/edit(.:format)",
+      "controller": "boards",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/boards/:id(.:format)",
+      "controller": "boards",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/boards/:id(.:format)",
+      "controller": "boards",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/boards/:id(.:format)",
+      "controller": "boards",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/boards/:id(.:format)",
+      "controller": "boards",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/columns/:column_id/left_position(.:format)",
+      "controller": "columns/left_positions",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/columns/:column_id/right_position(.:format)",
+      "controller": "columns/right_positions",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/columns/cards/:card_id/drops/not_now(.:format)",
+      "controller": "columns/cards/drops/not_nows",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/columns/cards/:card_id/drops/stream(.:format)",
+      "controller": "columns/cards/drops/streams",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/columns/cards/:card_id/drops/closure(.:format)",
+      "controller": "columns/cards/drops/closures",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/columns/cards/:card_id/drops/column(.:format)",
+      "controller": "columns/cards/drops/columns",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/previews(.:format)",
+      "controller": "cards/previews",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/draft(.:format)",
+      "controller": "cards/drafts",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/board/edit(.:format)",
+      "controller": "cards/boards",
+      "action": "edit"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/cards/:card_id/board(.:format)",
+      "controller": "cards/boards",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/cards/:card_id/board(.:format)",
+      "controller": "cards/boards",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/closure(.:format)",
+      "controller": "cards/closures",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/closure(.:format)",
+      "controller": "cards/closures",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/column/edit(.:format)",
+      "controller": "cards/columns",
+      "action": "edit"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/goldness(.:format)",
+      "controller": "cards/goldnesses",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/goldness(.:format)",
+      "controller": "cards/goldnesses",
+      "action": "create"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/image(.:format)",
+      "controller": "cards/images",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/not_now(.:format)",
+      "controller": "cards/not_nows",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/pin(.:format)",
+      "controller": "cards/pins",
+      "action": "show"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/pin(.:format)",
+      "controller": "cards/pins",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/pin(.:format)",
+      "controller": "cards/pins",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/publish(.:format)",
+      "controller": "cards/publishes",
+      "action": "create"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/reading(.:format)",
+      "controller": "cards/readings",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/reading(.:format)",
+      "controller": "cards/readings",
+      "action": "create"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/triage(.:format)",
+      "controller": "cards/triages",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/triage(.:format)",
+      "controller": "cards/triages",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/watch(.:format)",
+      "controller": "cards/watches",
+      "action": "show"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/watch(.:format)",
+      "controller": "cards/watches",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/watch(.:format)",
+      "controller": "cards/watches",
+      "action": "create"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/reading(.:format)",
+      "controller": "cards/readings",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/reading(.:format)",
+      "controller": "cards/readings",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/reactions(.:format)",
+      "controller": "cards/reactions",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/reactions(.:format)",
+      "controller": "cards/reactions",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/reactions/new(.:format)",
+      "controller": "cards/reactions",
+      "action": "new"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/reactions/:id(.:format)",
+      "controller": "cards/reactions",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/assignments(.:format)",
+      "controller": "cards/assignments",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/assignments/new(.:format)",
+      "controller": "cards/assignments",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/self_assignment(.:format)",
+      "controller": "cards/self_assignments",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/steps(.:format)",
+      "controller": "cards/steps",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/steps(.:format)",
+      "controller": "cards/steps",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/steps/:id/edit(.:format)",
+      "controller": "cards/steps",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/steps/:id(.:format)",
+      "controller": "cards/steps",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/cards/:card_id/steps/:id(.:format)",
+      "controller": "cards/steps",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/cards/:card_id/steps/:id(.:format)",
+      "controller": "cards/steps",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/steps/:id(.:format)",
+      "controller": "cards/steps",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/taggings(.:format)",
+      "controller": "cards/taggings",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/taggings/new(.:format)",
+      "controller": "cards/taggings",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/comments/:comment_id/reactions(.:format)",
+      "controller": "cards/comments/reactions",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/comments/:comment_id/reactions(.:format)",
+      "controller": "cards/comments/reactions",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/comments/:comment_id/reactions/new(.:format)",
+      "controller": "cards/comments/reactions",
+      "action": "new"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/comments/:comment_id/reactions/:id(.:format)",
+      "controller": "cards/comments/reactions",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/comments(.:format)",
+      "controller": "cards/comments",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards/:card_id/comments(.:format)",
+      "controller": "cards/comments",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/comments/:id/edit(.:format)",
+      "controller": "cards/comments",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:card_id/comments/:id(.:format)",
+      "controller": "cards/comments",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/cards/:card_id/comments/:id(.:format)",
+      "controller": "cards/comments",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/cards/:card_id/comments/:id(.:format)",
+      "controller": "cards/comments",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:card_id/comments/:id(.:format)",
+      "controller": "cards/comments",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards(.:format)",
+      "controller": "cards",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/cards(.:format)",
+      "controller": "cards",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:id/edit(.:format)",
+      "controller": "cards",
+      "action": "edit"
+    },
+    {
+      "verb": "GET",
+      "path": "/cards/:id(.:format)",
+      "controller": "cards",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/cards/:id(.:format)",
+      "controller": "cards",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/cards/:id(.:format)",
+      "controller": "cards",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/cards/:id(.:format)",
+      "controller": "cards",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/tags(.:format)",
+      "controller": "tags",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/notifications/settings(.:format)",
+      "controller": "notifications/settings",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/notifications/settings(.:format)",
+      "controller": "notifications/settings",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/notifications/settings(.:format)",
+      "controller": "notifications/settings",
+      "action": "update"
+    },
+    {
+      "verb": "GET",
+      "path": "/notifications/unsubscribe/new(.:format)",
+      "controller": "notifications/unsubscribes",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/notifications/unsubscribe(.:format)",
+      "controller": "notifications/unsubscribes",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/notifications/unsubscribe(.:format)",
+      "controller": "notifications/unsubscribes",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/notifications/tray(.:format)",
+      "controller": "notifications/trays",
+      "action": "show"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/notifications/:notification_id/reading(.:format)",
+      "controller": "notifications/readings",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/notifications/:notification_id/reading(.:format)",
+      "controller": "notifications/readings",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/notifications/bulk_reading(.:format)",
+      "controller": "notifications/bulk_readings",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/notifications(.:format)",
+      "controller": "notifications",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/search(.:format)",
+      "controller": "searches",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/filters/settings_refresh(.:format)",
+      "controller": "filters/settings_refreshes",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/filters(.:format)",
+      "controller": "filters",
+      "action": "create"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/filters/:id(.:format)",
+      "controller": "filters",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/activities(.:format)",
+      "controller": "activities",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/events(.:format)",
+      "controller": "events",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/events/days(.:format)",
+      "controller": "events/days",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/events/day_timeline/columns/:id(.:format)",
+      "controller": "events/day_timeline/columns",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/qr_codes/:id(.:format)",
+      "controller": "qr_codes",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/join/:code(.:format)",
+      "controller": "join_codes",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/join/:code(.:format)",
+      "controller": "join_codes",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/users/joins(.:format)",
+      "controller": "users/joins",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/joins/new(.:format)",
+      "controller": "users/joins",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/users/verifications(.:format)",
+      "controller": "users/verifications",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/users/verifications/new(.:format)",
+      "controller": "users/verifications",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/session/transfers/:id(.:format)",
+      "controller": "sessions/transfers",
+      "action": "show"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/session/transfers/:id(.:format)",
+      "controller": "sessions/transfers",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/session/transfers/:id(.:format)",
+      "controller": "sessions/transfers",
+      "action": "update"
+    },
+    {
+      "verb": "GET",
+      "path": "/session/magic_link(.:format)",
+      "controller": "sessions/magic_links",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/session/magic_link(.:format)",
+      "controller": "sessions/magic_links",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/session/menu(.:format)",
+      "controller": "sessions/menus",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/session/passkey(.:format)",
+      "controller": "sessions/passkeys",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/session/new(.:format)",
+      "controller": "sessions",
+      "action": "new"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/session(.:format)",
+      "controller": "sessions",
+      "action": "destroy"
+    },
+    {
+      "verb": "POST",
+      "path": "/session(.:format)",
+      "controller": "sessions",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/signup/completion/new(.:format)",
+      "controller": "signups/completions",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/signup/completion(.:format)",
+      "controller": "signups/completions",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/signup/new(.:format)",
+      "controller": "signups",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/signup(.:format)",
+      "controller": "signups",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/landing(.:format)",
+      "controller": "landings",
+      "action": "show"
+    },
+    {
+      "verb": "POST",
+      "path": "/my/passkey_challenge(.:format)",
+      "controller": "my/passkey_challenges",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/identity(.:format)",
+      "controller": "my/identities",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/access_tokens(.:format)",
+      "controller": "my/access_tokens",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/my/access_tokens(.:format)",
+      "controller": "my/access_tokens",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/access_tokens/new(.:format)",
+      "controller": "my/access_tokens",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/access_tokens/:id(.:format)",
+      "controller": "my/access_tokens",
+      "action": "show"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/my/access_tokens/:id(.:format)",
+      "controller": "my/access_tokens",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/passkeys(.:format)",
+      "controller": "my/passkeys",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/my/passkeys(.:format)",
+      "controller": "my/passkeys",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/passkeys/:id/edit(.:format)",
+      "controller": "my/passkeys",
+      "action": "edit"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/my/passkeys/:id(.:format)",
+      "controller": "my/passkeys",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/my/passkeys/:id(.:format)",
+      "controller": "my/passkeys",
+      "action": "update"
+    },
+    {
+      "verb": "DELETE",
+      "path": "/my/passkeys/:id(.:format)",
+      "controller": "my/passkeys",
+      "action": "destroy"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/pins(.:format)",
+      "controller": "my/pins",
+      "action": "index"
+    },
+    {
+      "verb": "PATCH",
+      "path": "/my/timezone(.:format)",
+      "controller": "my/timezones",
+      "action": "update"
+    },
+    {
+      "verb": "PUT",
+      "path": "/my/timezone(.:format)",
+      "controller": "my/timezones",
+      "action": "update"
+    },
+    {
+      "verb": "GET",
+      "path": "/my/menu(.:format)",
+      "controller": "my/menus",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/prompts/cards(.:format)",
+      "controller": "prompts/cards",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/prompts/users(.:format)",
+      "controller": "prompts/users",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/prompts/boards/:board_id/users(.:format)",
+      "controller": "prompts/boards/users",
+      "action": "index"
+    },
+    {
+      "verb": "GET",
+      "path": "/public/boards/:board_id/columns/not_now(.:format)",
+      "controller": "public/boards/columns/not_nows",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/public/boards/:board_id/columns/stream(.:format)",
+      "controller": "public/boards/columns/streams",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/public/boards/:board_id/columns/closed(.:format)",
+      "controller": "public/boards/columns/closeds",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/public/boards/:board_id/columns/:id(.:format)",
+      "controller": "public/boards/columns",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/public/boards/:board_id/cards/:id(.:format)",
+      "controller": "public/cards",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/public/boards/:id(.:format)",
+      "controller": "public/boards",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/up(.:format)",
+      "controller": "rails/health",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/manifest(.:format)",
+      "controller": "rails/pwa",
+      "action": "manifest"
+    },
+    {
+      "verb": "GET",
+      "path": "/service-worker(.:format)",
+      "controller": "pwa",
+      "action": "service_worker"
+    },
+    {
+      "verb": "GET",
+      "path": "/client_configurations(/:platform)_v(:version)(.:format)",
+      "controller": "client_configurations",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/recede_historical_location(.:format)",
+      "controller": "turbo/native/navigation",
+      "action": "recede"
+    },
+    {
+      "verb": "GET",
+      "path": "/resume_historical_location(.:format)",
+      "controller": "turbo/native/navigation",
+      "action": "resume"
+    },
+    {
+      "verb": "GET",
+      "path": "/refresh_historical_location(.:format)",
+      "controller": "turbo/native/navigation",
+      "action": "refresh"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/action_mailbox/postmark/inbound_emails(.:format)",
+      "controller": "action_mailbox/ingresses/postmark/inbound_emails",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/action_mailbox/relay/inbound_emails(.:format)",
+      "controller": "action_mailbox/ingresses/relay/inbound_emails",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/action_mailbox/sendgrid/inbound_emails(.:format)",
+      "controller": "action_mailbox/ingresses/sendgrid/inbound_emails",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/action_mailbox/mandrill/inbound_emails(.:format)",
+      "controller": "action_mailbox/ingresses/mandrill/inbound_emails",
+      "action": "health_check"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/action_mailbox/mandrill/inbound_emails(.:format)",
+      "controller": "action_mailbox/ingresses/mandrill/inbound_emails",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/action_mailbox/mailgun/inbound_emails/mime(.:format)",
+      "controller": "action_mailbox/ingresses/mailgun/inbound_emails",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/conductor/action_mailbox/inbound_emails(.:format)",
+      "controller": "rails/conductor/action_mailbox/inbound_emails",
+      "action": "index"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/conductor/action_mailbox/inbound_emails(.:format)",
+      "controller": "rails/conductor/action_mailbox/inbound_emails",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/conductor/action_mailbox/inbound_emails/new(.:format)",
+      "controller": "rails/conductor/action_mailbox/inbound_emails",
+      "action": "new"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/conductor/action_mailbox/inbound_emails/:id(.:format)",
+      "controller": "rails/conductor/action_mailbox/inbound_emails",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/conductor/action_mailbox/inbound_emails/sources/new(.:format)",
+      "controller": "rails/conductor/action_mailbox/inbound_emails/sources",
+      "action": "new"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/conductor/action_mailbox/inbound_emails/sources(.:format)",
+      "controller": "rails/conductor/action_mailbox/inbound_emails/sources",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/conductor/action_mailbox/:inbound_email_id/reroute(.:format)",
+      "controller": "rails/conductor/action_mailbox/reroutes",
+      "action": "create"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/conductor/action_mailbox/:inbound_email_id/incinerate(.:format)",
+      "controller": "rails/conductor/action_mailbox/incinerates",
+      "action": "create"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/blobs/redirect/:signed_id/*filename(.:format)",
+      "controller": "active_storage/blobs/redirect",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/blobs/proxy/:signed_id/*filename(.:format)",
+      "controller": "active_storage/blobs/proxy",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/blobs/:signed_id/*filename(.:format)",
+      "controller": "active_storage/blobs/redirect",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/representations/redirect/:signed_blob_id/:variation_key/*filename(.:format)",
+      "controller": "active_storage/representations/redirect",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/representations/proxy/:signed_blob_id/:variation_key/*filename(.:format)",
+      "controller": "active_storage/representations/proxy",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/representations/:signed_blob_id/:variation_key/*filename(.:format)",
+      "controller": "active_storage/representations/redirect",
+      "action": "show"
+    },
+    {
+      "verb": "GET",
+      "path": "/rails/active_storage/disk/:encoded_key/*filename(.:format)",
+      "controller": "active_storage/disk",
+      "action": "show"
+    },
+    {
+      "verb": "PUT",
+      "path": "/rails/active_storage/disk/:encoded_token(.:format)",
+      "controller": "active_storage/disk",
+      "action": "update"
+    },
+    {
+      "verb": "POST",
+      "path": "/rails/active_storage/direct_uploads(.:format)",
+      "controller": "active_storage/direct_uploads",
+      "action": "create"
+    }
+  ]
+}
