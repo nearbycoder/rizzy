@@ -284,6 +284,52 @@ def main():
                         if status != (204 if item[1] == 0 else 200)]
             assert not failures, failures[:5]
 
+            def mixed_comment_write(item, operation):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 1:
+                    return call(base, account, token, f"/cards/{number}", "PATCH",
+                                {"card": {"title": f"Comment {operation} title {index}"}})
+                if operation == "create":
+                    return call(base, account, token, f"/cards/{number}/comments", "POST",
+                                {"comment": {"body": f"Concurrent comment {index}"}})
+                path = f"/cards/{number}/comments/{comment_ids[index]}"
+                if operation == "edit":
+                    return call(base, account, token, path, "PATCH",
+                                {"comment": {"body": f"Edited concurrent comment {index}"}})
+                return call(base, account, token, path, "DELETE")
+
+            comment_ids = {}
+            for operation, expected in (("create", 201), ("edit", 200), ("delete", 204)):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                    comment_mixed = list(pool.map(
+                        lambda item: mixed_comment_write(item, operation), mixed_items))
+                failures = [(item, status, value)
+                            for item, (status, value, _) in zip(mixed_items, comment_mixed)
+                            if status != (expected if item[1] == 0 else 200)]
+                assert not failures, (operation, failures[:5])
+                if operation == "create":
+                    comment_ids = {
+                        index: value["id"]
+                        for (index, kind), (_, value, _) in zip(mixed_items, comment_mixed)
+                        if kind == 0
+                    }
+                    assert len(set(comment_ids.values())) == 200
+                elif operation == "edit":
+                    assert all(value["body"]["plain_text"] ==
+                               f"Edited concurrent comment {index}"
+                               for (index, kind), (_, value, _) in zip(mixed_items, comment_mixed)
+                               if kind == 0)
+            for index in (0, 99, 199):
+                number = results[index + 200][1]["number"]
+                status, _, _ = call(bases[index % 4], account, token,
+                                    f"/cards/{number}/comments/{comment_ids[index]}")
+                assert status == 404, (index, status)
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                deleted_ids = ",".join(f"'{comment_ids[index]}'" for index in range(200))
+                assert mysql_scalar(url, f"SELECT COUNT(*) FROM comments WHERE id IN ({deleted_ids})") == "0"
+
             def mixed_move_write(item):
                 index, kind = item
                 number = results[index][1]["number"]
@@ -446,10 +492,43 @@ def main():
                 status, tagged, _ = call(bases[index % 4], account, token, f"/cards/{number}")
                 assert status == 200 and "cluster-tag" in tagged["tags"], (index, status, tagged)
 
+            def mixed_comment_move(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/comments", "POST",
+                                {"comment": {"body": f"Moving comment {index}"}})
+                return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                            {"board_id": destination["id"]})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                comment_move = list(pool.map(mixed_comment_move, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, comment_move)
+                        if status != (201 if item[1] == 0 else 200)]
+            assert not failures, ("comment/move", failures[:5])
+            moved_comment_ids = [comment_move[2 * index][1]["id"] for index in range(200)]
+            assert len(set(moved_comment_ids)) == 200
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                moved_ids = ",".join(f"'{comment_id}'" for comment_id in moved_comment_ids)
+                assert mysql_scalar(url, f"SELECT COUNT(*) FROM comments WHERE id IN ({moved_ids})") == "200"
+                assert mysql_scalar(url, "SELECT COUNT(*) FROM events "
+                                     "WHERE eventable_type='Comment' AND "
+                                     f"eventable_id IN ({moved_ids})") == "200"
+            for index in (0, 99, 199):
+                number = results[index + 200][1]["number"]
+                comment = comment_move[2 * index][1]
+                status, shown, _ = call(bases[index % 4], account, token,
+                                        f"/cards/{number}/comments/{comment['id']}")
+                assert status == 200 and shown["body"]["plain_text"] == f"Moving comment {index}"
+                status, moved, _ = call(bases[index % 4], account, token, f"/cards/{number}")
+                assert status == 200 and moved["board"]["id"] == destination["id"]
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, mixed writes including reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            print("MySQL cluster passed: 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

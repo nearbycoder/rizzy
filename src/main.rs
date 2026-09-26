@@ -12433,7 +12433,7 @@ async fn create_comment(
     let created_at =
         timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
     let _writer = app.write_lock.lock().await;
-    let (mut tx, _) = begin_card_board_write(
+    let (mut tx, board_id) = begin_card_board_write(
         &app,
         &c.get::<String, _>("id"),
         &c.get::<String, _>("board_id"),
@@ -12469,7 +12469,7 @@ async fn create_comment(
     create_new_mentions(
         &mut tx,
         &p,
-        &c.get::<String, _>("board_id"),
+        &board_id,
         &c.get::<String, _>("id"),
         "Comment",
         &id,
@@ -12485,7 +12485,7 @@ async fn create_comment(
     record_event(
         &app,
         &p,
-        &c.get::<String, _>("board_id"),
+        &board_id,
         &c.get::<String, _>("id"),
         "Comment",
         &id,
@@ -12495,7 +12495,7 @@ async fn create_comment(
     .await?;
     let period: i64 =
         sqlx::query_scalar("SELECT auto_postpone_period_in_days FROM boards WHERE id=?")
-            .bind(c.get::<String, _>("board_id"))
+            .bind(&board_id)
             .fetch_one(&app.db)
             .await
             .map_err(db_err)?;
