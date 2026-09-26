@@ -408,6 +408,13 @@ and one fresh four-process cluster run passed 200 reaction deletions racing
 title edits on the same cards. This adds a specific delete-path check; other
 concurrent reaction and comment operations remain to be audited.
 
+The watch mutation now uses the card-and-board lock helper too. A live SQLite
+comparison checked Fizzy's watch on/off and repeat no-op timestamp effects.
+The expanded cluster test ran 200 watch mutations concurrently with moves of
+the same cards across four processes; with `RIZZY_TEST_MYSQL_CLIENT` configured,
+it checked representative persisted watch states after the race. Other
+cross-board write paths still need the same stale-board audit.
+
 A new move/title phase in that test reproduced MySQL 1213 deadlocks when a
 card moved between boards while another process edited its title. The move
 transaction now locks both boards in ID order before changing the card and

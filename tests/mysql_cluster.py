@@ -3,6 +3,7 @@
 
 Set RIZZY_TEST_MYSQL_URL to a MySQL database dedicated to tests. Each run adds
 one account and 400 cards. This checks correctness, not a throughput target.
+Set RIZZY_TEST_MYSQL_CLIENT to a MySQL CLI to verify persisted watch states.
 """
 
 import concurrent.futures
@@ -19,6 +20,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +51,23 @@ def call(base, account, token, path, method="GET", body=None):
     with response:
         data = response.read()
         return response.status, json.loads(data) if data else None, response.headers
+
+
+def mysql_scalar(url, statement):
+    client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT")
+    if not client:
+        return None
+    parsed = urlparse(url)
+    client_env = {**os.environ, "MYSQL_PWD": unquote(parsed.password or "")}
+    result = subprocess.run(
+        [client, "--no-defaults", "--host=" + (parsed.hostname or "localhost"),
+         "--port=" + str(parsed.port or 3306),
+         "--user=" + unquote(parsed.username or ""),
+         "--database=" + parsed.path.lstrip("/"),
+         "--skip-column-names", "--execute=" + statement],
+        env=client_env, check=True, capture_output=True, text=True,
+    )
+    return result.stdout.strip()
 
 
 def main():
@@ -304,6 +323,39 @@ def main():
             assert all(value["board"]["id"] == (board["id"] if index < 100 else destination["id"])
                        for index, (_, value, _) in enumerate(reverse))
 
+            def mixed_watch_move(item):
+                index, kind = item
+                card_index = index if index < 100 else index + 100
+                number = results[card_index][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/watch",
+                                "DELETE" if index < 100 else "POST")
+                next_board = destination["id"] if index < 100 else board["id"]
+                return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                            {"board_id": next_board})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                watch_move = list(pool.map(mixed_watch_move, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, watch_move)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+            assert all(value["board"]["id"] ==
+                       (destination["id"] if index < 100 else board["id"])
+                       for (index, kind), (_, value, _) in zip(mixed_items, watch_move)
+                       if kind == 1)
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                for index in (0, 99, 100, 199):
+                    card_index = index if index < 100 else index + 100
+                    card_id = results[card_index][1]["id"]
+                    watching = mysql_scalar(
+                        url, "SELECT watching FROM watches WHERE "
+                             f"card_id='{card_id}' AND user_id="
+                             f"(SELECT creator_id FROM cards WHERE id='{card_id}')",
+                    )
+                    assert watching == ("0" if index < 100 else "1"), index
+
             status, users, _ = call(bases[0], account, token, "/users")
             assert status == 200, status
             owner_id = next(user["id"] for user in users if user["role"] == "owner")
@@ -371,7 +423,7 @@ def main():
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, mixed writes including reaction deletion, opposite-direction moves, and 200 double tag toggles across four processes")
+            print("MySQL cluster passed: 400 unique cards, mixed writes including reaction deletion and watch/move races, opposite-direction moves, and 200 double tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()
