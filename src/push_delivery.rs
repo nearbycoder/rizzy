@@ -472,6 +472,8 @@ mod tests {
             notification_html_build_locks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             events_html_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             events_html_build_locks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            board_etag_connection: None,
+            board_etag_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             export_notify: tokio::sync::Notify::new(),
             import_notify: tokio::sync::Notify::new(),
         };

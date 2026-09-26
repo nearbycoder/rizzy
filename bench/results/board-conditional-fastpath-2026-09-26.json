@@ -1,0 +1,104 @@
+{
+  "before": {
+    "binary": "/tmp/rizzy-board-etag-before",
+    "cards": 100,
+    "html_bytes": 46890,
+    "measurements": {
+      "8": {
+        "full": {
+          "concurrency": 8,
+          "seconds": 3.0,
+          "requests": 7180,
+          "errors": {},
+          "rps": 2391.7,
+          "p50_ms": 3.45,
+          "p95_ms": 4.86,
+          "p99_ms": 5.48
+        },
+        "conditional": {
+          "concurrency": 8,
+          "seconds": 3.0,
+          "requests": 7144,
+          "errors": {},
+          "rps": 2379.3,
+          "p50_ms": 3.46,
+          "p95_ms": 5.03,
+          "p99_ms": 5.73
+        }
+      },
+      "32": {
+        "full": {
+          "concurrency": 32,
+          "seconds": 3.01,
+          "requests": 5704,
+          "errors": {},
+          "rps": 1893.4,
+          "p50_ms": 16.98,
+          "p95_ms": 19.07,
+          "p99_ms": 20.17
+        },
+        "conditional": {
+          "concurrency": 32,
+          "seconds": 3.01,
+          "requests": 5798,
+          "errors": {},
+          "rps": 1923.7,
+          "p50_ms": 16.88,
+          "p95_ms": 18.63,
+          "p99_ms": 19.33
+        }
+      }
+    }
+  },
+  "after": {
+    "binary": "/tmp/rizzy-board-etag-after",
+    "cards": 100,
+    "html_bytes": 46890,
+    "measurements": {
+      "8": {
+        "full": {
+          "concurrency": 8,
+          "seconds": 3.0,
+          "requests": 7326,
+          "errors": {},
+          "rps": 2440.7,
+          "p50_ms": 3.37,
+          "p95_ms": 4.74,
+          "p99_ms": 5.48
+        },
+        "conditional": {
+          "concurrency": 8,
+          "seconds": 3.0,
+          "requests": 14081,
+          "errors": {},
+          "rps": 4691.4,
+          "p50_ms": 1.62,
+          "p95_ms": 2.83,
+          "p99_ms": 3.49
+        }
+      },
+      "32": {
+        "full": {
+          "concurrency": 32,
+          "seconds": 3.01,
+          "requests": 5634,
+          "errors": {},
+          "rps": 1869.6,
+          "p50_ms": 17.23,
+          "p95_ms": 19.12,
+          "p99_ms": 19.92
+        },
+        "conditional": {
+          "concurrency": 32,
+          "seconds": 3.01,
+          "requests": 13930,
+          "errors": {},
+          "rps": 4635.3,
+          "p50_ms": 6.45,
+          "p95_ms": 12.4,
+          "p99_ms": 15.55
+        }
+      }
+    }
+  }
+}

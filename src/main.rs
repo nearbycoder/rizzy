@@ -13,8 +13,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{
-    QueryBuilder, Row, Sqlite, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteRow},
+    Connection, QueryBuilder, Row, Sqlite, SqlitePool,
+    sqlite::{
+        SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions, SqliteRow,
+    },
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -78,6 +80,8 @@ struct App {
         tokio::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
     events_html_cache: tokio::sync::Mutex<HashMap<String, EventsHtmlCacheEntry>>,
     events_html_build_locks: tokio::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
+    board_etag_connection: Option<tokio::sync::Mutex<SqliteConnection>>,
+    board_etag_cache: tokio::sync::Mutex<HashMap<String, BoardEtagCacheEntry>>,
     export_notify: tokio::sync::Notify,
     import_notify: tokio::sync::Notify,
 }
@@ -89,6 +93,10 @@ struct NotificationHtmlCacheEntry {
 struct EventsHtmlCacheEntry {
     html: String,
     cached_at: Instant,
+}
+struct BoardEtagCacheEntry {
+    data_version: i64,
+    etag: String,
 }
 type Shared = State<Arc<App>>;
 type Result<T> = std::result::Result<T, ApiError>;
@@ -1799,7 +1807,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .clamp(1, 64);
     let db = SqlitePoolOptions::new()
         .max_connections(pool_size)
-        .connect_with(options)
+        .connect_with(options.clone())
         .await?;
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
@@ -2403,6 +2411,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         seed(&db).await?;
         return Ok(());
     }
+    let board_etag_connection = if url.contains(":memory:") {
+        None
+    } else {
+        Some(tokio::sync::Mutex::new(
+            SqliteConnection::connect_with(&options).await?,
+        ))
+    };
     let app = Arc::new(App {
         db,
         qr_secret,
@@ -2412,6 +2427,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         notification_html_build_locks: tokio::sync::Mutex::new(HashMap::new()),
         events_html_cache: tokio::sync::Mutex::new(HashMap::new()),
         events_html_build_locks: tokio::sync::Mutex::new(HashMap::new()),
+        board_etag_connection,
+        board_etag_cache: tokio::sync::Mutex::new(HashMap::new()),
         export_notify: tokio::sync::Notify::new(),
         import_notify: tokio::sync::Notify::new(),
     });
@@ -4352,6 +4369,69 @@ fn conditional_html_response(body: String, headers: &HeaderMap) -> Response {
     response
 }
 
+async fn board_data_version(app: &App) -> Option<i64> {
+    let connection = app.board_etag_connection.as_ref()?;
+    let mut connection = connection.lock().await;
+    sqlx::query_scalar("PRAGMA data_version")
+        .fetch_one(&mut *connection)
+        .await
+        .ok()
+}
+
+fn board_etag_key(p: &Principal, board_id: &str, headers: &HeaderMap) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        p.account_id,
+        p.user_id,
+        board_id,
+        etag_timezone(headers).unwrap_or_default()
+    )
+}
+
+async fn cached_board_not_modified(app: &App, key: &str, headers: &HeaderMap) -> Option<Response> {
+    let candidates = headers.get(header::IF_NONE_MATCH)?.to_str().ok()?;
+    let data_version = board_data_version(app).await?;
+    let cache = app.board_etag_cache.lock().await;
+    let entry = cache.get(key)?;
+    if entry.data_version != data_version
+        || !candidates
+            .split(',')
+            .any(|candidate| candidate.trim() == entry.etag)
+    {
+        return None;
+    }
+    let mut response = StatusCode::NOT_MODIFIED.into_response();
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&entry.etag).expect("hex ETag"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    Some(response)
+}
+
+async fn remember_board_etag(app: &App, key: String, before: Option<i64>, etag: String) {
+    let Some(before) = before else { return };
+    let Some(after) = board_data_version(app).await else {
+        return;
+    };
+    if before == after {
+        let mut cache = app.board_etag_cache.lock().await;
+        if cache.len() >= 1024 {
+            cache.clear();
+        }
+        cache.insert(
+            key,
+            BoardEtagCacheEntry {
+                data_version: after,
+                etag,
+            },
+        );
+    }
+}
+
 fn prompt_user_item(p: &Principal, row: &SqliteRow) -> String {
     let id: String = row.get("id");
     let name: String = row.get("name");
@@ -5808,7 +5888,22 @@ async fn show_board(
                 .await?
                 .into_response()
         } else {
-            conditional_html_response(board_page::show(&app, &p, &r).await?.0, &headers)
+            let key = board_etag_key(&p, &id, &headers);
+            if let Some(response) = cached_board_not_modified(&app, &key, &headers).await {
+                return Ok(response);
+            }
+            let before = board_data_version(&app).await;
+            let response =
+                conditional_html_response(board_page::show(&app, &p, &r).await?.0, &headers);
+            if let Some(etag) = response
+                .headers()
+                .get(header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+            {
+                remember_board_etag(&app, key, before, etag).await;
+            }
+            response
         });
     }
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
