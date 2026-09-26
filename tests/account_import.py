@@ -19,6 +19,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "target/debug/rizzy"
+FRESH_UPDATE_TABLES = {
+    "user_settings": "user_settings_records",
+    "boards": "boards",
+    "columns": "columns",
+    "board_publications": "board_publications",
+    "webhooks": "webhooks",
+    "accesses": "access_records",
+    "cards": "cards",
+    "comments": "comments",
+    "closures": "closures",
+    "card_goldnesses": "card_goldnesses",
+    "card_not_nows": "card_not_nows",
+    "card_activity_spikes": "card_activity_spikes",
+    "watches": "watches",
+    "mentions": "mentions",
+    "filters": "filters",
+    "notifications": "notifications",
+    "notification_bundles": "notification_bundles",
+    "webhook_deliveries": "webhook_deliveries",
+}
 
 
 def call(url, token, path, method="GET", data=None, content_type=None):
@@ -86,6 +106,16 @@ def await_result(url, token, created):
     raise AssertionError("import did not finish")
 
 
+def assert_fresh(updated_at, import_started):
+    updated = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    assert import_started <= updated <= datetime.now(timezone.utc), updated_at
+
+
+def assert_generic_reexport(restored, source, keys, import_started):
+    assert {key: restored[key] for key in keys} == {key: source[key] for key in keys}
+    assert_fresh(restored["updated_at"], import_started)
+
+
 def run(archive_path):
     archive = archive_path.read_bytes()
     with zipfile.ZipFile(archive_path) as z:
@@ -138,7 +168,7 @@ def run(archive_path):
         imported_samples = {
             group: next((json.loads(z.read(name)) for name in z.namelist()
                          if name.startswith(f"data/{group}/")), None)
-            for group in ("boards", "cards")
+            for group in FRESH_UPDATE_TABLES
         }
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory() as temp:
@@ -184,13 +214,12 @@ def run(archive_path):
                 for group, sample in imported_samples.items():
                     if sample is None:
                         continue
-                    table = group
+                    table = FRESH_UPDATE_TABLES[group]
                     created_at, updated_at = db.execute(
-                        f"SELECT created_at,updated_at FROM {table} WHERE id=? AND account_id=?",
-                        (sample["id"], imported_id)).fetchone()
+                        f"SELECT created_at,updated_at FROM {table} WHERE id=?",
+                        (sample["id"],)).fetchone()
                     assert created_at == sample["created_at"], (group, "creation time")
-                    updated = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
-                    assert import_started <= updated <= datetime.now(timezone.utc), (group, "fresh update time")
+                    assert_fresh(updated_at, import_started)
                 queries = {
                     "accesses": "SELECT COUNT(*) FROM access_records WHERE account_id=?",
                     "user_settings": "SELECT COUNT(*) FROM user_settings_records WHERE account_id=?",
@@ -232,27 +261,30 @@ def run(archive_path):
                 for gold in golden_records:
                     actual = db.execute("SELECT card_id,created_at,updated_at FROM card_goldnesses WHERE id=?",
                                         (gold["id"],)).fetchone()
-                    assert actual == (gold["card_id"], gold["created_at"], gold["updated_at"])
+                    assert actual[:2] == (gold["card_id"], gold["created_at"])
+                    assert_fresh(actual[2], import_started)
                 for closure in closure_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM closures WHERE id=?",
                                         (closure["id"],)).fetchone()
-                    assert actual == (closure["card_id"], closure.get("user_id"),
-                                      closure["created_at"], closure["updated_at"])
+                    assert actual[:3] == (closure["card_id"], closure.get("user_id"), closure["created_at"])
+                    assert_fresh(actual[3], import_started)
                 for access in access_records:
                     actual = db.execute(
                         "SELECT r.board_id,r.user_id,x.involvement,x.accessed_at,r.created_at,r.updated_at "
                         "FROM access_records r JOIN accesses x ON x.board_id=r.board_id AND x.user_id=r.user_id "
                         "WHERE r.id=?", (access["id"],)).fetchone()
-                    assert actual == (access["board_id"], access["user_id"], access["involvement"],
-                                      access.get("accessed_at"), access["created_at"], access["updated_at"])
+                    assert actual[:5] == (access["board_id"], access["user_id"], access["involvement"],
+                                          access.get("accessed_at"), access["created_at"])
+                    assert_fresh(actual[5], import_started)
                 for setting in setting_records:
                     actual = db.execute(
                         "SELECT r.user_id,n.bundle_email_frequency,t.timezone_name,r.created_at,r.updated_at "
                         "FROM user_settings_records r JOIN notification_settings n ON n.user_id=r.user_id "
                         "LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.id=?",
                         (setting["id"],)).fetchone()
-                    assert actual == (setting["user_id"], setting["bundle_email_frequency"],
-                                      setting.get("timezone_name"), setting["created_at"], setting["updated_at"])
+                    assert actual[:4] == (setting["user_id"], setting["bundle_email_frequency"],
+                                          setting.get("timezone_name"), setting["created_at"])
+                    assert_fresh(actual[4], import_started)
                 restored_entropies = {}
                 for entropy in entropy_records:
                     container_id = imported_id if entropy["container_type"] == "Account" else entropy["container_id"]
@@ -277,12 +309,13 @@ def run(archive_path):
                 for publication in publication_records:
                     actual = db.execute("SELECT board_id,key,created_at,updated_at FROM board_publications WHERE id=?",
                                         (publication["id"],)).fetchone()
-                    assert actual == (publication["board_id"], publication["key"],
-                                      publication["created_at"], publication["updated_at"])
+                    assert actual[:3] == (publication["board_id"], publication["key"], publication["created_at"])
+                    assert_fresh(actual[3], import_started)
                 for spike in spike_records:
                     actual = db.execute("SELECT card_id,created_at,updated_at FROM card_activity_spikes WHERE id=?",
                                         (spike["id"],)).fetchone()
-                    assert actual == (spike["card_id"], spike["created_at"], spike["updated_at"])
+                    assert actual[:2] == (spike["card_id"], spike["created_at"])
+                    assert_fresh(actual[2], import_started)
                 imported_watches = {
                     row[0]: row[1:] for row in db.execute(
                         "SELECT w.id,w.card_id,w.user_id,w.watching,w.created_at,w.updated_at "
@@ -290,9 +323,11 @@ def run(archive_path):
                         (imported_id,))}
                 assert len(imported_watches) == len(watch_records)
                 for watch in watch_records:
-                    assert imported_watches[watch["id"]] == (
+                    actual = imported_watches[watch["id"]]
+                    assert actual[:4] == (
                         watch["card_id"], watch["user_id"], int(watch["watching"]),
-                        watch["created_at"], watch["updated_at"])
+                        watch["created_at"])
+                    assert_fresh(actual[4], import_started)
                 imported_rich_texts = {
                     row[0]: row[1:] for row in db.execute(
                         "SELECT id,record_type,record_id,name,created_at,updated_at "
@@ -305,8 +340,8 @@ def run(archive_path):
                 for not_now in postponed_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM card_not_nows WHERE id=?",
                                         (not_now["id"],)).fetchone()
-                    assert actual == (not_now["card_id"], not_now.get("user_id"),
-                                      not_now["created_at"], not_now["updated_at"])
+                    assert actual[:3] == (not_now["card_id"], not_now.get("user_id"), not_now["created_at"])
+                    assert_fresh(actual[3], import_started)
                 for bundle in bundles:
                     status_value = db.execute("SELECT status FROM notification_bundles WHERE id=?", (bundle["id"],)).fetchone()[0]
                     expected = {"pending": 0, "processing": 1, "delivered": 2}.get(bundle["status"], bundle["status"])
@@ -376,20 +411,21 @@ def run(archive_path):
                     assert card["due_on"] == source_card["due_on"]
                 for source_gold in golden_records:
                     restored = json.loads(z.read(f"data/card_goldnesses/{source_gold['id']}.json"))
-                    assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
-                        key: source_gold[key] for key in ("card_id", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_gold, ("card_id", "created_at"), import_started)
                 for source_closure in closure_records:
                     restored = json.loads(z.read(f"data/closures/{source_closure['id']}.json"))
-                    assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {
-                        key: source_closure[key] for key in ("card_id", "user_id", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_closure,
+                                            ("card_id", "user_id", "created_at"), import_started)
                 for source_access in access_records:
                     restored = json.loads(z.read(f"data/accesses/{source_access['id']}.json"))
-                    assert {key: restored[key] for key in ("board_id", "user_id", "involvement", "accessed_at", "created_at", "updated_at")} == {
-                        key: source_access[key] for key in ("board_id", "user_id", "involvement", "accessed_at", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_access,
+                                            ("board_id", "user_id", "involvement", "accessed_at", "created_at"),
+                                            import_started)
                 for source_setting in setting_records:
                     restored = json.loads(z.read(f"data/user_settings/{source_setting['id']}.json"))
-                    assert {key: restored[key] for key in ("user_id", "bundle_email_frequency", "timezone_name", "created_at", "updated_at")} == {
-                        key: source_setting[key] for key in ("user_id", "bundle_email_frequency", "timezone_name", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_setting,
+                                            ("user_id", "bundle_email_frequency", "timezone_name", "created_at"),
+                                            import_started)
                 for source_entropy in entropy_records:
                     container_id = imported_id if source_entropy["container_type"] == "Account" else source_entropy["container_id"]
                     record = restored_entropies[(source_entropy["container_type"], container_id)]
@@ -403,24 +439,23 @@ def run(archive_path):
                         "updated_at": record[3]}
                 for source_publication in publication_records:
                     restored = json.loads(z.read(f"data/board_publications/{source_publication['id']}.json"))
-                    assert {key: restored[key] for key in ("board_id", "key", "created_at", "updated_at")} == {
-                        key: source_publication[key] for key in ("board_id", "key", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_publication,
+                                            ("board_id", "key", "created_at"), import_started)
                 for source_spike in spike_records:
                     restored = json.loads(z.read(f"data/card_activity_spikes/{source_spike['id']}.json"))
-                    assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
-                        key: source_spike[key] for key in ("card_id", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_spike, ("card_id", "created_at"), import_started)
                 for source_watch in watch_records:
                     restored = json.loads(z.read(f"data/watches/{source_watch['id']}.json"))
-                    assert {key: restored[key] for key in ("card_id", "user_id", "watching", "created_at", "updated_at")} == {
-                        key: source_watch[key] for key in ("card_id", "user_id", "watching", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_watch,
+                                            ("card_id", "user_id", "watching", "created_at"), import_started)
                 for source_rich in rich_texts:
                     restored = json.loads(z.read(f"data/action_text_rich_texts/{source_rich['id']}.json"))
                     assert {key: restored[key] for key in ("body", "created_at", "name", "record_id", "record_type", "updated_at")} == {
                         key: source_rich[key] for key in ("body", "created_at", "name", "record_id", "record_type", "updated_at")}
                 for source_not_now in postponed_records:
                     restored = json.loads(z.read(f"data/card_not_nows/{source_not_now['id']}.json"))
-                    assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {
-                        key: source_not_now[key] for key in ("card_id", "user_id", "created_at", "updated_at")}
+                    assert_generic_reexport(restored, source_not_now,
+                                            ("card_id", "user_id", "created_at"), import_started)
                 for source_bundle in bundles:
                     bundle = json.loads(z.read(f"data/notification_bundles/{source_bundle['id']}.json"))
                     expected = source_bundle["status"] if isinstance(source_bundle["status"], str) else ("pending", "processing", "delivered")[source_bundle["status"]]

@@ -618,7 +618,7 @@ async fn apply_archive(
         let changed = sqlx::query("UPDATE user_settings_records SET id=?,created_at=?,updated_at=? WHERE user_id=? AND account_id=?")
             .bind(field(settings, "id")?)
             .bind(field(settings, "created_at")?)
-            .bind(field(settings, "updated_at")?)
+            .bind(&imported_at)
             .bind(user_id)
             .bind(account_id)
             .execute(&mut *tx)
@@ -660,7 +660,7 @@ async fn apply_archive(
             .bind(field(column,"id")?).bind(account_id).bind(field(column,"board_id")?)
             .bind(field(column,"name")?).bind(field(column,"color")?)
             .bind(integer(column,"position",0)).bind(field(column,"created_at")?)
-            .bind(field(column,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for entropy in records(&archive, "entropies") {
         let period = integer(entropy, "auto_postpone_period", 30 * 86400) / 86400;
@@ -713,7 +713,7 @@ async fn apply_archive(
             .bind(field(publication, "board_id")?)
             .bind(field(publication, "key")?)
             .bind(field(publication, "created_at")?)
-            .bind(field(publication, "updated_at")?)
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -740,7 +740,7 @@ async fn apply_archive(
             .bind(field(webhook,"id")?).bind(account_id).bind(field(webhook,"board_id")?)
             .bind(field(webhook,"name")?).bind(field(webhook,"url")?)
             .bind(boolean(webhook,"active",true)).bind(field(webhook,"signing_secret")?)
-            .bind(actions).bind(field(webhook,"created_at")?).bind(field(webhook,"updated_at")?)
+            .bind(actions).bind(field(webhook,"created_at")?).bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for access in records(&archive, "accesses") {
@@ -757,7 +757,7 @@ async fn apply_archive(
         let changed = sqlx::query("UPDATE access_records SET id=?,created_at=?,updated_at=? WHERE board_id=? AND user_id=?")
             .bind(field(access, "id")?)
             .bind(field(access, "created_at")?)
-            .bind(field(access, "updated_at")?)
+            .bind(&imported_at)
             .bind(field(access, "board_id")?)
             .bind(field(access, "user_id")?)
             .execute(&mut *tx)
@@ -783,7 +783,7 @@ async fn apply_archive(
     for comment in records(&archive, "comments") {
         sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,created_at,updated_at) VALUES(?,?,?,'',?,?)")
             .bind(field(comment,"id")?).bind(field(comment,"card_id")?).bind(field(comment,"creator_id")?)
-            .bind(field(comment,"created_at")?).bind(maybe_field(comment,"updated_at"))
+            .bind(field(comment,"created_at")?).bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for step in records(&archive, "steps") {
@@ -820,7 +820,7 @@ async fn apply_archive(
             .bind(card_id)
             .bind(maybe_field(closure, "user_id"))
             .bind(created_at)
-            .bind(maybe_field(closure, "updated_at").unwrap_or(created_at))
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -839,7 +839,7 @@ async fn apply_archive(
             .bind(account_id)
             .bind(card_id)
             .bind(created_at)
-            .bind(maybe_field(gold, "updated_at").unwrap_or(created_at))
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -859,7 +859,7 @@ async fn apply_archive(
             .bind(card_id)
             .bind(maybe_field(not_now, "user_id"))
             .bind(created_at)
-            .bind(maybe_field(not_now, "updated_at").unwrap_or(created_at))
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -873,7 +873,7 @@ async fn apply_archive(
     for spike in records(&archive, "card_activity_spikes") {
         sqlx::query("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?)")
             .bind(field(spike,"id")?).bind(field(spike,"card_id")?).bind(account_id).bind(field(spike,"created_at")?)
-            .bind(field(spike,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for watch in records(&archive, "watches") {
         sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?)")
@@ -882,7 +882,7 @@ async fn apply_archive(
             .bind(field(watch, "user_id")?)
             .bind(boolean(watch, "watching", true))
             .bind(field(watch, "created_at")?)
-            .bind(field(watch, "updated_at")?)
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -910,7 +910,7 @@ async fn apply_archive(
             .bind(field(mention,"id")?).bind(account_id).bind(field(mention,"mentionee_id")?)
             .bind(field(mention,"mentioner_id")?).bind(field(mention,"source_type")?)
             .bind(field(mention,"source_id")?).bind(field(mention,"created_at")?)
-            .bind(field(mention,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for filter in records(&archive, "filters") {
         let fields = serde_json::to_string(filter.get("fields").ok_or("Missing filter fields")?)
@@ -918,7 +918,7 @@ async fn apply_archive(
         sqlx::query("INSERT INTO filters(id,account_id,creator_id,fields,params_digest,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
             .bind(field(filter,"id")?).bind(account_id).bind(field(filter,"creator_id")?)
             .bind(fields).bind(field(filter,"params_digest")?).bind(field(filter,"created_at")?)
-            .bind(field(filter,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for tracker in records(&archive, "webhook_delinquency_trackers") {
         let changed = sqlx::query("UPDATE webhooks SET consecutive_failures_count=?,first_failure_at=? WHERE id=? AND account_id=?")
@@ -955,7 +955,7 @@ async fn apply_archive(
             .bind(field(notification,"creator_id")?).bind(field(notification,"card_id")?)
             .bind(field(notification,"source_id")?).bind(field(notification,"source_type")?)
             .bind(integer(notification,"unread_count",1)).bind(maybe_field(notification,"read_at"))
-            .bind(field(notification,"created_at")?).bind(field(notification,"updated_at")?)
+            .bind(field(notification,"created_at")?).bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for bundle in records(&archive, "notification_bundles") {
@@ -963,7 +963,7 @@ async fn apply_archive(
             .bind(field(bundle,"id")?).bind(account_id).bind(field(bundle,"user_id")?)
             .bind(field(bundle,"starts_at")?).bind(field(bundle,"ends_at")?)
             .bind(bundle_status(bundle)?).bind(field(bundle,"created_at")?)
-            .bind(field(bundle,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for delivery in records(&archive, "webhook_deliveries") {
         let request = delivery
@@ -982,7 +982,7 @@ async fn apply_archive(
             .bind(field(delivery,"id")?).bind(account_id).bind(field(delivery,"webhook_id")?)
             .bind(field(delivery,"event_id")?).bind(field(delivery,"state")?)
             .bind(request).bind(response).bind(field(delivery,"created_at")?)
-            .bind(field(delivery,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     let mut files = FileCleanup(Vec::new());
     let mut blob_sgids = HashMap::<String, String>::new();
