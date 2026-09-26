@@ -18,6 +18,8 @@ MySQL; some still use SQLite-only SQL, and this is not deployment parity.
 The core flow also checks that a changed comment edit touches its card and
 board, an identical edit leaves timestamps unchanged, and comment deletion
 touches the card and board without advancing card activity time.
+It checks a named-column card JSON ETag, a conditional 304 response, and
+invalidation after a step is added to that column's card.
 The pinned source's `Card::Entropic` suite passed 8 tests and 19 assertions on
 the same MySQL 8 server. The closing-soon MySQL query checks both account and
 board periods with recent, eligible, and overdue cards; it does not cover

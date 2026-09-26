@@ -186,10 +186,28 @@ def main():
                 {"column_id": column["id"]}, 204,
             )
             assert call(base, token, scope + f"/cards/{number}")["column"]["id"] == column["id"]
+            column_cards_url = base + scope + f"/boards/{board['id']}/columns/{column['id']}/cards"
+            column_headers = {"Authorization": "Bearer " + token,
+                              "Accept": "application/json"}
+            with urllib.request.urlopen(urllib.request.Request(
+                    column_cards_url, headers=column_headers), timeout=8) as response:
+                column_etag = response.headers["ETag"]
+                assert column_etag and json.load(response)[0]["id"] == card["id"]
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    column_cards_url, headers={**column_headers,
+                                               "If-None-Match": column_etag}), timeout=8)
+                raise AssertionError("Column cards ignored If-None-Match")
+            except urllib.error.HTTPError as response:
+                assert response.status == 304 and response.read() == b""
             step = call(
                 base, token, scope + f"/cards/{number}/steps", "POST",
                 {"step": {"content": "MySQL step"}}, 201,
             )
+            with urllib.request.urlopen(urllib.request.Request(
+                    column_cards_url, headers={**column_headers,
+                                               "If-None-Match": column_etag}), timeout=8) as response:
+                assert response.status == 200 and response.headers["ETag"] != column_etag
             call(
                 base, token, scope + f"/cards/{number}/steps/{step['id']}", "PUT",
                 {"step": {"completed": True}},

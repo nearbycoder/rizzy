@@ -10423,8 +10423,51 @@ async fn column_cards(
     if headers.contains_key("x-rizzy-card-fragment") {
         return Ok(Html(cards_page::previews(&app, &p, &rows).await?).into_response());
     }
-    let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
-    Ok(paginated(json!(out), total, page, &uri, &headers))
+    // Fizzy's fresh_when validator is based on the cards in this page, so an
+    // edit on another page leaves this response cacheable.
+    let mut digest = Sha256::new();
+    for row in &rows {
+        digest.update(row.get::<String, _>("id").as_bytes());
+        digest.update([0]);
+        digest.update(row.get::<String, _>("updated_at").as_bytes());
+        digest.update([0]);
+    }
+    let etag = format!("W/\"{}\"", hex::encode(&digest.finalize()[..16]));
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+        });
+    let mut response = if not_modified {
+        pagination_headers(
+            StatusCode::NOT_MODIFIED.into_response(),
+            total,
+            page,
+            &uri,
+            &headers,
+        )
+    } else {
+        let out = cards_json_batch(&app, &p, &rows, &base(&headers)).await?;
+        paginated(json!(out), total, page, &uri, &headers)
+    };
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("hex ETag"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    if !not_modified {
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+    }
+    Ok(response)
 }
 async fn show_card(
     State(app): Shared,
