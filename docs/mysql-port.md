@@ -340,7 +340,10 @@ local, four-board API workload. The shared account card counter and database
 remain contention points; other routes, larger datasets, durability under
 failure, and multiple hosts still need direct tests.
 The write-path audit found additional routes that update cards without first
-locking their parent board, including draft publication, step changes, triage,
-watches, and reactions. The current lock fix is verified for the mixed workload;
-these other routes need concurrent MySQL tests and a consistent lock order
-before treating clustered write reliability as complete.
+locking their parent board, including draft publication, steps, triage, watches,
+and reactions. `tests/mysql_cluster.py` now checks 400 distinct cards through
+step create, update, and delete phases at 32 clients across four app processes;
+the phases completed without HTTP errors. That check covers distinct cards on
+one board and does not prove freedom from every lock cycle. Draft publication,
+triage, watches, and reactions still need concurrent MySQL checks and any
+required lock-order changes before clustered write reliability is complete.

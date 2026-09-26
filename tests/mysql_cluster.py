@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Check concurrent card numbering through two MySQL-backed Rizzy processes.
+"""Check concurrent card numbering and step writes through two MySQL-backed processes.
 
 Set RIZZY_TEST_MYSQL_URL to a MySQL database dedicated to tests. Each run adds
-one account and 80 cards. This checks correctness, not a throughput target.
+one account and 400 cards. This checks correctness, not a throughput target.
 """
 
 import concurrent.futures
@@ -82,7 +82,7 @@ def main():
         processes = []
         bases = []
         try:
-            for index in range(2):
+            for index in range(4):
                 port = free_port()
                 local_env = {**env, "RIZZY_BIND": f"127.0.0.1:{port}"}
                 log = (Path(temp) / f"rizzy-{index}.log").open("w")
@@ -111,21 +111,60 @@ def main():
 
             def create(index):
                 return call(
-                    bases[index % 2], account, token, f"/boards/{board['id']}/cards", "POST",
+                    bases[index % 4], account, token, f"/boards/{board['id']}/cards", "POST",
                     {"card": {"title": f"Concurrent {index}"}},
                 )
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
-                results = list(pool.map(create, range(80)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+                results = list(pool.map(create, range(400)))
             failures = [(index, status, value) for index, (status, value, _) in enumerate(results)
                         if status != 201]
             assert not failures, failures[:5]
             numbers = [value["number"] for _, value, _ in results]
-            assert sorted(numbers) == list(range(1, 81)), numbers
+            assert sorted(numbers) == list(range(1, 401)), numbers
+            def create_step(index):
+                number = results[index][1]["number"]
+                return call(bases[index % 4], account, token,
+                            f"/cards/{number}/steps", "POST",
+                            {"step": {"content": f"Step {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+                steps = list(pool.map(create_step, range(400)))
+            failures = [(index, status, value) for index, (status, value, _) in enumerate(steps)
+                        if status != 201]
+            assert not failures, failures[:5]
+            assert len({value["id"] for _, value, _ in steps}) == 400
+
+            def update_step(index):
+                number = results[index][1]["number"]
+                step_id = steps[index][1]["id"]
+                return call(bases[index % 4], account, token,
+                            f"/cards/{number}/steps/{step_id}", "PATCH",
+                            {"step": {"content": f"Edited {index}", "completed": True}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+                updated = list(pool.map(update_step, range(400)))
+            failures = [(index, status, value) for index, (status, value, _) in enumerate(updated)
+                        if status != 200 or value["content"] != f"Edited {index}"
+                        or value["completed"] is not True]
+            assert not failures, failures[:5]
+
+            def delete_step(index):
+                number = results[index][1]["number"]
+                step_id = steps[index][1]["id"]
+                return call(bases[index % 4], account, token,
+                            f"/cards/{number}/steps/{step_id}", "DELETE")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+                deleted = list(pool.map(delete_step, range(400)))
+            failures = [(index, status, value) for index, (status, value, _) in enumerate(deleted)
+                        if status != 204]
+            assert not failures, failures[:5]
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
-            assert int(headers["X-Total-Count"]) == 80, headers
-            print("MySQL cluster passed: 80 unique cards across two processes")
+            assert int(headers["X-Total-Count"]) == 400, headers
+            print("MySQL cluster passed: 400 unique cards and step create/update/delete across four processes")
         finally:
             for process, log in processes:
                 if process.poll() is None:

@@ -161,7 +161,7 @@ pub(super) async fn show(
                 escape(&content)
             ));
     }
-    step_html.push_str("</ul><form class=\"steps__form\" id=\"step-form\"><label><span aria-hidden=\"true\">□</span><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" aria-label=\"Add a step\"></label></form></section>");
+    step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step\"><form class=\"steps__form\" id=\"step-form\"><label><span aria-hidden=\"true\">□</span><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" aria-label=\"Add a step\"></label></form></li></ul></section>", escape(&card_id)));
     let comments = sqlx::query("SELECT c.id,c.body,c.created_at,c.creator_id,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
         .bind(&card_id)
         .fetch_all(&app.db)

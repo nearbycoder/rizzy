@@ -11625,30 +11625,84 @@ async fn edit_step(
     );
     Ok(Html(html).into_response())
 }
+fn step_input(headers: &HeaderMap, body: &Bytes) -> Result<Value> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    if form {
+        let mut fields = serde_json::Map::new();
+        for (key, value) in url::form_urlencoded::parse(body) {
+            match key.as_ref() {
+                "step[content]" | "content" => {
+                    fields.insert("content".into(), json!(value.as_ref()));
+                }
+                "step[completed]" | "completed" => {
+                    fields.insert("completed".into(), json!(value.as_ref()));
+                }
+                _ => {}
+            }
+        }
+        Ok(json!({"step":fields}))
+    } else {
+        serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))
+    }
+}
+fn step_completed(value: Option<&Value>, previous: bool) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => value == "1" || value.eq_ignore_ascii_case("true"),
+        Some(Value::Number(value)) => value.as_i64() == Some(1),
+        _ => previous,
+    }
+}
+fn step_frame(account: &str, number: &str, id: &str, content: &str, completed: bool) -> String {
+    let id = escape(id);
+    let path = format!("/{account}/cards/{number}/steps/{id}");
+    let checked = if completed { " checked" } else { "" };
+    format!(
+        "<turbo-frame id=\"step_{id}\"><li class=\"step\"><form action=\"{path}\" method=\"post\" data-controller=\"form\"><input type=\"hidden\" name=\"_method\" value=\"put\"><input type=\"hidden\" name=\"step[completed]\" value=\"0\"><input type=\"checkbox\" name=\"step[completed]\" value=\"1\" class=\"checkbox\" data-action=\"change-&gt;form#submit\"{checked}></form><a href=\"{path}/edit\" class=\"step__content\">{}</a></li></turbo-frame>",
+        escape(content)
+    )
+}
+fn step_stream(action: &str, target: &str, template: Option<&str>) -> String {
+    let target = escape(target);
+    match template {
+        Some(html) => format!(
+            "<turbo-stream action=\"{action}\" target=\"{target}\"><template>{html}</template></turbo-stream>\n"
+        ),
+        None => format!("<turbo-stream action=\"{action}\" target=\"{target}\"></turbo-stream>\n"),
+    }
+}
 async fn create_step(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
+    let body = step_input(&headers, &body)?;
     let v = nested(&body, "step");
     let content = required(v, "content")?;
+    let completed = step_completed(v.get("completed"), false);
     let id = id();
     let timestamp = now();
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query("INSERT INTO steps(id,card_id,content,created_at,updated_at) VALUES(?,?,?,?,?)")
-        .bind(&id)
-        .bind(&card_id)
-        .bind(&content)
-        .bind(&timestamp)
-        .bind(&timestamp)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
+    sqlx::query(
+        "INSERT INTO steps(id,card_id,content,completed,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+    )
+    .bind(&id)
+    .bind(&card_id)
+    .bind(&content)
+    .bind(completed as i64)
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
     sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
         .bind(&timestamp)
         .bind(&card_id)
@@ -11656,17 +11710,33 @@ async fn create_step(
         .await
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    if wants_turbo_stream(&headers) {
+        let card_id: String = c.get("id");
+        let html = step_frame(&account, &number, &id, &content, completed);
+        let stream = step_stream("before", &format!("new_step_card_{card_id}"), Some(&html));
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(created(
         format!("/{account}/cards/{number}/steps/{id}.json"),
-        json!({"id":id,"content":content,"completed":false}),
+        json!({"id":id,"content":content,"completed":completed}),
     ))
 }
 async fn update_step(
     State(app): Shared,
     Path((account, number, step)): Path<(String, String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    body: Bytes,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
@@ -11677,14 +11747,12 @@ async fn update_step(
         .await
         .map_err(db_err)?
         .ok_or_else(missing)?;
+    let body = step_input(&headers, &body)?;
     let v = nested(&body, "step");
     let previous_content: String = old.get("content");
     let previous_completed = old.get::<i64, _>("completed") != 0;
     let content = string(v, "content").unwrap_or_else(|| previous_content.clone());
-    let completed = v
-        .get("completed")
-        .and_then(Value::as_bool)
-        .unwrap_or(previous_completed);
+    let completed = step_completed(v.get("completed"), previous_completed);
     let timestamp = now();
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
@@ -11710,22 +11778,41 @@ async fn update_step(
             .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
-    Ok(Json(
-        json!({"id":step,"content":content,"completed":completed}),
-    ))
+    if wants_turbo_stream(&headers) {
+        let card_id: String = c.get("id");
+        let html = step_frame(&account, &number, &step, &content, completed);
+        let bubble = format!(
+            "<div id=\"bubble_card_{}\" hidden class=\"bubble\"></div>",
+            escape(&card_id)
+        );
+        let stream = step_stream("replace", &format!("step_{step}"), Some(&html))
+            + &step_stream("replace", &format!("bubble_card_{card_id}"), Some(&bubble));
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    Ok(Json(json!({"id":step,"content":content,"completed":completed})).into_response())
 }
 async fn delete_step(
     State(app): Shared,
     Path((account, number, step)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let done = sqlx::query("DELETE FROM steps WHERE id=? AND card_id=?")
-        .bind(step)
+        .bind(&step)
         .bind(&card_id)
         .execute(&mut *tx)
         .await
@@ -11740,7 +11827,21 @@ async fn delete_step(
         .await
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    if wants_turbo_stream(&headers) {
+        let stream = step_stream("remove", &format!("step_{step}"), None);
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 async fn comment_row(app: &App, card: &DbRow, id: &str) -> Result<DbRow> {
     sqlx::query("SELECT * FROM comments WHERE id=? AND card_id=?")
