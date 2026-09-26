@@ -81,6 +81,9 @@ one clean pair measured 135.26 Rizzy workflows/s versus Fizzy's 21.11; the
 other Fizzy phase failed once in its ActiveSearch shard and cannot support a
 clean paired ratio. These are scoped local API measurements, not maximum
 capacity or whole-app results.
+A [16-client repeat](bench/results/mysql-mixed-1000-c16-30s-2026-09-26.json)
+also had one clean pair, 138.86 Rizzy versus 24.37 Fizzy workflows/s, and one
+Fizzy ActiveSearch deadlock phase.
 
 The [60-second mixed API benchmark](bench/results/sustained-mixed-100-2026-09-26.json) uses fresh source and Rust databases, 100 initial cards, 32 clients, the same eight logical server CPUs, and two reversed-order rounds. Each completed unit makes five JSON reads and four card writes. With board JSON and account ETag state included, Rizzy completed 90.99–91.10 units/s versus Fizzy's 25.61–28.03, with no HTTP errors and matching final card, event, and comment formulas. The artifact records the pinned Fizzy revision, Rizzy commit, and release binary hash. It compared sampled response shapes, content, counts, and pagination headers before timing. This verifies a faster result for this workload, not one-for-one application speed or maximum scale: the apps have different process models and unimplemented browser and background behaviors, and SQLite writes serialize. `tests/board_show_pagination_parity.py` checks signed-in board pages one and two, their separate ETags, and 304 responses against disposable Fizzy and Rizzy databases.
 

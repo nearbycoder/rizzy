@@ -366,6 +366,10 @@ one PATCH with an ActiveSearch shard deadlock, so the two-round comparison is
 not fully clean and its 27.19 workflows/s cannot be used as a paired
 throughput result. The Rust binary hash and source revisions are in the
 artifacts; the source and Rust apps still have incomplete feature parity.
+A [16-client repeat](../bench/results/mysql-mixed-1000-c16-30s-2026-09-26.json)
+likewise produced one clean pair, 138.86 Rizzy versus 24.37 Fizzy
+workflows/s, and one Fizzy ActiveSearch deadlock phase. Lower concurrency did
+not remove this source failure from the 1,000-card fixture.
 
 The write-path audit found additional routes that update cards without first
 locking their parent board, including draft publication, steps, triage, watches,
