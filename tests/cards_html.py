@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Exercise the all-cards browser grid without changing its JSON API."""
+import base64
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -8,6 +11,7 @@ import urllib.parse
 from pathlib import Path
 
 from auth import BINARY, ROOT, call as auth_call, cookie, request_code, start, stop
+from card_image_parity import IMAGE, call as storage_call
 from join import call
 
 
@@ -45,6 +49,24 @@ def main():
                  {"reaction": {"content": "👍"}}, bearer=token, status=201)
             call(port, f"/{account}/cards/{newest['number']}/assignments", "POST",
                  {"assignee_id": newest["creator"]["id"]}, bearer=token, status=204)
+            storage_target = {"url": f"http://127.0.0.1:{port}", "account": account, "token": token}
+            blob = {"filename": "moon.jpg", "byte_size": len(IMAGE),
+                    "checksum": base64.b64encode(hashlib.md5(IMAGE).digest()).decode(),
+                    "content_type": "image/jpeg"}
+            for record_path, payload in (
+                (f"/cards/{newest['number']}.json", lambda signed: {"card": {"image": signed}}),
+                (f"/users/{newest['creator']['id']}.json", lambda signed: {"user": {"avatar": signed}}),
+            ):
+                status, _, raw = storage_call(storage_target, f"/{account}/rails/active_storage/direct_uploads", "POST", {"blob": blob})
+                assert status == 200, (status, raw[:150])
+                upload = json.loads(raw)
+                status, _, raw = storage_call(storage_target, upload["direct_upload"]["url"], "PUT", IMAGE,
+                                              bearer=False, headers=upload["direct_upload"]["headers"])
+                assert status == 204, (status, raw[:150])
+                status, _, raw = storage_call(storage_target, f"/{account}{record_path}", "PATCH", payload(upload["signed_id"]))
+                assert status == 200, (status, raw[:150])
+                if record_path.startswith("/cards/"):
+                    card_image_url = json.loads(raw)["image_url"]
             closed, _ = call(port, f"/{account}/boards/{board_id}/cards", "POST",
                              {"card": {"title": "Completed item"}}, bearer=token, status=201)
             call(port, f"/{account}/cards/{closed['number']}/closure", "POST", bearer=token, status=204)
@@ -70,6 +92,11 @@ def main():
             assert 'class="card__tag">preview</span>' in first and 'aria-label="Steps completed">1/1' in first
             assert 'aria-label="Comments">◌ 1' in first and 'aria-label="Boosts">▲ 1' in first
             assert 'Assigned to' in first and 'card__meta-text--author' in first
+            avatar_url = f"/{account}/users/{newest['creator']['id']}/avatar"
+            assert first.count(f'src="{avatar_url}"') >= 2
+            assert f'<div class="card__background"><img src="{card_image_url}"' in first
+            status, _, _ = storage_call(storage_target, avatar_url, bearer=False)
+            assert status == 302, status
             assert all(f"Grid item {index:02d}" in first for index in range(2, 17))
             assert "Grid item 00" not in first and "Completed item" not in first
             assert 'data-preview-url=' in first and 'load-page-2' in first
@@ -99,11 +126,13 @@ def main():
             assert "Grid item 05" in browser_result and "Grid item 06" not in browser_result
             rows, _ = call(port, base, bearer=token)
             assert isinstance(rows, list) and len(rows) == 15
-            board_page = html(f"/{account}/boards/{board_id}")
+            board_page = html(f"/{account}/boards/{board_id}?terms%5B%5D=Grid+item+16")
             assert f'href="/{account}/cards">All cards</a>' in board_page
+            assert f'<div class="card__background"><img src="{card_image_url}"' in board_page
+            assert f'src="{avatar_url}"' in board_page
         finally:
             stop(server)
-    print("All-cards HTML passed: filters, pagination, Turbo append, navigation, and JSON regression")
+    print("All-cards HTML passed: filters, pagination, preview media, Turbo append, navigation, and JSON regression")
 
 
 if __name__ == "__main__":

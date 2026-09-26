@@ -142,7 +142,11 @@ pub(super) async fn show_filtered(
         .await
         .map_err(db_err)?;
     let order = card_sort_order(query);
-    let mut builder = cards_query("SELECT c.*", principal, query);
+    let mut builder = cards_query(
+        "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name",
+        principal,
+        query,
+    );
     builder
         .push(format!(" ORDER BY {order} LIMIT "))
         .push_bind(limit)
@@ -152,12 +156,7 @@ pub(super) async fn show_filtered(
     let mut list = format!(
         "<div class=\"card-columns card-columns--filtered\" aria-label=\"Filtered cards\"><section class=\"cards cards--grid\"><h2>Filtered cards <span class=\"cards__count\">{total}</span></h2><div class=\"cards__list\">"
     );
-    for card in &cards {
-        let number: i64 = card.get("number");
-        let title: String = card.get("title");
-        list.push_str(&format!("<a class=\"card{}\" href=\"/{}/cards/{number}\"><span class=\"card__number\">#{number}</span><strong class=\"card__title\">{}</strong></a>",
-            if card.get::<i64,_>("golden") != 0 { " card--golden" } else { "" }, principal.slug, escape(&title)));
-    }
+    list.push_str(&cards_page::previews(app, principal, &cards).await?);
     if cards.is_empty() {
         list.push_str("<p class=\"cards__empty\">No cards match this filter.</p>");
     }

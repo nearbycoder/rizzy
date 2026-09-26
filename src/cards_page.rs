@@ -7,6 +7,7 @@ use std::{
 
 use super::{
     App, CardQuery, Principal, Result, card_page::render_template, db_err, escape, page_window,
+    storage,
 };
 
 const TEMPLATE: &str = include_str!("../static/cards.html");
@@ -34,7 +35,7 @@ struct PreviewMeta {
     completed_steps: i64,
     comments: i64,
     boosts: i64,
-    assignees: Vec<String>,
+    assignees: Vec<(String, String)>,
 }
 
 async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<String, PreviewMeta>> {
@@ -47,23 +48,23 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
     // per-card set of round trips while leaving the JSON card API untouched.
     let relations = [
         (
-            "SELECT 'tag' AS kind,g.card_id,t.title AS label,0 AS completed,1 AS amount FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",
+            "SELECT 'tag' AS kind,g.card_id,t.title AS label,NULL AS user_id,0 AS completed,1 AS amount FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",
             "",
         ),
         (
-            "SELECT 'step' AS kind,s.card_id,NULL AS label,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN (",
+            "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN (",
             " GROUP BY s.card_id",
         ),
         (
-            "SELECT 'comment' AS kind,m.card_id,NULL AS label,0 AS completed,COUNT(*) AS amount FROM comments m JOIN users u ON u.id=m.creator_id AND u.role!='system' WHERE m.card_id IN (",
+            "SELECT 'comment' AS kind,m.card_id,NULL AS label,NULL AS user_id,0 AS completed,COUNT(*) AS amount FROM comments m JOIN users u ON u.id=m.creator_id AND u.role!='system' WHERE m.card_id IN (",
             " GROUP BY m.card_id",
         ),
         (
-            "SELECT 'boost' AS kind,r.reactable_id AS card_id,NULL AS label,0 AS completed,COUNT(*) AS amount FROM reactions r WHERE r.reactable_type='Card' AND r.reactable_id IN (",
+            "SELECT 'boost' AS kind,r.reactable_id AS card_id,NULL AS label,NULL AS user_id,0 AS completed,COUNT(*) AS amount FROM reactions r WHERE r.reactable_type='Card' AND r.reactable_id IN (",
             " GROUP BY r.reactable_id",
         ),
         (
-            "SELECT 'assignee' AS kind,a.card_id,u.name AS label,0 AS completed,1 AS amount FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id IN (",
+            "SELECT 'assignee' AS kind,a.card_id,u.name AS label,u.id AS user_id,0 AS completed,1 AS amount FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id IN (",
             "",
         ),
     ];
@@ -92,7 +93,7 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
             }
             "comment" => item.comments += row.get::<i64, _>("amount"),
             "boost" => item.boosts += row.get::<i64, _>("amount"),
-            "assignee" => item.assignees.push(row.get("label")),
+            "assignee" => item.assignees.push((row.get("user_id"), row.get("label"))),
             _ => {}
         }
     }
@@ -105,6 +106,8 @@ pub(super) async fn previews(
     cards: &[SqliteRow],
 ) -> Result<String> {
     let metadata = preview_metadata(app, cards).await?;
+    let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
+    let images = storage::image_urls_for_cards(app, principal, &ids).await?;
     let mut html = String::new();
     for card in cards {
         let id: String = card.get("id");
@@ -113,7 +116,14 @@ pub(super) async fn previews(
         let title: String = card.get("title");
         let board_name: String = card.get("board_name");
         let creator_name: Option<String> = card.get("creator_name");
-        let (initials, familiar_name) = author_label(creator_name.as_deref().unwrap_or(""));
+        let (_, familiar_name) = author_label(creator_name.as_deref().unwrap_or(""));
+        let creator_id: String = card.get("creator_id");
+        let creator_avatar = format!(
+            "<img class=\"card__avatar\" src=\"/{}/users/{}/avatar\" alt=\"\" title=\"{}\" width=\"30\" height=\"30\">",
+            principal.slug,
+            escape(&creator_id),
+            escape(creator_name.as_deref().unwrap_or(""))
+        );
         let column_name: Option<String> = card.get("column_name");
         let column_color: Option<String> = card.get("column_color");
         let closed = card.get::<i64, _>("closed") != 0;
@@ -164,7 +174,21 @@ pub(super) async fn previews(
             .unwrap_or_default();
         let assignees = meta
             .filter(|item| !item.assignees.is_empty())
-            .map(|item| format!("<span class=\"card__meta-text card__meta-text--assignees\">Assigned to {}</span>", escape(&item.assignees.join(" / "))))
+            .map(|item| {
+                let names = item.assignees.iter().map(|(_, name)| name.as_str()).collect::<Vec<_>>().join(" / ");
+                format!("<span class=\"card__meta-text card__meta-text--assignees\">Assigned to {}</span>", escape(&names))
+            })
+            .unwrap_or_default();
+        let assignee_avatars = meta
+            .map(|item| item.assignees.iter().map(|(user_id, name)| format!(
+                "<img class=\"card__assignee-avatar\" src=\"/{}/users/{}/avatar\" alt=\"\" title=\"{}\" width=\"24\" height=\"24\">",
+                principal.slug, escape(user_id), escape(name)
+            )).collect::<String>())
+            .unwrap_or_default();
+        let background = images
+            .get(&id)
+            .and_then(|value| value.as_str())
+            .map(|url| format!("<div class=\"card__background\"><img src=\"{}\" alt=\"\" loading=\"lazy\"></div>", escape(url)))
             .unwrap_or_default();
         let counts = meta
             .map(|item| {
@@ -197,7 +221,7 @@ pub(super) async fn previews(
         };
         let _ = write!(
             html,
-            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" data-card-number=\"{number}\" draggable=\"true\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{tags}{steps}{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\"><span class=\"card__avatar\" aria-hidden=\"true\">{}</span><span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\" data-relative-date>{}</time></span><span class=\"card__meta-text card__meta-text--updated\">↻ <time datetime=\"{}\" data-relative-date>{}</time></span><span class=\"card__meta-text card__meta-text--author\">{}</span>{assignees}</div><div class=\"card__counts\">{counts}</div></footer></article>",
+            "<article id=\"article_card_{}\" class=\"card{} {}\" data-id=\"{number}\" data-card-number=\"{number}\" draggable=\"true\" tabindex=\"0\"><div class=\"card__main\"><a class=\"card__link\" href=\"/{}/cards/{number}\" title=\"{} in {}\"><span class=\"for-screen-reader\">{}</span></a><header class=\"card__header\"><div class=\"card__board\"><div class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</div><div class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></div></div>{tags}{steps}{column}</header><div class=\"card__body\"><div class=\"card__content\"><h3 class=\"card__title overflow-line-clamp\">{}</h3></div>{stamp}</div></div><footer class=\"card__footer\"><div class=\"card__meta\">{creator_avatar}<span class=\"card__meta-text card__meta-text--added\">Added <time datetime=\"{}\" data-relative-date>{}</time></span><span class=\"card__meta-text card__meta-text--updated\">↻ <time datetime=\"{}\" data-relative-date>{}</time></span><span class=\"card__meta-text card__meta-text--author\">{}</span>{assignees}<div class=\"card__assignee-avatars\">{assignee_avatars}</div></div><div class=\"card__counts\">{counts}</div>{background}</footer></article>",
             escape(&id),
             class,
             color,
@@ -207,7 +231,6 @@ pub(super) async fn previews(
             escape(&title),
             escape(&board_name),
             escape(&title),
-            escape(&initials),
             escape(&created_at),
             escape(created_at.get(..10).unwrap_or(&created_at)),
             escape(&last_active_at),
