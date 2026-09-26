@@ -114,6 +114,11 @@ def main():
                 {"column": {"name": "In Progress"}}
             )
             assert status == 201, (status, column)
+            status, destination, _ = call(
+                bases[0], account, token, "/boards", "POST",
+                {"board": {"name": "Cluster destination"}}
+            )
+            assert status == 201, (status, destination)
 
             def create(index):
                 return call(
@@ -238,10 +243,49 @@ def main():
                         if status != (201 if item[1] == 0 else 200)]
             assert not failures, failures[:5]
 
+            def mixed_move_write(item):
+                index, kind = item
+                number = results[index][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                                {"board_id": destination["id"]})
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Moved title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                move_mixed = list(pool.map(mixed_move_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, move_mixed)
+                        if status != 200]
+            assert not failures, failures[:5]
+            assert all(value["board"]["id"] == destination["id"]
+                       for (index, kind), (_, value, _) in zip(mixed_items, move_mixed) if kind == 0)
+            for index in (0, 99, 199):
+                number = results[index][1]["number"]
+                status, moved, _ = call(bases[index % 4], account, token, f"/cards/{number}")
+                assert status == 200 and moved["board"]["id"] == destination["id"]
+                assert moved["title"] == f"Moved title {index}"
+
+            def reverse_move(index):
+                from_destination = index < 100
+                card_index = index if from_destination else index + 100
+                number = results[card_index][1]["number"]
+                next_board = board["id"] if from_destination else destination["id"]
+                return call(bases[index % 4], account, token,
+                            f"/cards/{number}/board", "PATCH", {"board_id": next_board})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                reverse = list(pool.map(reverse_move, range(200)))
+            failures = [(index, status, value) for index, (status, value, _) in enumerate(reverse)
+                        if status != 200]
+            assert not failures, failures[:5]
+            assert all(value["board"]["id"] == (board["id"] if index < 100 else destination["id"])
+                       for index, (_, value, _) in enumerate(reverse))
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, step CRUD, and mixed step/title, watch/title, triage/title, and reaction/title writes across four processes")
+            print("MySQL cluster passed: 400 unique cards, step CRUD, mixed step/title, watch/title, triage/title, reaction/title, move/title writes, and opposite-direction moves across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

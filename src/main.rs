@@ -1313,16 +1313,43 @@ async fn record_event(
 ) -> Result<()> {
     let timestamp = now();
     let event_id = id();
-    let mut tx = begin_write(&app).await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, board_id, app.mysql).await?;
+    let mut event_board_id = board_id.to_owned();
+    let mut board_rechecks = 0;
+    let mut tx = loop {
+        let mut tx = begin_write(app).await.map_err(db_err)?;
+        lock_board_for_write(&mut tx, &event_board_id, app.mysql).await?;
+        if !app.mysql {
+            break tx;
+        }
+        // A card can move after its caller reads it. Lock the card only after
+        // the board, then retry under the current board when that happened.
+        let current_board: String =
+            sqlx::query_scalar("SELECT board_id FROM cards WHERE id=? FOR UPDATE")
+                .bind(card_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if current_board == event_board_id {
+            break tx;
+        }
+        tx.rollback().await.map_err(db_err)?;
+        event_board_id = current_board;
+        board_rechecks += 1;
+        if board_rechecks == 16 {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Card moved during event creation",
+            ));
+        }
+    };
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
+        .bind(&event_id).bind(&p.account_id).bind(&event_board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
         .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
     queue_webhooks(
         &mut tx,
         &p.account_id,
-        board_id,
+        &event_board_id,
         &event_id,
         action,
         &timestamp,
@@ -1331,7 +1358,7 @@ async fn record_event(
     queue_notifications(
         &mut tx,
         p,
-        board_id,
+        &event_board_id,
         card_id,
         &event_id,
         eventable_type,
@@ -10752,6 +10779,7 @@ async fn publish_card(
     let card_id: String = c.get("id");
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
     sqlx::query("UPDATE cards SET status='published',title=CASE WHEN trim(title)='' THEN 'Untitled' ELSE title END,created_at=?,updated_at=? WHERE id=?")
         .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
     let event_id = id();
@@ -11703,6 +11731,12 @@ async fn move_card(
     if c.get::<String, _>("board_id") != destination {
         let card_id = c.get::<String, _>("id");
         let mut tx = app.db.begin().await.map_err(db_err)?;
+        let old_board_id: String = c.get("board_id");
+        let mut board_ids = [&old_board_id, &destination];
+        board_ids.sort();
+        for board_id in board_ids {
+            lock_board_for_write(&mut tx, board_id, app.mysql).await?;
+        }
         sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")
             .bind(&destination)
             .bind(now())

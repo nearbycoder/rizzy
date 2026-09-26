@@ -399,5 +399,25 @@ creation now lock the board before child writes; reaction creation also commits
 its insert and card touch together. The complete cluster test passed four fresh
 account runs after these changes, and the MySQL core flow plus SQLite step and
 watch regressions passed. This covers those specific races, not every lock
-cycle. Draft publication, card moves, other callbacks, and multi-host writes
-still need concurrent checks before clustered write reliability is complete.
+cycle. That initial check had not exercised draft publication or card moves.
+
+A new move/title phase in that test reproduced MySQL 1213 deadlocks when a
+card moved between boards while another process edited its title. The move
+transaction now locks both boards in ID order before changing the card and
+related rows. The title-change event could still read the old board after the
+move; event creation now locks the board, locks and rechecks the card, and
+retries under its current board if it moved. Six fresh-account cluster runs
+then passed 200 move/title pairs and 200 simultaneous moves in opposite
+directions, alongside the earlier mixed phases. `tests/mysql_core.py`, the
+SQLite card-update touch check, and 600 two-process SQLite card workflows also
+passed. These runs check one host and these paths; other write combinations
+remain outside the result.
+
+The draft publication path also reproduced MySQL 1213 deadlocks when 32 draft
+cards on one board were published concurrently through two app processes.
+Publication now locks the board before updating a draft into a published card.
+`tests/mysql_draft_cluster.py` keeps its browser draft and cross-process flow,
+and optionally uses a MySQL CLI to seed 32 same-board drafts for this race.
+Six fresh-account runs passed after the fix, with all 32 cards published and
+exactly 32 publication events in the final run. This checks one board on one
+host, not every draft callback, notification delivery, or multi-host case.

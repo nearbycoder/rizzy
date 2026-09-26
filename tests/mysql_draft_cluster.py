@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Run the draft browser flow on MySQL and hand a draft between two servers.
 
-Set RIZZY_TEST_MYSQL_URL to a dedicated MySQL database URL.
+Set RIZZY_TEST_MYSQL_URL to a dedicated MySQL database URL. Set
+RIZZY_TEST_MYSQL_CLIENT to also exercise concurrent publication of 32 drafts
+seeded on one board.
 """
 
 import concurrent.futures
@@ -16,10 +18,12 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from draft_workflow_parity import NoRedirect, request, run
 from mysql_cluster import call, free_port
+from mysql_core import mysql_scalar
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +64,45 @@ def publish_many(target, bases, account, token):
     finally:
         for board_id, _ in drafts:
             call(bases[0], account, token, f"/boards/{board_id}", "DELETE")
+
+
+def publish_same_board(url, bases, account, token):
+    status, board, _ = call(bases[0], account, token, "/boards", "POST",
+                            {"board": {"name": "Same-board drafts"}})
+    assert status == 201, (status, board)
+    try:
+        account_id, owner_id = mysql_scalar(
+            url, "SELECT a.id,u.id FROM accounts a JOIN users u ON u.account_id=a.id "
+                 f"WHERE a.external_account_id={int(account)} AND u.role='owner' LIMIT 1"
+        ).split()
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        numbers = [1000000 + index for index in range(32)]
+        values = ",".join(
+            f"('{uuid.uuid4().hex[:25]}','{account_id}','{board['id']}','{owner_id}',"
+            f"{number},'Draft {index}','','drafted','{timestamp}','{timestamp}','{timestamp}')"
+            for index, number in enumerate(numbers)
+        )
+        mysql_scalar(url, "INSERT INTO cards(id,account_id,board_id,creator_id,number,title,"
+                          "description,status,created_at,updated_at,last_active_at) VALUES " + values)
+
+        def publish(index):
+            return call(bases[index % len(bases)], account, token,
+                        f"/cards/{numbers[index]}/publish", "POST", {})
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+            published = list(pool.map(publish, range(len(numbers))))
+        failures = [(index, status, value) for index, (status, value, _) in enumerate(published)
+                    if status != 201]
+        assert not failures, failures[:5]
+        for number in numbers:
+            status, card, _ = call(bases[number % len(bases)], account, token,
+                                   f"/cards/{number}")
+            assert status == 200 and card["status"] == "published", (number, status, card)
+        events = int(mysql_scalar(url, "SELECT COUNT(*) FROM events "
+                                       f"WHERE board_id='{board['id']}' AND action='card_published'"))
+        assert events == len(numbers), (events, len(numbers))
+    finally:
+        call(bases[0], account, token, f"/boards/{board['id']}", "DELETE")
 
 
 def main():
@@ -146,7 +189,11 @@ def main():
             finally:
                 request(target, f"/{account}/boards/{board['id']}", "DELETE", bearer=True)
             publish_many(target, bases, account, token)
-            print("MySQL draft flow passed across two servers, including 32 concurrent publishes")
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                publish_same_board(url, bases, account, token)
+                print("MySQL draft flow passed across two servers, including 32 same-board concurrent publishes")
+            else:
+                print("MySQL draft flow passed across two servers, including 32 concurrent publishes on separate boards")
         except Exception:
             for log_path in logs:
                 if log_path.exists():

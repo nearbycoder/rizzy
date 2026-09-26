@@ -105,6 +105,17 @@ phases and 200 paired requests in each of four mixed phases across four app
 processes. The MySQL core flow and SQLite step and watch regressions also pass.
 Other card mutations and multi-host writes still need the same audit.
 
+The expanded MySQL cluster test also found InnoDB 1213 deadlocks on card
+move/title races. Moves now lock both boards in ID order. Event creation
+rechecks a locked card's board and retries when it changed after the caller's
+read, so title events use the destination board after a move. Six fresh-account
+runs passed 200 move/title pairs and 200 opposite-direction moves across four
+processes; the MySQL core and SQLite card workflow regressions passed. Same-board
+draft publication separately reproduced MySQL 1213 deadlocks across two
+processes. Publication now locks its board first; six 32-draft runs passed,
+including a check for one publication event per card. Other callbacks and
+multi-host writes remain unverified.
+
 The [60-second mixed API benchmark](bench/results/sustained-mixed-100-2026-09-26.json) uses fresh source and Rust databases, 100 initial cards, 32 clients, the same eight logical server CPUs, and two reversed-order rounds. Each completed unit makes five JSON reads and four card writes. With board JSON and account ETag state included, Rizzy completed 90.99–91.10 units/s versus Fizzy's 25.61–28.03, with no HTTP errors and matching final card, event, and comment formulas. The artifact records the pinned Fizzy revision, Rizzy commit, and release binary hash. It compared sampled response shapes, content, counts, and pagination headers before timing. This verifies a faster result for this workload, not one-for-one application speed or maximum scale: the apps have different process models and unimplemented browser and background behaviors, and SQLite writes serialize. `tests/board_show_pagination_parity.py` checks signed-in board pages one and two, their separate ETags, and 304 responses against disposable Fizzy and Rizzy databases.
 
 The [1,000-card, 64-client](bench/results/sustained-mixed-1000-64-2026-09-26.json), [128-client](bench/results/sustained-mixed-1000-128-2026-09-26.json), and [256-client](bench/results/sustained-mixed-1000-256-2026-09-26.json) mixed API runs used the same eight assigned server CPUs and two reversed-order 30-second rounds each. Across these six pairs, Rizzy completed 118.51–126.62 units/s versus Fizzy's 22.83–27.08, with zero HTTP errors and correct final record formulas in every run. At 256 clients both setups were near a local throughput plateau while p95 unit latency rose to 3.68–3.71 seconds for Rizzy and 10.43–12.59 for Fizzy. This is a larger-fixture, higher-concurrency comparison for one API workflow; it does not establish multi-host scale, a hard capacity limit, or complete application parity.
