@@ -4546,14 +4546,81 @@ fn config_response(body: &'static str) -> Response {
 }
 const STATIC_CSP: &str = "default-src 'none'; img-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
+struct CspConfig {
+    disabled: bool,
+    report_only: bool,
+    static_policy: String,
+    dynamic_policy: String,
+}
+
+fn csp_config() -> &'static CspConfig {
+    static CONFIG: std::sync::OnceLock<CspConfig> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        let report_uri = env::var("CSP_REPORT_URI")
+            .ok()
+            .filter(|value| !value.is_empty());
+        let mut static_policy = STATIC_CSP.to_owned();
+        if let Some(uri) = &report_uri {
+            static_policy.push_str("; report-uri ");
+            static_policy.push_str(uri);
+        }
+        let mut directives = Vec::new();
+        for (name, defaults, variable) in [
+            ("default-src", "'self'", "CSP_DEFAULT_SRC"),
+            ("script-src", "'self'", "CSP_SCRIPT_SRC"),
+            ("connect-src", "'self'", "CSP_CONNECT_SRC"),
+            ("frame-src", "'self'", "CSP_FRAME_SRC"),
+            ("style-src", "'self' 'unsafe-inline'", "CSP_STYLE_SRC"),
+            ("img-src", "'self' blob: data: https:", "CSP_IMG_SRC"),
+            ("font-src", "'self' data: https:", "CSP_FONT_SRC"),
+            ("media-src", "'self' blob: data: https:", "CSP_MEDIA_SRC"),
+            ("worker-src", "'self' blob:", "CSP_WORKER_SRC"),
+            ("object-src", "'none'", ""),
+            ("base-uri", "'none'", ""),
+            ("form-action", "'self'", "CSP_FORM_ACTION"),
+            ("frame-ancestors", "'self'", "CSP_FRAME_ANCESTORS"),
+        ] {
+            let mut directive = format!("{name} {defaults}");
+            if let Ok(sources) = env::var(variable) {
+                for source in sources.split_whitespace() {
+                    directive.push(' ');
+                    directive.push_str(source);
+                }
+            }
+            if name == "script-src" {
+                directive.push_str(" 'nonce-{nonce}'");
+            }
+            directives.push(directive);
+        }
+        if let Some(uri) = report_uri {
+            directives.push(format!("report-uri {uri}"));
+        }
+        CspConfig {
+            disabled: env::var_os("DISABLE_CSP").is_some(),
+            report_only: env::var("CSP_REPORT_ONLY").is_ok_and(|value| value == "true"),
+            static_policy,
+            dynamic_policy: directives.join("; "),
+        }
+    })
+}
+
 fn dynamic_csp(nonce: &str) -> String {
-    format!(
-        "default-src 'self'; script-src 'self' 'nonce-{nonce}'; connect-src 'self'; frame-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; font-src 'self' data: https:; media-src 'self' blob: data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
-    )
+    csp_config().dynamic_policy.replace("{nonce}", nonce)
 }
 
 async fn content_security_policy(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
+    let config = csp_config();
+    if config.disabled {
+        response
+            .headers_mut()
+            .remove(header::CONTENT_SECURITY_POLICY);
+        response
+            .headers_mut()
+            .remove(header::CONTENT_SECURITY_POLICY_REPORT_ONLY);
+        response.headers_mut().remove("x-rizzy-exceptions-app");
+        return response;
+    }
     if response
         .headers_mut()
         .remove("x-rizzy-exceptions-app")
@@ -4565,6 +4632,17 @@ async fn content_security_policy(request: Request, next: Next) -> Response {
         .headers()
         .contains_key(header::CONTENT_SECURITY_POLICY)
     {
+        response
+            .headers_mut()
+            .remove(header::CONTENT_SECURITY_POLICY);
+        response.headers_mut().insert(
+            if config.report_only {
+                header::CONTENT_SECURITY_POLICY_REPORT_ONLY
+            } else {
+                header::CONTENT_SECURITY_POLICY
+            },
+            HeaderValue::from_str(&config.static_policy).expect("valid static CSP"),
+        );
         return response;
     }
     let nonce = base64::Engine::encode(
@@ -4603,7 +4681,11 @@ async fn content_security_policy(request: Request, next: Next) -> Response {
         response
     };
     response.headers_mut().insert(
-        header::CONTENT_SECURITY_POLICY,
+        if config.report_only {
+            header::CONTENT_SECURITY_POLICY_REPORT_ONLY
+        } else {
+            header::CONTENT_SECURITY_POLICY
+        },
         HeaderValue::from_str(&dynamic_csp(&nonce)).expect("valid dynamic CSP"),
     );
     response

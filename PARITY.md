@@ -128,8 +128,10 @@ static Content Security Policy. It also compares the default dynamic policy
 after normalizing the per-request nonce on public HTML, JSON, and a signed-in
 account settings page. Rizzy gives its inline scripts that nonce; a browser
 sign-in, board creation, and Search panel check completed without page errors.
-Fizzy's CSP environment overrides, report-only mode, and other deployment
-configurations still need parity checks. The [CSP-enabled board HTML run](bench/results/board-html-csp-2026-09-26.json)
+`tests/csp_configuration_parity.py` also compares every documented source
+override, a report URI, report-only mode, and disabled CSP on static and dynamic
+responses. Source-specific `config.x` settings and other deployment
+configurations remain unverified. The [CSP-enabled board HTML run](bench/results/board-html-csp-2026-09-26.json)
 used fresh 100-card databases, four available server CPUs, two production
 Fizzy workers, a release Rizzy process, and two reversed-order five-second
 rounds at 8 and 32 clients. Rizzy served 5,219–5,843 requests/s versus
