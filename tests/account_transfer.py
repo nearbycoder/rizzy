@@ -91,7 +91,11 @@ def main():
                 gold_record = db.execute(
                     "SELECT id,created_at,updated_at FROM card_goldnesses WHERE card_id=?",
                     (card["id"],)).fetchone()
+                watch_record = db.execute(
+                    "SELECT id,user_id,watching,created_at,updated_at FROM watches WHERE card_id=? AND user_id=?",
+                    (card["id"], owner["id"])).fetchone()
             assert gold_record
+            assert watch_record
             with sqlite3.connect(db_path) as db:
                 spike_record = db.execute(
                     "SELECT id,created_at,updated_at FROM card_activity_spikes WHERE card_id=?",
@@ -145,6 +149,10 @@ def main():
                 spike_data = json.loads(archive.read(f"data/card_activity_spikes/{spike_record[0]}.json"))
                 assert (spike_data["card_id"], spike_data["created_at"], spike_data["updated_at"]) == (
                     card["id"], spike_record[1], spike_record[2])
+                watch_data = json.loads(archive.read(f"data/watches/{watch_record[0]}.json"))
+                assert (watch_data["card_id"], watch_data["user_id"], watch_data["watching"],
+                        watch_data["created_at"], watch_data["updated_at"]) == (
+                    card["id"], owner["id"], bool(watch_record[2]), watch_record[3], watch_record[4])
                 not_now_data = json.loads(archive.read(f"data/card_not_nows/{postponed_record[0]}.json"))
                 assert (not_now_data["card_id"], not_now_data["user_id"], not_now_data["created_at"]) == (
                     postponed_card["id"], owner["id"], postponed_record[2])

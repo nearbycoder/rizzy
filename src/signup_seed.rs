@@ -36,9 +36,12 @@ pub(super) async fn playground(
             .bind(&card_id).bind(account_id).bind(&board_id).bind(owner_id)
             .bind((index + 1) as i64).bind(&card.title).bind(&card.description).bind(search)
             .bind(created_at).bind(created_at).bind(created_at).execute(&mut **tx).await?;
-        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
+        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
+            .bind(id())
             .bind(&card_id)
             .bind(owner_id)
+            .bind(created_at)
+            .bind(created_at)
             .execute(&mut **tx)
             .await?;
         sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?)")

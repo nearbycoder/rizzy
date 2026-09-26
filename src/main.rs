@@ -782,8 +782,9 @@ async fn create_new_mentions(
         if inserted.rows_affected() == 0 {
             continue;
         }
-        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1")
-            .bind(card_id).bind(&user_id).execute(&mut **tx).await.map_err(db_err)?;
+        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1")
+            .bind(id()).bind(card_id).bind(&user_id).bind(&timestamp).bind(&timestamp)
+            .execute(&mut **tx).await.map_err(db_err)?;
         if user_id != p.user_id && p.role != "system" {
             sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Mention',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
                 .bind(id()).bind(&p.account_id).bind(&user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
@@ -1363,6 +1364,36 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .execute(&db).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS card_activity_spikes_account_updated ON card_activity_spikes(account_id,updated_at)")
         .execute(&db).await?;
+    let watch_columns = sqlx::query("PRAGMA table_info(watches)")
+        .fetch_all(&db)
+        .await?;
+    for column in ["id", "created_at", "updated_at"] {
+        if !watch_columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == column)
+        {
+            sqlx::query(&format!("ALTER TABLE watches ADD COLUMN {column} TEXT"))
+                .execute(&db)
+                .await?;
+        }
+    }
+    let legacy_watches = sqlx::query("SELECT w.card_id,w.user_id,c.created_at FROM watches w JOIN cards c ON c.id=w.card_id WHERE w.id IS NULL OR w.created_at IS NULL OR w.updated_at IS NULL")
+        .fetch_all(&db).await?;
+    if !legacy_watches.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_watches {
+            let created_at: String = row.get("created_at");
+            sqlx::query("UPDATE watches SET id=COALESCE(id,?),created_at=COALESCE(created_at,?),updated_at=COALESCE(updated_at,created_at,?) WHERE card_id=? AND user_id=?")
+                .bind(id()).bind(&created_at).bind(&created_at)
+                .bind(row.get::<String, _>("card_id"))
+                .bind(row.get::<String, _>("user_id"))
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
+    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS watches_id ON watches(id)")
+        .execute(&db)
+        .await?;
     sqlx::query("INSERT OR IGNORE INTO user_attachables(user_id,account_id,sgid) SELECT id,account_id,lower(hex(randomblob(32))) FROM users")
         .execute(&db).await?;
     migrate_notification_sources(&db).await?;
@@ -7834,9 +7865,12 @@ async fn create_card(
         .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
     storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
     storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
-    sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
+    sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
+        .bind(crate::id())
         .bind(&id)
         .bind(&p.user_id)
+        .bind(&timestamp)
+        .bind(&timestamp)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
@@ -7938,9 +7972,12 @@ async fn create_or_resume_draft(
         sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,status,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,'','','drafted',?,?,?)")
             .bind(&card_id).bind(&p.account_id).bind(board_id).bind(&p.user_id).bind(number)
             .bind(&timestamp).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)")
+        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
+            .bind(id())
             .bind(card_id)
             .bind(&p.user_id)
+            .bind(&timestamp)
+            .bind(&timestamp)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
@@ -9677,8 +9714,10 @@ async fn toggle_assignment_to(
             json!({"assignee_ids":[&assignee_id]}),
         )
         .await?;
-        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1")
-            .bind(&card_id).bind(&assignee_id).execute(&app.db).await.map_err(db_err)?;
+        let timestamp = now();
+        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1")
+            .bind(id()).bind(&card_id).bind(&assignee_id).bind(&timestamp).bind(&timestamp)
+            .execute(&app.db).await.map_err(db_err)?;
         system_comment(
             &app,
             &p,
@@ -9693,8 +9732,21 @@ async fn toggle_assignment_to(
 async fn set_watch(app: &App, p: &Principal, number: &str, watching: bool) -> Result<StatusCode> {
     p.write()?;
     let c = card(app, p, number).await?;
-    sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=excluded.watching")
-        .bind(c.get::<String,_>("id")).bind(&p.user_id).bind(watching as i64).execute(&app.db).await.map_err(db_err)?;
+    let card_id: String = c.get("id");
+    let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let result = sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=excluded.watching,updated_at=excluded.updated_at WHERE watches.watching!=excluded.watching")
+        .bind(id()).bind(&card_id).bind(&p.user_id).bind(watching as i64).bind(&timestamp).bind(&timestamp)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    if result.rows_affected() != 0 {
+        sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+            .bind(&timestamp)
+            .bind(&card_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result<StatusCode> {

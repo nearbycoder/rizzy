@@ -813,10 +813,13 @@ async fn apply_archive(
             .bind(field(spike,"updated_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for watch in records(&archive, "watches") {
-        sqlx::query("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,?)")
+        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .bind(field(watch, "id")?)
             .bind(field(watch, "card_id")?)
             .bind(field(watch, "user_id")?)
             .bind(boolean(watch, "watching", true))
+            .bind(field(watch, "created_at")?)
+            .bind(field(watch, "updated_at")?)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;

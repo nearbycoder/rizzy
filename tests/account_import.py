@@ -121,6 +121,8 @@ def run(archive_path):
                           if name.startswith("data/card_goldnesses/")]
         spike_records = [json.loads(z.read(name)) for name in z.namelist()
                          if name.startswith("data/card_activity_spikes/")]
+        watch_records = [json.loads(z.read(name)) for name in z.namelist()
+                         if name.startswith("data/watches/")]
         postponed_records = [json.loads(z.read(name)) for name in z.namelist()
                              if name.startswith("data/card_not_nows/")]
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
@@ -206,6 +208,16 @@ def run(archive_path):
                     actual = db.execute("SELECT card_id,created_at,updated_at FROM card_activity_spikes WHERE id=?",
                                         (spike["id"],)).fetchone()
                     assert actual == (spike["card_id"], spike["created_at"], spike["updated_at"])
+                imported_watches = {
+                    row[0]: row[1:] for row in db.execute(
+                        "SELECT w.id,w.card_id,w.user_id,w.watching,w.created_at,w.updated_at "
+                        "FROM watches w JOIN cards c ON c.id=w.card_id WHERE c.account_id=?",
+                        (imported_id,))}
+                assert len(imported_watches) == len(watch_records)
+                for watch in watch_records:
+                    assert imported_watches[watch["id"]] == (
+                        watch["card_id"], watch["user_id"], int(watch["watching"]),
+                        watch["created_at"], watch["updated_at"])
                 for not_now in postponed_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM card_not_nows WHERE id=?",
                                         (not_now["id"],)).fetchone()
@@ -286,6 +298,10 @@ def run(archive_path):
                     restored = json.loads(z.read(f"data/card_activity_spikes/{source_spike['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
                         key: source_spike[key] for key in ("card_id", "created_at", "updated_at")}
+                for source_watch in watch_records:
+                    restored = json.loads(z.read(f"data/watches/{source_watch['id']}.json"))
+                    assert {key: restored[key] for key in ("card_id", "user_id", "watching", "created_at", "updated_at")} == {
+                        key: source_watch[key] for key in ("card_id", "user_id", "watching", "created_at", "updated_at")}
                 for source_not_now in postponed_records:
                     restored = json.loads(z.read(f"data/card_not_nows/{source_not_now['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {

@@ -128,7 +128,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "watches",
-        query: "SELECT NULL id,c.account_id,w.card_id,c.created_at,c.created_at updated_at,w.user_id,w.watching FROM watches w JOIN cards c ON c.id=w.card_id WHERE c.account_id=? ORDER BY w.card_id,w.user_id",
+        query: "SELECT w.id,c.account_id,w.card_id,w.created_at,w.updated_at,w.user_id,w.watching FROM watches w JOIN cards c ON c.id=w.card_id WHERE c.account_id=? ORDER BY w.card_id,w.user_id",
         booleans: &["watching"],
         json_fields: &[],
     },

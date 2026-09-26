@@ -65,7 +65,8 @@ def main():
                    "VALUES(?,?,?,?,?,?)", (secrets.token_hex(12), account_id, card_id, user_id, owner_id, timestamp))
         db.execute("INSERT INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)",
                    (secrets.token_hex(12), account_id, card_id, user_id, timestamp))
-        db.execute("INSERT INTO watches(card_id,user_id,watching) VALUES(?,?,1)", (card_id, user_id))
+        db.execute("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)",
+                   (secrets.token_hex(12), card_id, user_id, timestamp, timestamp))
         db.execute("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) "
                    "VALUES(?,?,?,?,?,?,'Event',1,?,?)",
                    (secrets.token_hex(12), account_id, user_id, owner_id, card_id, secrets.token_hex(12), timestamp, timestamp))

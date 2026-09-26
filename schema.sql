@@ -343,9 +343,12 @@ CREATE TABLE IF NOT EXISTS assignments (
 );
 CREATE INDEX IF NOT EXISTS assignments_assignee ON assignments(assignee_id,card_id);
 CREATE TABLE IF NOT EXISTS watches (
+  id TEXT NOT NULL UNIQUE,
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
   watching INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
   PRIMARY KEY(card_id,user_id)
 );
 CREATE TABLE IF NOT EXISTS pins (
