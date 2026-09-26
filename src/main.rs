@@ -7115,20 +7115,71 @@ fn unique_ids(values: impl IntoIterator<Item = String>) -> Vec<String> {
         .into_iter()
         .collect()
 }
+fn event_api_particulars(action: &str, raw: &str) -> Value {
+    let stored: Value = serde_json::from_str(raw).unwrap_or(json!({}));
+    let nested = stored
+        .get("particulars")
+        .filter(|value| value.is_object())
+        .unwrap_or(&stored);
+    let field = |name: &str| nested.get(name).and_then(Value::as_str).unwrap_or("");
+    match action {
+        "card_assigned" | "card_unassigned" => {
+            let ids = match stored.get("assignee_ids") {
+                Some(Value::Array(ids)) => ids.clone(),
+                Some(Value::Null) | None => Vec::new(),
+                Some(id) => vec![id.clone()],
+            };
+            json!({"assignee_ids":ids})
+        }
+        "card_board_changed" => {
+            json!({"old_board":field("old_board"),"new_board":field("new_board")})
+        }
+        "card_title_changed" => {
+            json!({"old_title":field("old_title"),"new_title":field("new_title")})
+        }
+        "card_triaged" => json!({"column":field("column")}),
+        _ => json!({}),
+    }
+}
+fn event_assignee_names(ids: &[Value], users: &HashMap<String, Value>) -> String {
+    let mut names: Vec<(&str, &str)> = ids
+        .iter()
+        .filter_map(|id| id.as_str())
+        .filter_map(|id| {
+            users
+                .get(id)
+                .and_then(|user| user["name"].as_str())
+                .map(|name| (id, name))
+        })
+        .collect();
+    names.sort_by_key(|(id, _)| *id);
+    let names: Vec<String> = names.into_iter().map(|(_, name)| escape(name)).collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [name] => name.clone(),
+        [first, last] => format!("{first} and {last}"),
+        _ => format!(
+            "{}, and {}",
+            names[..names.len() - 1].join(", "),
+            names.last().unwrap()
+        ),
+    }
+}
 fn activity_description(
     p: &Principal,
     event: &SqliteRow,
     title: &str,
+    particulars: &Value,
     users: &HashMap<String, Value>,
 ) -> String {
-    let actor = users
-        .get(&event.get::<String, _>("creator_id"))
-        .and_then(|u| u["name"].as_str())
-        .unwrap_or("");
+    let actor = escape(
+        users
+            .get(&event.get::<String, _>("creator_id"))
+            .and_then(|u| u["name"].as_str())
+            .unwrap_or(""),
+    );
     let quoted = format!("&quot;{}&quot;", escape(title));
     let action: String = event.get("action");
-    let particulars: Value =
-        serde_json::from_str(&event.get::<String, _>("particulars")).unwrap_or(json!({}));
     let text = match action.as_str() {
         "card_published" => format!("{actor} added {quoted}"),
         "card_closed" => format!("{actor} moved {quoted} to \"Done\""),
@@ -7154,32 +7205,21 @@ fn activity_description(
             if ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&p.user_id))) {
                 format!("{actor} will handle {quoted}")
             } else {
-                let assignee = ids
-                    .and_then(|ids| ids.first())
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let name = users
-                    .get(assignee)
-                    .and_then(|u| u["name"].as_str())
-                    .unwrap_or("");
-                format!("{actor} assigned {name} to {quoted}")
+                let names = ids
+                    .map(|ids| event_assignee_names(ids, users))
+                    .unwrap_or_default();
+                format!("{actor} assigned {names} to {quoted}")
             }
         }
         "card_unassigned" => {
             let ids = particulars["assignee_ids"].as_array();
-            let assignee = ids
-                .and_then(|ids| ids.first())
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let target = if assignee == p.user_id {
-                "yourself".to_string()
-            } else {
-                users
-                    .get(assignee)
-                    .and_then(|u| u["name"].as_str())
-                    .unwrap_or("")
-                    .to_string()
-            };
+            let target =
+                if ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&p.user_id))) {
+                    "yourself".to_string()
+                } else {
+                    ids.map(|ids| event_assignee_names(ids, users))
+                        .unwrap_or_default()
+                };
             format!("{actor} unassigned {target} from {quoted}")
         }
         _ => String::new(),
@@ -7195,6 +7235,15 @@ async fn activity_items(
     if events.is_empty() {
         return Ok(Vec::new());
     }
+    let particulars: Vec<Value> = events
+        .iter()
+        .map(|event| {
+            event_api_particulars(
+                &event.get::<String, _>("action"),
+                &event.get::<String, _>("particulars"),
+            )
+        })
+        .collect();
     let card_ids = unique_ids(events.iter().map(|e| e.get::<String, _>("card_id")));
     let card_rows = rows_for_ids(app, "SELECT * FROM cards WHERE id IN (", &card_ids).await?;
     let board_ids = unique_ids(
@@ -7236,7 +7285,14 @@ async fn activity_items(
                     .iter()
                     .map(|c| c.get::<String, _>("creator_id")),
             )
-            .chain(events.iter().map(|e| e.get::<String, _>("creator_id"))),
+            .chain(events.iter().map(|e| e.get::<String, _>("creator_id")))
+            .chain(particulars.iter().flat_map(|value| {
+                value["assignee_ids"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|id| id.as_str().map(str::to_owned))
+            })),
     );
     let user_rows=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
     let users: HashMap<String, Value> = user_rows
@@ -7331,7 +7387,7 @@ async fn activity_items(
         );
     }
     let mut items = Vec::with_capacity(events.len());
-    for e in events {
+    for (e, particulars) in events.iter().zip(particulars.iter()) {
         let card_id: String = e.get("card_id");
         let (number, title, _) = card_meta.get(&card_id).ok_or_else(missing)?;
         let board_id: String = e.get("board_id");
@@ -7348,12 +7404,10 @@ async fn activity_items(
                 format!("{host}/{}/cards/{number}", p.slug),
             )
         };
-        let particulars: Value =
-            serde_json::from_str(&e.get::<String, _>("particulars")).unwrap_or(json!({}));
         items.push(
             json!({"id":e.get::<String,_>("id"),"action":e.get::<String,_>("action"),
             "created_at":e.get::<String,_>("created_at"),
-            "description":activity_description(p,e,title,&users),"particulars":particulars,
+            "description":activity_description(p,e,title,particulars,&users),"particulars":particulars,
             "url":url,"eventable_type":eventable_type,"eventable":eventable,
             "board":boards.get(&board_id).cloned().ok_or_else(missing)?,
             "creator":users.get(&e.get::<String,_>("creator_id")).cloned().ok_or_else(missing)?}),
