@@ -661,6 +661,98 @@ fn database_pool_size() -> u32 {
         .clamp(1, 64)
 }
 
+async fn validate_mysql_schema(
+    db: &DbPool,
+    schema: &str,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let expected_tables: HashSet<String> = schema
+        .lines()
+        .filter(|line| line.starts_with("CREATE TABLE "))
+        .filter_map(|line| line.split('`').nth(1).map(str::to_owned))
+        .collect();
+    let expected_indexes: HashSet<String> = schema
+        .lines()
+        .filter(|line| {
+            line.starts_with("CREATE INDEX ") || line.starts_with("CREATE UNIQUE INDEX ")
+        })
+        .filter_map(|line| line.split('`').nth(1).map(str::to_owned))
+        .collect();
+    let expected_foreign_keys: HashSet<String> = schema
+        .lines()
+        .filter(|line| line.starts_with("ALTER TABLE ") && line.contains(" ADD CONSTRAINT "))
+        .filter_map(|line| line.split('`').nth(3).map(str::to_owned))
+        .collect();
+    let expected_generated: HashSet<String> = schema
+        .lines()
+        .filter(|line| line.starts_with("ALTER TABLE ") && line.contains(" ADD COLUMN "))
+        .flat_map(|line| line.split("ADD COLUMN `").skip(1))
+        .filter_map(|part| part.split('`').next().map(str::to_owned))
+        .collect();
+    let actual_tables: HashSet<String> = sqlx::query_scalar(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .collect();
+    let actual_indexes: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT index_name FROM information_schema.statistics WHERE table_schema=DATABASE()",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .collect();
+    let actual_foreign_keys: HashSet<String> = sqlx::query_scalar(
+        "SELECT constraint_name FROM information_schema.referential_constraints WHERE constraint_schema=DATABASE()",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .collect();
+    let actual_generated: HashSet<String> = sqlx::query_scalar(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND generation_expression<>''",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .collect();
+    for (kind, expected, actual) in [
+        ("tables", expected_tables, actual_tables),
+        ("indexes", expected_indexes, actual_indexes),
+        ("foreign keys", expected_foreign_keys, actual_foreign_keys),
+        ("generated columns", expected_generated, actual_generated),
+    ] {
+        let mut missing: Vec<String> = expected.difference(&actual).cloned().collect();
+        missing.sort();
+        if !missing.is_empty() {
+            let sample = missing
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "incomplete MySQL schema: missing {} {kind} (first: {sample})",
+                missing.len()
+            )
+            .into());
+        }
+    }
+    let expected_checks = schema.matches(" CHECK(").count() as i64;
+    let actual_checks: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE() AND constraint_type='CHECK'",
+    )
+    .fetch_one(db)
+    .await?;
+    if actual_checks < expected_checks {
+        return Err(format!(
+            "incomplete MySQL schema: expected {expected_checks} checks, found {actual_checks}"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::error::Error>> {
     let db = AnyPoolOptions::new()
         .max_connections(database_pool_size())
@@ -690,6 +782,7 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     } else if table_count != expected_tables {
         return Err(format!("expected {expected_tables} Rizzy tables, found {table_count}").into());
     }
+    validate_mysql_schema(&db, schema).await?;
     let installed: HashSet<String> = sqlx::query_scalar(
         "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=DATABASE()",
     )

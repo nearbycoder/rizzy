@@ -35,16 +35,32 @@ the same transaction on MySQL, avoiding the SQLite-specific `UPDATE RETURNING`
 statement. The core and two-process checks passed again after this change.
 SQLx 0.8.6's `Any` adapter treats MariaDB's `LONGTEXT` as binary data; the
 local `vendor/sqlx-mysql` patch decodes that server type as UTF-8 for Rizzy's
-text-only schema. This patch and the schema need a direct MySQL 8.x run;
-MariaDB has dialect and behavior differences.
+text-only schema.
+
+The same tests passed on a fresh Oracle MySQL 8.4.11 database: 63 tables, 16
+triggers, 114 foreign-key column mappings, the core API workflow, and 80
+concurrent card creations through two processes. The first fresh MySQL schema
+attempt exposed a MySQL restriction: a foreign key with `ON DELETE CASCADE`
+cannot use the base column of a *stored* generated column. The five generated
+uniqueness columns on `storage_attachments` are now virtual; the indexes and
+cascading foreign keys install on both MySQL 8.4.11 and MariaDB 13.0.2. See
+the [MySQL foreign-key restrictions](https://dev.mysql.com/doc/refman/8.4/en/create-table-foreign-keys.html).
+The disposable MySQL server had binary logging enabled, so trigger installation
+initially failed with error 1419. The test server was configured with
+`log_bin_trust_function_creators=1`; a deployment with binary logging needs
+that setting or the necessary trigger-creation privilege. Schema installation
+currently leaves a partial database if it fails during DDL. Startup now checks
+the expected tables, indexes, foreign keys, generated columns, and check count
+and rejects an incomplete schema instead of serving it. A partial database
+still needs manual repair or a fresh database; setup must be made resumable
+before production use.
 
 Remaining database work:
 
 1. Replace the remaining SQLite startup migrations and `PRAGMA` queries with
    versioned MySQL migrations, including upgrades beyond the first backfill.
 2. Port the remaining SQLite trigger behavior and observable side effects.
-   Check generated columns and uniqueness against the source callbacks and
-   MySQL 8.x.
+   Check generated columns and uniqueness against the source callbacks.
 3. Port runtime statements using `INSERT OR IGNORE`, `ON CONFLICT`,
    `BEGIN IMMEDIATE`, SQLite date functions, and other SQLite-only syntax.
 4. Implement MySQL full-text search with the same user-visible results as the

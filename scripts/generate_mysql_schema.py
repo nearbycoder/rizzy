@@ -131,15 +131,15 @@ def generate(db: sqlite3.Connection) -> str:
             "CREATE UNIQUE INDEX `users_system_account` ON `users` (`system_account_key`);",
             "ALTER TABLE `storage_attachments` "
             "ADD COLUMN `card_image_record_key` VARCHAR(64) GENERATED ALWAYS AS "
-            "(CASE WHEN `record_type`='Card' AND `name`='image' THEN `record_id` END) STORED, "
+            "(CASE WHEN `record_type`='Card' AND `name`='image' THEN `record_id` END) VIRTUAL, "
             "ADD COLUMN `card_image_blob_key` VARCHAR(64) GENERATED ALWAYS AS "
-            "(CASE WHEN `record_type`='Card' AND `name`='image' THEN `blob_id` END) STORED, "
+            "(CASE WHEN `record_type`='Card' AND `name`='image' THEN `blob_id` END) VIRTUAL, "
             "ADD COLUMN `user_avatar_record_key` VARCHAR(64) GENERATED ALWAYS AS "
-            "(CASE WHEN `record_type`='User' AND `name`='avatar' THEN `record_id` END) STORED, "
+            "(CASE WHEN `record_type`='User' AND `name`='avatar' THEN `record_id` END) VIRTUAL, "
             "ADD COLUMN `user_avatar_blob_key` VARCHAR(64) GENERATED ALWAYS AS "
-            "(CASE WHEN `record_type`='User' AND `name`='avatar' THEN `blob_id` END) STORED, "
+            "(CASE WHEN `record_type`='User' AND `name`='avatar' THEN `blob_id` END) VIRTUAL, "
             "ADD COLUMN `embed_name_key` VARCHAR(191) GENERATED ALWAYS AS "
-            "(CASE WHEN `name`='embed' THEN `name` END) STORED;",
+            "(CASE WHEN `name`='embed' THEN `name` END) VIRTUAL;",
             "CREATE UNIQUE INDEX `storage_card_image_unique` ON `storage_attachments` (`card_image_record_key`);",
             "CREATE UNIQUE INDEX `storage_card_image_blob_unique` ON `storage_attachments` (`card_image_blob_key`);",
             "CREATE UNIQUE INDEX `storage_user_avatar_unique` ON `storage_attachments` (`user_avatar_record_key`);",
