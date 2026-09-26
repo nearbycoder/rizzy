@@ -7,7 +7,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, Timelike, Utc};
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -3237,6 +3237,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("Delivered {count} push jobs");
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("auto-postpone") {
+        let count = auto_postpone_all_due(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Auto-postponed {count} cards");
+        return Ok(());
+    }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
@@ -3315,6 +3322,35 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    if env::var("RIZZY_DISABLE_AUTO_POSTPONE").as_deref() != Ok("1") {
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let current = Utc::now();
+                if current.minute() != 50 {
+                    continue;
+                }
+                let slot = current.format("%Y-%m-%dT%H").to_string();
+                match claim_auto_postpone_slot(&app, &slot).await {
+                    Ok(true) => {
+                        if let Err(error) = auto_postpone_all_due(&app).await {
+                            eprintln!("automatic card postponement failed: {}", error.1);
+                            if let Err(release) = sqlx::query("UPDATE app_secrets SET value='0' WHERE name='auto_postpone_hour' AND value=?")
+                                .bind(&slot).execute(&app.db).await {
+                                eprintln!("automatic card postponement claim release failed: {release}");
+                            }
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        eprintln!("automatic card postponement claim failed: {}", error.1)
+                    }
+                }
+            }
+        });
+    }
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
         .route("/400.html", get(|| async { static_error_page(include_str!("../static/400.html"), StatusCode::OK) }))
@@ -12091,6 +12127,119 @@ async fn set_flag(
         .await?;
     }
     Ok(StatusCode::NO_CONTENT)
+}
+async fn claim_auto_postpone_slot(app: &App, slot: &str) -> Result<bool> {
+    let insert = if app.mysql {
+        "INSERT IGNORE INTO app_secrets(name,value) VALUES('auto_postpone_hour','0')"
+    } else {
+        "INSERT OR IGNORE INTO app_secrets(name,value) VALUES('auto_postpone_hour','0')"
+    };
+    sqlx::query(insert).execute(&app.db).await.map_err(db_err)?;
+    let result =
+        sqlx::query("UPDATE app_secrets SET value=? WHERE name='auto_postpone_hour' AND value<?")
+            .bind(slot)
+            .bind(slot)
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
+    Ok(result.rows_affected() == 1)
+}
+
+async fn auto_postpone_all_due(app: &App) -> Result<usize> {
+    let as_of = Utc::now();
+    let comment_body = "<strong>Moved</strong> to “Not Now” due to inactivity";
+    let comment_search = search_content(system_plain_text(comment_body));
+    let accounts = sqlx::query("SELECT a.id,u.id AS system_user_id FROM accounts a JOIN users u ON u.account_id=a.id AND u.role='system'")
+        .fetch_all(&app.db).await.map_err(db_err)?;
+    let mut postponed = 0;
+    for account in accounts {
+        let account_id: String = account.get("id");
+        let system_user_id: String = account.get("system_user_id");
+        let boards = sqlx::query(
+            "SELECT id,auto_postpone_period_in_days FROM boards WHERE account_id=? ORDER BY id",
+        )
+        .bind(&account_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+        for board in boards {
+            let board_id: String = board.get("id");
+            let days: i64 = board.get("auto_postpone_period_in_days");
+            let cutoff = (as_of - chrono::Duration::days(days))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            loop {
+                // The board/status/last_active index keeps each batch bounded
+                // even when many accounts have large card collections.
+                let cards = sqlx::query("SELECT id FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND last_active_at<=? ORDER BY last_active_at,id LIMIT 100")
+                    .bind(&board_id).bind(&cutoff).fetch_all(&app.db).await.map_err(db_err)?;
+                if cards.is_empty() {
+                    break;
+                }
+                for card in cards {
+                    let card_id: String = card.get("id");
+                    let _writer = app.write_lock.lock().await;
+                    let mut tx = begin_write(app).await.map_err(db_err)?;
+                    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+                    let still_due = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM cards WHERE id=? AND board_id=? AND status='published' AND closed=0 AND postponed=0 AND last_active_at<=?")
+                        .bind(&card_id).bind(&board_id).bind(&cutoff)
+                        .fetch_one(&mut *tx).await.map_err(db_err)? != 0;
+                    if !still_due {
+                        continue;
+                    }
+                    let timestamp = now();
+                    sqlx::query("UPDATE cards SET postponed=1,closed=0,column_id=NULL,updated_at=?,last_active_at=? WHERE id=?")
+                        .bind(&timestamp).bind(&timestamp).bind(&card_id)
+                        .execute(&mut *tx).await.map_err(db_err)?;
+                    sqlx::query("DELETE FROM card_activity_spikes WHERE card_id=?")
+                        .bind(&card_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db_err)?;
+                    sqlx::query("INSERT INTO card_not_nows(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                        .bind(id()).bind(&account_id).bind(&card_id).bind(&system_user_id)
+                        .bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+                    let event_id = id();
+                    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_auto_postponed','{}',?,?)")
+                        .bind(&event_id).bind(&account_id).bind(&board_id).bind(&card_id)
+                        .bind(&system_user_id).bind(&card_id).bind(&timestamp).bind(&timestamp)
+                        .execute(&mut *tx).await.map_err(db_err)?;
+                    queue_webhooks(
+                        &mut tx,
+                        &account_id,
+                        &board_id,
+                        &event_id,
+                        "card_auto_postponed",
+                        &timestamp,
+                    )
+                    .await?;
+                    let comment_id = id();
+                    sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+                        .bind(&comment_id).bind(&card_id).bind(&system_user_id)
+                        .bind(comment_body).bind(&comment_search).bind(&timestamp).bind(&timestamp)
+                        .execute(&mut *tx).await.map_err(db_err)?;
+                    rich_text_records::sync(
+                        &mut tx,
+                        &account_id,
+                        "Comment",
+                        &comment_id,
+                        "body",
+                        "",
+                        comment_body,
+                        &timestamp,
+                    )
+                    .await?;
+                    if app.mysql {
+                        mysql_search::sync_comment(&mut tx, &account_id, &comment_id)
+                            .await
+                            .map_err(db_err)?;
+                    }
+                    tx.commit().await.map_err(db_err)?;
+                    postponed += 1;
+                }
+            }
+        }
+    }
+    Ok(postponed)
 }
 async fn set_card_reading(
     app: &App,
