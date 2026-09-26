@@ -107,7 +107,7 @@ pub(super) async fn create(
     .execute(&mut *tx)
     .await
     .map_err(db_err)?;
-    insert_join_code_tx(&mut tx, &account_id)
+    insert_join_code_tx(&mut tx, &account_id, false)
         .await
         .map_err(db_err)?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")

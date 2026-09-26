@@ -612,12 +612,23 @@ fn join_code() -> String {
 async fn insert_join_code_tx(
     tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
+    mysql: bool,
 ) -> std::result::Result<(), sqlx::Error> {
     loop {
         let timestamp = now();
-        let inserted = sqlx::query("INSERT OR IGNORE INTO account_join_codes(id,account_id,code,created_at,updated_at) VALUES(?,?,?,?,?)")
-            .bind(id()).bind(account_id).bind(join_code()).bind(&timestamp).bind(&timestamp)
-            .execute(&mut **tx).await?;
+        let statement = if mysql {
+            "INSERT IGNORE INTO account_join_codes(id,account_id,code,created_at,updated_at) VALUES(?,?,?,?,?)"
+        } else {
+            "INSERT OR IGNORE INTO account_join_codes(id,account_id,code,created_at,updated_at) VALUES(?,?,?,?,?)"
+        };
+        let inserted = sqlx::query(statement)
+            .bind(id())
+            .bind(account_id)
+            .bind(join_code())
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .execute(&mut **tx)
+            .await?;
         if inserted.rows_affected() == 1 {
             return Ok(());
         }
@@ -631,6 +642,38 @@ async fn insert_join_code_tx(
             return Ok(());
         }
     }
+}
+
+async fn mysql_setup(url: &str) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let command = env::args().nth(1);
+    if command.as_deref() != Some("init-db") && command.as_deref() != Some("seed") {
+        return Err("MySQL browser/API queries and trigger migration are not complete".into());
+    }
+    let db = AnyPoolOptions::new()
+        .max_connections(12)
+        .connect(url)
+        .await?;
+    let schema = include_str!("../schema.mysql.sql");
+    let expected_tables = schema
+        .lines()
+        .filter(|line| line.starts_with("CREATE TABLE "))
+        .count() as i64;
+    let table_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",
+    )
+    .fetch_one(&db)
+    .await?;
+    if table_count == 0 {
+        sqlx::raw_sql(schema).execute(&db).await?;
+    } else if table_count != expected_tables {
+        return Err(format!("expected {expected_tables} Rizzy tables, found {table_count}").into());
+    }
+    if command.as_deref() == Some("seed") {
+        seed(&db, true).await?;
+    } else {
+        println!("Initialized MySQL schema ({expected_tables} tables)");
+    }
+    Ok(())
 }
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
@@ -1802,8 +1845,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::any::install_default_drivers();
     let url =
         env::var("RIZZY_DATABASE_URL").unwrap_or_else(|_| "sqlite://data/rizzy.sqlite3".into());
+    if url.starts_with("mysql:") {
+        return mysql_setup(&url).await;
+    }
     if !url.starts_with("sqlite:") {
-        return Err("MySQL schema and query migration is not complete".into());
+        return Err("RIZZY_DATABASE_URL must use sqlite: or mysql:".into());
     }
     if url.starts_with("sqlite://data/") {
         std::fs::create_dir_all("data")?;
@@ -2442,7 +2488,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .fetch_all(&db).await?;
     for account in missing_join_codes {
         let mut tx = db.begin().await?;
-        insert_join_code_tx(&mut tx, &account.get::<String, _>("id")).await?;
+        insert_join_code_tx(&mut tx, &account.get::<String, _>("id"), false).await?;
         tx.commit().await?;
     }
     sqlx::query(
@@ -2455,8 +2501,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::query_scalar("SELECT value FROM app_secrets WHERE name='qr_codes'")
             .fetch_one(&db)
             .await?;
+    if env::args().nth(1).as_deref() == Some("init-db") {
+        return Ok(());
+    }
     if env::args().nth(1).as_deref() == Some("seed") {
-        seed(&db).await?;
+        seed(&db, false).await?;
         return Ok(());
     }
     let board_etag_connection = if url.contains(":memory:") {
@@ -3202,7 +3251,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn seed(db: &DbPool) -> std::result::Result<(), Box<dyn std::error::Error>> {
+async fn seed(db: &DbPool, mysql: bool) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let account_id = id();
     let identity_id = id();
     let user_id = id();
@@ -3226,7 +3275,7 @@ async fn seed(db: &DbPool) -> std::result::Result<(), Box<dyn std::error::Error>
         .bind(&timestamp)
         .execute(&mut *tx)
         .await?;
-    insert_join_code_tx(&mut tx, &account_id).await?;
+    insert_join_code_tx(&mut tx, &account_id, mysql).await?;
     sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
         .bind(&identity_id)
         .bind(email)
@@ -3941,7 +3990,7 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    insert_join_code_tx(&mut tx, &account_id)
+    insert_join_code_tx(&mut tx, &account_id, false)
         .await
         .map_err(db_err)?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")
