@@ -61,7 +61,7 @@ def install_guard_triggers(database):
     """)
 
 
-def sample(size, epoch, trial):
+def sample(size, variant, trial):
     database = "rzbulktouch_" + uuid.uuid4().hex[:12]
     try:
         create_databases(CLIENT, SOCKET, [database])
@@ -69,7 +69,7 @@ def sample(size, epoch, trial):
             directory = Path(temp)
             env, credentials = prepare_rust(directory,
                 rust_env(directory, "127.0.0.1", 33080, database))
-            if not epoch:
+            if variant == "guard_query":
                 install_guard_triggers(database)
             process, url = start_server("rizzy", directory, env,
                                         sorted(os.sched_getaffinity(0))[:2])
@@ -79,18 +79,23 @@ def sample(size, epoch, trial):
                 item = fixture(target, size, trial, CLIENT, SOCKET)
                 board = quoted(item["board"]["id"])
                 column = quoted(item["delete_column"])
-                changes = ",bulk_touch_epoch=bulk_touch_epoch+1" if epoch else ""
+                changes = ",bulk_touch_epoch=bulk_touch_epoch+1" if variant != "guard_query" else ""
                 statements = [
                     ("lock", f"SELECT id FROM boards WHERE id={board} FOR UPDATE"),
                 ]
-                if not epoch:
+                if variant == "guard_query":
                     statements.append(("guard", f"INSERT INTO card_bulk_touches(board_id) VALUES({board})"))
-                statements.extend([
-                    ("nullify", f"UPDATE cards SET column_id=NULL{changes} WHERE board_id={board} AND column_id={column}"),
-                    ("touch_cards", f"UPDATE cards SET updated_at='2026-09-26T00:00:00.000Z'{changes} WHERE board_id={board}"),
-                    ("delete_column", f"DELETE FROM `columns` WHERE id={column} AND board_id={board}"),
-                ])
-                if not epoch:
+                if variant == "row_epoch_single":
+                    statements.append(("touch_and_nullify",
+                        f"UPDATE cards SET column_id=CASE WHEN column_id={column} THEN NULL ELSE column_id END,"
+                        f"updated_at='2026-09-26T00:00:00.000Z'{changes} WHERE board_id={board}"))
+                else:
+                    statements.extend([
+                        ("nullify", f"UPDATE cards SET column_id=NULL{changes} WHERE board_id={board} AND column_id={column}"),
+                        ("touch_cards", f"UPDATE cards SET updated_at='2026-09-26T00:00:00.000Z'{changes} WHERE board_id={board}"),
+                    ])
+                statements.append(("delete_column", f"DELETE FROM `columns` WHERE id={column} AND board_id={board}"))
+                if variant == "guard_query":
                     statements.append(("unguard", f"DELETE FROM card_bulk_touches WHERE board_id={board}"))
                 statements.append(("touch_board", f"UPDATE boards SET updated_at='2026-09-26T00:00:00.000Z' WHERE id={board}"))
                 sql = "SET @total=SYSDATE(6); START TRANSACTION; "
@@ -126,12 +131,13 @@ def main():
               "rizzy_revision": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "rizzy_binary_sha256": binary_sha256,
-              "variants": {"guard_query": [], "row_epoch": []}}
+              "variants": {"guard_query": [], "row_epoch": [], "row_epoch_single": []}}
     for trial in range(args.trials):
-        order = (("guard_query", False), ("row_epoch", True)) if trial % 2 == 0 else (
-            ("row_epoch", True), ("guard_query", False))
-        for name, epoch in order:
-            reading = sample(args.cards, epoch, trial)
+        order = ["guard_query", "row_epoch", "row_epoch_single"]
+        if trial % 2:
+            order.reverse()
+        for name in order:
+            reading = sample(args.cards, name, trial)
             result["variants"][name].append(reading)
             print(trial, name, reading, flush=True)
     result["median_us"] = {name: {step: round(statistics.median(

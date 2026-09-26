@@ -600,7 +600,7 @@ def main():
             assert all(before[0] != after[0] and before[1] == after[1]
                        for before, after in zip(before_cards, after_cards))
             assert [int(after[3]) - int(before[3]) for before, after in
-                    zip(before_cards, after_cards)] == [2, 1, 1]
+                    zip(before_cards, after_cards)] == [1, 1, 1]
             assert after_cards[0][2] == "NO_COLUMN" and after_cards[1][2] == second["id"]
             assert after_cards[2][2] == "NO_COLUMN"
             assert mysql_scalar(url,

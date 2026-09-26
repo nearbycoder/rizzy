@@ -8445,28 +8445,33 @@ async fn delete_column(
             .map_err(db_err)?;
     }
     let timestamp = now();
-    let nullify_sql = if app.mysql {
-        "UPDATE cards SET column_id=NULL,bulk_touch_epoch=bulk_touch_epoch+1 WHERE board_id=? AND column_id=?"
-    } else {
-        "UPDATE cards SET column_id=NULL WHERE board_id=? AND column_id=?"
-    };
-    sqlx::query(nullify_sql)
-        .bind(&board_id)
+    if app.mysql {
+        // Every card on the board receives one timestamp touch. Clear only
+        // links to the deleted column in the same scan, avoiding a second
+        // write of those rows and a second epoch trigger invocation.
+        sqlx::query(
+            "UPDATE cards SET column_id=CASE WHEN column_id=? THEN NULL ELSE column_id END,updated_at=?,bulk_touch_epoch=bulk_touch_epoch+1 WHERE board_id=?",
+        )
         .bind(&column_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    let touch_cards_sql = if app.mysql {
-        "UPDATE cards SET updated_at=?,bulk_touch_epoch=bulk_touch_epoch+1 WHERE board_id=?"
-    } else {
-        "UPDATE cards SET updated_at=? WHERE board_id=?"
-    };
-    sqlx::query(touch_cards_sql)
         .bind(&timestamp)
         .bind(&board_id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    } else {
+        sqlx::query("UPDATE cards SET column_id=NULL WHERE board_id=? AND column_id=?")
+            .bind(&board_id)
+            .bind(&column_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("UPDATE cards SET updated_at=? WHERE board_id=?")
+            .bind(&timestamp)
+            .bind(&board_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     sqlx::query("DELETE FROM columns WHERE id=? AND board_id=?")
         .bind(&column_id)
         .bind(&board_id)
