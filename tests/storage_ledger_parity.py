@@ -82,7 +82,13 @@ def check(target):
         finished = ledger(target, board_names)
         assert sum(delta * count for (_, delta, _, _, _), count in finished.items()) == 0, (target["name"], finished)
         assert sum(delta * count for (_, delta, _, board, _), count in finished.items() if board == "new") == 0, (target["name"], finished)
-        return finished
+        board_file = upload(target, FILE, "board.txt", "text/plain")
+        board_markup = f'<p><action-text-attachment sgid="{board_file["attachable_sgid"]}"></action-text-attachment></p>'
+        api(target, f"/boards/{boards['old']['id']}", "PATCH",
+            {"board": {"public_description": board_markup}})
+        with_board = ledger(target, board_names)
+        assert with_board[("attach", len(FILE), "Board", "old", True)] == 1, (target["name"], with_board)
+        return with_board
     finally:
         for board in boards.values():
             api(target, f"/boards/{board['id']}", "DELETE", expected=204)
@@ -96,7 +102,7 @@ def main():
                         "db": os.environ[f"{name}_DB_PATH"]})
     source, rust = (check(target) for target in targets)
     assert source == rust, (source, rust)
-    print("Storage ledger parity passed: card image, card/comment embeds, board transfer, and deletion")
+    print("Storage ledger parity passed: card image, board/card/comment embeds, board transfer, and deletion")
 
 
 if __name__ == "__main__":

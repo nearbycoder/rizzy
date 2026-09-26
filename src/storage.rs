@@ -82,6 +82,7 @@ async fn record_attachment_change_tx(
     user_id: Option<&str>,
 ) -> Result<()> {
     let board_query = match record_type {
+        "Board" => "SELECT id FROM boards WHERE id=? AND account_id=?",
         "Card" => "SELECT board_id FROM cards WHERE id=? AND account_id=?",
         "Comment" => {
             "SELECT c.board_id FROM comments m JOIN cards c ON c.id=m.card_id WHERE m.id=? AND c.account_id=?"
@@ -392,6 +393,65 @@ pub(super) async fn reconcile_all(app: &App) -> Result<usize> {
         changed += reconcile_owner(app, &account.get::<String, _>("id"), None).await? as usize;
     }
     Ok(changed)
+}
+
+pub(super) async fn reconcile_imported_storage_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    mysql: bool,
+) -> Result<()> {
+    let sum = if mysql {
+        "CAST(SUM(bytes) AS SIGNED)"
+    } else {
+        "SUM(bytes)"
+    };
+    let query = format!(
+        "SELECT board_id,{sum} AS bytes FROM (SELECT CASE a.record_type WHEN 'Card' THEN c.board_id WHEN 'Comment' THEN mc.board_id WHEN 'Board' THEN bd.id END AS board_id,b.byte_size AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id LEFT JOIN cards c ON a.record_type='Card' AND c.id=a.record_id LEFT JOIN comments m ON a.record_type='Comment' AND m.id=a.record_id LEFT JOIN cards mc ON mc.id=m.card_id LEFT JOIN boards bd ON a.record_type='Board' AND bd.id=a.record_id WHERE a.account_id=?) attached WHERE board_id IS NOT NULL GROUP BY board_id"
+    );
+    let boards = sqlx::query(&query)
+        .bind(account_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    for board in boards {
+        let bytes: i64 = board.get("bytes");
+        if bytes != 0 {
+            sqlx::query("INSERT INTO storage_entries(id,account_id,board_id,created_at,delta,operation) VALUES(?,?,?,?,?,'reconcile')")
+                .bind(id())
+                .bind(account_id)
+                .bind(board.get::<String, _>("board_id"))
+                .bind(now())
+                .bind(bytes)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
+        }
+    }
+    let sum = if mysql {
+        "CAST(COALESCE(SUM(delta),0) AS SIGNED)"
+    } else {
+        "COALESCE(SUM(delta),0)"
+    };
+    let total = sqlx::query(&format!(
+        "SELECT MAX(id) AS last_entry_id,{sum} AS bytes_stored FROM storage_entries WHERE account_id=?"
+    ))
+    .bind(account_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_err)?;
+    let stamp = now();
+    sqlx::query("INSERT INTO storage_totals(id,account_id,owner_id,owner_type,bytes_stored,last_entry_id,created_at,updated_at) VALUES(?,?,?,'Account',?,?,?,?)")
+        .bind(id())
+        .bind(account_id)
+        .bind(account_id)
+        .bind(total.get::<i64, _>("bytes_stored"))
+        .bind(total.get::<Option<String>, _>("last_entry_id"))
+        .bind(&stamp)
+        .bind(&stamp)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    Ok(())
 }
 
 pub(super) fn public_image_path(slug: i64, signed_id: &str, filename: &str) -> String {
@@ -983,7 +1043,7 @@ pub(super) async fn sync_embeds_tx(
     record_id: &str,
     content: &str,
 ) -> Result<Vec<String>> {
-    if !matches!(record_type, "Card" | "Comment") {
+    if !matches!(record_type, "Board" | "Card" | "Comment") {
         return Err(bad("Invalid embedded attachment owner"));
     }
     let mut wanted = HashSet::new();
@@ -994,7 +1054,7 @@ pub(super) async fn sync_embeds_tx(
             wanted.insert(blob);
         }
     }
-    let existing = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type=? AND a.record_id=? AND a.name='embed' AND a.account_id=?")
+    let existing = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type=? AND a.record_id=? AND a.name IN ('embed','embeds') AND a.account_id=?")
         .bind(record_type).bind(record_id).bind(&p.account_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
     let mut current = HashSet::new();
@@ -1060,9 +1120,10 @@ pub(super) async fn purge_card_storage_tx(
     board_id: Option<&str>,
     user_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))))")
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))) OR (a.record_type='Board' AND a.record_id=? AND ? IS NOT NULL))")
         .bind(account_id).bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
         .bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
+        .bind(board_id).bind(board_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
     let mut keys = Vec::new();
     for row in rows {

@@ -1236,6 +1236,9 @@ async fn apply_archive(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
+    storage::reconcile_imported_storage_tx(&mut tx, account_id, app.mysql)
+        .await
+        .map_err(|error| error.1)?;
     let timestamp = now();
     let completed = sqlx::query("UPDATE imports SET status='completed',completed_at=?,updated_at=? WHERE id=? AND status='processing'")
         .bind(&timestamp).bind(&timestamp).bind(import_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;

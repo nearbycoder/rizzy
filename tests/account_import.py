@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Import a real Fizzy account ZIP into a disposable Rizzy database."""
 import argparse
+from collections import defaultdict
 import io
 import json
 import os
@@ -151,6 +152,31 @@ def run(archive_path):
         user_gid = f'gid="gid://fizzy/User/{owner["id"]}"'
         has_user_mention = any(user_gid in (rich.get("body") or "") for rich in rich_texts)
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
+        cards_by_id = {card["id"]: card for card in
+                       (json.loads(z.read(name)) for name in z.namelist()
+                        if name.startswith("data/cards/"))}
+        comments_by_id = {comment["id"]: comment for comment in
+                          (json.loads(z.read(name)) for name in z.namelist()
+                           if name.startswith("data/comments/"))}
+        rich_by_id = {rich["id"]: rich for rich in rich_texts}
+        expected_board_bytes = defaultdict(int)
+        for name in z.namelist():
+            if not name.startswith("data/active_storage_attachments/"):
+                continue
+            attachment = json.loads(z.read(name))
+            kind, record_id = attachment["record_type"], attachment["record_id"]
+            if kind == "ActionText::RichText":
+                rich = rich_by_id[record_id]
+                kind, record_id = rich["record_type"], rich["record_id"]
+            if kind == "Card":
+                board_id = cards_by_id[record_id]["board_id"]
+            elif kind == "Comment":
+                board_id = cards_by_id[comments_by_id[record_id]["card_id"]]["board_id"]
+            elif kind == "Board":
+                board_id = record_id
+            else:
+                continue
+            expected_board_bytes[board_id] += len(original_bytes[attachment["blob_id"]])
         dated_cards = [json.loads(z.read(name)) for name in z.namelist()
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
         golden_records = [json.loads(z.read(name)) for name in z.namelist()
@@ -220,6 +246,19 @@ def run(archive_path):
                     "SELECT name,created_at,updated_at FROM accounts WHERE id=?", (imported_id,)
                 ).fetchone()
                 assert imported_account[0] == account["name"]
+                ledger = dict(db.execute(
+                    "SELECT board_id,SUM(delta) FROM storage_entries WHERE account_id=? "
+                    "GROUP BY board_id", (imported_id,)).fetchall())
+                assert ledger == {board: size for board, size in expected_board_bytes.items()
+                                  if size}, (ledger, expected_board_bytes)
+                assert db.execute(
+                    "SELECT COUNT(*) FROM storage_entries WHERE account_id=? AND operation!='reconcile'",
+                    (imported_id,)).fetchone()[0] == 0
+                account_total = db.execute(
+                    "SELECT bytes_stored,last_entry_id FROM storage_totals "
+                    "WHERE owner_type='Account' AND owner_id=?", (imported_id,)).fetchone()
+                assert account_total and account_total[0] == sum(expected_board_bytes.values())
+                assert bool(account_total[1]) == bool(expected_board_bytes), account_total
                 if account["name"] != "Import" or account.get("cards_count", 0) != 0:
                     assert_fresh(imported_account[2], import_started)
                 for user in users:

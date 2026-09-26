@@ -32,13 +32,16 @@ the still-missing MySQL runtime work, and the database comparison needed
 before deployment parity or a greater-scale claim can be made.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
-card images, card and comment embeds, a board transfer, and card deletion.
+card images, board/card/comment embeds, a board transfer, and card deletion.
 `tests/storage_materialization.py` checks concurrent materialization, exact
 account and board totals, idempotency, board cleanup, and reconciliation of an
 attachment that predates the ledger. `reconcile-storage` scans existing
 attachments and adds only the missing byte delta; `materialize-storage` drains
-pending totals. Board rich-text embeds, request IDs, import reconciliation,
-periodic reconciliation, and MySQL execution of these new paths remain open.
+pending totals. Account import now writes per-board reconciliation entries from
+its restored attachments and materializes the account total before completion;
+`tests/account_import.py` checks those values against the ZIP. Source timing for
+detaching a board embed after clearing its description, request IDs, periodic
+reconciliation, and MySQL execution of these new paths remain open.
 
 On the MySQL branch, `tests/mysql_search_parity.py` compared the pinned Fizzy
 MySQL adapter with Rizzy on a shared Oracle MySQL 8.4.11 server. Selected JSON

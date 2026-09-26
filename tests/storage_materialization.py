@@ -10,7 +10,7 @@ from pathlib import Path
 
 from auth import BINARY, ROOT, start, stop
 from card_image_parity import IMAGE
-from storage_ledger_parity import api, upload
+from storage_ledger_parity import FILE, api, upload
 
 
 def main():
@@ -96,9 +96,20 @@ def main():
             assert total("Account", account_id)[1] != account_total[1]
             assert total("Board", board["id"])[1] != board_total[1]
 
+            embedded = upload(target, FILE, "board.txt", "text/plain")
+            markup = f'<p><action-text-attachment sgid="{embedded["attachable_sgid"]}"></action-text-attachment></p>'
+            api(target, f"/boards/{board['id']}", "PATCH",
+                {"board": {"public_description": markup}})
+            subprocess.run([BINARY, "materialize-storage"], cwd=ROOT, env=env,
+                           check=True, capture_output=True)
+            assert total("Account", account_id)[0] == len(FILE)
+            assert total("Board", board["id"])[0] == len(FILE)
             api(target, f"/boards/{board['id']}", "DELETE", expected=204)
+            subprocess.run([BINARY, "materialize-storage"], cwd=ROOT, env=env,
+                           check=True, capture_output=True)
             assert total("Board", board["id"]) is None
             assert total("Account", account_id)[0] == 0
+            assert not (Path(root) / "files" / embedded["key"]).exists()
         finally:
             stop(server)
     print("Storage materialization passed: concurrent claims, exact totals, idempotency, and board cleanup")

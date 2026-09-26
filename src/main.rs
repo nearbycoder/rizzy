@@ -7862,6 +7862,7 @@ async fn create_board(
         )
         .await?;
     }
+    storage::sync_embeds_tx(&mut tx, &p, "Board", &id, &public_description).await?;
     sqlx::query("INSERT INTO accesses(board_id,user_id,involvement) VALUES(?,?,'watching')")
         .bind(&id)
         .bind(&p.user_id)
@@ -8006,6 +8007,8 @@ async fn update_board(
         )
         .await?;
     }
+    let removed_embed_keys =
+        storage::sync_embeds_tx(&mut tx, &p, "Board", &id, &public_description).await?;
     if all && b.get::<i64, _>("all_access") == 0 {
         if app.mysql {
             let user_ids: Vec<String> = sqlx::query_scalar(
@@ -8086,6 +8089,7 @@ async fn update_board(
         }
     }
     tx.commit().await.map_err(db_err)?;
+    storage::remove_files(removed_embed_keys).await;
     if !all {
         let has_access: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM accesses WHERE board_id=? AND user_id=?")
