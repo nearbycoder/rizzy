@@ -21,7 +21,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue and JSON delivery | No |
 | Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, VAPID push queue/delivery, timed multipart text/HTML email bundles, and expiring unsubscribe links | No |
-| Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, common formatted text, and signed limit/fill image representation routes | No |
+| Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, common formatted text, signed limit/fill image representation routes, and a storage entry/total ledger | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
 | SQLite and MySQL deployment parity | SQLite runtime; MySQL 8.4.11 core, search, notification, webhook, account import/cancellation, device transfer, deletion cleanup, partial schema recovery, and two-process write and worker checks on this branch | No |
@@ -30,6 +30,15 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed
 before deployment parity or a greater-scale claim can be made.
+
+`tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
+card images, card and comment embeds, a board transfer, and card deletion.
+`tests/storage_materialization.py` checks concurrent materialization, exact
+account and board totals, idempotency, board cleanup, and reconciliation of an
+attachment that predates the ledger. `reconcile-storage` scans existing
+attachments and adds only the missing byte delta; `materialize-storage` drains
+pending totals. Board rich-text embeds, request IDs, import reconciliation,
+periodic reconciliation, and MySQL execution of these new paths remain open.
 
 On the MySQL branch, `tests/mysql_search_parity.py` compared the pinned Fizzy
 MySQL adapter with Rizzy on a shared Oracle MySQL 8.4.11 server. Selected JSON

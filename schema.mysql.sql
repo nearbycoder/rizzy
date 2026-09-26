@@ -286,6 +286,31 @@ CREATE TABLE `storage_attachments` (
   `created_at` LONGTEXT NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `storage_entries` (
+  `id` VARCHAR(64),
+  `account_id` VARCHAR(64) NOT NULL,
+  `blob_id` VARCHAR(64),
+  `board_id` VARCHAR(64),
+  `created_at` LONGTEXT NOT NULL,
+  `delta` BIGINT NOT NULL,
+  `operation` LONGTEXT NOT NULL,
+  `recordable_id` VARCHAR(64),
+  `recordable_type` VARCHAR(255),
+  `request_id` VARCHAR(64),
+  `user_id` VARCHAR(64),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `storage_totals` (
+  `id` VARCHAR(64),
+  `account_id` VARCHAR(64) NOT NULL,
+  `owner_id` VARCHAR(64) NOT NULL,
+  `owner_type` VARCHAR(255) NOT NULL,
+  `bytes_stored` BIGINT NOT NULL DEFAULT 0,
+  `last_entry_id` LONGTEXT,
+  `created_at` LONGTEXT NOT NULL,
+  `updated_at` LONGTEXT NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `storage_download_tokens` (
   `token_hash` VARCHAR(255),
   `blob_id` VARCHAR(64) NOT NULL,
@@ -627,6 +652,14 @@ CREATE UNIQUE INDEX `uniq_storage_blobs_2` ON `storage_blobs` (`signed_id`);
 CREATE UNIQUE INDEX `uniq_storage_blobs_3` ON `storage_blobs` (`storage_key`);
 CREATE UNIQUE INDEX `uniq_storage_variant_records_0` ON `storage_variant_records` (`blob_id`, `variation_digest`);
 CREATE INDEX `storage_attachments_record` ON `storage_attachments` (`record_type`, `record_id`);
+CREATE INDEX `storage_entries_user` ON `storage_entries` (`user_id`);
+CREATE INDEX `storage_entries_request` ON `storage_entries` (`request_id`);
+CREATE INDEX `storage_entries_recordable` ON `storage_entries` (`recordable_type`, `recordable_id`);
+CREATE INDEX `storage_entries_blob` ON `storage_entries` (`blob_id`);
+CREATE INDEX `storage_entries_board` ON `storage_entries` (`board_id`, `id`);
+CREATE INDEX `storage_entries_account` ON `storage_entries` (`account_id`, `id`);
+CREATE INDEX `storage_totals_account` ON `storage_totals` (`account_id`);
+CREATE UNIQUE INDEX `uniq_storage_totals_1` ON `storage_totals` (`owner_type`, `owner_id`);
 CREATE INDEX `closures_account_created` ON `closures` (`account_id`, `created_at`);
 CREATE INDEX `closures_user_created` ON `closures` (`user_id`, `created_at`);
 CREATE UNIQUE INDEX `uniq_closures_2` ON `closures` (`card_id`);
@@ -721,6 +754,8 @@ ALTER TABLE `storage_variant_records` ADD CONSTRAINT `fk_storage_variant_records
 ALTER TABLE `storage_variant_records` ADD CONSTRAINT `fk_storage_variant_records_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_attachments` ADD CONSTRAINT `fk_storage_attachments_0` FOREIGN KEY (`blob_id`) REFERENCES `storage_blobs` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_attachments` ADD CONSTRAINT `fk_storage_attachments_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
+ALTER TABLE `storage_entries` ADD CONSTRAINT `fk_storage_entries_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
+ALTER TABLE `storage_totals` ADD CONSTRAINT `fk_storage_totals_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_download_tokens` ADD CONSTRAINT `fk_storage_download_tokens_0` FOREIGN KEY (`blob_id`) REFERENCES `storage_blobs` (`id`) ON DELETE CASCADE;
 ALTER TABLE `closures` ADD CONSTRAINT `fk_closures_0` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
 ALTER TABLE `closures` ADD CONSTRAINT `fk_closures_1` FOREIGN KEY (`card_id`) REFERENCES `cards` (`id`) ON DELETE CASCADE;

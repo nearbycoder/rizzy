@@ -3238,6 +3238,27 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("Delivered {count} push jobs");
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("materialize-storage") {
+        let mut total = 0;
+        loop {
+            let count = storage::materialize_pending(&app)
+                .await
+                .map_err(|error| std::io::Error::other(error.1))?;
+            total += count;
+            if count == 0 {
+                break;
+            }
+        }
+        println!("Materialized {total} storage totals");
+        return Ok(());
+    }
+    if env::args().nth(1).as_deref() == Some("reconcile-storage") {
+        let count = storage::reconcile_all(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Reconciled {count} storage owners");
+        return Ok(());
+    }
     if env::args().nth(1).as_deref() == Some("auto-postpone") {
         let started = Instant::now();
         let count = auto_postpone_all_due(&app)
@@ -3267,6 +3288,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(notification_mail::worker(app.clone()));
     if env::var("RIZZY_DISABLE_PUSH_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(push_delivery::worker(app.clone()));
+    }
+    if env::var("RIZZY_DISABLE_STORAGE_MATERIALIZATION").as_deref() != Ok("1") {
+        tokio::spawn(storage::materialize_worker(app.clone()));
     }
     let maintenance_db = app.db.clone();
     let maintenance_app = app.clone();
@@ -8171,8 +8195,15 @@ async fn delete_board(
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, None, Some(&id)).await?;
+    let keys =
+        storage::purge_card_storage_tx(&mut tx, &p.account_id, None, Some(&id), Some(&p.user_id))
+            .await?;
     deletion_cleanup::board(&mut tx, &p.account_id, &id).await?;
+    sqlx::query("DELETE FROM storage_totals WHERE owner_type='Board' AND owner_id=?")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     sqlx::query("DELETE FROM boards WHERE id=? AND account_id=?")
         .bind(id)
         .bind(&p.account_id)
@@ -11918,7 +11949,14 @@ async fn delete_card(
     let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
+    let keys = storage::purge_card_storage_tx(
+        &mut tx,
+        &p.account_id,
+        Some(&card_id),
+        None,
+        Some(&p.user_id),
+    )
+    .await?;
     deletion_cleanup::card(&mut tx, &p.account_id, &card_id).await?;
     sqlx::query("DELETE FROM cards WHERE id=?")
         .bind(card_id)
@@ -12623,6 +12661,15 @@ async fn move_card(
         for board_id in board_ids {
             lock_board_for_write(&mut tx, board_id, app.mysql).await?;
         }
+        storage::record_board_transfer_tx(
+            &mut tx,
+            &p.account_id,
+            &card_id,
+            &old_board_id,
+            &destination,
+            &p.user_id,
+        )
+        .await?;
         sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")
             .bind(&destination)
             .bind(now())

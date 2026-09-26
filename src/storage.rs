@@ -41,6 +41,359 @@ fn image_url(p: &Principal, signed_id: &str, filename: &str) -> String {
     )
 }
 
+async fn record_storage_entry_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    board_id: &str,
+    record_type: &str,
+    record_id: &str,
+    blob_id: Option<&str>,
+    delta: i64,
+    operation: &str,
+    user_id: Option<&str>,
+) -> Result<()> {
+    if delta == 0 {
+        return Ok(());
+    }
+    sqlx::query("INSERT INTO storage_entries(id,account_id,blob_id,board_id,created_at,delta,operation,recordable_id,recordable_type,user_id) VALUES(?,?,?,?,?,?,?,?,?,?)")
+        .bind(id())
+        .bind(account_id)
+        .bind(blob_id)
+        .bind(board_id)
+        .bind(now())
+        .bind(delta)
+        .bind(operation)
+        .bind(record_id)
+        .bind(record_type)
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    Ok(())
+}
+
+async fn record_attachment_change_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    record_type: &str,
+    record_id: &str,
+    blob_id: &str,
+    operation: &str,
+    user_id: Option<&str>,
+) -> Result<()> {
+    let board_query = match record_type {
+        "Card" => "SELECT board_id FROM cards WHERE id=? AND account_id=?",
+        "Comment" => {
+            "SELECT c.board_id FROM comments m JOIN cards c ON c.id=m.card_id WHERE m.id=? AND c.account_id=?"
+        }
+        _ => return Ok(()),
+    };
+    let board_id: String = sqlx::query_scalar(board_query)
+        .bind(record_id)
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    let bytes: i64 =
+        sqlx::query_scalar("SELECT byte_size FROM storage_blobs WHERE id=? AND account_id=?")
+            .bind(blob_id)
+            .bind(account_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    record_storage_entry_tx(
+        tx,
+        account_id,
+        &board_id,
+        record_type,
+        record_id,
+        Some(blob_id),
+        if operation == "detach" { -bytes } else { bytes },
+        operation,
+        user_id,
+    )
+    .await
+}
+
+pub(super) async fn record_board_transfer_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    card_id: &str,
+    old_board_id: &str,
+    new_board_id: &str,
+    user_id: &str,
+) -> Result<()> {
+    let rows = sqlx::query("SELECT a.record_type,a.record_id,SUM(b.byte_size) AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id=?) OR (a.record_type='Comment' AND a.record_id IN (SELECT id FROM comments WHERE card_id=?))) GROUP BY a.record_type,a.record_id")
+        .bind(account_id)
+        .bind(card_id)
+        .bind(card_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    for row in rows {
+        let record_type: String = row.get("record_type");
+        let record_id: String = row.get("record_id");
+        let bytes: i64 = row.get("bytes");
+        record_storage_entry_tx(
+            tx,
+            account_id,
+            old_board_id,
+            &record_type,
+            &record_id,
+            None,
+            -bytes,
+            "transfer_out",
+            Some(user_id),
+        )
+        .await?;
+        record_storage_entry_tx(
+            tx,
+            account_id,
+            new_board_id,
+            &record_type,
+            &record_id,
+            None,
+            bytes,
+            "transfer_in",
+            Some(user_id),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn materialize_owner(
+    app: &App,
+    account_id: &str,
+    owner_type: &str,
+    owner_id: &str,
+) -> Result<bool> {
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    if owner_type == "Board" {
+        let exists: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM boards WHERE id=? AND account_id=?)")
+                .bind(owner_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if exists == 0 {
+            return Ok(false);
+        }
+    }
+    let insert = if app.mysql {
+        "INSERT IGNORE INTO storage_totals(id,account_id,owner_id,owner_type,created_at,updated_at) VALUES(?,?,?,?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO storage_totals(id,account_id,owner_id,owner_type,created_at,updated_at) VALUES(?,?,?,?,?,?)"
+    };
+    let stamp = now();
+    sqlx::query(insert)
+        .bind(id())
+        .bind(account_id)
+        .bind(owner_id)
+        .bind(owner_type)
+        .bind(&stamp)
+        .bind(&stamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let total_query = if app.mysql {
+        "SELECT id,last_entry_id,bytes_stored FROM storage_totals WHERE owner_type=? AND owner_id=? FOR UPDATE"
+    } else {
+        "SELECT id,last_entry_id,bytes_stored FROM storage_totals WHERE owner_type=? AND owner_id=?"
+    };
+    let Some(total) = sqlx::query(total_query)
+        .bind(owner_type)
+        .bind(owner_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+    else {
+        return Ok(false);
+    };
+    let cursor: Option<String> = total.get("last_entry_id");
+    let pending_query = match (owner_type, app.mysql) {
+        ("Account", true) => {
+            "SELECT MAX(id) AS latest,CAST(COALESCE(SUM(delta),0) AS SIGNED) AS delta FROM storage_entries WHERE account_id=? AND id>?"
+        }
+        ("Account", false) => {
+            "SELECT MAX(id) AS latest,COALESCE(SUM(delta),0) AS delta FROM storage_entries WHERE account_id=? AND id>?"
+        }
+        (_, true) => {
+            "SELECT MAX(id) AS latest,CAST(COALESCE(SUM(delta),0) AS SIGNED) AS delta FROM storage_entries WHERE board_id=? AND id>?"
+        }
+        (_, false) => {
+            "SELECT MAX(id) AS latest,COALESCE(SUM(delta),0) AS delta FROM storage_entries WHERE board_id=? AND id>?"
+        }
+    };
+    let pending = sqlx::query(pending_query)
+        .bind(owner_id)
+        .bind(cursor.as_deref().unwrap_or(""))
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let latest: Option<String> = pending.get("latest");
+    if let Some(latest) = latest {
+        let delta: i64 = pending.get("delta");
+        sqlx::query(
+            "UPDATE storage_totals SET bytes_stored=?,last_entry_id=?,updated_at=? WHERE id=?",
+        )
+        .bind(total.get::<i64, _>("bytes_stored") + delta)
+        .bind(latest)
+        .bind(now())
+        .bind(total.get::<String, _>("id"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(true)
+}
+
+pub(super) async fn materialize_pending(app: &App) -> Result<usize> {
+    let owners = sqlx::query(
+        "SELECT DISTINCT e.account_id,'Account' AS owner_type,e.account_id AS owner_id FROM storage_entries e LEFT JOIN storage_totals t ON t.owner_type='Account' AND t.owner_id=e.account_id WHERE e.id>COALESCE(t.last_entry_id,'') UNION SELECT DISTINCT e.account_id,'Board' AS owner_type,e.board_id AS owner_id FROM storage_entries e JOIN boards b ON b.id=e.board_id LEFT JOIN storage_totals t ON t.owner_type='Board' AND t.owner_id=e.board_id WHERE e.board_id IS NOT NULL AND e.id>COALESCE(t.last_entry_id,'') LIMIT 100",
+    )
+    .fetch_all(&app.db)
+    .await
+    .map_err(db_err)?;
+    let mut count = 0;
+    for owner in owners {
+        if materialize_owner(
+            app,
+            &owner.get::<String, _>("account_id"),
+            &owner.get::<String, _>("owner_type"),
+            &owner.get::<String, _>("owner_id"),
+        )
+        .await?
+        {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+pub(super) async fn materialize_worker(app: Arc<App>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        interval.tick().await;
+        if let Err(error) = materialize_pending(&app).await {
+            eprintln!("storage materialization failed: {}", error.1);
+        }
+    }
+}
+
+async fn reconcile_owner(app: &App, account_id: &str, board_id: Option<&str>) -> Result<bool> {
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    if let Some(board_id) = board_id {
+        lock_board_for_write(&mut tx, board_id, app.mysql).await?;
+        let exists: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM boards WHERE id=? AND account_id=?)")
+                .bind(board_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if exists == 0 {
+            return Ok(false);
+        }
+    }
+    let cursor_sql = if board_id.is_some() {
+        "SELECT MAX(id) FROM storage_entries WHERE board_id=?"
+    } else {
+        "SELECT MAX(id) FROM storage_entries WHERE account_id=?"
+    };
+    let owner_id = board_id.unwrap_or(account_id);
+    let cursor_before: Option<String> = sqlx::query_scalar(cursor_sql)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let sum = if app.mysql {
+        "CAST(COALESCE(SUM(b.byte_size),0) AS SIGNED)"
+    } else {
+        "COALESCE(SUM(b.byte_size),0)"
+    };
+    let scope = if board_id.is_some() {
+        "((a.record_type='Card' AND c.board_id=?) OR (a.record_type='Comment' AND mc.board_id=?) OR (a.record_type='Board' AND a.record_id=?))"
+    } else {
+        "((a.record_type='Card' AND c.account_id=?) OR (a.record_type='Comment' AND mc.account_id=?) OR (a.record_type='Board' AND bd.account_id=?))"
+    };
+    let real_sql = format!(
+        "SELECT {sum} FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id LEFT JOIN cards c ON a.record_type='Card' AND c.id=a.record_id LEFT JOIN comments m ON a.record_type='Comment' AND m.id=a.record_id LEFT JOIN cards mc ON mc.id=m.card_id LEFT JOIN boards bd ON a.record_type='Board' AND bd.id=a.record_id WHERE a.account_id=? AND {scope}"
+    );
+    let real_bytes: i64 = sqlx::query_scalar(&real_sql)
+        .bind(account_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let cursor_after: Option<String> = sqlx::query_scalar(cursor_sql)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if cursor_before != cursor_after {
+        return Ok(false);
+    }
+    let ledger_scope = if board_id.is_some() {
+        "board_id"
+    } else {
+        "account_id"
+    };
+    let ledger_sum = if app.mysql {
+        "CAST(COALESCE(SUM(delta),0) AS SIGNED)"
+    } else {
+        "COALESCE(SUM(delta),0)"
+    };
+    let ledger_sql = format!("SELECT {ledger_sum} FROM storage_entries WHERE {ledger_scope}=?");
+    let ledger_bytes: i64 = sqlx::query_scalar(&ledger_sql)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let delta = real_bytes - ledger_bytes;
+    if delta != 0 {
+        sqlx::query("INSERT INTO storage_entries(id,account_id,board_id,created_at,delta,operation) VALUES(?,?,?,?,?,'reconcile')")
+            .bind(id())
+            .bind(account_id)
+            .bind(board_id)
+            .bind(now())
+            .bind(delta)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(delta != 0)
+}
+
+pub(super) async fn reconcile_all(app: &App) -> Result<usize> {
+    let boards = sqlx::query("SELECT account_id,id FROM boards ORDER BY account_id,id")
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut changed = 0;
+    for board in boards {
+        changed += reconcile_owner(
+            app,
+            &board.get::<String, _>("account_id"),
+            Some(&board.get::<String, _>("id")),
+        )
+        .await? as usize;
+    }
+    let accounts = sqlx::query("SELECT id FROM accounts ORDER BY id")
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    for account in accounts {
+        changed += reconcile_owner(app, &account.get::<String, _>("id"), None).await? as usize;
+    }
+    Ok(changed)
+}
+
 pub(super) fn public_image_path(slug: i64, signed_id: &str, filename: &str) -> String {
     format!(
         "/{slug}/rails/active_storage/blobs/redirect/{signed_id}/{}",
@@ -452,11 +805,22 @@ pub(super) async fn attach_card_image_tx(
     if existing == blob_id {
         return Ok(Vec::new());
     }
-    let keys = purge_card_images_tx(tx, &p.account_id, Some(card_id), None).await?;
+    let keys =
+        purge_card_images_tx(tx, &p.account_id, Some(card_id), None, Some(&p.user_id)).await?;
     if let Some(blob_id) = blob_id {
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'Card',?,'image',?)")
-            .bind(id()).bind(&p.account_id).bind(blob_id).bind(card_id).bind(now())
+            .bind(id()).bind(&p.account_id).bind(&blob_id).bind(card_id).bind(now())
             .execute(&mut **tx).await.map_err(db_err)?;
+        record_attachment_change_tx(
+            tx,
+            &p.account_id,
+            "Card",
+            card_id,
+            &blob_id,
+            "attach",
+            Some(&p.user_id),
+        )
+        .await?;
     }
     Ok(keys)
 }
@@ -573,8 +937,9 @@ pub(super) async fn purge_card_images_tx(
     account_id: &str,
     card_id: Option<&str>,
     board_id: Option<&str>,
+    user_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let rows = sqlx::query("SELECT a.id AS attachment_id,b.id AS blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id JOIN cards c ON c.id=a.record_id WHERE a.record_type='Card' AND a.name='image' AND c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?)")
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.record_id,b.id AS blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id JOIN cards c ON c.id=a.record_id WHERE a.record_type='Card' AND a.name='image' AND c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?)")
         .bind(account_id)
         .bind(card_id).bind(card_id)
         .bind(board_id).bind(board_id)
@@ -583,6 +948,11 @@ pub(super) async fn purge_card_images_tx(
     for row in rows {
         let attachment_id: String = row.get("attachment_id");
         let blob_id: String = row.get("blob_id");
+        let record_id: String = row.get("record_id");
+        record_attachment_change_tx(
+            tx, account_id, "Card", &record_id, &blob_id, "detach", user_id,
+        )
+        .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
             .bind(&attachment_id)
             .execute(&mut **tx)
@@ -635,6 +1005,16 @@ pub(super) async fn sync_embeds_tx(
             current.insert(blob_id);
             continue;
         }
+        record_attachment_change_tx(
+            tx,
+            &p.account_id,
+            record_type,
+            record_id,
+            &blob_id,
+            "detach",
+            Some(&p.user_id),
+        )
+        .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
             .bind(row.get::<String, _>("attachment_id"))
             .execute(&mut **tx)
@@ -659,6 +1039,16 @@ pub(super) async fn sync_embeds_tx(
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,?,?,'embed',?)")
             .bind(id()).bind(&p.account_id).bind(blob_id).bind(record_type).bind(record_id).bind(now())
             .execute(&mut **tx).await.map_err(db_err)?;
+        record_attachment_change_tx(
+            tx,
+            &p.account_id,
+            record_type,
+            record_id,
+            blob_id,
+            "attach",
+            Some(&p.user_id),
+        )
+        .await?;
     }
     Ok(keys)
 }
@@ -668,14 +1058,25 @@ pub(super) async fn purge_card_storage_tx(
     account_id: &str,
     card_id: Option<&str>,
     board_id: Option<&str>,
+    user_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))))")
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))))")
         .bind(account_id).bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
         .bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
     let mut keys = Vec::new();
     for row in rows {
         let blob_id: String = row.get("blob_id");
+        record_attachment_change_tx(
+            tx,
+            account_id,
+            &row.get::<String, _>("record_type"),
+            &row.get::<String, _>("record_id"),
+            &blob_id,
+            "detach",
+            user_id,
+        )
+        .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
             .bind(row.get::<String, _>("attachment_id"))
             .execute(&mut **tx)
@@ -1698,7 +2099,14 @@ pub(super) async fn delete_image(
     let card = card(&app, &p, &number).await?;
     let card_id: String = card.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = purge_card_images_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
+    let keys = purge_card_images_tx(
+        &mut tx,
+        &p.account_id,
+        Some(&card_id),
+        None,
+        Some(&p.user_id),
+    )
+    .await?;
     tx.commit().await.map_err(db_err)?;
     remove_files(keys).await;
     if headers.contains_key("x-rizzy-json-request") {

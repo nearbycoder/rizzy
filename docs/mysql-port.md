@@ -248,6 +248,11 @@ search throughput.
 
 Remaining database work:
 
+The new storage entry and total tables are included in the generated MySQL
+schema, but their recording, reconciliation, and materialization paths have
+only been exercised on SQLite. They need a live MySQL install and concurrent
+write check before this part of the port is considered verified.
+
 1. Replace the remaining SQLite startup migrations and `PRAGMA` queries with
    versioned MySQL migrations, including upgrades beyond the first backfill.
 2. Port the remaining SQLite trigger behavior and observable side effects.

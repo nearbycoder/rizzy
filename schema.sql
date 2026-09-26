@@ -304,6 +304,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS storage_user_avatar_blob_unique
 CREATE UNIQUE INDEX IF NOT EXISTS storage_embed_unique
   ON storage_attachments(record_type,record_id,name,blob_id) WHERE name='embed';
 CREATE INDEX IF NOT EXISTS storage_attachments_record ON storage_attachments(record_type,record_id);
+CREATE TABLE IF NOT EXISTS storage_entries (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  blob_id TEXT,
+  board_id TEXT,
+  created_at TEXT NOT NULL,
+  delta INTEGER NOT NULL,
+  operation TEXT NOT NULL,
+  recordable_id TEXT,
+  recordable_type TEXT,
+  request_id TEXT,
+  user_id TEXT
+);
+CREATE INDEX IF NOT EXISTS storage_entries_account ON storage_entries(account_id,id);
+CREATE INDEX IF NOT EXISTS storage_entries_board ON storage_entries(board_id,id);
+CREATE INDEX IF NOT EXISTS storage_entries_blob ON storage_entries(blob_id);
+CREATE INDEX IF NOT EXISTS storage_entries_recordable ON storage_entries(recordable_type,recordable_id);
+CREATE INDEX IF NOT EXISTS storage_entries_request ON storage_entries(request_id);
+CREATE INDEX IF NOT EXISTS storage_entries_user ON storage_entries(user_id);
+CREATE TABLE IF NOT EXISTS storage_totals (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  owner_id TEXT NOT NULL,
+  owner_type TEXT NOT NULL,
+  bytes_stored INTEGER NOT NULL DEFAULT 0,
+  last_entry_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(owner_type,owner_id)
+);
+CREATE INDEX IF NOT EXISTS storage_totals_account ON storage_totals(account_id);
 CREATE TABLE IF NOT EXISTS storage_download_tokens (
   token_hash TEXT PRIMARY KEY,
   blob_id TEXT NOT NULL REFERENCES storage_blobs(id) ON DELETE CASCADE,
