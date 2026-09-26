@@ -145,11 +145,17 @@ The disposable MySQL server had binary logging enabled, so trigger installation
 initially failed with error 1419. The test server was configured with
 `log_bin_trust_function_creators=1`; a deployment with binary logging needs
 that setting or the necessary trigger-creation privilege. Schema installation
-currently leaves a partial database if it fails during DDL. Startup now checks
-the expected tables, indexes, foreign keys, generated columns, and check count
-and rejects an incomplete schema instead of serving it. A partial database
-still needs manual repair or a fresh database; setup must be made resumable
-before production use.
+can leave a partial database if it fails during DDL. Startup now resumes
+missing tables, indexes, generated columns, and foreign keys while holding
+the schema initialization lock, then checks those objects and the check count
+before serving. `tests/mysql_schema_resume.py` passed on two disposable MySQL
+8.4.11 databases interrupted after early tables and midway through generated
+columns; both retained existing data through recovery, seeding, and a second
+restart. The generated-column case started two recovery processes together.
+The fresh-schema two-process `tests/mysql_cluster.py` check also
+passed after this change. This repairs interrupted installation of the current
+snapshot; incompatible object definitions and future schema upgrades still
+need versioned migrations and may require manual repair.
 
 The pinned Fizzy MySQL search controller and sharded adapter suites passed
 37 tests and 146 assertions on the same Oracle MySQL 8.4.11 server.

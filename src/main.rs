@@ -662,6 +662,97 @@ fn database_pool_size() -> u32 {
         .clamp(1, 64)
 }
 
+async fn resume_mysql_schema(
+    db: &DbPool,
+    schema: &str,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut tables: HashSet<String> = sqlx::query_scalar(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .collect();
+    let mut indexes: HashSet<(String, String)> = sqlx::query(
+        "SELECT DISTINCT table_name,index_name FROM information_schema.statistics WHERE table_schema=DATABASE()",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .map(|row| (row.get(0), row.get(1)))
+    .collect();
+    let mut foreign_keys: HashSet<(String, String)> = sqlx::query(
+        "SELECT table_name,constraint_name FROM information_schema.referential_constraints WHERE constraint_schema=DATABASE()",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .map(|row| (row.get(0), row.get(1)))
+    .collect();
+    let mut generated: HashSet<(String, String)> = sqlx::query(
+        "SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND generation_expression<>''",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .map(|row| (row.get(0), row.get(1)))
+    .collect();
+    let statements = schema
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("--"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for statement in statements
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let quoted = |index: usize| -> std::result::Result<&str, Box<dyn std::error::Error>> {
+            statement
+                .split('`')
+                .nth(index)
+                .ok_or_else(|| format!("malformed MySQL schema statement: {statement}").into())
+        };
+        if statement.starts_with("SET NAMES ") {
+            sqlx::query(statement).execute(db).await?;
+        } else if statement.starts_with("CREATE TABLE ") {
+            let table = quoted(1)?;
+            if tables.insert(table.to_owned()) {
+                sqlx::raw_sql(statement).execute(db).await?;
+            }
+        } else if statement.starts_with("CREATE INDEX ")
+            || statement.starts_with("CREATE UNIQUE INDEX ")
+        {
+            let index = quoted(1)?;
+            let table = quoted(3)?;
+            if indexes.insert((table.to_owned(), index.to_owned())) {
+                sqlx::query(statement).execute(db).await?;
+            }
+        } else if let Some((_, definitions)) = statement.split_once(" ADD COLUMN ") {
+            let table = quoted(1)?;
+            for definition in definitions.split(", ADD COLUMN ") {
+                let column = definition
+                    .split('`')
+                    .nth(1)
+                    .ok_or("malformed MySQL generated column")?;
+                if generated.insert((table.to_owned(), column.to_owned())) {
+                    let ddl = format!("ALTER TABLE `{table}` ADD COLUMN {definition}");
+                    sqlx::query(&ddl).execute(db).await?;
+                }
+            }
+        } else if statement.starts_with("ALTER TABLE ") && statement.contains(" ADD CONSTRAINT ") {
+            let table = quoted(1)?;
+            let constraint = quoted(3)?;
+            if foreign_keys.insert((table.to_owned(), constraint.to_owned())) {
+                sqlx::query(statement).execute(db).await?;
+            }
+        } else {
+            return Err(format!("unsupported MySQL schema statement: {statement}").into());
+        }
+    }
+    Ok(())
+}
+
 async fn validate_mysql_schema(
     db: &DbPool,
     schema: &str,
@@ -769,23 +860,7 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
         return Err("Timed out waiting for MySQL schema initialization lock".into());
     }
     let schema = include_str!("../schema.mysql.sql");
-    let expected_tables = schema
-        .lines()
-        .filter(|line| line.starts_with("CREATE TABLE "))
-        .count() as i64;
-    let table_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",
-    )
-    .fetch_one(&db)
-    .await?;
-    if table_count == 0 {
-        sqlx::raw_sql(schema).execute(&db).await?;
-    } else if table_count < expected_tables {
-        return Err(format!(
-            "expected at least {expected_tables} Rizzy tables, found {table_count}"
-        )
-        .into());
-    }
+    resume_mysql_schema(&db, schema).await?;
     validate_mysql_schema(&db, schema).await?;
     mysql_search::setup(&db).await?;
     let installed: HashSet<String> = sqlx::query_scalar(
