@@ -1,0 +1,192 @@
+{
+  "fixture_cards": 100,
+  "workload": "scoped",
+  "rounds": 2,
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 10.01,
+        "requests": 8859,
+        "errors": {},
+        "rps": 884.8,
+        "p50_ms": 6.83,
+        "p95_ms": 20.0,
+        "p99_ms": 38.51,
+        "round": 1
+      },
+      {
+        "concurrency": 8,
+        "seconds": 10.02,
+        "requests": 9516,
+        "errors": {},
+        "rps": 950.0,
+        "p50_ms": 6.59,
+        "p95_ms": 18.5,
+        "p99_ms": 22.44,
+        "round": 2
+      },
+      {
+        "concurrency": 32,
+        "seconds": 10.13,
+        "requests": 11578,
+        "errors": {},
+        "rps": 1142.9,
+        "p50_ms": 23.18,
+        "p95_ms": 66.35,
+        "p99_ms": 102.38,
+        "round": 1
+      },
+      {
+        "concurrency": 32,
+        "seconds": 10.04,
+        "requests": 12570,
+        "errors": {},
+        "rps": 1251.7,
+        "p50_ms": 21.55,
+        "p95_ms": 60.7,
+        "p99_ms": 85.24,
+        "round": 2
+      },
+      {
+        "concurrency": 64,
+        "seconds": 10.08,
+        "requests": 12028,
+        "errors": {},
+        "rps": 1193.2,
+        "p50_ms": 47.64,
+        "p95_ms": 116.12,
+        "p99_ms": 152.82,
+        "round": 1
+      },
+      {
+        "concurrency": 64,
+        "seconds": 10.09,
+        "requests": 11855,
+        "errors": {},
+        "rps": 1175.3,
+        "p50_ms": 47.26,
+        "p95_ms": 121.73,
+        "p99_ms": 159.28,
+        "round": 2
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 10.0,
+        "requests": 45784,
+        "errors": {},
+        "rps": 4577.3,
+        "p50_ms": 1.62,
+        "p95_ms": 3.31,
+        "p99_ms": 4.13,
+        "round": 1
+      },
+      {
+        "concurrency": 8,
+        "seconds": 10.0,
+        "requests": 41870,
+        "errors": {},
+        "rps": 4186.2,
+        "p50_ms": 1.75,
+        "p95_ms": 3.68,
+        "p99_ms": 4.71,
+        "round": 2
+      },
+      {
+        "concurrency": 32,
+        "seconds": 10.01,
+        "requests": 32083,
+        "errors": {},
+        "rps": 3205.7,
+        "p50_ms": 9.08,
+        "p95_ms": 18.55,
+        "p99_ms": 27.84,
+        "round": 1
+      },
+      {
+        "concurrency": 32,
+        "seconds": 10.01,
+        "requests": 38477,
+        "errors": {},
+        "rps": 3844.4,
+        "p50_ms": 7.73,
+        "p95_ms": 15.43,
+        "p99_ms": 19.22,
+        "round": 2
+      },
+      {
+        "concurrency": 64,
+        "seconds": 10.02,
+        "requests": 39812,
+        "errors": {},
+        "rps": 3974.2,
+        "p50_ms": 17.05,
+        "p95_ms": 27.09,
+        "p99_ms": 29.45,
+        "round": 1
+      },
+      {
+        "concurrency": 64,
+        "seconds": 10.02,
+        "requests": 39991,
+        "errors": {},
+        "rps": 3992.8,
+        "p50_ms": 17.18,
+        "p95_ms": 27.29,
+        "p99_ms": 29.34,
+        "round": 2
+      }
+    ]
+  },
+  "sample_parity": {
+    "board_shape": true,
+    "card_shape": true,
+    "activity_shape": true,
+    "description_html": true,
+    "first_page_count": true,
+    "first_page_bytes": {
+      "fizzy": 24829,
+      "rizzy": 23719
+    }
+  },
+  "comparison": [
+    {
+      "concurrency": 8,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 5.173,
+      "p95_ratio_fizzy_over_rizzy": 6.042
+    },
+    {
+      "concurrency": 8,
+      "round": 2,
+      "rps_ratio_rizzy_over_fizzy": 4.407,
+      "p95_ratio_fizzy_over_rizzy": 5.027
+    },
+    {
+      "concurrency": 32,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 2.805,
+      "p95_ratio_fizzy_over_rizzy": 3.577
+    },
+    {
+      "concurrency": 32,
+      "round": 2,
+      "rps_ratio_rizzy_over_fizzy": 3.071,
+      "p95_ratio_fizzy_over_rizzy": 3.934
+    },
+    {
+      "concurrency": 64,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 3.331,
+      "p95_ratio_fizzy_over_rizzy": 4.286
+    },
+    {
+      "concurrency": 64,
+      "round": 2,
+      "rps_ratio_rizzy_over_fizzy": 3.397,
+      "p95_ratio_fizzy_over_rizzy": 4.461
+    }
+  ]
+}

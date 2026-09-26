@@ -91,10 +91,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cards", type=int, default=100)
     parser.add_argument("--seconds", type=float, default=10)
+    parser.add_argument("--rounds", type=int, default=1,
+                        help="repeat each level, alternating which server runs first")
     parser.add_argument("--concurrency", default="1,8,32")
     parser.add_argument("--workload", choices=("mixed", "scoped"), default="mixed",
                         help="scoped excludes the account-wide board list")
     args = parser.parse_args()
+    if args.cards < 1 or args.seconds <= 0 or args.rounds < 1:
+        parser.error("--cards, --seconds, and --rounds must be positive")
     targets = {}
     for name in ("FIZZY", "RIZZY"):
         keys = [f"{name}_{field}" for field in ("URL", "ACCOUNT", "TOKEN")]
@@ -106,7 +110,8 @@ def main():
         targets[name.lower()] = {field.lower(): os.environ[f"{name}_{field}"] for field in ("URL", "ACCOUNT", "TOKEN")}
     if not targets:
         parser.error("Set at least one complete FIZZY_* or RIZZY_* target")
-    results = {"fixture_cards": args.cards, "workload": args.workload, "runs": {}}
+    results = {"fixture_cards": args.cards, "workload": args.workload,
+               "rounds": args.rounds, "runs": {}}
     paths = {}
     samples = {}
     created_boards = []
@@ -153,13 +158,24 @@ def main():
                                     "first_page_count": left["first_page_count"] == right["first_page_count"],
                                     "first_page_bytes": {name: sample["first_page_bytes"] for name, sample in samples.items()}}
         assert all(value for key,value in results["sample_parity"].items() if key != "first_page_bytes"), results["sample_parity"]
-    for concurrency in map(int, args.concurrency.split(",")):
-        for name, target in targets.items():
-            results["runs"].setdefault(name, []).append(run(target, paths[name], concurrency, args.seconds))
-            print(f"{name} c={concurrency}: {results['runs'][name][-1]}", file=sys.stderr, flush=True)
+    levels = [int(value) for value in args.concurrency.split(",")]
+    if not levels or any(value < 1 for value in levels):
+        parser.error("--concurrency must be a comma-separated list of positive integers")
+    for concurrency in levels:
+        for round_number in range(1, args.rounds + 1):
+            names = list(targets)
+            if round_number % 2 == 0:
+                names.reverse()
+            for name in names:
+                result = run(targets[name], paths[name], concurrency, args.seconds)
+                result["round"] = round_number
+                results["runs"].setdefault(name, []).append(result)
+                print(f"{name} c={concurrency} round={round_number}: {result}",
+                      file=sys.stderr, flush=True)
     if len(targets) == 2:
         for fizzy, rizzy in zip(results["runs"]["fizzy"], results["runs"]["rizzy"]):
             results.setdefault("comparison", []).append({"concurrency": fizzy["concurrency"],
+                "round": fizzy["round"],
                 "rps_ratio_rizzy_over_fizzy": round(rizzy["rps"]/fizzy["rps"], 3) if fizzy["rps"] else None,
                 "p95_ratio_fizzy_over_rizzy": round(fizzy["p95_ms"]/rizzy["p95_ms"], 3) if rizzy["p95_ms"] else None})
     print(json.dumps(results, indent=2))
