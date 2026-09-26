@@ -31,13 +31,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seconds", type=float, default=10)
     parser.add_argument("--rounds", type=int, default=2)
+    parser.add_argument("--boards", type=int, default=200)
     parser.add_argument("--concurrency", default="8,32,64")
     parser.add_argument("--load-binary", default="target/release/rizzy_load")
     parser.add_argument("--output")
     args = parser.parse_args()
     levels = [int(value) for value in args.concurrency.split(",")]
-    if args.seconds <= 0 or args.rounds < 1 or not levels or min(levels) < 1:
-        parser.error("seconds, rounds, and concurrency must be positive")
+    if args.seconds <= 0 or args.rounds < 1 or not levels or min(levels) < 1 or args.boards < 200:
+        parser.error("seconds, rounds, and concurrency must be positive; boards must be at least 200")
     binary = str((ROOT / args.load_binary).resolve())
     if not Path(binary).is_file():
         parser.error(f"Build the load client first: {binary}")
@@ -52,15 +53,20 @@ def main():
             target["pid"] = int(os.environ[f"{name}_PID"])
         targets[name.lower()] = target
     created = []
-    result = {"fixture_boards": 200, "path": "/boards.json?page=4",
+    result = {"fixture_boards": args.boards, "path": "/boards.json?page=4",
               "seconds_per_sample": args.seconds, "rounds": args.rounds,
               "concurrency": levels, "samples": {}, "runs": []}
+    result["cpu_affinity"] = {
+        "load_generator": sorted(os.sched_getaffinity(0)),
+        **{name: sorted(os.sched_getaffinity(target["pid"]))
+           for name, target in targets.items() if target.get("pid")},
+    }
     try:
         shapes = {}
         for name, target in targets.items():
-            board, new_ids, baseline = fixture(target)
+            board, new_ids, baseline = fixture(target, args.boards)
             created.append((target, board, new_ids))
-            pages, board_shape = verify(target, baseline)
+            pages, board_shape = verify(target, baseline, args.boards)
             shapes[name] = board_shape
             result["samples"][name] = {"pages": pages, **sample(target)}
         assert shapes["fizzy"] == shapes["rizzy"], shapes

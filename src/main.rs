@@ -2285,6 +2285,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE accesses SET involvement='watching' WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=accesses.board_id AND b.creator_id=accesses.user_id)")
             .execute(&db).await?;
     }
+    sqlx::query("DELETE FROM access_records WHERE NOT EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=access_records.board_id AND x.user_id=access_records.user_id)")
+        .execute(&db).await?;
+    sqlx::query("UPDATE access_records SET account_id=(SELECT b.account_id FROM boards b WHERE b.id=access_records.board_id) WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=access_records.board_id AND b.account_id<>access_records.account_id)")
+        .execute(&db).await?;
     let legacy_accesses = sqlx::query("SELECT x.board_id,x.user_id,b.account_id,b.created_at,COALESCE(x.accessed_at,b.created_at) AS updated_at FROM accesses x JOIN boards b ON b.id=x.board_id WHERE NOT EXISTS(SELECT 1 FROM access_records r WHERE r.board_id=x.board_id AND r.user_id=x.user_id)")
         .fetch_all(&db).await?;
     if !legacy_accesses.is_empty() {
@@ -5681,12 +5685,13 @@ async fn list_boards(
     let (offset, limit) = page_window(page);
     let scope =
         " FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=?";
-    let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){scope}"))
-        .bind(&p.account_id)
-        .bind(&p.user_id)
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM access_records WHERE user_id=? AND account_id=?")
+            .bind(&p.user_id)
+            .bind(&p.account_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
     let rows = sqlx::query(&format!(
         "SELECT b.*{scope} ORDER BY x.accessed_at DESC LIMIT ? OFFSET ?"
     ))

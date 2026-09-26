@@ -20,7 +20,7 @@ def timestamp(index):
         timespec="milliseconds").replace("+00:00", "Z")
 
 
-def fixture(target):
+def fixture(target, count=COUNT):
     board = call(target, "/boards", "POST",
                  {"board": {"name": "Bulk board 000", "all_access": False}}, 201)
     new_ids = []
@@ -40,7 +40,7 @@ def fixture(target):
         board_insert = f"INSERT INTO boards ({','.join(board_columns)}) VALUES ({','.join('?' for _ in board_columns)})"
         access_columns = list(access.keys())
         access_insert = f"INSERT INTO accesses ({','.join(access_columns)}) VALUES ({','.join('?' for _ in access_columns)})"
-        for index in range(1, COUNT):
+        for index in range(1, count):
             board_id = stored_id(target, uuid.uuid4().int)
             new_ids.append(board_id)
             clone = dict(original)
@@ -65,7 +65,8 @@ def page(target, number):
         return json.load(response), response.headers
 
 
-def verify(target, baseline):
+def verify(target, baseline, count=COUNT):
+    assert count >= COUNT
     pages = []
     ordered = []
     first_shape = None
@@ -75,7 +76,7 @@ def verify(target, baseline):
         assert len(records) >= expected_size, (target["name"], number, len(records))
         if number < 5:
             assert len(records) == expected_size, (target["name"], number, len(records))
-        assert int(headers["X-Total-Count"]) == baseline + COUNT - 1
+        assert int(headers["X-Total-Count"]) == baseline + count - 1
         if number < 5:
             assert 'rel="next"' in headers.get("Link", ""), (target["name"], number)
         if first_shape is None:
@@ -84,7 +85,7 @@ def verify(target, baseline):
         assert all(record["all_access"] is False for record in records[:expected_size])
         pages.append(expected_size)
         ordered.extend(names)
-    expected = [f"Bulk board {index:03d}" for index in reversed(range(COUNT))]
+    expected = [f"Bulk board {index:03d}" for index in reversed(range(count - COUNT, count))]
     assert ordered == expected, (target["name"], ordered[:5], ordered[-5:])
     return pages, first_shape
 
@@ -92,9 +93,11 @@ def verify(target, baseline):
 def cleanup(target, board, new_ids):
     with sqlite3.connect(target["db"]) as db:
         db.execute("PRAGMA foreign_keys=ON")
-        for board_id in new_ids:
-            db.execute("DELETE FROM accesses WHERE board_id=?", (board_id,))
-            db.execute("DELETE FROM boards WHERE id=?", (board_id,))
+        for start in range(0, len(new_ids), 500):
+            batch = new_ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            db.execute(f"DELETE FROM accesses WHERE board_id IN ({placeholders})", batch)
+            db.execute(f"DELETE FROM boards WHERE id IN ({placeholders})", batch)
     if board:
         call(target, f"/boards/{board['id']}", "DELETE", status=204)
 

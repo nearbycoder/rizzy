@@ -26,7 +26,7 @@ def main():
 
         env = {**os.environ, "RIZZY_DATABASE_URL": "sqlite://" + target["db"]}
         stable_id = None
-        for _ in range(2):
+        for restart_index in range(2):
             _, restarted = start(env, binary=BINARY)
             try:
                 with sqlite3.connect(target["db"]) as db:
@@ -38,8 +38,16 @@ def main():
                     if stable_id is not None:
                         assert row[0] == stable_id
                     stable_id = row[0]
+                    if restart_index == 1:
+                        assert db.execute("SELECT COUNT(*) FROM access_records WHERE board_id='orphan'").fetchone()[0] == 0
             finally:
                 stop(restarted)
+            if restart_index == 0:
+                with sqlite3.connect(target["db"]) as db:
+                    db.execute("INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES('orphan',?,?,?,?,?)",
+                               (owner, "orphan-access", old[0], old[1], old[1]))
+                    db.execute("UPDATE access_records SET account_id='wrong-account' WHERE board_id=? AND user_id=?",
+                               (board["id"], owner))
         print("Access migration passed: old rows gain stable metadata")
 
 
