@@ -88,6 +88,7 @@ python3 tests/board_views_parity.py
 python3 tests/auth_format_parity.py
 python3 tests/request_forgery_parity.py
 python3 tests/search_engine_indexing_parity.py
+python3 tests/allow_browser_parity.py
 python3 tests/card_image_parity.py
 python3 tests/avatar_parity.py
 python3 tests/rich_text_parity.py

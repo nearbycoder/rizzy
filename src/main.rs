@@ -182,6 +182,8 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
     let path = request.uri().path();
     let exempt = path.ends_with("/notifications/unsubscribe")
         || path.contains("/collections/")
+        || (path == "/signup" && request.method() == Method::GET)
+        || path == "/error.css"
         || path == "/manifest.json"
         || path == "/service-worker"
         || path == "/service-worker.js"
@@ -229,7 +231,11 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
         }
     }
     let mut response = next.run(request).await;
-    if response.status() == StatusCode::NOT_FOUND {
+    if matches!(
+        response.status(),
+        StatusCode::NOT_FOUND | StatusCode::NOT_ACCEPTABLE
+    ) || authentication_redirect(&response)
+    {
         return response;
     }
     let vary = response
@@ -253,21 +259,174 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
     response
 }
 async fn block_search_engine_indexing(request: Request, next: Next) -> Response {
-    let path = request.uri().path();
-    let application_route = path != "/up"
-        && path != "/error.css"
-        && path != "/manifest.json"
-        && !path.starts_with("/assets/")
-        && !path.starts_with("/app-icon")
-        && !path.contains("/rails/active_storage/")
-        && !path.contains("/collections/");
+    let application_route = application_controller_route(request.uri().path(), request.method());
     let mut response = next.run(request).await;
-    if application_route && response.status() != StatusCode::NOT_FOUND {
+    if application_route
+        && !matches!(
+            response.status(),
+            StatusCode::NOT_FOUND | StatusCode::NOT_ACCEPTABLE
+        )
+        && !authentication_redirect(&response)
+    {
         response
             .headers_mut()
             .insert("x-robots-tag", HeaderValue::from_static("none"));
     }
     response
+}
+fn authentication_redirect(response: &Response) -> bool {
+    response.status() == StatusCode::FOUND
+        && response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|location| {
+                location.ends_with("/session/new") || location.ends_with("/session/menu")
+            })
+}
+async fn signup_redirect(headers: HeaderMap) -> Response {
+    (
+        StatusCode::MOVED_PERMANENTLY,
+        [(header::LOCATION, format!("{}/signup/new", base(&headers)))],
+    )
+        .into_response()
+}
+fn application_controller_route(path: &str, method: &Method) -> bool {
+    path != "/up"
+        && path != "/error.css"
+        && path != "/manifest.json"
+        && !path.starts_with("/assets/")
+        && !path.starts_with("/app-icon")
+        && !path.contains("/rails/active_storage/")
+        && !path.contains("/collections/")
+        && !(path == "/signup" && method == Method::GET)
+}
+fn user_agent_version(agent: &str, product: &str) -> Option<(u32, u32)> {
+    let version: String = agent
+        .split_once(product)?
+        .1
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect();
+    let mut numbers = version.split('.');
+    let major = numbers.next()?.parse().ok()?;
+    let minor = numbers
+        .next()
+        .and_then(|part| part.parse().ok())
+        .unwrap_or(0);
+    Some((major, minor))
+}
+fn unsupported_browser(agent: &str) -> bool {
+    let lower = agent.to_ascii_lowercase();
+    if lower.contains("bot")
+        || lower.contains("googleimageproxy")
+        || lower.contains("chrome-lighthouse")
+        || [
+            "Edg/",
+            "EdgA/",
+            "EdgiOS/",
+            "Edge/",
+            "Vivaldi/",
+            "baidubrowser/",
+            "MicroMessenger/",
+        ]
+        .iter()
+        .any(|product| agent.contains(product))
+    {
+        return false;
+    }
+    if let Some(version) =
+        user_agent_version(agent, "MSIE ").or_else(|| user_agent_version(agent, "rv:"))
+    {
+        if agent.contains("MSIE ") || agent.contains("Trident/") {
+            return version > (0, 0);
+        }
+    }
+    if let Some(version) = user_agent_version(agent, "OPR/").or_else(|| {
+        agent.contains("Opera/").then(|| {
+            user_agent_version(agent, "Version/").or_else(|| user_agent_version(agent, "Opera/"))
+        })?
+    }) {
+        return version < (106, 0);
+    }
+    if let Some(version) = user_agent_version(agent, "Firefox/") {
+        return version < (121, 0);
+    }
+    if let Some(version) = user_agent_version(agent, "HeadlessChrome/")
+        .or_else(|| user_agent_version(agent, "Chrome/"))
+        .or_else(|| user_agent_version(agent, "CriOS/"))
+    {
+        return version < (120, 0);
+    }
+    if agent.contains("Safari/") {
+        if let Some(version) = user_agent_version(agent, "Version/") {
+            return version < (17, 2);
+        }
+        if agent.contains("iPhone") || agent.contains("iPad") {
+            if let Some(version) = agent.split(" OS ").nth(1) {
+                let normalized: String = version
+                    .chars()
+                    .take_while(|character| {
+                        character.is_ascii_digit() || matches!(character, '_' | '.')
+                    })
+                    .map(|character| if character == '_' { '.' } else { character })
+                    .collect();
+                let mut parts = normalized.split('.');
+                if let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok()) {
+                    let minor = parts
+                        .next()
+                        .and_then(|part| part.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    return (major, minor) < (17, 2);
+                }
+            }
+        }
+    }
+    false
+}
+fn browser_access_is_public(path: &str, method: &Method) -> bool {
+    (path == "/session/new" && method == Method::GET)
+        || (path == "/session" && method == Method::POST)
+        || (path.starts_with("/session/magic_link")
+            && matches!(*method, Method::GET | Method::POST))
+        || (path == "/session/passkey" && method == Method::POST)
+        || (path.starts_with("/session/transfers/")
+            && matches!(*method, Method::GET | Method::PATCH | Method::PUT))
+        || (path == "/signup/new" && method == Method::GET)
+        || (path == "/signup" && method == Method::POST)
+        || (path.starts_with("/client_configurations/") && method == Method::GET)
+        || (path.starts_with("/join_codes/") && method == Method::GET)
+        || (path.starts_with("/qr_codes/") && method == Method::GET)
+        || (path.contains("/public/") && method == Method::GET)
+        || path.ends_with("/notifications/unsubscribe")
+        || (path.ends_with("/my/passkey_challenge") && method == Method::POST)
+}
+async fn allow_modern_browser(State(app): Shared, request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let blocked = application_controller_route(path, request.method())
+        && request
+            .headers()
+            .get(header::USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(unsupported_browser);
+    if blocked
+        && (browser_access_is_public(path, request.method())
+            || identity_auth(&app, request.headers()).await.is_ok())
+    {
+        let mut response = (
+            StatusCode::NOT_ACCEPTABLE,
+            [(header::CACHE_CONTROL, "no-cache")],
+            Html(include_str!("../static/406-unsupported-browser.html")),
+        )
+            .into_response();
+        if request.headers().contains_key(header::ACCEPT) {
+            response
+                .headers_mut()
+                .insert(header::VARY, HeaderValue::from_static("Accept"));
+        }
+        return response;
+    }
+    next.run(request).await
 }
 async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next) -> Response {
     let session_cookie = cookie_value(request.headers(), "session_token").is_some();
@@ -2118,7 +2277,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .post(session_transfer::redeem),
         )
         .route("/session/magic_link", get(show_magic_link).post(complete_magic_link))
-        .route("/signup", get(|| async { (StatusCode::FOUND,[(header::LOCATION,"/signup/new")]) }).post(request_signup))
+        .route("/signup", get(signup_redirect).post(request_signup))
         .route("/signup/new", get(new_signup))
         .route("/signup/completion", post(complete_signup))
         .route("/signup/completion/new", get(new_signup_completion))
@@ -2577,6 +2736,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn_with_state(
             app.clone(),
             register_pwa_on_pages,
+        ))
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            allow_modern_browser,
         ))
         .with_state(app)
         .layer(middleware::from_fn(block_search_engine_indexing))
