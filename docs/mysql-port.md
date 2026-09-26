@@ -388,12 +388,16 @@ served 3,251–4,117 requests/s versus Fizzy's 320–350, or 10.2–12.1× per
 paired level. Its serialized bodies were about 1% smaller. Unsampled responses,
 other routes, writes, and multi-host capacity remain unproven.
 
-The write-path audit found additional routes that update cards without first
-locking their parent board, including draft publication, steps, triage, watches,
-and reactions. `tests/mysql_cluster.py` now checks 400 distinct cards through
-step create, update, and delete phases at 32 clients across four app processes;
-the phases completed without HTTP errors. That check covers distinct cards on
-one board and does not prove freedom from every lock cycle. The draft test above
-covers concurrent publishes on separate boards. Same-board writes, triage,
-watches, and reactions still need concurrent MySQL checks and any required lock
-order changes before clustered write reliability is complete.
+The write-path audit found routes that updated cards without locking their
+parent board first. `tests/mysql_cluster.py` now checks 400 distinct cards
+through step create, update, and delete phases and then runs 200 same-card
+pairs per phase: step/title, unwatch/title, triage/title, and reaction/title.
+Each pair uses different app processes; the 64-client phases share one board
+across four processes. Before the fixes, each new mixed phase produced HTTP
+500 database errors. Step CRUD, watches, triage/return-to-stream, and reaction
+creation now lock the board before child writes; reaction creation also commits
+its insert and card touch together. The complete cluster test passed four fresh
+account runs after these changes, and the MySQL core flow plus SQLite step and
+watch regressions passed. This covers those specific races, not every lock
+cycle. Draft publication, card moves, other callbacks, and multi-host writes
+still need concurrent checks before clustered write reliability is complete.

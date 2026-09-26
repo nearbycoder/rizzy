@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check concurrent card numbering and step writes through two MySQL-backed processes.
+"""Check mixed same-board card writes through four MySQL-backed processes.
 
 Set RIZZY_TEST_MYSQL_URL to a MySQL database dedicated to tests. Each run adds
 one account and 400 cards. This checks correctness, not a throughput target.
@@ -12,6 +12,7 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -108,6 +109,11 @@ def main():
                 bases[0], account, token, "/boards", "POST", {"board": {"name": "Cluster"}}
             )
             assert status == 201, (status, board)
+            status, column, _ = call(
+                bases[0], account, token, f"/boards/{board['id']}/columns", "POST",
+                {"column": {"name": "In Progress"}}
+            )
+            assert status == 201, (status, column)
 
             def create(index):
                 return call(
@@ -161,10 +167,87 @@ def main():
                         if status != 204]
             assert not failures, failures[:5]
 
+            # Step insertion takes a foreign-key lock on its card. In parallel,
+            # a title edit updates that card and touches the shared board. The
+            # two requests use different app processes for each card.
+            def mixed_write(item):
+                index, kind = item
+                number = results[index][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/steps", "POST",
+                                {"step": {"content": f"Mixed {index}"}})
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Mixed title {index}"}})
+
+            mixed_items = [(index, kind) for index in range(200) for kind in (0, 1)]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                mixed = list(pool.map(mixed_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, mixed)
+                        if status != (201 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+            assert len({value["id"] for (index, kind), (_, value, _) in zip(mixed_items, mixed)
+                        if kind == 0}) == 200
+            assert all(value["title"] == f"Mixed title {index}"
+                       for (index, kind), (_, value, _) in zip(mixed_items, mixed) if kind == 1)
+
+            def mixed_watch_write(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/watch", "DELETE")
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Watch title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                watch_mixed = list(pool.map(mixed_watch_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, watch_mixed)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+
+            def mixed_triage_write(item):
+                index, kind = item
+                number = results[index][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/triage", "POST",
+                                {"column_id": column["id"]})
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Triage title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                triage_mixed = list(pool.map(mixed_triage_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, triage_mixed)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+
+            def mixed_reaction_write(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/reactions", "POST",
+                                {"reaction": {"content": "🎉"}})
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Reaction title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                reaction_mixed = list(pool.map(mixed_reaction_write, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, reaction_mixed)
+                        if status != (201 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards and step create/update/delete across four processes")
+            print("MySQL cluster passed: 400 unique cards, step CRUD, and mixed step/title, watch/title, triage/title, and reaction/title writes across four processes")
+        except Exception:
+            for index, (_, log) in enumerate(processes):
+                log.flush()
+                print(f"rizzy-{index} log tail: {Path(log.name).read_text()[-2000:]}",
+                      file=sys.stderr)
+            raise
         finally:
             for process, log in processes:
                 if process.poll() is None:

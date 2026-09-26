@@ -11582,6 +11582,7 @@ async fn triage_card_into(app: &App, p: &Principal, number: &str, column: &str) 
     let col = checked_column(&app, &p, &c.get::<String, _>("board_id"), &column).await?;
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     sqlx::query("UPDATE cards SET column_id=?,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
         .bind(column).bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&mut *tx).await.map_err(db_err)?;
     for table in ["closures", "card_not_nows", "card_activity_spikes"] {
@@ -11630,6 +11631,7 @@ async fn send_card_to_stream(app: &App, p: &Principal, number: &str) -> Result<(
     let c = card(&app, &p, &number).await?;
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     sqlx::query("UPDATE cards SET column_id=NULL,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
         .bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&mut *tx).await.map_err(db_err)?;
     for table in ["closures", "card_not_nows", "card_activity_spikes"] {
@@ -12050,6 +12052,7 @@ async fn create_step(
     let timestamp = now();
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     sqlx::query(
         "INSERT INTO steps(id,card_id,content,completed,created_at,updated_at) VALUES(?,?,?,?,?,?)",
     )
@@ -12115,6 +12118,7 @@ async fn update_step(
     let timestamp = now();
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     let changed = sqlx::query("UPDATE steps SET content=?,completed=?,updated_at=? WHERE id=? AND card_id=? AND (content<>? OR completed<>?)")
         .bind(&content)
         .bind(completed as i64)
@@ -12170,6 +12174,7 @@ async fn delete_step(
     let c = card(&app, &p, &number).await?;
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     let done = sqlx::query("DELETE FROM steps WHERE id=? AND card_id=?")
         .bind(&step)
         .bind(&card_id)
@@ -12874,6 +12879,7 @@ async fn set_watch(app: &App, p: &Principal, number: &str, watching: bool) -> Re
     let card_id: String = c.get("id");
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     let statement = if app.mysql {
         "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>VALUES(watching),VALUES(updated_at),updated_at),watching=VALUES(watching)"
     } else {
@@ -13024,17 +13030,20 @@ async fn create_reaction(
         ("Card", c.get::<String, _>("id"))
     };
     let id = id();
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content).bind(now()).execute(&app.db).await.map_err(db_err)?;
-    let r = sqlx::query("SELECT * FROM reactions WHERE id=?")
-        .bind(&id)
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
+        .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content).bind(now()).execute(&mut *tx).await.map_err(db_err)?;
     sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
         .bind(now())
         .bind(c.get::<String, _>("id"))
-        .execute(&app.db)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    let r = sqlx::query("SELECT * FROM reactions WHERE id=?")
+        .bind(&id)
+        .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
     if wants_turbo_stream(headers) {
