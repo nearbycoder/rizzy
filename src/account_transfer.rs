@@ -56,7 +56,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "board_publications",
-        query: "SELECT NULL id,account_id,id board_id,created_at,publication_key key,updated_at FROM boards WHERE account_id=? AND publication_key IS NOT NULL ORDER BY id",
+        query: "SELECT id,account_id,board_id,created_at,key,updated_at FROM board_publications WHERE account_id=? ORDER BY board_id",
         booleans: &[],
         json_fields: &[],
     },

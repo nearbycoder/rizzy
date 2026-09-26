@@ -113,6 +113,11 @@ def main():
             assert closure_record and closure_record[2] == owner["id"]
             mutate(target, f"/cards/{card['number']}/reactions", payload={"reaction": {"content": "👍"}})
             mutate(target, f"/boards/{board['id']}/publication")
+            with sqlite3.connect(db_path) as db:
+                publication_record = db.execute(
+                    "SELECT id,account_id,key,created_at,updated_at FROM board_publications WHERE board_id=?",
+                    (board["id"],)).fetchone()
+            assert publication_record and publication_record[2]
             mutate(target, f"/boards/{board['id']}/webhooks", payload={
                 "webhook": {"name": "Transfer hook", "url": "https://example.invalid/rizzy-transfer",
                             "subscribed_actions": []}})
@@ -122,6 +127,7 @@ def main():
             with sqlite3.connect(db_path) as db:
                 account_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?", (account,)).fetchone()[0]
             assert closure_record[1] == account_id
+            assert publication_record[1] == account_id
             for _ in range(120):
                 state = api(target, f"/account/exports/{export_id}")
                 if state["status"] in ("completed", "failed"):
@@ -160,6 +166,11 @@ def main():
                 assert (closure_data["account_id"], closure_data["card_id"], closure_data["user_id"],
                         closure_data["created_at"], closure_data["updated_at"]) == (
                     account_id, card["id"], owner["id"], closure_record[3], closure_record[4])
+                publication_data = json.loads(archive.read(
+                    f"data/board_publications/{publication_record[0]}.json"))
+                assert (publication_data["account_id"], publication_data["board_id"], publication_data["key"],
+                        publication_data["created_at"], publication_data["updated_at"]) == (
+                    account_id, board["id"], publication_record[2], publication_record[3], publication_record[4])
                 spike_data = json.loads(archive.read(f"data/card_activity_spikes/{spike_record[0]}.json"))
                 assert (spike_data["card_id"], spike_data["created_at"], spike_data["updated_at"]) == (
                     card["id"], spike_record[1], spike_record[2])

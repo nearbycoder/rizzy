@@ -172,6 +172,15 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE INDEX IF NOT EXISTS boards_account ON boards(account_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS boards_publication_key ON boards(publication_key) WHERE publication_key IS NOT NULL;
+CREATE TABLE IF NOT EXISTS board_publications (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  board_id TEXT NOT NULL UNIQUE REFERENCES boards(id) ON DELETE CASCADE,
+  key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS board_publications_account ON board_publications(account_id);
 CREATE TABLE IF NOT EXISTS accesses (
   board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -1655,6 +1655,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
+    let legacy_publications = sqlx::query("SELECT b.id,b.account_id,b.publication_key,b.updated_at FROM boards b WHERE b.publication_key IS NOT NULL AND NOT EXISTS(SELECT 1 FROM board_publications p WHERE p.board_id=b.id)")
+        .fetch_all(&db).await?;
+    if !legacy_publications.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_publications {
+            let timestamp: String = row.get("updated_at");
+            sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                .bind(id())
+                .bind(row.get::<String, _>("account_id"))
+                .bind(row.get::<String, _>("id"))
+                .bind(row.get::<String, _>("publication_key"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
     if !board_columns
         .iter()
         .any(|r| r.get::<String, _>("name") == "entropy_override")
@@ -5693,14 +5710,28 @@ async fn publish_board(
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
     if b.get::<Option<String>, _>("publication_key").is_none() {
-        sqlx::query("UPDATE boards SET publication_key=?,updated_at=? WHERE id=? AND account_id=?")
-            .bind(publication_key())
-            .bind(now())
-            .bind(&id)
+        let key = publication_key();
+        let timestamp = now();
+        let mut tx = app.db.begin().await.map_err(db_err)?;
+        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .bind(crate::id())
             .bind(&p.account_id)
-            .execute(&app.db)
+            .bind(&id)
+            .bind(&key)
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
+        sqlx::query("UPDATE boards SET publication_key=?,updated_at=? WHERE id=? AND account_id=?")
+            .bind(&key)
+            .bind(&timestamp)
+            .bind(&id)
+            .bind(&p.account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
     }
     let b = board(&app, &p, &id).await?;
     Ok((
@@ -5718,13 +5749,25 @@ async fn unpublish_board(
     p.write()?;
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
-    sqlx::query("UPDATE boards SET publication_key=NULL,updated_at=? WHERE id=? AND account_id=?")
+    if b.get::<Option<String>, _>("publication_key").is_some() {
+        let mut tx = app.db.begin().await.map_err(db_err)?;
+        sqlx::query("DELETE FROM board_publications WHERE board_id=? AND account_id=?")
+            .bind(&id)
+            .bind(&p.account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query(
+            "UPDATE boards SET publication_key=NULL,updated_at=? WHERE id=? AND account_id=?",
+        )
         .bind(now())
         .bind(&id)
         .bind(&p.account_id)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 async fn published_board(app: &App, account: &str, key: &str) -> Result<SqliteRow> {
