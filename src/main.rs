@@ -1935,7 +1935,24 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
     }
+    if !user_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "updated_at")
+    {
+        sqlx::query("ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+            .execute(&db)
+            .await?;
+    }
+    sqlx::query("UPDATE users SET updated_at=created_at WHERE updated_at=''")
+        .execute(&db)
+        .await?;
     migrate_deactivated_users(&db).await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_insert AFTER INSERT ON users WHEN NEW.updated_at='' BEGIN UPDATE users SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        .execute(&db)
+        .await?;
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_change AFTER UPDATE OF name,role,active,verified_at,identity_id ON users WHEN NEW.name IS NOT OLD.name OR NEW.role IS NOT OLD.role OR NEW.active IS NOT OLD.active OR NEW.verified_at IS NOT OLD.verified_at OR NEW.identity_id IS NOT OLD.identity_id BEGIN UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.id; END")
+        .execute(&db)
+        .await?;
     sqlx::query("INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE role!='system'")
         .execute(&db).await?;
     let legacy_user_settings = sqlx::query("SELECT u.id,u.account_id,u.created_at FROM users u WHERE u.role!='system' AND NOT EXISTS(SELECT 1 FROM user_settings_records r WHERE r.user_id=u.id)")
@@ -3022,9 +3039,9 @@ async fn migrate_deactivated_users(db: &SqlitePool) -> std::result::Result<(), s
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *connection)
             .await?;
-        sqlx::query("CREATE TABLE users_identity_v2 (id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),identity_id TEXT REFERENCES identities(id),name TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'member',active INTEGER NOT NULL DEFAULT 1,verified_at TEXT,created_at TEXT NOT NULL,UNIQUE(account_id,identity_id))")
+        sqlx::query("CREATE TABLE users_identity_v2 (id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),identity_id TEXT REFERENCES identities(id),name TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'member',active INTEGER NOT NULL DEFAULT 1,verified_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT '',UNIQUE(account_id,identity_id))")
             .execute(&mut *connection).await?;
-        sqlx::query("INSERT INTO users_identity_v2(id,account_id,identity_id,name,role,active,verified_at,created_at) SELECT id,account_id,identity_id,name,role,active,verified_at,created_at FROM users")
+        sqlx::query("INSERT INTO users_identity_v2(id,account_id,identity_id,name,role,active,verified_at,created_at,updated_at) SELECT id,account_id,identity_id,name,role,active,verified_at,created_at,updated_at FROM users")
             .execute(&mut *connection).await?;
         sqlx::query("DROP TABLE users")
             .execute(&mut *connection)

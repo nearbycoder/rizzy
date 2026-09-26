@@ -166,6 +166,18 @@ def main():
             mutate(target, f"/boards/{board['id']}/webhooks", payload={
                 "webhook": {"name": "Transfer hook", "url": "https://example.invalid/rizzy-transfer",
                             "subscribed_actions": []}})
+            with sqlite3.connect(db_path) as db:
+                user_before = db.execute("SELECT created_at,updated_at FROM users WHERE id=?",
+                                         (owner["id"],)).fetchone()
+            time.sleep(.01)
+            mutate(target, f"/users/{owner['id']}", "PATCH", {"user": {"name": "Transfer Owner"}})
+            with sqlite3.connect(db_path) as db:
+                user_times = db.execute("SELECT created_at,updated_at FROM users WHERE id=?",
+                                        (owner["id"],)).fetchone()
+            assert user_times[0] == user_before[0] and user_times[1] > user_before[1]
+            mutate(target, f"/users/{owner['id']}", "PATCH", {"user": {"name": "Transfer Owner"}})
+            with sqlite3.connect(db_path) as db:
+                assert db.execute("SELECT updated_at FROM users WHERE id=?", (owner["id"],)).fetchone()[0] == user_times[1]
             exported = api(target, "/account/exports", "POST", expected=201)
             assert exported["status"] == "pending" and "download_url" not in exported
             export_id = exported["id"]
@@ -205,6 +217,9 @@ def main():
                                    if path.startswith("data/users/")
                                    and json.loads(archive.read(path))["role"] == "system")
                 assert system_user["email_address"] is None and system_user["identity_id"] is None
+                owner_data = json.loads(archive.read(f"data/users/{owner['id']}.json"))
+                assert (owner_data["name"], owner_data["created_at"], owner_data["updated_at"]) == (
+                    "Transfer Owner", *user_times)
                 card_data = json.loads(archive.read(f"data/cards/{card['id']}.json"))
                 assert card_data["title"] == "Transfer card" and "description" not in card_data
                 step_data = json.loads(archive.read(f"data/steps/{step['id']}.json"))

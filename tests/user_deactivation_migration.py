@@ -16,6 +16,9 @@ def main():
     schema = (ROOT / "schema.sql").read_text()
     old_schema = schema.replace("identity_id TEXT REFERENCES identities(id),", "identity_id TEXT NOT NULL REFERENCES identities(id),", 1)
     assert old_schema != schema
+    user_times = "  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL DEFAULT '',\n  UNIQUE(account_id, identity_id)"
+    assert user_times in old_schema
+    old_schema = old_schema.replace(user_times, "  created_at TEXT NOT NULL,\n  UNIQUE(account_id, identity_id)", 1)
     with tempfile.TemporaryDirectory() as temp:
         db_path = Path(temp) / "existing.sqlite3"
         stamp = "2026-01-01T00:00:00Z"
@@ -38,17 +41,20 @@ def main():
             with sqlite3.connect(db_path) as db:
                 column = next(row for row in db.execute("PRAGMA table_info(users)") if row[1] == "identity_id")
                 assert column[3] == 0, column
+                assert db.execute("SELECT created_at,updated_at FROM users WHERE id='old-member'").fetchone() == (stamp, stamp)
                 assert db.execute("SELECT sgid FROM user_attachables WHERE user_id='old-member'").fetchone()[0] == old_sgid
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             invite, _ = call(port, "/1/account/join_code", bearer="owner-token")
             call(port, "/1/users/old-member", "DELETE", bearer="owner-token", status=204)
             with sqlite3.connect(db_path) as db:
-                assert db.execute("SELECT active,identity_id FROM users WHERE id='old-member'").fetchone() == (0, None)
+                removed = db.execute("SELECT active,identity_id,updated_at FROM users WHERE id='old-member'").fetchone()
+                assert removed[:2] == (0, None) and removed[2] > stamp
             joined, _ = call(port, f"/1/join/{invite['code']}", "POST", {"email_address": "member@example.test"}, bearer="member-token")
             assert joined == {"joined": True, "requires_name": True, "account_slug": "/1"}, joined
             with sqlite3.connect(db_path) as db:
                 new = db.execute("SELECT id,role FROM users WHERE account_id='account' AND identity_id='member-identity' AND active=1").fetchone()
                 assert new and new[0] != "old-member" and new[1] == "member"
+                assert db.execute("SELECT updated_at FROM users WHERE id=?", (new[0],)).fetchone()[0]
                 assert db.execute("SELECT COUNT(*) FROM accesses WHERE board_id='board' AND user_id=?", (new[0],)).fetchone()[0] == 1
                 assert db.execute("SELECT COUNT(*) FROM user_attachables WHERE user_id=?", (new[0],)).fetchone()[0] == 1
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []

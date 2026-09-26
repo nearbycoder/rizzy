@@ -20,7 +20,7 @@ struct RecordSet {
 const RECORD_SETS: &[RecordSet] = &[
     RecordSet {
         directory: "users",
-        query: "SELECT u.id,u.account_id,u.active,u.created_at,i.email_address,u.identity_id,u.name,u.role,u.created_at updated_at,u.verified_at FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.account_id=? ORDER BY u.id",
+        query: "SELECT u.id,u.account_id,u.active,u.created_at,i.email_address,u.identity_id,u.name,u.role,u.updated_at,u.verified_at FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.account_id=? ORDER BY u.id",
         booleans: &["active"],
         json_fields: &[],
     },

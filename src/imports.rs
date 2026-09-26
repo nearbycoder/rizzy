@@ -598,10 +598,11 @@ async fn apply_archive(
                 .await
                 .map_err(|e| e.to_string())?
         };
-        sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,active,verified_at,created_at) VALUES(?,?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,active,verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
             .bind(user_id).bind(account_id).bind(identity_id).bind(field(user,"name")?).bind(role)
             .bind(boolean(user,"active",true)).bind(maybe_field(user,"verified_at"))
-            .bind(field(user,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(field(user,"created_at")?).bind(field(user,"updated_at")?)
+            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for settings in records(&archive, "user_settings") {
         let user_id = field(settings, "user_id")?;

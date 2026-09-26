@@ -213,6 +213,10 @@ def run(archive_path):
                 imported_id = db.execute("SELECT id FROM accounts WHERE external_account_id=?",
                                          (created["account"],)).fetchone()[0]
                 assert db.execute("SELECT name FROM accounts WHERE id=?", (imported_id,)).fetchone()[0] == account["name"]
+                for user in users:
+                    actual = db.execute("SELECT created_at,updated_at FROM users WHERE id=? AND account_id=?",
+                                        (user["id"], imported_id)).fetchone()
+                    assert actual == (user["created_at"], user["updated_at"]), ("user times", user["id"])
                 for group, sample in imported_samples.items():
                     if sample is None:
                         continue
@@ -402,6 +406,10 @@ def run(archive_path):
                 for group, expected in counts.items():
                     actual = sum(name.startswith(f"data/{group}/") for name in names)
                     assert actual == expected, ("reexport", group, actual, expected)
+                for user in users:
+                    restored = json.loads(z.read(f"data/users/{user['id']}.json"))
+                    assert (restored["created_at"], restored["updated_at"]) == (
+                        user["created_at"], user["updated_at"])
                 for group, sample in imported_samples.items():
                     if sample is None:
                         continue

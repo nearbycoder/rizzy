@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS users (
   active INTEGER NOT NULL DEFAULT 1,
   verified_at TEXT,
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(account_id, identity_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS users_system_account ON users(account_id) WHERE role='system';
