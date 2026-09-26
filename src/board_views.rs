@@ -217,7 +217,7 @@ fn public_day_label(raw: &str) -> String {
         .unwrap_or_default()
 }
 
-fn public_html_title(title: &str) -> String {
+pub(super) fn public_html_title(title: &str) -> String {
     static INLINE_CODE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let pattern = INLINE_CODE.get_or_init(|| regex::Regex::new(r"`([^`]+)`").unwrap());
     pattern

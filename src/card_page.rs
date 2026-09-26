@@ -3,7 +3,7 @@ use sqlx::{Row, sqlite::SqliteRow};
 use std::collections::HashMap;
 
 use super::{
-    App, Principal, Result, assignment_page, board, comment_edit_page, db_err, escape,
+    App, Principal, Result, assignment_page, board, board_views, comment_edit_page, db_err, escape,
     reaction_page, storage, tagging_page, wrap_html,
 };
 
@@ -227,6 +227,7 @@ pub(super) async fn show(
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
         ("TITLE", escape(&title)),
+        ("TITLE_HTML", board_views::public_html_title(&title)),
         ("DESCRIPTION_HTML", description_html),
         ("DESCRIPTION_VALUE", escape(&description)),
         ("ASSIGNMENT_META", assignment_page::meta(app, card).await?),
@@ -238,6 +239,20 @@ pub(super) async fn show(
         ("IMAGE", image),
         ("IMAGE_BUTTON", image_button),
         ("TAG_CONTROL", tag_control),
+        (
+            "DELETE_ACTION",
+            if principal.role == "owner"
+                || principal.role == "admin"
+                || principal.user_id == card.get::<String, _>("creator_id")
+            {
+                format!(
+                    "<footer class=\"delete-card\"><button type=\"button\" id=\"delete-card-open\" class=\"secondary\">Delete this card</button><dialog id=\"delete-card-dialog\" aria-label=\"Delete this card\"><h3>Delete this card?</h3><p>Are you sure you want to permanently delete this card?</p><div class=\"actions\"><button type=\"button\" id=\"delete-card-cancel\" class=\"secondary\">Cancel</button><form id=\"delete-card-form\" method=\"post\" action=\"/{}/cards/{number}\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\">Delete card</button></form></div><p class=\"error\" role=\"alert\" id=\"delete-card-error\"></p></dialog></footer>",
+                    principal.slug
+                )
+            } else {
+                String::new()
+            },
+        ),
         (
             "IMAGE_CLASS",
             if image_url.as_str().is_some() {

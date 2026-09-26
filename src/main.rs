@@ -2816,6 +2816,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}",
             get(show_card)
+                .post(delete_card_form)
                 .put(update_card)
                 .patch(update_card)
                 .delete(delete_card),
@@ -9119,18 +9120,14 @@ async fn delete_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let b = board(&app, &p, &c.get::<String, _>("board_id")).await?;
-    p.admin(&b.get::<String, _>("creator_id")).or_else(|_| {
-        if p.user_id == c.get::<String, _>("creator_id") {
-            Ok(())
-        } else {
-            Err(err(StatusCode::FORBIDDEN, "Card administrator required"))
-        }
-    })?;
+    if p.role != "owner" && p.role != "admin" && p.user_id != c.get::<String, _>("creator_id") {
+        return Err(err(StatusCode::FORBIDDEN, "Card administrator required"));
+    }
+    let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
@@ -9141,7 +9138,36 @@ async fn delete_card(
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if headers.contains_key("x-rizzy-json-request") {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/boards/{board_id}"))],
+        )
+            .into_response()
+    })
+}
+
+async fn delete_card_form(
+    state: Shared,
+    path: Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let is_form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    if is_form
+        && url::form_urlencoded::parse(&body)
+            .find(|(key, _)| key == "_method")
+            .is_some_and(|(_, value)| value == "delete")
+    {
+        delete_card(state, path, headers).await
+    } else {
+        Err(missing())
+    }
 }
 
 async fn set_flag(
