@@ -64,12 +64,17 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 .cards__more{margin:9px auto}.card-columns--filtered{display:block;width:100%}.card-columns--filtered .cards{width:100%;max-height:none}.card-columns--filtered .cards__list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.card-columns--filtered .card{display:block}.card-columns--filtered .cards__header{display:none}
 @media(max-width:639px){:root{font-size:16px}.board__header h1{font-size:23px;gap:7px}.cards.is-expanded{flex-basis:calc(100vw - 145px)}.card-columns{max-width:100%}}
 </style>
+<style>
+.board__actions--start { left: 0; right: auto }
+.board__actions--end { right: 0 }
+.board-webhooks svg { width: 21px; height: 21px; fill: currentColor }
+</style>
 </head>
 <body data-account="{{ACCOUNT}}" data-board="{{BOARD_ID}}">
 <a class="skip" href="#main">Skip to main content</a>
 <header class="site"><details class="site-menu"><summary><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy<span class="site-caret">⌄</span></summary><nav><a href="/{{ACCOUNT}}/my/menu">Explore</a><a href="{{HOME_PATH}}">All boards</a><a href="/{{ACCOUNT}}/cards">All cards</a></nav></details></header>
 <main class="board" id="main">
-  <div class="board__header"><h1>{{BOARD_NAME}}</h1><div class="board__actions">{{WEBHOOKS_LINK}}{{SETTINGS_LINK}}</div></div>
+  <div class="board__header"><div class="board__actions board__actions--start">{{WEBHOOKS_LINK}}</div><h1>{{BOARD_NAME}}</h1><div class="board__actions board__actions--end">{{SETTINGS_LINK}}</div></div>
   {{FILTER_FORM}}
   <div class="board-stage">{{COLUMNS}}{{ADD_COLUMN}}</div>
 </main>
