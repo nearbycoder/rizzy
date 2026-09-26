@@ -252,6 +252,23 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
     }
     response
 }
+async fn block_search_engine_indexing(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let application_route = path != "/up"
+        && path != "/error.css"
+        && path != "/manifest.json"
+        && !path.starts_with("/assets/")
+        && !path.starts_with("/app-icon")
+        && !path.contains("/rails/active_storage/")
+        && !path.contains("/collections/");
+    let mut response = next.run(request).await;
+    if application_route && response.status() != StatusCode::NOT_FOUND {
+        response
+            .headers_mut()
+            .insert("x-robots-tag", HeaderValue::from_static("none"));
+    }
+    response
+}
 async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next) -> Response {
     let session_cookie = cookie_value(request.headers(), "session_token").is_some();
     let headers = if session_cookie {
@@ -2562,6 +2579,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             register_pwa_on_pages,
         ))
         .with_state(app)
+        .layer(middleware::from_fn(block_search_engine_indexing))
         .layer(middleware::from_fn(prevent_request_forgery))
         .layer(middleware::from_fn(mark_request_format));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
