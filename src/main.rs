@@ -9168,6 +9168,7 @@ async fn update_card(
         .clone()
         .unwrap_or_else(|| c.get("last_active_at"));
     let timestamp = now();
+    let _writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     if let Some(upload) = &input.image {
         storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
@@ -9405,6 +9406,7 @@ async fn set_flag(
         _ => return Err(bad("invalid flag")),
     };
     let timestamp = now();
+    let _writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     if flag == "golden" {
         sqlx::query(sql)
@@ -10355,6 +10357,7 @@ async fn create_comment(
     let timestamp = now();
     let created_at =
         timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
+    let _writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id)
