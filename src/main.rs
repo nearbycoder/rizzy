@@ -13044,14 +13044,13 @@ async fn update_comment(
     } else {
         serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?
     };
-    if !wants_turbo_stream(&headers) && !headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let result = update_comment_data(&app, &account, &number, &id, &headers, &body).await?;
     if wants_turbo_stream(&headers) {
         comment_replace_stream(&app, &account, &number, &id, &headers).await
-    } else {
+    } else if headers.contains_key("x-rizzy-json-request") {
         Ok(Json(result).into_response())
+    } else {
+        Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
     }
 }
 
@@ -13076,7 +13075,7 @@ async fn update_or_delete_comment_form(
             let content = fields
                 .get("comment[body]")
                 .ok_or_else(|| bad("body is required"))?;
-            update_comment_data(
+            let result = update_comment_data(
                 &app,
                 &account,
                 &number,
@@ -13088,27 +13087,21 @@ async fn update_or_delete_comment_form(
             if wants_turbo_stream(&headers) {
                 return comment_replace_stream(&app, &account, &number, &id, &headers).await;
             }
+            if headers.contains_key("x-rizzy-json-request") {
+                return Ok(Json(result).into_response());
+            }
+            Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
         }
         Some("delete") => {
-            let mut delete_headers = headers;
-            delete_headers.insert("x-rizzy-json-request", HeaderValue::from_static("1"));
-            let response = delete_comment(
+            delete_comment(
                 State(app),
-                Path((account.clone(), number.clone(), id)),
-                delete_headers,
+                Path((account, number, id)),
+                headers,
             )
-            .await?;
-            if response.status() == StatusCode::OK {
-                return Ok(response);
-            }
+            .await
         }
-        _ => return Err(missing()),
+        _ => Err(missing()),
     }
-    Ok((
-        StatusCode::FOUND,
-        [(header::LOCATION, format!("/{account}/cards/{number}"))],
-    )
-        .into_response())
 }
 
 async fn update_comment_data(
