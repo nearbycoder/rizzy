@@ -14,7 +14,14 @@ fn page(p: &Principal, title: &str, content: String) -> Html<String> {
     Html(render_template(TEMPLATE, &values))
 }
 
-pub(super) fn show(p: &Principal, url: &str, count: i64, limit: i64) -> Html<String> {
+pub(super) fn show(
+    p: &Principal,
+    url: &str,
+    qr_url: &str,
+    account_name: &str,
+    count: i64,
+    limit: i64,
+) -> Html<String> {
     let admin = matches!(p.role.as_str(), "owner" | "admin");
     let remaining = if count < limit {
         (limit - count).to_string()
@@ -38,9 +45,11 @@ pub(super) fn show(p: &Principal, url: &str, count: i64, limit: i64) -> Html<Str
         String::new()
     };
     let content = format!(
-        "<a href=\"/{}/account/settings\">← Account Settings</a><article class=\"panel\"><h1>Add people</h1><p>Share the link below to invite people to this account</p><div class=\"link-row\"><input id=\"invite-url\" type=\"text\" value=\"{}\" readonly aria-label=\"Invite link\">{reset}</div><div class=\"actions\"><button type=\"button\" id=\"copy-link\">Copy invite link</button></div><footer>This code has been used {count}/{limit} times ({remaining} remaining) {limit_link}</footer></article>",
+        "<a href=\"/{}/account/settings\">← Account Settings</a><article class=\"panel\"><h1>Add people</h1><p>Share the link below to invite people to this account</p><div class=\"link-row\"><input id=\"invite-url\" type=\"text\" value=\"{}\" readonly aria-label=\"Invite link\">{reset}</div><div class=\"actions\"><button type=\"button\" id=\"copy-link\">Copy invite link</button><button type=\"button\" id=\"show-invite-qr\">Get QR code</button></div><dialog id=\"invite-qr-dialog\"><p><strong>Scan this code to join {}:</strong></p><img class=\"qr-code center\" src=\"{}\" alt=\"QR Code\" width=\"280\" height=\"280\"><form method=\"dialog\"><button type=\"submit\">Done</button></form></dialog><footer>This code has been used {count}/{limit} times ({remaining} remaining) {limit_link}</footer></article>",
         p.slug,
-        escape(url)
+        escape(url),
+        escape(account_name),
+        escape(qr_url),
     );
     page(p, "Add people", content)
 }

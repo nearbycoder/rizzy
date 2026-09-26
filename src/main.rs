@@ -6352,7 +6352,7 @@ async fn show_join_code(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let row = sqlx::query(
-        "SELECT code,usage_count,usage_limit FROM account_join_codes WHERE account_id=?",
+        "SELECT j.code,j.usage_count,j.usage_limit,a.name AS account_name FROM account_join_codes j JOIN accounts a ON a.id=j.account_id WHERE j.account_id=?",
     )
     .bind(&p.account_id)
     .fetch_one(&app.db)
@@ -6369,7 +6369,10 @@ async fn show_join_code(
             .into_response(),
         )
     } else {
-        Ok(join_code_page::show(&p, &url, count, limit).into_response())
+        let qr_id = session_transfer::qr_link(&app, p.slug, &url);
+        let qr_url = format!("/{}/qr_codes/{qr_id}", p.slug);
+        let account_name: String = row.get("account_name");
+        Ok(join_code_page::show(&p, &url, &qr_url, &account_name, count, limit).into_response())
     }
 }
 async fn edit_join_code(
