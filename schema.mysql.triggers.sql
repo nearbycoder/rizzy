@@ -59,7 +59,6 @@ BEGIN
   END IF;
 END;
 
--- trigger: boards_after_insert
 -- trigger: user_settings_frequency_update
 CREATE TRIGGER user_settings_frequency_update AFTER UPDATE ON notification_settings FOR EACH ROW
 BEGIN

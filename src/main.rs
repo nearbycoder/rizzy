@@ -802,8 +802,12 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
         let (name, ddl) = section
             .split_once('\n')
             .ok_or("Malformed MySQL trigger section")?;
+        let ddl = ddl.trim();
+        if ddl.is_empty() {
+            return Err(format!("Empty MySQL trigger section: {}", name.trim()).into());
+        }
         if !installed.contains(name.trim()) {
-            sqlx::raw_sql(ddl.trim()).execute(&db).await?;
+            sqlx::raw_sql(ddl).execute(&db).await?;
         }
     }
     let backfilled: i64 = sqlx::query_scalar(

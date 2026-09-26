@@ -39,7 +39,10 @@ comments. Twenty MySQL triggers in
 for databases created before the triggers were added. Other SQLite trigger
 behavior still needs native MySQL equivalents or equivalent application code.
 An existing MySQL database installed the four added user settings triggers on
-restart and reported all twenty expected triggers.
+restart and reported all twenty expected triggers. A fresh database with the
+twenty-trigger schema passed concurrent initialization and 80 card creations
+across two processes. The first fresh run exposed an empty trigger section
+header; removing it fixed installation.
 
 The schema and commands were exercised on a disposable local MariaDB 13.0.2
 instance on 2026-09-26. The Rust binary created all 63 tables through SQLx,
