@@ -5,6 +5,7 @@ Set RIZZY_TEST_MYSQL_URL and RIZZY_TEST_MYSQL_CLIENT. An optional ZIP argument
 can supply a Fizzy export; otherwise the existing Rizzy export fixture is used.
 """
 
+import io
 import json
 import os
 import re
@@ -20,6 +21,8 @@ from collections import Counter
 from pathlib import Path
 
 from account_import import await_result, cross_account_reference, upload
+from account_transfer import api
+from card_image_parity import call
 from mysql_core import mysql_scalar
 
 
@@ -129,7 +132,27 @@ def main():
             duplicate_account = mysql_scalar(url, f"SELECT id FROM accounts WHERE external_account_id={int(duplicate['account'])}")
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM cards WHERE account_id='{duplicate_account}'") == "0"
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM cards WHERE account_id='{account_id}'") == str(account["cards_count"])
-            print(f"MySQL account import passed: invalid ZIP atomicity, duplicate conflict, {sum(counts.values())} records across {len(counts)} groups and {len(blobs)} files")
+            target = {"url": base, "account": created["account"], "token": token}
+            export = api(target, "/account/exports", "POST", expected=201)
+            for _ in range(120):
+                state = api(target, f"/account/exports/{export['id']}")
+                if state["status"] in ("completed", "failed"):
+                    break
+                time.sleep(.1)
+            assert state["status"] == "completed", state
+            status, headers, exported_bytes = call(target, state["download_url"])
+            assert status == 200 and headers.get_content_type() == "application/zip"
+            with zipfile.ZipFile(io.BytesIO(exported_bytes)) as exported:
+                output_counts = Counter(name.split("/")[1] for name in exported.namelist()
+                                        if name.startswith("data/") and name.endswith(".json")
+                                        and name != "data/account.json")
+                assert output_counts == counts, (output_counts, counts)
+                exported_account = json.loads(exported.read("data/account.json"))
+                assert exported_account["name"] == account["name"] and exported_account["cards_count"] == account["cards_count"]
+                for blob_id, source_bytes in blobs:
+                    restored_blob = json.loads(exported.read(f"data/active_storage_blobs/{blob_id}.json"))
+                    assert exported.read(f"storage/{restored_blob['key']}") == source_bytes
+            print(f"MySQL account transfer passed: invalid ZIP atomicity, duplicate conflict, {sum(counts.values())} records across {len(counts)} groups, {len(blobs)} files, and re-export")
         except Exception:
             print(log_path.read_text()[-5000:])
             raise

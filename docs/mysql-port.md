@@ -69,11 +69,13 @@ expiry, and race checks passed again after this change. The MySQL test checks
 Rizzy only.
 `tests/mysql_account_import.py` restores a populated account ZIP on MySQL,
 checking 43 records across 23 groups, two original file payloads, account
-name and card count. It also checks that a cross-account reference leaves no
-restored records and that a second import of the same ZIP reports a conflict
-without adding cards. The import worker now uses MySQL upserts and scalar
+name and card count. It re-exports the imported account and compares all 23
+record-group counts and both file payloads. It also checks that a cross-account
+reference leaves no restored records and that a second import of the same ZIP
+reports a conflict without adding cards. The import worker now uses MySQL upserts and scalar
 `GREATEST` where SQLite used `ON CONFLICT` and scalar `MAX`. A new MySQL board
-update trigger supplies the entropy metadata expected during restore. The
+update trigger supplies the entropy metadata expected during restore, and the
+export query quotes MySQL's reserved `key` column. The
 full SQLite account import regression still passes. The default fixture is a
 Rizzy-created Fizzy-format ZIP; direct restoration of a ZIP exported by the
 pinned Fizzy application on MySQL and wider archive variants remain to be

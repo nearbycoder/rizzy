@@ -56,7 +56,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "board_publications",
-        query: "SELECT id,account_id,board_id,created_at,key,updated_at FROM board_publications WHERE account_id=? ORDER BY board_id",
+        query: "SELECT id,account_id,board_id,created_at,`key`,updated_at FROM board_publications WHERE account_id=? ORDER BY board_id",
         booleans: &[],
         json_fields: &[],
     },
@@ -188,7 +188,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "active_storage_blobs",
-        query: "SELECT id,account_id,byte_size,checksum,content_type,created_at,filename,storage_key key,metadata FROM storage_blobs WHERE account_id=? AND uploaded_at IS NOT NULL ORDER BY id",
+        query: "SELECT id,account_id,byte_size,checksum,content_type,created_at,filename,storage_key AS `key`,metadata FROM storage_blobs WHERE account_id=? AND uploaded_at IS NOT NULL ORDER BY id",
         booleans: &[],
         json_fields: &["metadata"],
     },
