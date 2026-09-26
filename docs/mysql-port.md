@@ -51,6 +51,16 @@ SQLite passkey flow still passes. The pinned
 Fizzy MySQL passkey controller and library suites passed 19 tests and 64
 assertions. This checks one synthetic authenticator and one local origin; real
 browser devices, multiple credentials, and deployment origins remain.
+`tests/mysql_draft_cluster.py` runs the existing browser draft parity flow on
+MySQL, then creates a draft on one Rizzy process, edits it on a second, publishes
+it on the first, and verifies the card and publication event from the second.
+It also publishes 32 drafts concurrently across both processes on distinct
+boards and verifies each published card. Four fresh-database runs passed. The
+pinned Fizzy draft and publish controller suites passed 5 tests and 36
+assertions on SQLite. This verifies
+cross-process state sharing and distinct-board concurrent publication on the
+tested MySQL setup; same-board concurrent publication and the complete browser
+interface remain open.
 `tests/mysql_account_cancellation.py` checks the single-tenant cancellation
 guard, immediate access loss, day-29 retention, day-31 deletion of all
 account-scoped MySQL rows and dependent comments, file cleanup, and survival
@@ -344,6 +354,7 @@ locking their parent board, including draft publication, steps, triage, watches,
 and reactions. `tests/mysql_cluster.py` now checks 400 distinct cards through
 step create, update, and delete phases at 32 clients across four app processes;
 the phases completed without HTTP errors. That check covers distinct cards on
-one board and does not prove freedom from every lock cycle. Draft publication,
-triage, watches, and reactions still need concurrent MySQL checks and any
-required lock-order changes before clustered write reliability is complete.
+one board and does not prove freedom from every lock cycle. The draft test above
+covers concurrent publishes on separate boards. Same-board writes, triage,
+watches, and reactions still need concurrent MySQL checks and any required lock
+order changes before clustered write reliability is complete.
