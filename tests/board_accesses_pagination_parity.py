@@ -2,6 +2,8 @@
 """Compare a complete board-access user traversal with pinned Fizzy."""
 
 import os
+import hashlib
+import secrets
 import sqlite3
 import subprocess
 import sys
@@ -20,6 +22,7 @@ from activity_event_board_parity import database_id  # noqa: E402
 
 
 def clone_users(target, database, board_id):
+    member_tokens = {}
     with sqlite3.connect(database) as db:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
@@ -44,6 +47,22 @@ def clone_users(target, database, board_id):
             user_values["name"] = f"Member {index:03d}"
             user_values["role"] = "member"
             insert("users", user_values)
+            if index in (0, 2):
+                token = secrets.token_hex(32)
+                token_id = stored_id(target, uuid.uuid4().int)
+                if target["name"] == "fizzy":
+                    insert("identity_access_tokens", {
+                        "id": token_id, "identity_id": identity_values["id"],
+                        "token": token, "description": "Board access parity",
+                        "permission": "write", "created_at": user_values["created_at"],
+                        "updated_at": user_values["updated_at"]})
+                else:
+                    insert("access_tokens", {
+                        "id": token_id, "identity_id": identity_values["id"],
+                        "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                        "description": "Board access parity", "permission": "write",
+                        "created_at": user_values["created_at"]})
+                member_tokens[index] = token
             if index < 2:
                 access_values = dict(owner_access)
                 if "id" in access_values:
@@ -51,6 +70,7 @@ def clone_users(target, database, board_id):
                 access_values["user_id"] = user_values["id"]
                 access_values["involvement"] = "access_only" if index == 0 else "watching"
                 insert("accesses", access_values)
+    return member_tokens
 
 
 def check(name, directory):
@@ -59,12 +79,20 @@ def check(name, directory):
     process, url = start_server(name, directory, env,
                                 sorted(os.sched_getaffinity(0))[:2])
     try:
+        def assert_not_found(actor):
+            try:
+                api(actor, f"/boards/{board['id']}/accesses")
+            except RuntimeError as error:
+                assert "HTTP 404:" in str(error), (name, error)
+            else:
+                raise AssertionError((name, "board access unexpectedly allowed"))
+
         target = {"name": name, "url": url, "account": str(credentials["account"]),
                   "token": credentials["token"]}
         board, _ = expect(target, "/boards", "POST",
                           {"board": {"name": "Access traversal", "all_access": False}}, 201)
         database = directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3")
-        clone_users(target, database, board["id"])
+        member_tokens = clone_users(target, database, board["id"])
         pages = []
         names = []
         access = []
@@ -92,7 +120,28 @@ def check(name, directory):
         assert access[1] == ("Member 001", True, "watching"), access[1]
         assert all(not has_access and involvement is None for _, has_access, involvement in access[2:-1])
         assert access[-1] == ("Owner", True, "watching"), access[-1]
-        return pages, access
+        member = {**target, "token": member_tokens[0]}
+        excluded = {**target, "token": member_tokens[2]}
+        status, visible, _ = api(member, f"/boards/{board['id']}/accesses")
+        assert status == 200 and len(visible["users"]) == 15, (name, status)
+        assert visible["users"][0]["name"] == "Member 000", name
+        assert_not_found(excluded)
+        revoked_id = next(user["id"] for user in visible["users"] if user["name"] == "Member 000")
+        last_page = api(target, f"/boards/{board['id']}/accesses?page=5")[1]["users"]
+        owner_id = next(user["id"] for user in last_page if user["name"] == "Owner")
+        retained_entry = next(user["id"] for user in visible["users"] if user["name"] == "Member 001")
+        status, _, _ = api(target, f"/boards/{board['id']}", "PUT",
+                           {"board": {"name": "Access traversal"},
+                            "user_ids": [owner_id, retained_entry]})
+        assert status == 200, (name, "revoke", status)
+        assert_not_found(member)
+        status, after, _ = api(target, f"/boards/{board['id']}/accesses")
+        assert status == 200, (name, status)
+        removed = next(user for user in after["users"] if user["id"] == revoked_id)
+        retained = next(user for user in after["users"] if user["id"] == retained_entry)
+        assert (removed["has_access"], removed["involvement"]) == (False, None), (name, removed)
+        assert (retained["has_access"], retained["involvement"]) == (True, "watching"), (name, retained)
+        return pages, access, (len(visible["users"]), removed["has_access"], retained["involvement"])
     finally:
         stop_server(process)
 
@@ -111,7 +160,7 @@ def main():
         assert results["fizzy"][0] == [(15, 201, True), (30, 201, True),
                                         (50, 201, True), (100, 201, True),
                                         (6, 201, False), (0, 201, True)], results["fizzy"][0]
-    print("Board access pagination and membership matched pinned Fizzy")
+    print("Board access pagination, member visibility, and revocation matched pinned Fizzy")
 
 
 if __name__ == "__main__":
