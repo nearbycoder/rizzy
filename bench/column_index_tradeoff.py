@@ -19,9 +19,19 @@ INDEXES = {
     "wide": None,
     "pair": "CREATE INDEX cards_board_column_active ON cards(board_id,column_id)",
     "partial_order": "CREATE INDEX cards_board_column_active ON cards(board_id,column_id,golden DESC,last_active_at DESC,id DESC) WHERE status='published' AND closed=0 AND postponed=0",
+    "column_order": "CREATE INDEX cards_board_column_active ON cards(column_id,status,closed,postponed,golden DESC,last_active_at DESC,id DESC)",
+    "column_partial_order": "CREATE INDEX cards_board_column_active ON cards(column_id,golden DESC,last_active_at DESC,id DESC) WHERE status='published' AND closed=0 AND postponed=0",
+    "wide_nonnull": "CREATE INDEX cards_board_column_active ON cards(board_id,column_id,status,closed,postponed,golden DESC,last_active_at DESC,id DESC) WHERE column_id IS NOT NULL",
+    "column_nonnull": "CREATE INDEX cards_board_column_active ON cards(column_id,status,closed,postponed,golden DESC,last_active_at DESC,id DESC) WHERE column_id IS NOT NULL",
+    "nonnull_plus_maybe": (
+        "CREATE INDEX cards_board_column_active ON cards(board_id,column_id,status,closed,postponed,golden DESC,last_active_at DESC,id DESC) WHERE column_id IS NOT NULL",
+        "CREATE INDEX cards_maybe_active ON cards(board_id,golden DESC,last_active_at DESC,id DESC) WHERE column_id IS NULL AND status='published' AND closed=0 AND postponed=0",
+    ),
 }
 READ = "SELECT * FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0 ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT 15"
 COUNT = "SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0"
+READ_MAYBE = "SELECT * FROM cards WHERE board_id=? AND column_id IS NULL AND status='published' AND closed=0 AND postponed=0 ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT 15"
+COUNT_MAYBE = "SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id IS NULL AND status='published' AND closed=0 AND postponed=0"
 
 
 def timed(db, sql, args):
@@ -33,6 +43,8 @@ def timed(db, sql, args):
 def sample(db, item, repetitions):
     read_times = []
     count_times = []
+    maybe_read_times = []
+    maybe_count_times = []
     for _ in range(repetitions + 1):
         started = time.perf_counter()
         rows = db.execute(READ, (item["board_id"], item["delete_id"])).fetchall()
@@ -40,7 +52,14 @@ def sample(db, item, repetitions):
         started = time.perf_counter()
         count = db.execute(COUNT, (item["board_id"], item["delete_id"])).fetchone()[0]
         count_times.append((time.perf_counter() - started) * 1000)
+        started = time.perf_counter()
+        maybe_rows = db.execute(READ_MAYBE, (item["board_id"],)).fetchall()
+        maybe_read_times.append((time.perf_counter() - started) * 1000)
+        started = time.perf_counter()
+        maybe_count = db.execute(COUNT_MAYBE, (item["board_id"],)).fetchone()[0]
+        maybe_count_times.append((time.perf_counter() - started) * 1000)
     assert len(rows) == 15 and count == 1 + (item["size"] - 3 + 2) // 3
+    assert len(maybe_rows) == 15 and maybe_count > 0
     db.isolation_level = None
     db.execute("BEGIN IMMEDIATE")
     db.execute("INSERT INTO card_bulk_touches(board_id) VALUES(?)", (item["board_id"],))
@@ -54,6 +73,8 @@ def sample(db, item, repetitions):
     db.execute("COMMIT")
     return {"read_ms": round(statistics.median(read_times[1:]), 3),
             "count_ms": round(statistics.median(count_times[1:]), 3),
+            "maybe_read_ms": round(statistics.median(maybe_read_times[1:]), 3),
+            "maybe_count_ms": round(statistics.median(maybe_count_times[1:]), 3),
             "nullify_ms": nullify, "touch_ms": touch}
 
 
@@ -86,21 +107,27 @@ def main():
                 for name, ddl in INDEXES.items():
                     samples = []
                     plan = []
+                    maybe_plan = []
                     for trial in range(args.trials):
                         with sqlite3.connect(directory / f"{name}-{trial}.sqlite3") as db:
                             source.backup(db)
                             db.execute("PRAGMA synchronous=NORMAL")
                             if ddl:
                                 db.execute("DROP INDEX cards_board_column_active")
-                                db.execute(ddl)
+                                for statement in ddl if isinstance(ddl, tuple) else (ddl,):
+                                    db.execute(statement)
                                 db.commit()
                             if not plan:
                                 plan = [row[3] for row in db.execute(
                                     "EXPLAIN QUERY PLAN " + READ,
                                     (item["board_id"], item["delete_id"]))]
+                                maybe_plan = [row[3] for row in db.execute(
+                                    "EXPLAIN QUERY PLAN " + READ_MAYBE,
+                                    (item["board_id"],))]
                             samples.append(sample(db, item, args.repetitions))
                     result["variants"][name] = {
                         "plan": plan,
+                        "maybe_plan": maybe_plan,
                         "median_ms": {key: round(statistics.median(
                             entry[key] for entry in samples), 3) for key in samples[0]},
                         "samples": samples,

@@ -1,0 +1,348 @@
+{
+  "cards": 30000,
+  "deleted_column_cards": 10000,
+  "trials": 3,
+  "read_repetitions": 100,
+  "variants": {
+    "wide": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.023,
+        "count_ms": 0.309,
+        "maybe_read_ms": 0.022,
+        "maybe_count_ms": 0.275,
+        "nullify_ms": 34.591,
+        "touch_ms": 19.659
+      },
+      "samples": [
+        {
+          "read_ms": 0.022,
+          "count_ms": 0.31,
+          "maybe_read_ms": 0.022,
+          "maybe_count_ms": 0.276,
+          "nullify_ms": 34.591,
+          "touch_ms": 19.659
+        },
+        {
+          "read_ms": 0.023,
+          "count_ms": 0.308,
+          "maybe_read_ms": 0.022,
+          "maybe_count_ms": 0.275,
+          "nullify_ms": 34.168,
+          "touch_ms": 19.341
+        },
+        {
+          "read_ms": 0.023,
+          "count_ms": 0.309,
+          "maybe_read_ms": 0.022,
+          "maybe_count_ms": 0.275,
+          "nullify_ms": 39.545,
+          "touch_ms": 25.996
+        }
+      ]
+    },
+    "pair": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "median_ms": {
+        "read_ms": 2.294,
+        "count_ms": 1.858,
+        "maybe_read_ms": 2.264,
+        "maybe_count_ms": 1.835,
+        "nullify_ms": 18.367,
+        "touch_ms": 19.41
+      },
+      "samples": [
+        {
+          "read_ms": 2.305,
+          "count_ms": 1.845,
+          "maybe_read_ms": 2.275,
+          "maybe_count_ms": 1.852,
+          "nullify_ms": 18.223,
+          "touch_ms": 19.41
+        },
+        {
+          "read_ms": 2.288,
+          "count_ms": 1.88,
+          "maybe_read_ms": 2.239,
+          "maybe_count_ms": 1.835,
+          "nullify_ms": 18.554,
+          "touch_ms": 19.049
+        },
+        {
+          "read_ms": 2.294,
+          "count_ms": 1.858,
+          "maybe_read_ms": 2.264,
+          "maybe_count_ms": 1.835,
+          "nullify_ms": 18.367,
+          "touch_ms": 19.856
+        }
+      ]
+    },
+    "partial_order": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.029,
+        "count_ms": 1.877,
+        "maybe_read_ms": 0.026,
+        "maybe_count_ms": 1.87,
+        "nullify_ms": 31.643,
+        "touch_ms": 19.893
+      },
+      "samples": [
+        {
+          "read_ms": 0.026,
+          "count_ms": 1.872,
+          "maybe_read_ms": 0.025,
+          "maybe_count_ms": 1.849,
+          "nullify_ms": 31.643,
+          "touch_ms": 19.893
+        },
+        {
+          "read_ms": 0.032,
+          "count_ms": 1.957,
+          "maybe_read_ms": 0.03,
+          "maybe_count_ms": 1.924,
+          "nullify_ms": 32.805,
+          "touch_ms": 21.224
+        },
+        {
+          "read_ms": 0.029,
+          "count_ms": 1.877,
+          "maybe_read_ms": 0.026,
+          "maybe_count_ms": 1.87,
+          "nullify_ms": 31.129,
+          "touch_ms": 19.781
+        }
+      ]
+    },
+    "column_order": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.045,
+        "count_ms": 3.996,
+        "maybe_read_ms": 0.041,
+        "maybe_count_ms": 1.926,
+        "nullify_ms": 33.635,
+        "touch_ms": 20.757
+      },
+      "samples": [
+        {
+          "read_ms": 0.045,
+          "count_ms": 3.996,
+          "maybe_read_ms": 0.041,
+          "maybe_count_ms": 1.926,
+          "nullify_ms": 33.635,
+          "touch_ms": 20.757
+        },
+        {
+          "read_ms": 0.041,
+          "count_ms": 3.945,
+          "maybe_read_ms": 0.04,
+          "maybe_count_ms": 1.916,
+          "nullify_ms": 36.302,
+          "touch_ms": 21.775
+        },
+        {
+          "read_ms": 0.049,
+          "count_ms": 4.102,
+          "maybe_read_ms": 0.047,
+          "maybe_count_ms": 1.972,
+          "nullify_ms": 33.635,
+          "touch_ms": 19.725
+        }
+      ]
+    },
+    "column_partial_order": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (column_id=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (column_id=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.036,
+        "count_ms": 1.962,
+        "maybe_read_ms": 0.033,
+        "maybe_count_ms": 1.91,
+        "nullify_ms": 26.882,
+        "touch_ms": 21.745
+      },
+      "samples": [
+        {
+          "read_ms": 0.025,
+          "count_ms": 1.866,
+          "maybe_read_ms": 0.024,
+          "maybe_count_ms": 1.788,
+          "nullify_ms": 26.197,
+          "touch_ms": 22.929
+        },
+        {
+          "read_ms": 0.036,
+          "count_ms": 1.962,
+          "maybe_read_ms": 0.034,
+          "maybe_count_ms": 1.91,
+          "nullify_ms": 26.882,
+          "touch_ms": 20.689
+        },
+        {
+          "read_ms": 0.036,
+          "count_ms": 2.059,
+          "maybe_read_ms": 0.033,
+          "maybe_count_ms": 2.009,
+          "nullify_ms": 27.728,
+          "touch_ms": 21.745
+        }
+      ]
+    },
+    "wide_nonnull": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "median_ms": {
+        "read_ms": 0.034,
+        "count_ms": 0.357,
+        "maybe_read_ms": 2.411,
+        "maybe_count_ms": 1.969,
+        "nullify_ms": 20.626,
+        "touch_ms": 20.536
+      },
+      "samples": [
+        {
+          "read_ms": 0.031,
+          "count_ms": 0.344,
+          "maybe_read_ms": 2.345,
+          "maybe_count_ms": 1.888,
+          "nullify_ms": 20.626,
+          "touch_ms": 20.536
+        },
+        {
+          "read_ms": 0.035,
+          "count_ms": 0.357,
+          "maybe_read_ms": 2.411,
+          "maybe_count_ms": 2.029,
+          "nullify_ms": 23.846,
+          "touch_ms": 20.593
+        },
+        {
+          "read_ms": 0.034,
+          "count_ms": 0.361,
+          "maybe_read_ms": 2.416,
+          "maybe_count_ms": 1.969,
+          "nullify_ms": 20.499,
+          "touch_ms": 19.806
+        }
+      ]
+    },
+    "column_nonnull": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_board_active (board_id=? AND status=? AND closed=? AND postponed=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "median_ms": {
+        "read_ms": 0.038,
+        "count_ms": 3.9,
+        "maybe_read_ms": 2.328,
+        "maybe_count_ms": 1.893,
+        "nullify_ms": 22.932,
+        "touch_ms": 19.381
+      },
+      "samples": [
+        {
+          "read_ms": 0.038,
+          "count_ms": 3.9,
+          "maybe_read_ms": 2.347,
+          "maybe_count_ms": 1.895,
+          "nullify_ms": 22.932,
+          "touch_ms": 19.224
+        },
+        {
+          "read_ms": 0.038,
+          "count_ms": 3.887,
+          "maybe_read_ms": 2.291,
+          "maybe_count_ms": 1.85,
+          "nullify_ms": 23.056,
+          "touch_ms": 19.381
+        },
+        {
+          "read_ms": 0.039,
+          "count_ms": 3.935,
+          "maybe_read_ms": 2.328,
+          "maybe_count_ms": 1.893,
+          "nullify_ms": 22.881,
+          "touch_ms": 19.881
+        }
+      ]
+    },
+    "nonnull_plus_maybe": {
+      "plan": [
+        "SEARCH cards USING INDEX cards_board_column_active (board_id=? AND column_id=? AND status=? AND closed=? AND postponed=?)"
+      ],
+      "maybe_plan": [
+        "SEARCH cards USING INDEX cards_maybe_active (board_id=?)"
+      ],
+      "median_ms": {
+        "read_ms": 0.029,
+        "count_ms": 0.341,
+        "maybe_read_ms": 0.027,
+        "maybe_count_ms": 2.054,
+        "nullify_ms": 32.603,
+        "touch_ms": 19.897
+      },
+      "samples": [
+        {
+          "read_ms": 0.026,
+          "count_ms": 0.311,
+          "maybe_read_ms": 0.024,
+          "maybe_count_ms": 1.829,
+          "nullify_ms": 30.861,
+          "touch_ms": 19.897
+        },
+        {
+          "read_ms": 0.034,
+          "count_ms": 0.353,
+          "maybe_read_ms": 0.03,
+          "maybe_count_ms": 2.157,
+          "nullify_ms": 32.603,
+          "touch_ms": 19.811
+        },
+        {
+          "read_ms": 0.029,
+          "count_ms": 0.341,
+          "maybe_read_ms": 0.027,
+          "maybe_count_ms": 2.054,
+          "nullify_ms": 33.192,
+          "touch_ms": 20.16
+        }
+      ]
+    }
+  }
+}
