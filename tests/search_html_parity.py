@@ -106,6 +106,7 @@ def check(target, tag):
         long_card = new_card("Long winded " + tag, f"{filler} needle{tag} {filler}")
         ascii_card = new_card("caf " + tag)
         new_card("café " + tag)
+        quote_card = new_card("gamma" + tag + " 123 beta")
         for i in range(20):
             new_card(f"page{tag} card {i}")
 
@@ -138,6 +139,10 @@ def check(target, tag):
         assert str(ascii_card["number"]) in titles(accent_doc)[0]
         assert '<mark class="circled-text"><span></span>caf</mark>' in accent_doc
         assert not titles(html(target, "東京"))
+        assert str(quote_card["number"]) in titles(html(target, "gamma" + tag + " 123 beta"))[0]
+        quoted_term = '123(gamma' + tag + '"beta|"'
+        assert not titles(html(target, quoted_term))
+        assert not api(target, "/search?" + urllib.parse.urlencode({"q": quoted_term}))
         first_page = titles(html(target, "page" + tag))
         second_page = titles(html(target, "page" + tag, 2))
         assert len(first_page) == 15 and len(second_page) == 5

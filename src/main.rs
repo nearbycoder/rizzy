@@ -7444,6 +7444,8 @@ fn parse_search_query(raw: Option<String>) -> SearchQuery {
     query
 }
 fn fts_query(raw: &str) -> Option<String> {
+    // Match Search::Query's sanitization and ActiveSearch's SQLite term parser.
+    // A quote inside a word stays inside that term; it does not start a phrase.
     let balanced = raw.chars().filter(|ch| *ch == '"').count() % 2 == 0;
     let sanitized: String = raw
         .chars()
@@ -7455,23 +7457,28 @@ fn fts_query(raw: &str) -> Option<String> {
             }
         })
         .collect();
-    let mut quoted = false;
-    let mut token = String::new();
     let mut tokens = Vec::new();
-    for ch in sanitized.chars().chain(std::iter::once(' ')) {
-        if ch == '"' {
-            if !token.trim().is_empty() {
-                tokens.push(format!("\"{}\"", token.trim()));
+    let mut remaining = sanitized.trim_start();
+    while !remaining.trim().is_empty() {
+        if let Some(after_open) = remaining.strip_prefix('"') {
+            if let Some(end) = after_open.find('"') {
+                tokens.push(format!("\"{}\"", &after_open[..end]));
+                remaining = after_open[end + 1..].trim_start();
+                continue;
             }
-            token.clear();
-            quoted = !quoted;
-        } else if ch.is_whitespace() && !quoted {
-            if !token.trim().is_empty() {
-                tokens.push(format!("\"{}\"", token.trim()));
-            }
-            token.clear();
+        }
+        let end = remaining
+            .find(char::is_whitespace)
+            .unwrap_or(remaining.len());
+        let term = &remaining[..end];
+        remaining = remaining[end..].trim_start();
+        if term
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            tokens.push(term.to_owned());
         } else {
-            token.push(ch);
+            tokens.push(format!("\"{}\"", term.replace('"', "\"\"")));
         }
     }
     if tokens.is_empty() {

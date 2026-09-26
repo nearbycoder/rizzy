@@ -227,4 +227,6 @@ Steps now store their own update times. `tests/step_record_migration.py` checks 
 
 `tests/search_html_parity.py` now also checks Fizzy's ASCII-only query sanitization with accented and non-Latin input against disposable source and Rust databases. A search for `café` finds the separate `caf` card and highlights `caf`; a query containing only `東京` has no terms. This closes those Unicode query cases, but does not establish parity for the full search grammar, ranking, or indexing at scale.
 
+The same live test now covers an embedded-quote query in HTML and JSON search that previously matched a card only in Rizzy. Rust now follows ActiveSearch's SQLite term parsing: a quote inside a word stays in that term, and an empty quoted term is preserved. A deterministic 180-query differential probe using punctuation, quotes, accented text, and nine search terms found one result difference before the fix and none after it. That fixture does not cover all query combinations, result ranking, or scale.
+
 Fizzy's production JSON response immediately after changing an empty board's entropy can show its cached old value. Its focused controller test expects the new value and passes. The parity scenario checks the saved value after a board update invalidates that cache; Rizzy currently returns the new value immediately.
