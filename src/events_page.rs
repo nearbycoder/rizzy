@@ -8,7 +8,6 @@ use chrono_tz::Tz;
 use serde_json::json;
 use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
 use std::{
-    str::FromStr,
     sync::{Arc, Weak},
     time::{Duration, Instant},
 };
@@ -97,7 +96,7 @@ fn timezone(headers: &HeaderMap) -> Tz {
             })
         })
         .flatten()
-        .and_then(|name| Tz::from_str(&name).ok())
+        .and_then(|name| super::timezone::resolve(&name))
         .unwrap_or(chrono_tz::UTC)
 }
 

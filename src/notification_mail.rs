@@ -1,6 +1,5 @@
 use super::*;
 use chrono::TimeZone;
-use chrono_tz::Tz;
 use crc32fast::Hasher;
 
 struct MailNotice {
@@ -222,13 +221,7 @@ fn display_time(timestamp: &str, timezone: Option<&str>) -> String {
         return timestamp.to_owned();
     };
     let zone = timezone
-        .and_then(|name| match name {
-            "Madrid" => Some(chrono_tz::Europe::Madrid),
-            "Eastern Time (US & Canada)" => Some(chrono_tz::America::New_York),
-            "Central Time (US & Canada)" => Some(chrono_tz::America::Chicago),
-            "Pacific Time (US & Canada)" => Some(chrono_tz::America::Los_Angeles),
-            _ => name.parse::<Tz>().ok(),
-        })
+        .and_then(super::timezone::resolve)
         .unwrap_or(chrono_tz::UTC);
     let local = zone.from_utc_datetime(&parsed.naive_utc());
     local.format("%-I%P on %A, %B %-d").to_string()

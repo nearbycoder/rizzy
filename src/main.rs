@@ -63,6 +63,7 @@ mod signup_page;
 mod signup_seed;
 mod storage;
 mod tagging_page;
+mod timezone;
 mod unsubscribes;
 mod user_page;
 mod webhook_page;
@@ -632,10 +633,7 @@ fn etag_timezone(headers: &HeaderMap) -> Option<String> {
     let cookie = cookie_value(headers, "timezone")?;
     let encoded = format!("timezone={}", cookie.trim_matches('"'));
     let decoded = url::form_urlencoded::parse(encoded.as_bytes()).next()?.1;
-    decoded
-        .parse::<chrono_tz::Tz>()
-        .ok()
-        .map(|zone| zone.to_string())
+    timezone::resolve(&decoded).map(|_| decoded.into_owned())
 }
 fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, max_age: i64, secure: bool) {
     let secure_part = if secure { "; Secure" } else { "" };
