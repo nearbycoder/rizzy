@@ -1979,6 +1979,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(android_config),
         )
         .route("/client_configurations/ios_v1.json", get(ios_config))
+        .route("/collections/{collection_id}/cards/{id}", get(legacy_card_root))
+        .route("/collections/{collection_id}/cards/{id}/", get(legacy_card_root))
+        .route("/collections/{id}", get(legacy_board_root))
+        .route("/collections/{id}/", get(legacy_board_root))
+        .route("/public/collections/{id}", get(legacy_public_board_root))
+        .route("/public/collections/{id}/", get(legacy_public_board_root))
         .route("/manifest.json", get(pwa::manifest))
         .route("/service-worker", get(pwa::service_worker))
         .route("/service-worker.js", get(pwa::service_worker))
@@ -2068,6 +2074,24 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/client_configurations/ios_v1.json",
             get(ios_config),
+        )
+        .route(
+            "/{account}/collections/{collection_id}/cards/{id}",
+            get(legacy_card),
+        )
+        .route(
+            "/{account}/collections/{collection_id}/cards/{id}/",
+            get(legacy_card),
+        )
+        .route("/{account}/collections/{id}", get(legacy_board))
+        .route("/{account}/collections/{id}/", get(legacy_board))
+        .route(
+            "/{account}/public/collections/{id}",
+            get(legacy_public_board),
+        )
+        .route(
+            "/{account}/public/collections/{id}/",
+            get(legacy_public_board),
         )
         .route(
             "/{account}/my/access_tokens",
@@ -3369,6 +3393,60 @@ async fn android_config() -> Response {
 }
 async fn ios_config() -> Response {
     config_response(include_str!("../static/client_configurations/ios_v1.json"))
+}
+fn legacy_redirect(headers: &HeaderMap, segments: &[&str]) -> Result<Response> {
+    let mut url = url::Url::parse(&base(headers)).map_err(|_| bad("Invalid host"))?;
+    url.path_segments_mut()
+        .map_err(|_| bad("Invalid host"))?
+        .extend(segments);
+    Ok((
+        StatusCode::MOVED_PERMANENTLY,
+        [
+            (header::LOCATION, url.to_string()),
+            (header::CACHE_CONTROL, "no-cache".to_owned()),
+            (header::CONTENT_TYPE, "text/html; charset=UTF-8".to_owned()),
+        ],
+    )
+        .into_response())
+}
+fn legacy_account(account: &str) -> Result<()> {
+    if account.is_empty() || !account.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(missing());
+    }
+    Ok(())
+}
+async fn legacy_board_root(Path(id): Path<String>, headers: HeaderMap) -> Result<Response> {
+    legacy_redirect(&headers, &["boards", &id])
+}
+async fn legacy_card_root(
+    Path((_, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    legacy_redirect(&headers, &["cards", &id])
+}
+async fn legacy_public_board_root(Path(id): Path<String>, headers: HeaderMap) -> Result<Response> {
+    legacy_redirect(&headers, &["public", "boards", &id])
+}
+async fn legacy_board(
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    legacy_account(&account)?;
+    legacy_redirect(&headers, &[&account, "boards", &id])
+}
+async fn legacy_card(
+    Path((account, _, id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    legacy_account(&account)?;
+    legacy_redirect(&headers, &[&account, "cards", &id])
+}
+async fn legacy_public_board(
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    legacy_account(&account)?;
+    legacy_redirect(&headers, &[&account, "public", "boards", &id])
 }
 async fn update_timezone(
     State(app): Shared,

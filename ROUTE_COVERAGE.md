@@ -4,6 +4,8 @@ Pinned Fizzy revision: `477c943e0506f109e5bc83ae9dadbe519732c045`.
 
 The source implements actions for 209 GET/POST/PUT/PATCH/DELETE application routes across 99 controllers. Rizzy declares matching method and normalized path for 208. This is a route-presence inventory only: a match does not prove response, permissions, side effects, HTML, or JSON parity. Optional format suffixes and parameter names are normalized; generated routes without a controller action and mounted engine routes are excluded.
 
+The remaining normalized route is Fizzy's parameterized client-configuration route; Rizzy declares the two versioned files present in this revision directly. Three legacy `collections` redirects are generated routes and excluded from the table. Rizzy serves their root and account forms, including optional JSON suffixes and trailing slashes.
+
 | Source controller | Routes | Method/path present in Rust |
 | --- | ---: | ---: |
 | `client_configurations` | 1 | 0 |
