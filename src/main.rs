@@ -9553,9 +9553,21 @@ async fn create_filter(
     let filter_id = id();
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let saved_id: String = sqlx::query_scalar("INSERT INTO filters(id,account_id,creator_id,fields,params_digest,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(creator_id,params_digest) DO UPDATE SET updated_at=excluded.updated_at RETURNING id")
-        .bind(filter_id).bind(&p.account_id).bind(&p.user_id).bind(&fields).bind(digest)
-        .bind(&timestamp).bind(&timestamp).fetch_one(&mut *tx).await.map_err(db_err)?;
+    let saved_id: String = if app.mysql {
+        sqlx::query("INSERT INTO filters(id,account_id,creator_id,fields,params_digest,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)")
+            .bind(&filter_id).bind(&p.account_id).bind(&p.user_id).bind(&fields).bind(&digest)
+            .bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        sqlx::query_scalar("SELECT id FROM filters WHERE creator_id=? AND params_digest=?")
+            .bind(&p.user_id)
+            .bind(&digest)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?
+    } else {
+        sqlx::query_scalar("INSERT INTO filters(id,account_id,creator_id,fields,params_digest,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(creator_id,params_digest) DO UPDATE SET updated_at=excluded.updated_at RETURNING id")
+            .bind(&filter_id).bind(&p.account_id).bind(&p.user_id).bind(&fields).bind(&digest)
+            .bind(&timestamp).bind(&timestamp).fetch_one(&mut *tx).await.map_err(db_err)?
+    };
     for (key, table, column) in [
         ("tag_ids", "filters_tags", "tag_id"),
         ("board_ids", "boards_filters", "board_id"),
@@ -9564,8 +9576,11 @@ async fn create_filter(
         ("closer_ids", "closers_filters", "closer_id"),
     ] {
         if let Some(ids) = params.get(key).and_then(Value::as_array) {
-            let statement =
-                format!("INSERT OR IGNORE INTO {table}(filter_id,{column}) VALUES(?,?)");
+            let statement = if app.mysql {
+                format!("INSERT IGNORE INTO {table}(filter_id,{column}) VALUES(?,?)")
+            } else {
+                format!("INSERT OR IGNORE INTO {table}(filter_id,{column}) VALUES(?,?)")
+            };
             for resource_id in ids.iter().filter_map(Value::as_str) {
                 sqlx::query(&statement)
                     .bind(&saved_id)

@@ -20,7 +20,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlencode, urlparse
 
 from auth import call as auth_call, cookie
 
@@ -64,6 +64,21 @@ def mysql_scalar(url, statement):
         env=client_env, check=True, capture_output=True, text=True,
     )
     return result.stdout.strip()
+
+
+def save_filter(base, session, scope, board_id):
+    request = urllib.request.Request(
+        base + scope + "/filters",
+        urlencode({"indexed_by": "closed", "board_ids[]": board_id}).encode(),
+        method="POST",
+        headers={"Cookie": session,
+                 "Accept": "text/vnd.turbo-stream.html",
+                 "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(request, timeout=8) as response:
+        assert response.status == 200
+        body = response.read().decode()
+    return re.search(r"/filters/([a-z0-9-]+)", body).group(1)
 
 
 def check_metadata(url, account):
@@ -307,16 +322,28 @@ def main():
             assert [item["id"] for item in call(base, token, scope + "/search?q=jump")] == [stemmed["id"]]
             call(base, token, scope + f"/cards/{stemmed_number}", "DELETE", expected=204)
             assert call(base, token, scope + "/search?q=jump") == []
+            saved_id = save_filter(base, session, scope, board["id"])
+            assert save_filter(base, session, scope, board["id"]) == saved_id
+            assert call(base, token, scope + "/cards?filter_id=" + saved_id) == []
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM boards_filters WHERE filter_id='{saved_id}'") == "1"
             call(base, token, scope + f"/cards/{number}/closure", "POST", expected=204)
             loaded = call(base, token, scope + f"/cards/{number}")
             assert loaded["closed"] is True and loaded["title"] == "MySQL card", loaded
             assert comment["body"]["plain_text"] == "MySQL comment", comment
             assert call(base, token, scope + "/cards") == []
+            assert [item["id"] for item in call(base, token, scope + "/cards?filter_id=" + saved_id)] == [card["id"]]
+            filter_delete = urllib.request.Request(
+                base + scope + "/filters/" + saved_id, method="DELETE",
+                headers={"Cookie": session,
+                         "Accept": "text/vnd.turbo-stream.html"},
+            )
+            with urllib.request.urlopen(filter_delete, timeout=8) as response:
+                assert response.status == 200
             assert len(call(base, token, scope + f"/cards/{number}/comments")) >= 1
             assert len(call(base, token, scope + "/activities")) >= 3
             metadata_checked = check_metadata(url, account)
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, public board, comment, search, browser card/menu, close, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, public board, comment, search, browser card/menu, close, reads{detail}")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise
