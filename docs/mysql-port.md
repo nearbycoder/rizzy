@@ -71,19 +71,21 @@ Rizzy only.
 default Rizzy-generated fixture checks 43 records across 23 groups and two
 original file payloads. A ZIP produced by the pinned Fizzy app's MySQL test
 account through `tests/source_mysql_account_export_test.rb` also restored and
-re-exported: 92 records across 24 groups, including users, settings,
-notifications, filters, and webhook deliveries. For both fixtures the test
-checks account name, card count, re-exported record-group counts, and any file
-payloads. It also checks that a cross-account
+re-exported: 94 records across 26 groups, including users, settings,
+notifications, filters, webhook deliveries, and a card image. For both fixtures
+the test checks account name, card count, re-exported record-group counts, file
+bytes, and attachment targets. For the source image, it also fetches the
+restored card and serves the image over HTTP with the original bytes. The
+Fizzy-produced ZIP also passed the SQLite
+import regression. The MySQL test checks that a cross-account
 reference leaves no restored records and that a second import of the same ZIP
 reports a conflict without adding cards. The import worker now uses MySQL upserts and scalar
 `GREATEST` where SQLite used `ON CONFLICT` and scalar `MAX`. A new MySQL board
 update trigger supplies the entropy metadata expected during restore, and the
 export query quotes MySQL's reserved `key` column. Import and export now
 preserve a source system user's settings record and omit generated settings
-for an imported user whose archive has none. The SQLite account import check
-also passed with the Fizzy-produced ZIP. These fixtures do not cover every
-source archive variant, especially source-generated file attachments.
+for an imported user whose archive has none. These fixtures do not cover every
+source archive variant or every browser workflow after restoration.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,

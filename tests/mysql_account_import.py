@@ -5,6 +5,7 @@ Set RIZZY_TEST_MYSQL_URL and RIZZY_TEST_MYSQL_CLIENT. An optional ZIP argument
 can supply a Fizzy export; otherwise the existing Rizzy export fixture is used.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -15,9 +16,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
+import uuid
 import zipfile
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 from account_import import await_result, cross_account_reference, upload
@@ -62,6 +66,8 @@ def main():
             counts = Counter(name.split("/")[1] for name in records)
             blobs = [(item["id"], zipped.read(f"storage/{item['key']}"))
                      for name, item in records.items() if name.startswith("data/active_storage_blobs/")]
+            attachments = [item for name, item in records.items()
+                           if name.startswith("data/active_storage_attachments/")]
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -128,6 +134,38 @@ def main():
             for blob_id, source_bytes in blobs:
                 key = mysql_scalar(url, f"SELECT storage_key FROM storage_blobs WHERE id='{blob_id}' AND account_id='{account_id}'")
                 assert key and (storage / key).read_bytes() == source_bytes, blob_id
+            for attachment in attachments:
+                fields = mysql_scalar(
+                    url,
+                    "SELECT blob_id,record_type,record_id,name FROM storage_attachments "
+                    f"WHERE id='{attachment['id']}' AND account_id='{account_id}'",
+                ).split("\t")
+                assert fields == [attachment[key] for key in ("blob_id", "record_type", "record_id", "name")], attachment
+            image = next((item for item in attachments
+                          if item["record_type"] == "Card" and item["name"] == "image"), None)
+            if image:
+                card_id = image["record_id"]
+                number, creator_identity = mysql_scalar(
+                    url,
+                    "SELECT c.number,u.identity_id FROM cards c JOIN users u ON u.id=c.creator_id "
+                    f"WHERE c.id='{card_id}' AND c.account_id='{account_id}'",
+                ).split("\t")
+                image_token = "image-" + uuid.uuid4().hex
+                mysql_scalar(
+                    url,
+                    "INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES("
+                    f"'{uuid.uuid4().hex}','{creator_identity}','{hashlib.sha256(image_token.encode()).hexdigest()}',"
+                    f"'import image check','read','{datetime.now(timezone.utc).isoformat()}')",
+                )
+                image_target = {"url": base, "account": created["account"], "token": image_token}
+                status, _, raw = call(image_target, f"/{created['account']}/cards/{number}")
+                assert status == 200, (status, raw[:200])
+                image_url = json.loads(raw)["image_url"]
+                assert image_url, card_id
+                status, headers, _ = call(image_target, urllib.parse.urlparse(image_url).path)
+                assert status == 302, (status, image_url)
+                status, _, served = call(image_target, headers["Location"], bearer=False)
+                assert status == 200 and served == dict(blobs)[image["blob_id"]], (status, card_id)
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM cards WHERE account_id='{account_id}'") == str(account["cards_count"])
             duplicate = upload(base, token, archive)
             conflict = await_result(base, token, duplicate)
@@ -155,7 +193,11 @@ def main():
                 for blob_id, source_bytes in blobs:
                     restored_blob = json.loads(exported.read(f"data/active_storage_blobs/{blob_id}.json"))
                     assert exported.read(f"storage/{restored_blob['key']}") == source_bytes
-            print(f"MySQL account transfer passed: invalid ZIP atomicity, duplicate conflict, {sum(counts.values())} records across {len(counts)} groups, {len(blobs)} files, and re-export")
+                for attachment in attachments:
+                    restored = json.loads(exported.read(f"data/active_storage_attachments/{attachment['id']}.json"))
+                    for key in ("blob_id", "record_type", "record_id", "name"):
+                        assert restored[key] == attachment[key], (key, restored, attachment)
+            print(f"MySQL account transfer passed: invalid ZIP atomicity, duplicate conflict, {sum(counts.values())} records across {len(counts)} groups, files={len(blobs)}, and re-export")
         except Exception:
             print(log_path.read_text()[-5000:])
             raise
