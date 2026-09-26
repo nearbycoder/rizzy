@@ -712,7 +712,7 @@ async fn apply_archive(
         }
     }
     for publication in records(&archive, "board_publications") {
-        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,`key`,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(field(publication, "id")?)
             .bind(account_id)
             .bind(field(publication, "board_id")?)

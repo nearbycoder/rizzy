@@ -123,6 +123,41 @@ def main():
             )
             number = card["number"]
             assert [item["number"] for item in call(base, token, scope + "/cards")] == [number]
+            column = call(
+                base, token, scope + f"/boards/{board['id']}/columns", "POST",
+                {"column": {"name": "MySQL column"}}, 201,
+            )
+            call(
+                base, token, scope + f"/cards/{number}/triage", "POST",
+                {"column_id": column["id"]}, 204,
+            )
+            assert call(base, token, scope + f"/cards/{number}")["column"]["id"] == column["id"]
+            step = call(
+                base, token, scope + f"/cards/{number}/steps", "POST",
+                {"step": {"content": "MySQL step"}}, 201,
+            )
+            call(
+                base, token, scope + f"/cards/{number}/steps/{step['id']}", "PUT",
+                {"step": {"completed": True}},
+            )
+            assert call(base, token, scope + f"/cards/{number}")["steps"][0]["completed"] is True
+            call(
+                base, token, scope + f"/cards/{number}/taggings", "POST",
+                {"tag_title": "#mysql"}, 204,
+            )
+            assert call(base, token, scope + f"/cards/{number}")["tags"] == ["mysql"]
+            assert call(base, token, scope + "/account/settings")["auto_postpone_period_in_days"] == 30
+            assert call(
+                base, token, scope + "/account/entropy", "PUT",
+                {"entropy": {"auto_postpone_period_in_days": 7}},
+            )["auto_postpone_period_in_days"] == 7
+            published = call(
+                base, token, scope + f"/boards/{board['id']}/publication", "POST",
+                expected=201,
+            )
+            with urllib.request.urlopen(published["public_url"], timeout=8) as response:
+                assert "MySQL core" in response.read().decode()
+            call(base, token, scope + f"/boards/{board['id']}/publication", "DELETE", expected=204)
             comment = call(
                 base, token, scope + f"/cards/{number}/comments", "POST",
                 {"comment": {"body": "MySQL comment"}}, 201,
@@ -136,7 +171,10 @@ def main():
             assert len(call(base, token, scope + "/activities")) >= 3
             metadata_checked = check_metadata(url, account)
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, comment, close, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, public board, comment, close, reads{detail}")
+        except Exception:
+            print(log_path.read_text()[-2000:])
+            raise
         finally:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)

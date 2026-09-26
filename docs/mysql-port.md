@@ -3,7 +3,8 @@
 Fizzy supports MySQL. Rizzy's MySQL work is in progress on this branch. The
 `mysql:` URL now starts the web server. The repeatable
 `tests/mysql_core.py` flow covers account seeding, board and card creation,
-comments, closing a card, and API reads. It verifies the account entropy,
+columns, triage, steps, tags, account entropy, public board publication and
+viewing, comments, closing a card, and API reads. It verifies the account entropy,
 user attachable and settings, access record, and board touch side effects in
 the database. Most routes have not yet been exercised on MySQL; some still use
 SQLite-only SQL, and this is not deployment parity.

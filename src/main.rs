@@ -2507,7 +2507,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let mut tx = db.begin().await?;
             for row in legacy_publications {
                 let timestamp: String = row.get("updated_at");
-                sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                sqlx::query("INSERT INTO board_publications(id,account_id,board_id,`key`,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(id())
                 .bind(row.get::<String, _>("account_id"))
                 .bind(row.get::<String, _>("id"))
@@ -7200,7 +7200,7 @@ async fn publish_board(
         let key = publication_key();
         let timestamp = now();
         let mut tx = app.db.begin().await.map_err(db_err)?;
-        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,`key`,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(crate::id())
             .bind(&p.account_id)
             .bind(&id)
@@ -10966,8 +10966,19 @@ async fn toggle_tag(
         return Err(bad("tag_title is required"));
     }
     let tag_id = id();
-    sqlx::query("INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?) ON CONFLICT(account_id,title) DO NOTHING")
-        .bind(&tag_id).bind(&p.account_id).bind(&title).bind(now()).execute(&app.db).await.map_err(db_err)?;
+    let insert = if app.mysql {
+        "INSERT IGNORE INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)"
+    } else {
+        "INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?) ON CONFLICT(account_id,title) DO NOTHING"
+    };
+    sqlx::query(insert)
+        .bind(&tag_id)
+        .bind(&p.account_id)
+        .bind(&title)
+        .bind(now())
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
     let tag_id: String = sqlx::query_scalar("SELECT id FROM tags WHERE account_id=? AND title=?")
         .bind(&p.account_id)
         .bind(&title)
