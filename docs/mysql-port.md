@@ -8,8 +8,8 @@ filter, assignment and activity spikes, watch and pin controls, assigned-card
 moves into private boards, saved filters,
 event and mention notifications, email and push queue records, notification
 settings and unsubscribe tokens, personal timezone, public board publication
-and viewing, push-job draining without a VAPID key, comments, JSON and browser
-search, browser card and menu pages,
+and viewing, push-job draining without a VAPID key, passkey registration and
+sign-in, comments, JSON and browser search, browser card and menu pages,
 closing a card, and API reads. It verifies the
 account entropy, user attachable and settings, access record, and board touch
 side effects in the database. Most routes have not yet been exercised on
@@ -41,6 +41,16 @@ still need full cross-app comparison.
 The pinned source's selected invite, join, and email-change model and
 controller suites passed 51 tests and 232 assertions on the same MySQL 8
 server.
+`tests/mysql_passkeys.py` runs the passkey registration, management, signed
+login, replay, invalid-signature, and deletion flow on MySQL. It also sends
+two simultaneous assertions for one challenge and requires exactly one login;
+MySQL challenge consumption uses a row lock and transaction in place of
+SQLite's `DELETE RETURNING`. Five repeated MySQL runs passed after clearing the
+dedicated test database's authentication-attempt history between runs; the
+SQLite passkey flow still passes. The pinned
+Fizzy MySQL passkey controller and library suites passed 19 tests and 64
+assertions. This checks one synthetic authenticator and one local origin; real
+browser devices, multiple credentials, and deployment origins remain.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,

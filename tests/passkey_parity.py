@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise passkey registration, authentication, replay defense and management."""
 import base64
+import concurrent.futures
 import hashlib
 import http.cookiejar
 import json
@@ -11,13 +12,15 @@ import sqlite3
 import struct
 import subprocess
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 
 SOURCE = os.environ.get('PASSKEY_TARGET') == 'fizzy'
 BASE = os.environ.get('FIZZY_URL', 'http://127.0.0.1:3006') if SOURCE else os.environ.get('RIZZY_URL', 'http://localhost:3038')
-DB = pathlib.Path(os.environ['FIZZY_DB'] if SOURCE else os.environ['RIZZY_DB'])
+MYSQL_URL = os.environ.get('RIZZY_TEST_MYSQL_URL') if not SOURCE else None
+DB = None if MYSQL_URL else pathlib.Path(os.environ['FIZZY_DB'] if SOURCE else os.environ['RIZZY_DB'])
 EMAIL = os.environ.get('FIZZY_EMAIL', 'bench@example.com') if SOURCE else os.environ.get('RIZZY_EMAIL', 'settings-verify@example.test')
 RP_ID = urllib.parse.urlparse(BASE).hostname
 ORIGIN = BASE
@@ -116,6 +119,9 @@ def assertion(challenge_value, key_path, counter=1, alter_signature=False):
 
 
 def count():
+    if MYSQL_URL:
+        from mysql_core import mysql_scalar
+        return int(mysql_scalar(MYSQL_URL, f"SELECT COUNT(*) FROM passkeys WHERE credential_id='{b64(CREDENTIAL_ID)}'"))
     with sqlite3.connect(DB) as db:
         table = 'action_pack_passkeys' if SOURCE else 'passkeys'
         return db.execute(f'SELECT count(*) FROM {table} WHERE credential_id=?',
@@ -174,6 +180,18 @@ def main():
         wrong_challenge = challenge('authentication')
         status, _, body = request('/session/passkey.json', 'POST', assertion(wrong_challenge, key_path, 2, True))
         assert status == 401, (status, body[:300])
+        if os.environ.get('PASSKEY_RACE') == '1':
+            race_challenge = challenge('authentication')
+            credential = assertion(race_challenge, key_path, 2)
+            barrier = threading.Barrier(2)
+
+            def compete():
+                barrier.wait()
+                return request('/session/passkey.json', 'POST', credential)[0]
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                statuses = sorted(pool.map(lambda _: compete(), range(2)))
+            assert statuses == [200, 401], statuses
     if SOURCE:
         login()
         status, _, html = request(PASSKEYS_PATH, accept='text/html')

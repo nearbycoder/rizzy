@@ -46,6 +46,11 @@ code. The MySQL core flow also checks an assigned card move into a private
 board and draining queued push jobs without a VAPID key. The local MySQL mixed
 API benchmark is recorded in [MySQL port status](docs/mysql-port.md); it covers
 one workflow and does not prove full application speed or maximum scale.
+`tests/mysql_passkeys.py` also checks a complete passkey registration and
+authentication flow on MySQL, including two simultaneous submissions of one
+challenge with exactly one successful login. The pinned source's selected
+MySQL passkey suites passed 19 tests and 64 assertions. Browser authenticators
+and alternate deployment origins are still unverified.
 
 The [60-second mixed API benchmark](bench/results/sustained-mixed-100-2026-09-26.json) uses fresh source and Rust databases, 100 initial cards, 32 clients, the same eight logical server CPUs, and two reversed-order rounds. Each completed unit makes five JSON reads and four card writes. With board JSON and account ETag state included, Rizzy completed 90.99–91.10 units/s versus Fizzy's 25.61–28.03, with no HTTP errors and matching final card, event, and comment formulas. The artifact records the pinned Fizzy revision, Rizzy commit, and release binary hash. It compared sampled response shapes, content, counts, and pagination headers before timing. This verifies a faster result for this workload, not one-for-one application speed or maximum scale: the apps have different process models and unimplemented browser and background behaviors, and SQLite writes serialize. `tests/board_show_pagination_parity.py` checks signed-in board pages one and two, their separate ETags, and 304 responses against disposable Fizzy and Rizzy databases.
 

@@ -77,14 +77,34 @@ fn client_challenge(client_data: &str) -> Result<String> {
 }
 
 async fn consume_challenge(app: &App, challenge: &str, purpose: &str) -> Result<DbRow> {
-    sqlx::query("DELETE FROM passkey_challenges WHERE challenge=? AND purpose=? AND expires_at>? RETURNING identity_id,state_json")
-        .bind(challenge)
-        .bind(purpose)
-        .bind(now())
-        .fetch_optional(&app.db)
-        .await
-        .map_err(db_err)?
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Passkey challenge expired or already used"))
+    if app.mysql {
+        let mut tx = app.db.begin().await.map_err(db_err)?;
+        let row = sqlx::query("SELECT identity_id,state_json FROM passkey_challenges WHERE challenge=? AND purpose=? AND expires_at>? FOR UPDATE")
+            .bind(challenge)
+            .bind(purpose)
+            .bind(now())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Passkey challenge expired or already used"))?;
+        sqlx::query("DELETE FROM passkey_challenges WHERE challenge=? AND purpose=?")
+            .bind(challenge)
+            .bind(purpose)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(row)
+    } else {
+        sqlx::query("DELETE FROM passkey_challenges WHERE challenge=? AND purpose=? AND expires_at>? RETURNING identity_id,state_json")
+            .bind(challenge)
+            .bind(purpose)
+            .bind(now())
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "Passkey challenge expired or already used"))
+    }
 }
 
 pub(super) async fn challenge(
@@ -245,9 +265,22 @@ pub(super) async fn register(
     let credential_json = serde_json::to_string(&passkey).map_err(|_| bad("Invalid passkey"))?;
     let transports = input.get("transports").cloned().unwrap_or(json!([]));
     let timestamp = now();
-    let inserted = sqlx::query("INSERT OR IGNORE INTO passkeys(id,identity_id,credential_id,credential_json,transports,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(&id).bind(identity_id).bind(credential_id).bind(credential_json).bind(transports.to_string())
-        .bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "INSERT IGNORE INTO passkeys(id,identity_id,credential_id,credential_json,transports,created_at,updated_at) VALUES(?,?,?,?,?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO passkeys(id,identity_id,credential_id,credential_json,transports,created_at,updated_at) VALUES(?,?,?,?,?,?,?)"
+    };
+    let inserted = sqlx::query(statement)
+        .bind(&id)
+        .bind(identity_id)
+        .bind(credential_id)
+        .bind(credential_json)
+        .bind(transports.to_string())
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
     if inserted.rows_affected() == 0 {
         return Ok(response());
     }
