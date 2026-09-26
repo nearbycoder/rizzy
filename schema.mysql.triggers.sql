@@ -32,7 +32,8 @@ BEGIN
   IF NOT (NEW.auto_postpone_period_in_days <=> OLD.auto_postpone_period_in_days) THEN
     UPDATE entropy_records SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')
     WHERE container_type='Account' AND container_id=NEW.id;
-    UPDATE cards SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')
+    UPDATE cards SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z'),
+      bulk_touch_epoch=bulk_touch_epoch+1
     WHERE account_id=NEW.id;
   END IF;
 END;

@@ -15,6 +15,10 @@ closing a card, and API reads. It verifies the
 account entropy, user attachable and settings, access record, and board touch
 side effects in the database. Most routes have not yet been exercised on
 MySQL; some still use SQLite-only SQL, and this is not deployment parity.
+Account entropy's first and repeated saves now touch cards while preserving
+board, column, and card activity times. A migration replaces the older MySQL
+account trigger on existing databases; `tests/mysql_account_entropy_trigger_migration.py`
+checks that replacement.
 The core flow also checks that a changed comment edit touches its card and
 board, an identical edit leaves timestamps unchanged, and comment deletion
 touches the card and board without advancing card activity time.

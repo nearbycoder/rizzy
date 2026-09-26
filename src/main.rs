@@ -964,6 +964,16 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
                 .await?;
         }
     }
+    let account_entropy_trigger_installed: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='accounts_entropy_bulk_touch_v2')",
+    )
+    .fetch_one(&db)
+    .await?;
+    if account_entropy_trigger_installed == 0 {
+        sqlx::raw_sql("DROP TRIGGER IF EXISTS accounts_after_update")
+            .execute(&db)
+            .await?;
+    }
     let installed: HashSet<String> = sqlx::query_scalar(
         "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=DATABASE()",
     )
@@ -988,6 +998,11 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     if bulk_touch_triggers_installed == 0 {
         sqlx::query("INSERT INTO app_secrets(name,value) VALUES('cards_bulk_touch_triggers_v3','done') ON DUPLICATE KEY UPDATE value='done'")
+            .execute(&db)
+            .await?;
+    }
+    if account_entropy_trigger_installed == 0 {
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('accounts_entropy_bulk_touch_v2','done') ON DUPLICATE KEY UPDATE value='done'")
             .execute(&db)
             .await?;
     }
@@ -6903,7 +6918,26 @@ async fn update_account_entropy(
         Ok(days) => days,
         Err(_) => return Ok(entropy_parameter_error(StatusCode::UNPROCESSABLE_ENTITY)),
     };
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    let account_days_sql = if app.mysql {
+        "SELECT auto_postpone_period_in_days FROM accounts WHERE id=? FOR UPDATE"
+    } else {
+        "SELECT auto_postpone_period_in_days FROM accounts WHERE id=?"
+    };
+    let current_days: i64 = sqlx::query_scalar(account_days_sql)
+        .bind(&p.account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if !app.mysql {
+        sqlx::query(
+            "INSERT INTO card_bulk_touches(board_id) SELECT id FROM boards WHERE account_id=?",
+        )
+        .bind(&p.account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    }
     sqlx::query("UPDATE accounts SET auto_postpone_period_in_days=? WHERE id=?")
         .bind(days)
         .bind(&p.account_id)
@@ -6912,6 +6946,28 @@ async fn update_account_entropy(
         .map_err(db_err)?;
     sqlx::query("UPDATE boards SET auto_postpone_period_in_days=? WHERE account_id=? AND entropy_override=0")
         .bind(days).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+    // The changed-value trigger touches all account cards. Rails also calls
+    // touch_all after an unchanged Entropy save, so repeat requests do it here.
+    if current_days == days {
+        let touch_cards_sql = if app.mysql {
+            "UPDATE cards SET updated_at=?,bulk_touch_epoch=bulk_touch_epoch+1 WHERE account_id=?"
+        } else {
+            "UPDATE cards SET updated_at=? WHERE account_id=?"
+        };
+        sqlx::query(touch_cards_sql)
+            .bind(now())
+            .bind(&p.account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    if !app.mysql {
+        sqlx::query("DELETE FROM card_bulk_touches WHERE board_id IN (SELECT id FROM boards WHERE account_id=?)")
+            .bind(&p.account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     Ok(if form {
         (

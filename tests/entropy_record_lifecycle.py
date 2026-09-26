@@ -46,12 +46,20 @@ def main():
             assert api(target, f"/boards/{board['id']}")["auto_postpone_period_in_days"] == 7
 
             time.sleep(.02)
+            api(target, "/account/entropy", "PUT", {
+                "entropy": {"auto_postpone_period_in_days": 7}})
+            assert record(target, "Account", account_id) == account_changed
+            after_account_repeat = card_times(target, card["id"])
+            assert after_account_repeat[0] > after_account[0]
+            assert after_account_repeat[1] == after_account[1]
+
+            time.sleep(.02)
             updated_board = api(target, f"/boards/{board['id']}/entropy", "PUT", {
                 "board": {"auto_postpone_period_in_days": 90}})
             assert updated_board["auto_postpone_period_in_days"] == 90
             board_first = record(target, "Board", board["id"])
             after_board = card_times(target, card["id"])
-            assert board_first and after_board[0] > after_account[0]
+            assert board_first and after_board[0] > after_account_repeat[0]
             assert after_board[1] == original_card[1]
 
             time.sleep(.02)
@@ -71,7 +79,7 @@ def main():
             api(target, f"/boards/{board['id']}", "DELETE", expected=204)
             assert record(target, "Board", board["id"]) is None
             assert record(target, "Account", account_id)[0] == account_first[0]
-            print("Entropy lifecycle passed: account and board records, overrides, repeat card touch, cleanup")
+            print("Entropy lifecycle passed: account and board records, overrides, both repeat card touches, cleanup")
         finally:
             stop(process)
 
