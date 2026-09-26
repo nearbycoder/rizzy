@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare filtered browser timeline throughput with equal card/event fixtures."""
 import argparse
+import atexit
 import concurrent.futures
 import http.cookiejar
 import json
@@ -15,7 +16,7 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 
-from compare import fixture, pct
+from compare import fixture, pct, request as api_request
 
 
 def browser_cookie(target):
@@ -43,14 +44,27 @@ def browser_cookie(target):
     return cookie
 
 
-def html(target, path):
+def html_response(target, path, etag=None):
+    headers = {"Accept": "text/html", "Cookie": target["cookie"]}
+    if etag:
+        headers["If-None-Match"] = etag
     request = urllib.request.Request(target["url"] + f"/{target['account']}{path}",
-        headers={"Accept": "text/html", "Cookie": target["cookie"]})
-    with urllib.request.urlopen(request, timeout=15) as response:
-        return response.read()
+        headers=headers)
+    try:
+        response = urllib.request.urlopen(request, timeout=15)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        return response.status, response.headers, response.read()
 
 
-def run(target, path, concurrency, seconds):
+def html(target, path):
+    status, _, body = html_response(target, path)
+    assert status == 200, status
+    return body
+
+
+def run(target, path, concurrency, seconds, etag=None):
     deadline = time.monotonic() + seconds
     started = time.monotonic()
     samples, failures = [], Counter()
@@ -61,7 +75,8 @@ def run(target, path, concurrency, seconds):
         while time.monotonic() < deadline:
             beginning = time.perf_counter()
             try:
-                html(target, path)
+                status, _, _ = html_response(target, path, etag)
+                assert status == (304 if etag else 200), status
                 local.append(time.perf_counter() - beginning)
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
                 errors[str(getattr(error, "code", type(error).__name__))] += 1
@@ -84,6 +99,7 @@ def main():
     parser.add_argument("--cards", type=int, default=100)
     parser.add_argument("--seconds", type=float, default=5)
     parser.add_argument("--concurrency", default="1,8,32")
+    parser.add_argument("--conditional", action="store_true", help="measure matching If-None-Match reads")
     args = parser.parse_args()
     targets = {}
     for name in ("FIZZY", "RIZZY"):
@@ -91,26 +107,47 @@ def main():
         if any(not os.getenv(key) for key in keys):
             parser.error("Set " + ", ".join(keys))
         targets[name.lower()] = {"name": name.lower(), **{field.lower(): os.environ[f"{name}_{field}"] for field in ("URL", "ACCOUNT", "TOKEN", "EMAIL", "DB")}}
-    results = {"fixture_cards": args.cards, "sample_parity": {}, "runs": {}}
+    results = {"fixture_cards": args.cards, "conditional": args.conditional,
+               "sample_parity": {}, "runs": {}}
     paths = {}
+    etags = {}
+    created_boards = []
+
+    def cleanup():
+        for target, board in reversed(created_boards):
+            try:
+                api_request(target, f"/boards/{board}", "DELETE")
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
+                pass
+
+    atexit.register(cleanup)
     for name, target in targets.items():
-        board, _ = fixture(target, args.cards)
+        board, _ = fixture(target, args.cards,
+                           lambda board_id: created_boards.append((target, board_id)))
         target["cookie"] = browser_cookie(target)
         path = "/events?board_ids%5B%5D=" + urllib.parse.quote(board)
         paths[name] = path
-        sample = html(target, path)
+        sample_status, sample_headers, sample = html_response(target, path)
+        assert sample_status == 200
+        etags[name] = sample_headers.get("ETag")
         event_count = len(re.findall(rb'class="event event--', sample))
         assert event_count == min(args.cards, 100), (name, event_count)
         assert b"events__columns" in sample and b"events__time-block" in sample
         assert b"Benchmark card 0" in sample
         results["sample_parity"][name] = {"visible_events": event_count,
-            "columns": sample.count(b'class="events__column"'), "html_bytes": len(sample)}
+            "columns": sample.count(b'class="events__column"'), "html_bytes": len(sample),
+            "etag": bool(etags[name])}
         for _ in range(10):
             html(target, path)
+        if args.conditional:
+            assert etags[name], (name, "missing ETag")
+            status, _, body = html_response(target, path, etags[name])
+            assert status == 304 and not body, (name, status, body[:100])
     assert results["sample_parity"]["fizzy"]["visible_events"] == results["sample_parity"]["rizzy"]["visible_events"]
     for concurrency in map(int, args.concurrency.split(",")):
         for name, target in targets.items():
-            result = run(target, paths[name], concurrency, args.seconds)
+            result = run(target, paths[name], concurrency, args.seconds,
+                         etags[name] if args.conditional else None)
             results["runs"].setdefault(name, []).append(result)
             print(f"{name} c={concurrency}: {result}", file=sys.stderr, flush=True)
     for fizzy, rust in zip(results["runs"]["fizzy"], results["runs"]["rizzy"]):

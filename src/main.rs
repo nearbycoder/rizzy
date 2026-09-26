@@ -71,11 +71,17 @@ struct App {
     notification_html_cache: tokio::sync::Mutex<HashMap<String, NotificationHtmlCacheEntry>>,
     notification_html_build_locks:
         tokio::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
+    events_html_cache: tokio::sync::Mutex<HashMap<String, EventsHtmlCacheEntry>>,
+    events_html_build_locks: tokio::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
     export_notify: tokio::sync::Notify,
     import_notify: tokio::sync::Notify,
 }
 struct NotificationHtmlCacheEntry {
     version: (i64, Option<String>, i64),
+    html: String,
+    cached_at: Instant,
+}
+struct EventsHtmlCacheEntry {
     html: String,
     cached_at: Instant,
 }
@@ -1515,6 +1521,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         auth_lock: tokio::sync::Mutex::new(()),
         notification_html_cache: tokio::sync::Mutex::new(HashMap::new()),
         notification_html_build_locks: tokio::sync::Mutex::new(HashMap::new()),
+        events_html_cache: tokio::sync::Mutex::new(HashMap::new()),
+        events_html_build_locks: tokio::sync::Mutex::new(HashMap::new()),
         export_notify: tokio::sync::Notify::new(),
         import_notify: tokio::sync::Notify::new(),
     });

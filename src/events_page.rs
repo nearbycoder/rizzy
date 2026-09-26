@@ -1,14 +1,22 @@
 use axum::{
     extract::{Path, RawQuery, State},
-    http::{HeaderMap, StatusCode},
-    response::Html,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{Html, IntoResponse, Response},
 };
 use chrono::{DateTime, NaiveDate, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
+use serde_json::json;
 use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    sync::{Arc, Weak},
+    time::{Duration, Instant},
+};
 
-use super::{App, Principal, Result, Shared, active_user, db_err, err, escape, missing, principal};
+use super::{
+    App, EventsHtmlCacheEntry, Principal, Result, Shared, active_user, db_err, err, escape, hash,
+    missing, principal,
+};
 
 const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card_closed','card_reopened','card_collection_changed','card_board_changed','card_postponed','card_auto_postponed','card_triaged','card_sent_back_to_triage','comment_created')";
 
@@ -16,6 +24,7 @@ const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card
 struct Params {
     day: Option<String>,
     filter_id: Option<String>,
+    filter_key: String,
     boards: Vec<String>,
     creators: Vec<String>,
 }
@@ -39,14 +48,38 @@ fn params(raw: Option<String>) -> Params {
 
 async fn resolved_params(app: &App, p: &Principal, raw: Option<String>) -> Result<Params> {
     let mut result = params(raw.clone());
-    if result.filter_id.is_some() {
+    let filter = if result.filter_id.is_some() {
         // Day timelines use only the board and creator scopes of a saved card
         // filter. The source ignores other query filters when filter_id is set.
-        let filter = super::resolved_card_query(app, p, raw).await?;
+        super::resolved_card_query(app, p, raw).await?
+    } else {
+        super::parse_card_query(raw)
+    };
+    result.filter_key = filter_fingerprint(&filter);
+    if result.filter_id.is_some() {
         result.boards = filter.board_ids;
         result.creators = filter.creator_ids;
     }
     Ok(result)
+}
+
+fn filter_fingerprint(filter: &super::CardQuery) -> String {
+    json!({
+        "indexed_by": filter.indexed_by.as_deref().unwrap_or("all"),
+        "sorted_by": filter.sorted_by.as_deref().unwrap_or("latest"),
+        "assignment_status": filter.assignment_status.as_deref().unwrap_or(""),
+        "creation": filter.creation.as_deref().unwrap_or(""),
+        "closure": filter.closure.as_deref().unwrap_or(""),
+        "board_ids": filter.board_ids,
+        "creator_ids": filter.creator_ids,
+        "card_ids": filter.card_ids,
+        "column_ids": filter.column_ids,
+        "tag_ids": filter.tag_ids,
+        "assignee_ids": filter.assignee_ids,
+        "closer_ids": filter.closer_ids,
+        "terms": filter.terms,
+    })
+    .to_string()
 }
 
 fn timezone(headers: &HeaderMap) -> Tz {
@@ -94,6 +127,59 @@ fn start_of_day(day: NaiveDate, tz: Tz) -> Result<DateTime<Utc>> {
 
 fn timestamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+async fn timeline_etag(
+    app: &App,
+    p: &Principal,
+    params: &Params,
+    tz: Tz,
+    view: &str,
+) -> Result<String> {
+    let day = selected_day(params, tz)?;
+    let start = timestamp(start_of_day(day, tz)?);
+    let end = timestamp(start_of_day(day.succ_opt().ok_or_else(missing)?, tz)?);
+    let mut query = base_query("SELECT COUNT(*),MAX(e.created_at),MAX(e.id)", p, params);
+    query
+        .push(" AND e.created_at >= ")
+        .push_bind(&start)
+        .push(" AND e.created_at < ")
+        .push_bind(&end);
+    let version: (i64, Option<String>, Option<String>) = query
+        .build_query_as()
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(format!(
+        "W/\"{}\"",
+        hash(&format!(
+            "timeline:{}:{}:{day}:{tz}:{view}:{}:{version:?}",
+            p.account_id, p.user_id, params.filter_key
+        ))
+    ))
+}
+
+fn not_modified(headers: &HeaderMap, etag: &str) -> Option<Response> {
+    let matches = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+        });
+    matches.then(|| cache_headers(StatusCode::NOT_MODIFIED.into_response(), etag))
+}
+
+fn cache_headers(mut response: Response, etag: &str) -> Response {
+    response
+        .headers_mut()
+        .insert(header::ETAG, HeaderValue::from_str(etag).expect("hex ETag"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    response
 }
 
 fn base_query<'a>(select: &str, p: &'a Principal, params: &'a Params) -> QueryBuilder<'a, Sqlite> {
@@ -412,10 +498,45 @@ pub(super) async fn index(
     Path(account): Path<String>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
-) -> Result<Html<String>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let params = resolved_params(&app, &p, raw).await?;
     let tz = timezone(&headers);
+    let etag = timeline_etag(&app, &p, &params, tz, "index").await?;
+    if let Some(response) = not_modified(&headers, &etag) {
+        return Ok(response);
+    }
+    let cache_key = format!("index:{etag}");
+    if let Some(cached) = app.events_html_cache.lock().await.get(&cache_key) {
+        if cached.cached_at.elapsed() < Duration::from_secs(1) {
+            return Ok(cache_headers(
+                Html(cached.html.clone()).into_response(),
+                &etag,
+            ));
+        }
+    }
+    let build_lock = {
+        let mut locks = app.events_html_build_locks.lock().await;
+        if locks.len() > 256 {
+            locks.retain(|_, lock| lock.strong_count() > 0);
+        }
+        if let Some(lock) = locks.get(&cache_key).and_then(Weak::upgrade) {
+            lock
+        } else {
+            let lock = Arc::new(tokio::sync::Mutex::new(()));
+            locks.insert(cache_key.clone(), Arc::downgrade(&lock));
+            lock
+        }
+    };
+    let _build_guard = build_lock.lock_owned().await;
+    if let Some(cached) = app.events_html_cache.lock().await.get(&cache_key) {
+        if cached.cached_at.elapsed() < Duration::from_secs(1) {
+            return Ok(cache_headers(
+                Html(cached.html.clone()).into_response(),
+                &etag,
+            ));
+        }
+    }
     let timeline = timeline(&app, &p, &params, tz).await?;
     let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? ORDER BY lower(b.name),b.id")
         .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
@@ -459,7 +580,7 @@ pub(super) async fn index(
         "Latest Activity"
     };
     let body = render_day(&timeline, p.slug, &params, "events/days");
-    Ok(Html(format!(
+    let html = format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a><h1 class=\"header__title\">{title}</h1><a class=\"button\" href=\"/{}/boards/new\">Add a board</a></header><main id=\"main\"><form class=\"events__filters\" action=\"/{}/events\" method=\"get\"><details class=\"quick-filter\"><summary>Board…</summary><div class=\"quick-filter__options\">{board_options}</div></details><details class=\"quick-filter\"><summary>Person…</summary><div class=\"quick-filter__options\">{user_options}</div></details><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{}/events\">Clear</a></form><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
         include_str!("../static/events.css"),
         p.slug,
@@ -467,7 +588,21 @@ pub(super) async fn index(
         p.slug,
         p.slug,
         include_str!("../static/events.js")
-    )))
+    );
+    {
+        let mut cache = app.events_html_cache.lock().await;
+        if cache.len() >= 128 && !cache.contains_key(&cache_key) {
+            cache.clear();
+        }
+        cache.insert(
+            cache_key,
+            EventsHtmlCacheEntry {
+                html: html.clone(),
+                cached_at: Instant::now(),
+            },
+        );
+    }
+    Ok(cache_headers(Html(html).into_response(), &etag))
 }
 
 pub(super) async fn days(
@@ -475,11 +610,19 @@ pub(super) async fn days(
     Path(account): Path<String>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
-) -> Result<Html<String>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let params = resolved_params(&app, &p, raw).await?;
-    let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
-    Ok(Html(render_day(&timeline, p.slug, &params, "events/days")))
+    let tz = timezone(&headers);
+    let etag = timeline_etag(&app, &p, &params, tz, "days").await?;
+    if let Some(response) = not_modified(&headers, &etag) {
+        return Ok(response);
+    }
+    let timeline = timeline(&app, &p, &params, tz).await?;
+    Ok(cache_headers(
+        Html(render_day(&timeline, p.slug, &params, "events/days")).into_response(),
+        &etag,
+    ))
 }
 
 pub(super) async fn user_events(
@@ -487,10 +630,22 @@ pub(super) async fn user_events(
     Path((account, user_id)): Path<(String, String)>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
-) -> Result<Html<String>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let user = active_user(&app, &p, &user_id).await?;
-    Ok(Html(user_fragment(&app, &p, &user, &headers, raw).await?))
+    let mut params = resolved_params(&app, &p, raw.clone()).await?;
+    params.filter_id = None;
+    params.boards.clear();
+    params.creators = vec![user.get("id")];
+    params.filter_key = format!("user:{user_id}");
+    let etag = timeline_etag(&app, &p, &params, timezone(&headers), "user").await?;
+    if let Some(response) = not_modified(&headers, &etag) {
+        return Ok(response);
+    }
+    Ok(cache_headers(
+        Html(user_fragment(&app, &p, &user, &headers, raw).await?).into_response(),
+        &etag,
+    ))
 }
 
 pub(super) async fn user_fragment(
@@ -505,6 +660,7 @@ pub(super) async fn user_fragment(
     params.filter_id = None;
     params.boards.clear();
     params.creators = vec![id.clone()];
+    params.filter_key = format!("user:{id}");
     let timeline = timeline(app, p, &params, timezone(headers)).await?;
     let heading = if p.user_id == id {
         "What have you been up to?".to_owned()
@@ -527,13 +683,18 @@ pub(super) async fn column(
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
-) -> Result<Html<String>> {
+) -> Result<Response> {
     if !["added", "updated", "closed"].contains(&id.as_str()) {
         return Err(err(StatusCode::NOT_FOUND, "Not found"));
     }
     let p = principal(&app, &headers, &account).await?;
     let params = resolved_params(&app, &p, raw).await?;
-    let timeline = timeline(&app, &p, &params, timezone(&headers)).await?;
+    let tz = timezone(&headers);
+    let etag = timeline_etag(&app, &p, &params, tz, "column").await?;
+    if let Some(response) = not_modified(&headers, &etag) {
+        return Ok(response);
+    }
+    let timeline = timeline(&app, &p, &params, tz).await?;
     let selected = timeline
         .columns
         .iter()
@@ -543,7 +704,7 @@ pub(super) async fn column(
     for event in &selected.events {
         events.push_str(&render_event(event, p.slug));
     }
-    Ok(Html(format!(
+    Ok(cache_headers(Html(format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header class=\"header\"><a href=\"/{}/\">Activity</a><h1>{} {} ({})</h1></header><main id=\"main\" class=\"events--grid\">{events}</main></body></html>",
         selected.title,
         include_str!("../static/events.css"),
@@ -551,5 +712,5 @@ pub(super) async fn column(
         selected.title,
         timeline.day.format("%b %-d"),
         selected.count
-    )))
+    )).into_response(), &etag))
 }

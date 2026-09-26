@@ -1,0 +1,126 @@
+{
+  "fixture_cards": 100,
+  "conditional": false,
+  "sample_parity": {
+    "fizzy": {
+      "visible_events": 100,
+      "columns": 3,
+      "html_bytes": 247637,
+      "etag": true
+    },
+    "rizzy": {
+      "visible_events": 100,
+      "columns": 3,
+      "html_bytes": 47174,
+      "etag": true
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 3.0,
+        "requests": 163,
+        "errors": {},
+        "rps": 54.3,
+        "p50_ms": 17.42,
+        "p95_ms": 22.91,
+        "p99_ms": 31.82
+      },
+      {
+        "concurrency": 8,
+        "seconds": 3.02,
+        "requests": 1434,
+        "errors": {},
+        "rps": 475.2,
+        "p50_ms": 15.72,
+        "p95_ms": 25.56,
+        "p99_ms": 32.82
+      },
+      {
+        "concurrency": 32,
+        "seconds": 3.08,
+        "requests": 2264,
+        "errors": {},
+        "rps": 735.4,
+        "p50_ms": 39.05,
+        "p95_ms": 83.04,
+        "p99_ms": 105.44
+      },
+      {
+        "concurrency": 64,
+        "seconds": 3.12,
+        "requests": 2287,
+        "errors": {},
+        "rps": 733.7,
+        "p50_ms": 82.35,
+        "p95_ms": 155.94,
+        "p99_ms": 187.28
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 3.0,
+        "requests": 2951,
+        "errors": {},
+        "rps": 983.5,
+        "p50_ms": 1.02,
+        "p95_ms": 1.32,
+        "p99_ms": 1.51
+      },
+      {
+        "concurrency": 8,
+        "seconds": 3.01,
+        "requests": 2364,
+        "errors": {},
+        "rps": 786.6,
+        "p50_ms": 10.08,
+        "p95_ms": 12.83,
+        "p99_ms": 14.37
+      },
+      {
+        "concurrency": 32,
+        "seconds": 3.03,
+        "requests": 1929,
+        "errors": {},
+        "rps": 636.1,
+        "p50_ms": 49.93,
+        "p95_ms": 59.93,
+        "p99_ms": 63.37
+      },
+      {
+        "concurrency": 64,
+        "seconds": 3.06,
+        "requests": 1894,
+        "errors": {},
+        "rps": 619.9,
+        "p50_ms": 104.18,
+        "p95_ms": 115.1,
+        "p99_ms": 119.17
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 1,
+      "rps_ratio_rizzy_over_fizzy": 18.112,
+      "p95_ratio_fizzy_over_rizzy": 17.356
+    },
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 1.655,
+      "p95_ratio_fizzy_over_rizzy": 1.992
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 0.865,
+      "p95_ratio_fizzy_over_rizzy": 1.386
+    },
+    {
+      "concurrency": 64,
+      "rps_ratio_rizzy_over_fizzy": 0.845,
+      "p95_ratio_fizzy_over_rizzy": 1.355
+    }
+  ]
+}
