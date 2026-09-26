@@ -64,11 +64,12 @@ The pinned Fizzy MySQL search controller and sharded adapter suites passed
 37 tests and 146 assertions on the same Oracle MySQL 8.4.11 server.
 `tests/mysql_search_parity.py` compares the two live apps on title,
 description, and comment hits; English stemming; card text filters; browser
-hit counts; edits; and deletions. Its selected JSON results and hit counts
-matched. A fresh two-process Rizzy run created 80 cards and 80 search records;
-an existing database backfilled 63 records for 63 published cards and
-comments. This does not cover the complete query grammar, exact browser
-highlight and snippet rendering, Unicode indexing, or search throughput.
+result titles, highlighted words, and 20-word excerpts; edits; and deletions.
+Its selected JSON and browser results matched. A fresh two-process Rizzy run
+created 80 cards and 80 search records; an existing database backfilled 63
+records for 63 published cards and comments. This does not cover the complete
+query grammar, every browser highlight and snippet case, Unicode indexing, or
+search throughput.
 
 Remaining database work:
 

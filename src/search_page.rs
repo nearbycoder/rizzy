@@ -1,6 +1,7 @@
 use axum::response::{Html, IntoResponse, Response};
 use regex::{Regex, RegexBuilder};
 use sqlx::Row;
+use std::sync::OnceLock;
 
 use super::{
     App, Principal, Result, SearchQuery, card, db_err, escape, fts_query, mysql_search, page_window,
@@ -65,6 +66,54 @@ fn excerpt(value: &str, pattern: Option<&Regex>) -> String {
         result.push_str("...");
     }
     result.push_str(&highlighted(&words[start..end].join(" "), pattern));
+    if end < words.len() {
+        result.push_str("...");
+    }
+    result
+}
+
+fn mysql_matches(word: &str, stems: &[String]) -> bool {
+    mysql_search::stem_tokens(word)
+        .iter()
+        .any(|stem| stems.contains(stem))
+}
+
+fn mysql_highlighted(value: &str, stems: &[String]) -> String {
+    static WORD: OnceLock<Regex> = OnceLock::new();
+    let pattern = WORD.get_or_init(|| Regex::new(r"\w+").expect("word regex"));
+    let mut result = String::new();
+    let mut end = 0;
+    for found in pattern.find_iter(value) {
+        result.push_str(&escape(&value[end..found.start()]));
+        if mysql_matches(found.as_str(), stems) {
+            result.push_str("<mark class=\"circled-text\"><span></span>");
+            result.push_str(&escape(found.as_str()));
+            result.push_str("</mark>");
+        } else {
+            result.push_str(&escape(found.as_str()));
+        }
+        end = found.end();
+    }
+    result.push_str(&escape(&value[end..]));
+    result
+}
+
+fn mysql_excerpt(value: &str, stems: &[String]) -> String {
+    let text = super::rich_text::plain_text(value);
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= 20 {
+        return mysql_highlighted(&text, stems);
+    }
+    let Some(hit) = words.iter().position(|word| mysql_matches(word, stems)) else {
+        return excerpt(value, None);
+    };
+    let start = hit.saturating_sub(10);
+    let end = (start + 20).min(words.len());
+    let mut result = String::new();
+    if start > 0 {
+        result.push_str("...");
+    }
+    result.push_str(&mysql_highlighted(&words[start..end].join(" "), stems));
     if end < words.len() {
         result.push_str("...");
     }
@@ -178,6 +227,11 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
             };
             next = rows.len() as i64 > limit;
             let pattern = matcher(term);
+            let mysql_stems = if app.mysql {
+                mysql_search::stem_tokens(term)
+            } else {
+                Vec::new()
+            };
             for row in rows.into_iter().take(limit as usize) {
                 found += 1;
                 let kind: String = row.get("kind");
@@ -200,7 +254,9 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 html.push_str("\"><div><h3 class=\"search__title\"># ");
                 html.push_str(&number.to_string());
                 html.push(' ');
-                if kind == "card" {
+                if app.mysql {
+                    html.push_str(&mysql_highlighted(&title, &mysql_stems));
+                } else if kind == "card" {
                     html.push_str(&highlighted(&title, pattern.as_ref()));
                 } else {
                     html.push_str(&escape(&title));
@@ -210,10 +266,12 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                     html.push_str(" search__excerpt--comment");
                 }
                 html.push_str("\">");
-                html.push_str(&excerpt(
-                    comment.as_deref().unwrap_or(&description),
-                    pattern.as_ref(),
-                ));
+                let body = comment.as_deref().unwrap_or(&description);
+                if app.mysql {
+                    html.push_str(&mysql_excerpt(body, &mysql_stems));
+                } else {
+                    html.push_str(&excerpt(body, pattern.as_ref()));
+                }
                 html.push_str("</div></div><div class=\"search__board\">");
                 html.push_str(&escape(&board));
                 html.push_str("</div></a></li>");

@@ -8,14 +8,17 @@ pub(super) fn table(account_id: &str) -> String {
     format!("search_records_{}", hash(account_id.as_bytes()) % 16)
 }
 
-fn stem(value: &str) -> String {
+pub(super) fn stem_tokens(value: &str) -> Vec<String> {
     let stemmer = Stemmer::create(Algorithm::English);
     value
         .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
         .filter(|word| !word.is_empty())
         .map(|word| stemmer.stem(&word.to_ascii_lowercase()).into_owned())
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect()
+}
+
+fn stem(value: &str) -> String {
+    stem_tokens(value).join(" ")
 }
 
 pub(super) fn query(raw: &str, account_id: &str) -> Option<String> {

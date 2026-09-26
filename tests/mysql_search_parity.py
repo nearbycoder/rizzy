@@ -8,6 +8,7 @@ needs a write token. The Rizzy database must be dedicated to tests.
 
 import json
 import http.cookiejar
+from html import unescape
 import os
 import re
 import signal
@@ -91,7 +92,7 @@ def browser_login(target):
         assert response.status == 200
 
 
-def browser_hit_count(target, term):
+def browser_results(target, term):
     request = urllib.request.Request(
         target["url"] + f"/{target['account']}/search?" + urllib.parse.urlencode({"q": term}),
         headers={"Accept": "text/html"},
@@ -99,7 +100,26 @@ def browser_hit_count(target, term):
     with target["opener"].open(request, timeout=12) as response:
         assert response.status == 200
         html = response.read().decode()
-        return len(re.findall(r'<h3[^>]*class="[^"]*search__title[^"]*"', html))
+    title_fragments = re.findall(
+        r'<h3[^>]*class="[^"]*search__title[^"]*"[^>]*>(.*?)</h3>', html, re.S
+    )
+    excerpt_fragments = re.findall(
+        r'<div[^>]*class="[^"]*search__excerpt[^"]*"[^>]*>(.*?)</div>', html, re.S
+    )
+    assert len(title_fragments) == len(excerpt_fragments), (target["name"], term)
+
+    def plain(fragment):
+        return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", "", fragment))).strip()
+
+    def marks(fragment):
+        return [plain(mark) for mark in re.findall(r"<mark[^>]*>(.*?)</mark>", fragment, re.S)]
+
+    return [
+        {"title": re.sub(r"^#\s*\d+\s+", "", plain(title)),
+         "excerpt": plain(excerpt),
+         "title_marks": marks(title), "excerpt_marks": marks(excerpt)}
+        for title, excerpt in zip(title_fragments, excerpt_fragments)
+    ]
 
 
 def run(target, tag):
@@ -113,6 +133,8 @@ def run(target, tag):
         second = card("Some card")
         third = card("Just haggis", "More haggis")
         stemmed = card("Running authentication")
+        filler = " ".join(["word"] * 20)
+        card("Long winded", f"{filler} needle {filler}")
         comment = api(target, f"/cards/{second['number']}/comments", "POST", {"comment": {"body": "overflowing text issue"}}, 201)
         api(target, f"/cards/{third['number']}/comments", "POST", {"comment": {"body": "I love haggis"}}, 201)
         walk = api(target, f"/cards/{stemmed['number']}/comments", "POST", {"comment": {"body": "Walking swiftly"}}, 201)
@@ -121,7 +143,9 @@ def run(target, tag):
             '"Layout is broken"', "missing", "café", "東京",
         )}
         filtered = {term: filtered_cards(target, term) for term in ("run", "haggis", "missing")}
-        browser = {term: browser_hit_count(target, term) for term in ("run", "haggis", "overflowing", "missing")}
+        browser = {term: browser_results(target, term) for term in (
+            "run", "authenticate", "haggis", "overflowing", "needle", "missing",
+        )}
         api(target, f"/cards/{first['number']}", "PUT", {"card": {"title": "Repaired layout"}})
         api(target, f"/cards/{second['number']}/comments/{comment['id']}", "PUT", {"comment": {"body": "Sprinting text issue"}})
         edited = {term: search(target, term) for term in ("repaired", "sprint", "overflowing")}
