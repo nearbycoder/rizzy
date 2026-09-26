@@ -41,10 +41,24 @@ pub(super) async fn ensure(
     name: &str,
     timestamp: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=1")
-        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
-        .bind(timestamp).bind(timestamp)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let mysql = (**tx).backend_name() == "MySQL";
+    let statement = if mysql {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(body_is_null=1,?,updated_at),body_is_null=0"
+    } else {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=1"
+    };
+    let mut query = sqlx::query(statement)
+        .bind(id())
+        .bind(account_id)
+        .bind(record_type)
+        .bind(record_id)
+        .bind(name)
+        .bind(timestamp)
+        .bind(timestamp);
+    if mysql {
+        query = query.bind(timestamp);
+    }
+    query.execute(&mut **tx).await.map_err(db_err)?;
     Ok(())
 }
 
@@ -56,10 +70,24 @@ pub(super) async fn ensure_null(
     name: &str,
     timestamp: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=1,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=0")
-        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
-        .bind(timestamp).bind(timestamp)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let mysql = (**tx).backend_name() == "MySQL";
+    let statement = if mysql {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE updated_at=IF(body_is_null=0,?,updated_at),body_is_null=1"
+    } else {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=1,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=0"
+    };
+    let mut query = sqlx::query(statement)
+        .bind(id())
+        .bind(account_id)
+        .bind(record_type)
+        .bind(record_id)
+        .bind(name)
+        .bind(timestamp)
+        .bind(timestamp);
+    if mysql {
+        query = query.bind(timestamp);
+    }
+    query.execute(&mut **tx).await.map_err(db_err)?;
     Ok(())
 }
 
@@ -76,10 +104,24 @@ pub(super) async fn sync(
     if old_body == new_body || (old_body.is_empty() && new_body.is_empty()) {
         return Ok(());
     }
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at")
-        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
-        .bind(timestamp).bind(timestamp)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let mysql = (**tx).backend_name() == "MySQL";
+    let statement = if mysql {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE body_is_null=0,updated_at=?"
+    } else {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at"
+    };
+    let mut query = sqlx::query(statement)
+        .bind(id())
+        .bind(account_id)
+        .bind(record_type)
+        .bind(record_id)
+        .bind(name)
+        .bind(timestamp)
+        .bind(timestamp);
+    if mysql {
+        query = query.bind(timestamp);
+    }
+    query.execute(&mut **tx).await.map_err(db_err)?;
     Ok(())
 }
 

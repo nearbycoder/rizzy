@@ -470,6 +470,7 @@ mod tests {
             .execute(&db).await.unwrap();
         let app = App {
             db,
+            mysql: false,
             qr_secret: "test-qr-secret".into(),
             write_lock: tokio::sync::Mutex::new(()),
             auth_lock: tokio::sync::Mutex::new(()),

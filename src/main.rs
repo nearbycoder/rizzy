@@ -71,6 +71,7 @@ mod webhook_page;
 
 struct App {
     db: DbPool,
+    mysql: bool,
     qr_secret: String,
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
@@ -83,6 +84,14 @@ struct App {
     board_etag_cache: tokio::sync::Mutex<HashMap<String, BoardEtagCacheEntry>>,
     export_notify: tokio::sync::Notify,
     import_notify: tokio::sync::Notify,
+}
+
+async fn begin_write(app: &App) -> std::result::Result<sqlx::Transaction<'_, Db>, sqlx::Error> {
+    if app.mysql {
+        app.db.begin().await
+    } else {
+        app.db.begin_with("BEGIN IMMEDIATE").await
+    }
 }
 struct NotificationHtmlCacheEntry {
     version: (i64, Option<String>, i64),
@@ -644,13 +653,17 @@ async fn insert_join_code_tx(
     }
 }
 
-async fn mysql_setup(url: &str) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let command = env::args().nth(1);
-    if command.as_deref() != Some("init-db") && command.as_deref() != Some("seed") {
-        return Err("MySQL browser/API queries and trigger migration are not complete".into());
-    }
+fn database_pool_size() -> u32 {
+    env::var("RIZZY_DB_POOL_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(12)
+        .clamp(1, 64)
+}
+
+async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::error::Error>> {
     let db = AnyPoolOptions::new()
-        .max_connections(12)
+        .max_connections(database_pool_size())
         .connect(url)
         .await?;
     let schema = include_str!("../schema.mysql.sql");
@@ -668,12 +681,44 @@ async fn mysql_setup(url: &str) -> std::result::Result<(), Box<dyn std::error::E
     } else if table_count != expected_tables {
         return Err(format!("expected {expected_tables} Rizzy tables, found {table_count}").into());
     }
-    if command.as_deref() == Some("seed") {
-        seed(&db, true).await?;
-    } else {
-        println!("Initialized MySQL schema ({expected_tables} tables)");
+    let installed: HashSet<String> = sqlx::query_scalar(
+        "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=DATABASE()",
+    )
+    .fetch_all(&db)
+    .await?
+    .into_iter()
+    .collect();
+    for section in include_str!("../schema.mysql.triggers.sql")
+        .split("-- trigger: ")
+        .skip(1)
+    {
+        let (name, ddl) = section
+            .split_once('\n')
+            .ok_or("Malformed MySQL trigger section")?;
+        if !installed.contains(name.trim()) {
+            sqlx::raw_sql(ddl.trim()).execute(&db).await?;
+        }
     }
-    Ok(())
+    let backfilled: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='mysql_backfill_v1')",
+    )
+    .fetch_one(&db)
+    .await?;
+    if backfilled == 0 {
+        let mut tx = db.begin().await?;
+        sqlx::raw_sql(include_str!("../schema.mysql.backfill.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('mysql_backfill_v1','done')")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
+    sqlx::query("INSERT IGNORE INTO app_secrets(name,value) VALUES('qr_codes',?)")
+        .bind(random_token())
+        .execute(&db)
+        .await?;
+    Ok(db)
 }
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
@@ -996,7 +1041,7 @@ async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> 
     let comment_id = id();
     let (plain, _, _) = storage::render_rich_text(app, &p.account_id, p.slug, body).await?;
     let content = search_content(plain);
-    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&comment_id).bind(card_id).bind(system).bind(body).bind(content).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     rich_text_records::sync(
@@ -1025,7 +1070,7 @@ async fn record_event(
 ) -> Result<()> {
     let timestamp = now();
     let event_id = id();
-    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
         .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
@@ -1063,7 +1108,7 @@ async fn record_event(
 }
 async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Result<()> {
     let timestamp = now();
-    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     sqlx::query("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at")
         .bind(uuid::Uuid::now_v7().to_string()).bind(card_id).bind(account_id).bind(&timestamp).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
@@ -1084,8 +1129,18 @@ async fn queue_webhooks(
     action: &str,
     timestamp: &str,
 ) -> Result<()> {
-    let webhooks:Vec<String>=sqlx::query_scalar("SELECT w.id FROM webhooks w WHERE w.account_id=? AND w.board_id=? AND w.active=1 AND EXISTS(SELECT 1 FROM json_each(w.subscribed_actions) WHERE value=?)")
-        .bind(account_id).bind(board_id).bind(action).fetch_all(&mut **tx).await.map_err(db_err)?;
+    let statement = if (**tx).backend_name() == "MySQL" {
+        "SELECT w.id FROM webhooks w WHERE w.account_id=? AND w.board_id=? AND w.active=1 AND JSON_CONTAINS(w.subscribed_actions,JSON_QUOTE(?))"
+    } else {
+        "SELECT w.id FROM webhooks w WHERE w.account_id=? AND w.board_id=? AND w.active=1 AND EXISTS(SELECT 1 FROM json_each(w.subscribed_actions) WHERE value=?)"
+    };
+    let webhooks: Vec<String> = sqlx::query_scalar(statement)
+        .bind(account_id)
+        .bind(board_id)
+        .bind(action)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
     for webhook_id in webhooks {
         sqlx::query("INSERT INTO webhook_deliveries(id,account_id,webhook_id,event_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(id()).bind(account_id).bind(webhook_id).bind(event_id).bind(timestamp).bind(timestamp)
@@ -1845,103 +1900,104 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::any::install_default_drivers();
     let url =
         env::var("RIZZY_DATABASE_URL").unwrap_or_else(|_| "sqlite://data/rizzy.sqlite3".into());
-    if url.starts_with("mysql:") {
-        return mysql_setup(&url).await;
-    }
-    if !url.starts_with("sqlite:") {
+    let mysql = url.starts_with("mysql:");
+    if !mysql && !url.starts_with("sqlite:") {
         return Err("RIZZY_DATABASE_URL must use sqlite: or mysql:".into());
     }
-    if url.starts_with("sqlite://data/") {
-        std::fs::create_dir_all("data")?;
-    }
-    let options = url
-        .parse::<SqliteConnectOptions>()?
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5));
-    let pool_size = env::var("RIZZY_DB_POOL_SIZE")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(12)
-        .clamp(1, 64);
-    let setup_connection = SqliteConnection::connect_with(&options).await?;
-    drop(setup_connection);
-    let db = AnyPoolOptions::new()
-        .max_connections(if url.contains(":memory:") {
-            1
-        } else {
-            pool_size
-        })
-        .after_connect(|connection, _| {
-            Box::pin(async move {
-                sqlx::query("PRAGMA foreign_keys=ON")
-                    .execute(&mut *connection)
-                    .await?;
-                sqlx::query("PRAGMA busy_timeout=5000")
-                    .execute(&mut *connection)
-                    .await?;
-                Ok(())
-            })
-        })
-        .connect(&url)
-        .await?;
-    sqlx::raw_sql(include_str!("../schema.sql"))
-        .execute(&db)
-        .await?;
-    rich_text_records::migrate(&db).await?;
-    for (name, definition) in [
-        (
-            "cards_touch_board_insert",
-            "CREATE TRIGGER cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
-        ),
-        (
-            "cards_touch_board_update",
-            "CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
-        ),
-    ] {
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?")
-                .bind(name)
-                .fetch_optional(&db)
-                .await?;
-        if existing
-            .as_deref()
-            .is_none_or(|sql| !sql.contains("WHEN NEW.status='published'"))
-        {
-            let mut tx = db.begin().await?;
-            sqlx::query(&format!("DROP TRIGGER IF EXISTS {name}"))
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query(definition).execute(&mut *tx).await?;
-            tx.commit().await?;
+    let (db, qr_secret, board_etag_connection) = if mysql {
+        let db = mysql_setup(&url).await?;
+        let qr_secret = sqlx::query_scalar("SELECT value FROM app_secrets WHERE name='qr_codes'")
+            .fetch_one(&db)
+            .await?;
+        (db, qr_secret, None)
+    } else {
+        if url.starts_with("sqlite://data/") {
+            std::fs::create_dir_all("data")?;
         }
-    }
-    let old_delete_trigger: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='cards_touch_board_delete'",
-    )
-    .fetch_optional(&db)
-    .await?;
-    if old_delete_trigger.is_some() {
-        sqlx::query("DROP TRIGGER cards_touch_board_delete")
+        let options = url
+            .parse::<SqliteConnectOptions>()?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .foreign_keys(true)
+            .busy_timeout(Duration::from_secs(5));
+        let pool_size = database_pool_size();
+        let setup_connection = SqliteConnection::connect_with(&options).await?;
+        drop(setup_connection);
+        let db = AnyPoolOptions::new()
+            .max_connections(if url.contains(":memory:") {
+                1
+            } else {
+                pool_size
+            })
+            .after_connect(|connection, _| {
+                Box::pin(async move {
+                    sqlx::query("PRAGMA foreign_keys=ON")
+                        .execute(&mut *connection)
+                        .await?;
+                    sqlx::query("PRAGMA busy_timeout=5000")
+                        .execute(&mut *connection)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(&url)
+            .await?;
+        sqlx::raw_sql(include_str!("../schema.sql"))
             .execute(&db)
             .await?;
-    }
-    let closure_columns = sqlx::query("PRAGMA table_info(closures)")
-        .fetch_all(&db)
+        rich_text_records::migrate(&db).await?;
+        for (name, definition) in [
+            (
+                "cards_touch_board_insert",
+                "CREATE TRIGGER cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
+            ),
+            (
+                "cards_touch_board_update",
+                "CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
+            ),
+        ] {
+            let existing: Option<String> =
+                sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?")
+                    .bind(name)
+                    .fetch_optional(&db)
+                    .await?;
+            if existing
+                .as_deref()
+                .is_none_or(|sql| !sql.contains("WHEN NEW.status='published'"))
+            {
+                let mut tx = db.begin().await?;
+                sqlx::query(&format!("DROP TRIGGER IF EXISTS {name}"))
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query(definition).execute(&mut *tx).await?;
+                tx.commit().await?;
+            }
+        }
+        let old_delete_trigger: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='cards_touch_board_delete'",
+        )
+        .fetch_optional(&db)
         .await?;
-    if !closure_columns
-        .iter()
-        .any(|row| row.get::<String, _>("name") == "id")
-    {
-        let mut tx = db.begin().await?;
-        sqlx::query("CREATE TABLE closures_rebuilt (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, card_id TEXT NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        if old_delete_trigger.is_some() {
+            sqlx::query("DROP TRIGGER cards_touch_board_delete")
+                .execute(&db)
+                .await?;
+        }
+        let closure_columns = sqlx::query("PRAGMA table_info(closures)")
+            .fetch_all(&db)
+            .await?;
+        if !closure_columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "id")
+        {
+            let mut tx = db.begin().await?;
+            sqlx::query("CREATE TABLE closures_rebuilt (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, card_id TEXT NOT NULL UNIQUE REFERENCES cards(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
             .execute(&mut *tx).await?;
-        let legacy = sqlx::query("SELECT z.card_id,c.account_id,z.user_id,z.created_at FROM closures z JOIN cards c ON c.id=z.card_id")
+            let legacy = sqlx::query("SELECT z.card_id,c.account_id,z.user_id,z.created_at FROM closures z JOIN cards c ON c.id=z.card_id")
             .fetch_all(&mut *tx).await?;
-        for row in legacy {
-            let timestamp: String = row.get("created_at");
-            sqlx::query("INSERT INTO closures_rebuilt(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            for row in legacy {
+                let timestamp: String = row.get("created_at");
+                sqlx::query("INSERT INTO closures_rebuilt(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(id())
                 .bind(row.get::<String, _>("account_id"))
                 .bind(row.get::<String, _>("card_id"))
@@ -1949,160 +2005,162 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            sqlx::query("DROP TABLE closures").execute(&mut *tx).await?;
+            sqlx::query("ALTER TABLE closures_rebuilt RENAME TO closures")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
         }
-        sqlx::query("DROP TABLE closures").execute(&mut *tx).await?;
-        sqlx::query("ALTER TABLE closures_rebuilt RENAME TO closures")
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-    }
-    sqlx::query("CREATE INDEX IF NOT EXISTS closures_user_created ON closures(user_id,created_at)")
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS closures_user_created ON closures(user_id,created_at)",
+        )
         .execute(&db)
         .await?;
-    sqlx::query(
+        sqlx::query(
         "CREATE INDEX IF NOT EXISTS closures_account_created ON closures(account_id,created_at)",
     )
     .execute(&db)
     .await?;
-    let spike_columns = sqlx::query("PRAGMA table_info(card_activity_spikes)")
-        .fetch_all(&db)
-        .await?;
-    if !spike_columns
-        .iter()
-        .any(|row| row.get::<String, _>("name") == "id")
-    {
-        sqlx::query("ALTER TABLE card_activity_spikes ADD COLUMN id TEXT")
-            .execute(&db)
-            .await?;
-    }
-    let spikes_missing_ids =
-        sqlx::query("SELECT card_id FROM card_activity_spikes WHERE id IS NULL")
+        let spike_columns = sqlx::query("PRAGMA table_info(card_activity_spikes)")
             .fetch_all(&db)
             .await?;
-    if !spikes_missing_ids.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in spikes_missing_ids {
-            sqlx::query("UPDATE card_activity_spikes SET id=? WHERE card_id=? AND id IS NULL")
-                .bind(uuid::Uuid::now_v7().to_string())
-                .bind(row.get::<String, _>("card_id"))
-                .execute(&mut *tx)
-                .await?;
-        }
-        tx.commit().await?;
-    }
-    let spike_fks = sqlx::query("PRAGMA foreign_key_list(card_activity_spikes)")
-        .fetch_all(&db)
-        .await?;
-    if spike_fks
-        .iter()
-        .any(|row| row.get::<String, _>("table") == "cards")
-    {
-        let mut tx = db.begin().await?;
-        sqlx::query("DROP TRIGGER IF EXISTS cards_delete_activity_spikes")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("CREATE TABLE card_activity_spikes_rebuilt (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, card_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO card_activity_spikes_rebuilt(id,account_id,card_id,created_at,updated_at) SELECT id,account_id,card_id,created_at,updated_at FROM card_activity_spikes")
-            .execute(&mut *tx).await?;
-        sqlx::query("DROP TABLE card_activity_spikes")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER TABLE card_activity_spikes_rebuilt RENAME TO card_activity_spikes")
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-    }
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS cards_delete_activity_spikes AFTER DELETE ON cards BEGIN DELETE FROM card_activity_spikes WHERE card_id=OLD.id; END")
-        .execute(&db).await?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS card_activity_spikes_account_updated ON card_activity_spikes(account_id,updated_at)")
-        .execute(&db).await?;
-    let watch_columns = sqlx::query("PRAGMA table_info(watches)")
-        .fetch_all(&db)
-        .await?;
-    for column in ["id", "created_at", "updated_at"] {
-        if !watch_columns
+        if !spike_columns
             .iter()
-            .any(|row| row.get::<String, _>("name") == column)
+            .any(|row| row.get::<String, _>("name") == "id")
         {
-            sqlx::query(&format!("ALTER TABLE watches ADD COLUMN {column} TEXT"))
+            sqlx::query("ALTER TABLE card_activity_spikes ADD COLUMN id TEXT")
                 .execute(&db)
                 .await?;
         }
-    }
-    let legacy_watches = sqlx::query("SELECT w.card_id,w.user_id,c.created_at FROM watches w JOIN cards c ON c.id=w.card_id WHERE w.id IS NULL OR w.created_at IS NULL OR w.updated_at IS NULL")
+        let spikes_missing_ids =
+            sqlx::query("SELECT card_id FROM card_activity_spikes WHERE id IS NULL")
+                .fetch_all(&db)
+                .await?;
+        if !spikes_missing_ids.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in spikes_missing_ids {
+                sqlx::query("UPDATE card_activity_spikes SET id=? WHERE card_id=? AND id IS NULL")
+                    .bind(uuid::Uuid::now_v7().to_string())
+                    .bind(row.get::<String, _>("card_id"))
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            tx.commit().await?;
+        }
+        let spike_fks = sqlx::query("PRAGMA foreign_key_list(card_activity_spikes)")
+            .fetch_all(&db)
+            .await?;
+        if spike_fks
+            .iter()
+            .any(|row| row.get::<String, _>("table") == "cards")
+        {
+            let mut tx = db.begin().await?;
+            sqlx::query("DROP TRIGGER IF EXISTS cards_delete_activity_spikes")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("CREATE TABLE card_activity_spikes_rebuilt (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, card_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            .execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO card_activity_spikes_rebuilt(id,account_id,card_id,created_at,updated_at) SELECT id,account_id,card_id,created_at,updated_at FROM card_activity_spikes")
+            .execute(&mut *tx).await?;
+            sqlx::query("DROP TABLE card_activity_spikes")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("ALTER TABLE card_activity_spikes_rebuilt RENAME TO card_activity_spikes")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS cards_delete_activity_spikes AFTER DELETE ON cards BEGIN DELETE FROM card_activity_spikes WHERE card_id=OLD.id; END")
+        .execute(&db).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS card_activity_spikes_account_updated ON card_activity_spikes(account_id,updated_at)")
+        .execute(&db).await?;
+        let watch_columns = sqlx::query("PRAGMA table_info(watches)")
+            .fetch_all(&db)
+            .await?;
+        for column in ["id", "created_at", "updated_at"] {
+            if !watch_columns
+                .iter()
+                .any(|row| row.get::<String, _>("name") == column)
+            {
+                sqlx::query(&format!("ALTER TABLE watches ADD COLUMN {column} TEXT"))
+                    .execute(&db)
+                    .await?;
+            }
+        }
+        let legacy_watches = sqlx::query("SELECT w.card_id,w.user_id,c.created_at FROM watches w JOIN cards c ON c.id=w.card_id WHERE w.id IS NULL OR w.created_at IS NULL OR w.updated_at IS NULL")
         .fetch_all(&db).await?;
-    if !legacy_watches.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_watches {
-            let created_at: String = row.get("created_at");
-            sqlx::query("UPDATE watches SET id=COALESCE(id,?),created_at=COALESCE(created_at,?),updated_at=COALESCE(updated_at,created_at,?) WHERE card_id=? AND user_id=?")
+        if !legacy_watches.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_watches {
+                let created_at: String = row.get("created_at");
+                sqlx::query("UPDATE watches SET id=COALESCE(id,?),created_at=COALESCE(created_at,?),updated_at=COALESCE(updated_at,created_at,?) WHERE card_id=? AND user_id=?")
                 .bind(id()).bind(&created_at).bind(&created_at)
                 .bind(row.get::<String, _>("card_id"))
                 .bind(row.get::<String, _>("user_id"))
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS watches_id ON watches(id)")
-        .execute(&db)
-        .await?;
-    sqlx::query("INSERT OR IGNORE INTO user_attachables(user_id,account_id,sgid) SELECT id,account_id,lower(hex(randomblob(32))) FROM users")
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS watches_id ON watches(id)")
+            .execute(&db)
+            .await?;
+        sqlx::query("INSERT OR IGNORE INTO user_attachables(user_id,account_id,sgid) SELECT id,account_id,lower(hex(randomblob(32))) FROM users")
         .execute(&db).await?;
-    migrate_notification_sources(&db).await?;
-    backfill_system_users(&db).await?;
-    let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
-        .fetch_all(&db)
-        .await?;
-    for (column, definition) in [
-        ("width", "INTEGER"),
-        ("height", "INTEGER"),
-        ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
-    ] {
-        if !blob_columns
-            .iter()
-            .any(|row| row.get::<String, _>("name") == column)
-        {
-            sqlx::query(&format!(
-                "ALTER TABLE storage_blobs ADD COLUMN {column} {definition}"
-            ))
-            .execute(&db)
+        migrate_notification_sources(&db).await?;
+        backfill_system_users(&db).await?;
+        let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
+            .fetch_all(&db)
             .await?;
+        for (column, definition) in [
+            ("width", "INTEGER"),
+            ("height", "INTEGER"),
+            ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+        ] {
+            if !blob_columns
+                .iter()
+                .any(|row| row.get::<String, _>("name") == column)
+            {
+                sqlx::query(&format!(
+                    "ALTER TABLE storage_blobs ADD COLUMN {column} {definition}"
+                ))
+                .execute(&db)
+                .await?;
+            }
         }
-    }
-    let card_columns = sqlx::query("PRAGMA table_info(cards)")
-        .fetch_all(&db)
-        .await?;
-    if !card_columns
-        .iter()
-        .any(|row| row.get::<String, _>("name") == "due_on")
-    {
-        sqlx::query("ALTER TABLE cards ADD COLUMN due_on TEXT")
-            .execute(&db)
+        let card_columns = sqlx::query("PRAGMA table_info(cards)")
+            .fetch_all(&db)
             .await?;
-    }
-    let download_columns = sqlx::query("PRAGMA table_info(storage_download_tokens)")
-        .fetch_all(&db)
-        .await?;
-    for (column, default) in [("disposition", "inline"), ("variant", "original")] {
-        if !download_columns
+        if !card_columns
             .iter()
-            .any(|row| row.get::<String, _>("name") == column)
+            .any(|row| row.get::<String, _>("name") == "due_on")
         {
-            sqlx::query(&format!(
+            sqlx::query("ALTER TABLE cards ADD COLUMN due_on TEXT")
+                .execute(&db)
+                .await?;
+        }
+        let download_columns = sqlx::query("PRAGMA table_info(storage_download_tokens)")
+            .fetch_all(&db)
+            .await?;
+        for (column, default) in [("disposition", "inline"), ("variant", "original")] {
+            if !download_columns
+                .iter()
+                .any(|row| row.get::<String, _>("name") == column)
+            {
+                sqlx::query(&format!(
                 "ALTER TABLE storage_download_tokens ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'"
             ))
             .execute(&db)
             .await?;
+            }
         }
-    }
-    let legacy_closures = sqlx::query("SELECT c.id,c.account_id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id) AS user_id,COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) AS created_at FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
+        let legacy_closures = sqlx::query("SELECT c.id,c.account_id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id) AS user_id,COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) AS created_at FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
         .fetch_all(&db).await?;
-    if !legacy_closures.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_closures {
-            let timestamp: String = row.get("created_at");
-            sqlx::query("INSERT OR IGNORE INTO closures(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        if !legacy_closures.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_closures {
+                let timestamp: String = row.get("created_at");
+                sqlx::query("INSERT OR IGNORE INTO closures(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(id())
                 .bind(row.get::<String, _>("account_id"))
                 .bind(row.get::<String, _>("id"))
@@ -2110,32 +2168,32 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    let legacy_goldnesses = sqlx::query("SELECT c.id,c.account_id,c.updated_at FROM cards c WHERE c.golden=1 AND NOT EXISTS(SELECT 1 FROM card_goldnesses g WHERE g.card_id=c.id)")
+        let legacy_goldnesses = sqlx::query("SELECT c.id,c.account_id,c.updated_at FROM cards c WHERE c.golden=1 AND NOT EXISTS(SELECT 1 FROM card_goldnesses g WHERE g.card_id=c.id)")
         .fetch_all(&db).await?;
-    if !legacy_goldnesses.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_goldnesses {
-            let timestamp: String = row.get("updated_at");
-            sqlx::query("INSERT OR IGNORE INTO card_goldnesses(id,account_id,card_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+        if !legacy_goldnesses.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_goldnesses {
+                let timestamp: String = row.get("updated_at");
+                sqlx::query("INSERT OR IGNORE INTO card_goldnesses(id,account_id,card_id,created_at,updated_at) VALUES(?,?,?,?,?)")
                 .bind(uuid::Uuid::now_v7().to_string())
                 .bind(row.get::<String,_>("account_id"))
                 .bind(row.get::<String,_>("id"))
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    let legacy_not_nows = sqlx::query("SELECT c.id,c.account_id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action IN ('card_postponed','card_auto_postponed') ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id) AS user_id,COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action IN ('card_postponed','card_auto_postponed') ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) AS created_at FROM cards c WHERE c.postponed=1 AND NOT EXISTS(SELECT 1 FROM card_not_nows n WHERE n.card_id=c.id)")
+        let legacy_not_nows = sqlx::query("SELECT c.id,c.account_id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action IN ('card_postponed','card_auto_postponed') ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id) AS user_id,COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action IN ('card_postponed','card_auto_postponed') ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) AS created_at FROM cards c WHERE c.postponed=1 AND NOT EXISTS(SELECT 1 FROM card_not_nows n WHERE n.card_id=c.id)")
         .fetch_all(&db).await?;
-    if !legacy_not_nows.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_not_nows {
-            let timestamp: String = row.get("created_at");
-            sqlx::query("INSERT OR IGNORE INTO card_not_nows(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        if !legacy_not_nows.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_not_nows {
+                let timestamp: String = row.get("created_at");
+                sqlx::query("INSERT OR IGNORE INTO card_not_nows(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(uuid::Uuid::now_v7().to_string())
                 .bind(row.get::<String,_>("account_id"))
                 .bind(row.get::<String,_>("id"))
@@ -2143,206 +2201,208 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    let user_columns = sqlx::query("PRAGMA table_info(users)")
-        .fetch_all(&db)
-        .await?;
-    if !user_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "verified_at")
-    {
-        sqlx::query("ALTER TABLE users ADD COLUMN verified_at TEXT")
+        let user_columns = sqlx::query("PRAGMA table_info(users)")
+            .fetch_all(&db)
+            .await?;
+        if !user_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "verified_at")
+        {
+            sqlx::query("ALTER TABLE users ADD COLUMN verified_at TEXT")
+                .execute(&db)
+                .await?;
+            sqlx::query("UPDATE users SET verified_at=created_at WHERE role='owner'")
+                .execute(&db)
+                .await?;
+        }
+        if !user_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at")
+        {
+            sqlx::query("ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+                .execute(&db)
+                .await?;
+        }
+        sqlx::query("UPDATE users SET updated_at=created_at WHERE updated_at=''")
             .execute(&db)
             .await?;
-        sqlx::query("UPDATE users SET verified_at=created_at WHERE role='owner'")
-            .execute(&db)
-            .await?;
-    }
-    if !user_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "updated_at")
-    {
-        sqlx::query("ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
-            .execute(&db)
-            .await?;
-    }
-    sqlx::query("UPDATE users SET updated_at=created_at WHERE updated_at=''")
+        migrate_deactivated_users(&db).await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_insert AFTER INSERT ON users WHEN NEW.updated_at='' BEGIN UPDATE users SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
-    migrate_deactivated_users(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_insert AFTER INSERT ON users WHEN NEW.updated_at='' BEGIN UPDATE users SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_change AFTER UPDATE OF name,role,active,verified_at,identity_id ON users WHEN NEW.name IS NOT OLD.name OR NEW.role IS NOT OLD.role OR NEW.active IS NOT OLD.active OR NEW.verified_at IS NOT OLD.verified_at OR NEW.identity_id IS NOT OLD.identity_id BEGIN UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_change AFTER UPDATE OF name,role,active,verified_at,identity_id ON users WHEN NEW.name IS NOT OLD.name OR NEW.role IS NOT OLD.role OR NEW.active IS NOT OLD.active OR NEW.verified_at IS NOT OLD.verified_at OR NEW.identity_id IS NOT OLD.identity_id BEGIN UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.id; END")
-        .execute(&db)
-        .await?;
-    sqlx::query("INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE role!='system'")
+        sqlx::query("INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE role!='system'")
         .execute(&db).await?;
-    let legacy_user_settings = sqlx::query("SELECT u.id,u.account_id,u.created_at FROM users u WHERE u.role!='system' AND NOT EXISTS(SELECT 1 FROM user_settings_records r WHERE r.user_id=u.id)")
+        let legacy_user_settings = sqlx::query("SELECT u.id,u.account_id,u.created_at FROM users u WHERE u.role!='system' AND NOT EXISTS(SELECT 1 FROM user_settings_records r WHERE r.user_id=u.id)")
         .fetch_all(&db).await?;
-    if !legacy_user_settings.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_user_settings {
-            let timestamp: String = row.get("created_at");
-            sqlx::query("INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+        if !legacy_user_settings.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_user_settings {
+                let timestamp: String = row.get("created_at");
+                sqlx::query("INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?)")
                 .bind(id())
                 .bind(row.get::<String, _>("account_id"))
                 .bind(row.get::<String, _>("id"))
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_user_insert AFTER INSERT ON users WHEN NEW.role!='system' BEGIN INSERT INTO notification_settings(user_id,account_id) VALUES(NEW.id,NEW.account_id); INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,NEW.id,NEW.created_at,NEW.created_at); END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_user_insert AFTER INSERT ON users WHEN NEW.role!='system' BEGIN INSERT INTO notification_settings(user_id,account_id) VALUES(NEW.id,NEW.account_id); INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,NEW.id,NEW.created_at,NEW.created_at); END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_frequency_update AFTER UPDATE OF bundle_email_frequency ON notification_settings WHEN NEW.bundle_email_frequency<>OLD.bundle_email_frequency BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_frequency_update AFTER UPDATE OF bundle_email_frequency ON notification_settings WHEN NEW.bundle_email_frequency<>OLD.bundle_email_frequency BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_insert AFTER INSERT ON user_timezones WHEN NEW.timezone_name IS NOT NULL BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_insert AFTER INSERT ON user_timezones WHEN NEW.timezone_name IS NOT NULL BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_update AFTER UPDATE OF timezone_name ON user_timezones WHEN OLD.timezone_name IS NOT NEW.timezone_name BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_update AFTER UPDATE OF timezone_name ON user_timezones WHEN OLD.timezone_name IS NOT NEW.timezone_name BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=NEW.user_id; END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_delete AFTER DELETE ON user_timezones BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=OLD.user_id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS user_settings_timezone_delete AFTER DELETE ON user_timezones BEGIN UPDATE user_settings_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=OLD.user_id; END")
         .execute(&db).await?;
-    for table in ["cards", "comments"] {
-        let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+        for table in ["cards", "comments"] {
+            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(&db)
+                .await?;
+            if !columns
+                .iter()
+                .any(|row| row.get::<String, _>("name") == "search_text")
+            {
+                sqlx::query(&format!(
+                    "ALTER TABLE {table} ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
+                ))
+                .execute(&db)
+                .await?;
+            }
+        }
+        let access_columns = sqlx::query("PRAGMA table_info(accesses)")
             .fetch_all(&db)
             .await?;
-        if !columns
+        if !access_columns
             .iter()
-            .any(|row| row.get::<String, _>("name") == "search_text")
+            .any(|r| r.get::<String, _>("name") == "accessed_at")
         {
-            sqlx::query(&format!(
-                "ALTER TABLE {table} ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
-            ))
-            .execute(&db)
-            .await?;
+            sqlx::query("ALTER TABLE accesses ADD COLUMN accessed_at TEXT")
+                .execute(&db)
+                .await?;
         }
-    }
-    let access_columns = sqlx::query("PRAGMA table_info(accesses)")
-        .fetch_all(&db)
-        .await?;
-    if !access_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "accessed_at")
-    {
-        sqlx::query("ALTER TABLE accesses ADD COLUMN accessed_at TEXT")
-            .execute(&db)
+        let webhook_columns = sqlx::query("PRAGMA table_info(webhooks)")
+            .fetch_all(&db)
             .await?;
-    }
-    let webhook_columns = sqlx::query("PRAGMA table_info(webhooks)")
-        .fetch_all(&db)
-        .await?;
-    if !webhook_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "consecutive_failures_count")
-    {
-        sqlx::query(
+        if !webhook_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "consecutive_failures_count")
+        {
+            sqlx::query(
             "ALTER TABLE webhooks ADD COLUMN consecutive_failures_count INTEGER NOT NULL DEFAULT 0",
         )
         .execute(&db)
         .await?;
-    }
-    if !webhook_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "first_failure_at")
-    {
-        sqlx::query("ALTER TABLE webhooks ADD COLUMN first_failure_at TEXT")
-            .execute(&db)
+        }
+        if !webhook_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "first_failure_at")
+        {
+            sqlx::query("ALTER TABLE webhooks ADD COLUMN first_failure_at TEXT")
+                .execute(&db)
+                .await?;
+        }
+        let comment_columns = sqlx::query("PRAGMA table_info(comments)")
+            .fetch_all(&db)
             .await?;
-    }
-    let comment_columns = sqlx::query("PRAGMA table_info(comments)")
-        .fetch_all(&db)
-        .await?;
-    if !comment_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "updated_at")
-    {
-        sqlx::query("ALTER TABLE comments ADD COLUMN updated_at TEXT")
-            .execute(&db)
+        if !comment_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at")
+        {
+            sqlx::query("ALTER TABLE comments ADD COLUMN updated_at TEXT")
+                .execute(&db)
+                .await?;
+            sqlx::query("UPDATE comments SET updated_at=created_at WHERE updated_at IS NULL")
+                .execute(&db)
+                .await?;
+        }
+        let event_columns = sqlx::query("PRAGMA table_info(events)")
+            .fetch_all(&db)
             .await?;
-        sqlx::query("UPDATE comments SET updated_at=created_at WHERE updated_at IS NULL")
-            .execute(&db)
-            .await?;
-    }
-    let event_columns = sqlx::query("PRAGMA table_info(events)")
-        .fetch_all(&db)
-        .await?;
-    if !event_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "updated_at")
-    {
-        sqlx::query("ALTER TABLE events ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
-            .execute(&db)
-            .await?;
-        sqlx::query("UPDATE events SET updated_at=created_at WHERE updated_at=''")
-            .execute(&db)
-            .await?;
-    }
-    // Legacy writers and test fixtures may still omit the column on insert.
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS events_updated_at_insert AFTER INSERT ON events WHEN NEW.updated_at='' BEGIN UPDATE events SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        if !event_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at")
+        {
+            sqlx::query("ALTER TABLE events ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+                .execute(&db)
+                .await?;
+            sqlx::query("UPDATE events SET updated_at=created_at WHERE updated_at=''")
+                .execute(&db)
+                .await?;
+        }
+        // Legacy writers and test fixtures may still omit the column on insert.
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS events_updated_at_insert AFTER INSERT ON events WHEN NEW.updated_at='' BEGIN UPDATE events SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
-    let step_columns = sqlx::query("PRAGMA table_info(steps)")
-        .fetch_all(&db)
-        .await?;
-    if !step_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "updated_at")
-    {
-        sqlx::query("ALTER TABLE steps ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
-            .execute(&db)
+        let step_columns = sqlx::query("PRAGMA table_info(steps)")
+            .fetch_all(&db)
             .await?;
-        sqlx::query("UPDATE steps SET updated_at=created_at WHERE updated_at=''")
-            .execute(&db)
-            .await?;
-    }
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS steps_updated_at_insert AFTER INSERT ON steps WHEN NEW.updated_at='' BEGIN UPDATE steps SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        if !step_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at")
+        {
+            sqlx::query("ALTER TABLE steps ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+                .execute(&db)
+                .await?;
+            sqlx::query("UPDATE steps SET updated_at=created_at WHERE updated_at=''")
+                .execute(&db)
+                .await?;
+        }
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS steps_updated_at_insert AFTER INSERT ON steps WHEN NEW.updated_at='' BEGIN UPDATE steps SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
-    let tag_columns = sqlx::query("PRAGMA table_info(tags)")
-        .fetch_all(&db)
-        .await?;
-    if !tag_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "created_at")
-    {
-        sqlx::query("ALTER TABLE tags ADD COLUMN created_at TEXT")
+        let tag_columns = sqlx::query("PRAGMA table_info(tags)")
+            .fetch_all(&db)
+            .await?;
+        if !tag_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "created_at")
+        {
+            sqlx::query("ALTER TABLE tags ADD COLUMN created_at TEXT")
+                .execute(&db)
+                .await?;
+            sqlx::query("UPDATE tags SET created_at=? WHERE created_at IS NULL")
+                .bind(now())
+                .execute(&db)
+                .await?;
+        }
+        let board_columns = sqlx::query("PRAGMA table_info(boards)")
+            .fetch_all(&db)
+            .await?;
+        if !board_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "public_description")
+        {
+            sqlx::query(
+                "ALTER TABLE boards ADD COLUMN public_description TEXT NOT NULL DEFAULT ''",
+            )
             .execute(&db)
             .await?;
-        sqlx::query("UPDATE tags SET created_at=? WHERE created_at IS NULL")
-            .bind(now())
-            .execute(&db)
-            .await?;
-    }
-    let board_columns = sqlx::query("PRAGMA table_info(boards)")
-        .fetch_all(&db)
-        .await?;
-    if !board_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "public_description")
-    {
-        sqlx::query("ALTER TABLE boards ADD COLUMN public_description TEXT NOT NULL DEFAULT ''")
-            .execute(&db)
-            .await?;
-    }
-    if !board_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "publication_key")
-    {
-        sqlx::query("ALTER TABLE boards ADD COLUMN publication_key TEXT")
-            .execute(&db)
-            .await?;
-    }
-    let legacy_publications = sqlx::query("SELECT b.id,b.account_id,b.publication_key,b.updated_at FROM boards b WHERE b.publication_key IS NOT NULL AND NOT EXISTS(SELECT 1 FROM board_publications p WHERE p.board_id=b.id)")
+        }
+        if !board_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "publication_key")
+        {
+            sqlx::query("ALTER TABLE boards ADD COLUMN publication_key TEXT")
+                .execute(&db)
+                .await?;
+        }
+        let legacy_publications = sqlx::query("SELECT b.id,b.account_id,b.publication_key,b.updated_at FROM boards b WHERE b.publication_key IS NOT NULL AND NOT EXISTS(SELECT 1 FROM board_publications p WHERE p.board_id=b.id)")
         .fetch_all(&db).await?;
-    if !legacy_publications.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_publications {
-            let timestamp: String = row.get("updated_at");
-            sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        if !legacy_publications.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_publications {
+                let timestamp: String = row.get("updated_at");
+                sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(id())
                 .bind(row.get::<String, _>("account_id"))
                 .bind(row.get::<String, _>("id"))
@@ -2350,45 +2410,49 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    if !board_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "entropy_override")
-    {
-        sqlx::query("ALTER TABLE boards ADD COLUMN entropy_override INTEGER NOT NULL DEFAULT 0")
+        if !board_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "entropy_override")
+        {
+            sqlx::query(
+                "ALTER TABLE boards ADD COLUMN entropy_override INTEGER NOT NULL DEFAULT 0",
+            )
             .execute(&db)
             .await?;
-        sqlx::query("UPDATE boards SET entropy_override=1 WHERE auto_postpone_period_in_days!=30")
+            sqlx::query(
+                "UPDATE boards SET entropy_override=1 WHERE auto_postpone_period_in_days!=30",
+            )
             .execute(&db)
             .await?;
-    }
-    let access_columns = sqlx::query("PRAGMA table_info(accesses)")
-        .fetch_all(&db)
-        .await?;
-    if !access_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "involvement")
-    {
-        sqlx::query(
-            "ALTER TABLE accesses ADD COLUMN involvement TEXT NOT NULL DEFAULT 'access_only'",
-        )
-        .execute(&db)
-        .await?;
-        sqlx::query("UPDATE accesses SET involvement='watching' WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=accesses.board_id AND b.creator_id=accesses.user_id)")
+        }
+        let access_columns = sqlx::query("PRAGMA table_info(accesses)")
+            .fetch_all(&db)
+            .await?;
+        if !access_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "involvement")
+        {
+            sqlx::query(
+                "ALTER TABLE accesses ADD COLUMN involvement TEXT NOT NULL DEFAULT 'access_only'",
+            )
+            .execute(&db)
+            .await?;
+            sqlx::query("UPDATE accesses SET involvement='watching' WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=accesses.board_id AND b.creator_id=accesses.user_id)")
             .execute(&db).await?;
-    }
-    sqlx::query("DELETE FROM access_records WHERE NOT EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=access_records.board_id AND x.user_id=access_records.user_id)")
+        }
+        sqlx::query("DELETE FROM access_records WHERE NOT EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=access_records.board_id AND x.user_id=access_records.user_id)")
         .execute(&db).await?;
-    sqlx::query("UPDATE access_records SET account_id=(SELECT b.account_id FROM boards b WHERE b.id=access_records.board_id) WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=access_records.board_id AND b.account_id<>access_records.account_id)")
+        sqlx::query("UPDATE access_records SET account_id=(SELECT b.account_id FROM boards b WHERE b.id=access_records.board_id) WHERE EXISTS(SELECT 1 FROM boards b WHERE b.id=access_records.board_id AND b.account_id<>access_records.account_id)")
         .execute(&db).await?;
-    let legacy_accesses = sqlx::query("SELECT x.board_id,x.user_id,b.account_id,b.created_at,COALESCE(x.accessed_at,b.created_at) AS updated_at FROM accesses x JOIN boards b ON b.id=x.board_id WHERE NOT EXISTS(SELECT 1 FROM access_records r WHERE r.board_id=x.board_id AND r.user_id=x.user_id)")
+        let legacy_accesses = sqlx::query("SELECT x.board_id,x.user_id,b.account_id,b.created_at,COALESCE(x.accessed_at,b.created_at) AS updated_at FROM accesses x JOIN boards b ON b.id=x.board_id WHERE NOT EXISTS(SELECT 1 FROM access_records r WHERE r.board_id=x.board_id AND r.user_id=x.user_id)")
         .fetch_all(&db).await?;
-    if !legacy_accesses.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_accesses {
-            sqlx::query("INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        if !legacy_accesses.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_accesses {
+                sqlx::query("INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(row.get::<String, _>("board_id"))
                 .bind(row.get::<String, _>("user_id"))
                 .bind(id())
@@ -2396,70 +2460,70 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(row.get::<String, _>("created_at"))
                 .bind(row.get::<String, _>("updated_at"))
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS access_records_insert AFTER INSERT ON accesses BEGIN INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(NEW.board_id,NEW.user_id,'0'||substr(lower(hex(randomblob(16))),1,24),(SELECT account_id FROM boards WHERE id=NEW.board_id),strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')); END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS access_records_insert AFTER INSERT ON accesses BEGIN INSERT INTO access_records(board_id,user_id,id,account_id,created_at,updated_at) VALUES(NEW.board_id,NEW.user_id,'0'||substr(lower(hex(randomblob(16))),1,24),(SELECT account_id FROM boards WHERE id=NEW.board_id),strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')); END")
         .execute(&db).await?;
-    let access_update_sql = "CREATE TRIGGER access_records_update AFTER UPDATE OF involvement,accessed_at ON accesses WHEN NEW.involvement IS NOT OLD.involvement OR NEW.accessed_at IS NOT OLD.accessed_at BEGIN UPDATE access_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.board_id AND user_id=NEW.user_id; END";
-    let access_update_existing: Option<String> = sqlx::query_scalar(
-        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='access_records_update'",
-    )
-    .fetch_optional(&db)
-    .await?;
-    if access_update_existing
-        .as_deref()
-        .is_none_or(|sql| !sql.contains("WHEN NEW.involvement IS NOT OLD.involvement"))
-    {
-        let mut tx = db.begin().await?;
-        sqlx::query("DROP TRIGGER IF EXISTS access_records_update")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(access_update_sql).execute(&mut *tx).await?;
-        tx.commit().await?;
-    }
-    sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT b.id,u.id,CASE WHEN b.creator_id=u.id THEN 'watching' ELSE 'access_only' END FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.all_access=1 AND u.active=1 AND u.role!='system'")
-        .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_insert AFTER INSERT ON accesses BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.user_id; END")
-        .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_update AFTER UPDATE OF involvement,accessed_at ON accesses WHEN NEW.involvement IS NOT OLD.involvement OR NEW.accessed_at IS NOT OLD.accessed_at BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.user_id; END")
-        .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_delete AFTER DELETE ON accesses BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.user_id; END")
-        .execute(&db).await?;
-    let account_columns = sqlx::query("PRAGMA table_info(accounts)")
-        .fetch_all(&db)
+        let access_update_sql = "CREATE TRIGGER access_records_update AFTER UPDATE OF involvement,accessed_at ON accesses WHEN NEW.involvement IS NOT OLD.involvement OR NEW.accessed_at IS NOT OLD.accessed_at BEGIN UPDATE access_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.board_id AND user_id=NEW.user_id; END";
+        let access_update_existing: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='access_records_update'",
+        )
+        .fetch_optional(&db)
         .await?;
-    if !account_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "updated_at")
-    {
-        sqlx::query("ALTER TABLE accounts ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        if access_update_existing
+            .as_deref()
+            .is_none_or(|sql| !sql.contains("WHEN NEW.involvement IS NOT OLD.involvement"))
+        {
+            let mut tx = db.begin().await?;
+            sqlx::query("DROP TRIGGER IF EXISTS access_records_update")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query(access_update_sql).execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT b.id,u.id,CASE WHEN b.creator_id=u.id THEN 'watching' ELSE 'access_only' END FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.all_access=1 AND u.active=1 AND u.role!='system'")
+        .execute(&db).await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_insert AFTER INSERT ON accesses BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.user_id; END")
+        .execute(&db).await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_update AFTER UPDATE OF involvement,accessed_at ON accesses WHEN NEW.involvement IS NOT OLD.involvement OR NEW.accessed_at IS NOT OLD.accessed_at BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.user_id; END")
+        .execute(&db).await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS accesses_touch_related_delete AFTER DELETE ON accesses BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.board_id; UPDATE users SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.user_id; END")
+        .execute(&db).await?;
+        let account_columns = sqlx::query("PRAGMA table_info(accounts)")
+            .fetch_all(&db)
+            .await?;
+        if !account_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at")
+        {
+            sqlx::query("ALTER TABLE accounts ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+                .execute(&db)
+                .await?;
+        }
+        sqlx::query("UPDATE accounts SET updated_at=created_at WHERE updated_at=''")
             .execute(&db)
             .await?;
-    }
-    sqlx::query("UPDATE accounts SET updated_at=created_at WHERE updated_at=''")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS accounts_updated_at_insert AFTER INSERT ON accounts WHEN NEW.updated_at='' BEGIN UPDATE accounts SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS accounts_updated_at_insert AFTER INSERT ON accounts WHEN NEW.updated_at='' BEGIN UPDATE accounts SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS accounts_updated_at_name AFTER UPDATE OF name ON accounts WHEN NEW.name IS NOT OLD.name BEGIN UPDATE accounts SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS accounts_updated_at_name AFTER UPDATE OF name ON accounts WHEN NEW.name IS NOT OLD.name BEGIN UPDATE accounts SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.id; END")
-        .execute(&db)
-        .await?;
-    if !account_columns
-        .iter()
-        .any(|r| r.get::<String, _>("name") == "auto_postpone_period_in_days")
-    {
-        sqlx::query("ALTER TABLE accounts ADD COLUMN auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30")
+        if !account_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "auto_postpone_period_in_days")
+        {
+            sqlx::query("ALTER TABLE accounts ADD COLUMN auto_postpone_period_in_days INTEGER NOT NULL DEFAULT 30")
             .execute(&db).await?;
-    }
-    let legacy_entropies = sqlx::query("SELECT a.id AS container_id,a.id AS account_id,'Account' AS container_type,a.created_at AS timestamp FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM entropy_records e WHERE e.container_type='Account' AND e.container_id=a.id) UNION ALL SELECT b.id,b.account_id,'Board',b.updated_at FROM boards b WHERE b.entropy_override=1 AND NOT EXISTS(SELECT 1 FROM entropy_records e WHERE e.container_type='Board' AND e.container_id=b.id)")
+        }
+        let legacy_entropies = sqlx::query("SELECT a.id AS container_id,a.id AS account_id,'Account' AS container_type,a.created_at AS timestamp FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM entropy_records e WHERE e.container_type='Account' AND e.container_id=a.id) UNION ALL SELECT b.id,b.account_id,'Board',b.updated_at FROM boards b WHERE b.entropy_override=1 AND NOT EXISTS(SELECT 1 FROM entropy_records e WHERE e.container_type='Board' AND e.container_id=b.id)")
         .fetch_all(&db).await?;
-    if !legacy_entropies.is_empty() {
-        let mut tx = db.begin().await?;
-        for row in legacy_entropies {
-            let timestamp: String = row.get("timestamp");
-            sqlx::query("INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        if !legacy_entropies.is_empty() {
+            let mut tx = db.begin().await?;
+            for row in legacy_entropies {
+                let timestamp: String = row.get("timestamp");
+                sqlx::query("INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(id())
                 .bind(row.get::<String, _>("account_id"))
                 .bind(row.get::<String, _>("container_type"))
@@ -2467,56 +2531,59 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(&timestamp)
                 .bind(&timestamp)
                 .execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-    }
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_account_insert AFTER INSERT ON accounts BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.id,'Account',NEW.id,NEW.created_at,NEW.created_at); END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_account_insert AFTER INSERT ON accounts BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.id,'Account',NEW.id,NEW.created_at,NEW.created_at); END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_account_update AFTER UPDATE OF auto_postpone_period_in_days ON accounts WHEN NEW.auto_postpone_period_in_days<>OLD.auto_postpone_period_in_days BEGIN UPDATE entropy_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE container_type='Account' AND container_id=NEW.id; UPDATE cards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE account_id=NEW.id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_account_update AFTER UPDATE OF auto_postpone_period_in_days ON accounts WHEN NEW.auto_postpone_period_in_days<>OLD.auto_postpone_period_in_days BEGIN UPDATE entropy_records SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE container_type='Account' AND container_id=NEW.id; UPDATE cards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE account_id=NEW.id; END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_board_insert AFTER INSERT ON boards WHEN NEW.entropy_override=1 BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,'Board',NEW.id,NEW.created_at,NEW.created_at); END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_board_insert AFTER INSERT ON boards WHEN NEW.entropy_override=1 BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,'Board',NEW.id,NEW.created_at,NEW.created_at); END")
         .execute(&db).await?;
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_board_update AFTER UPDATE OF auto_postpone_period_in_days,entropy_override ON boards WHEN NEW.entropy_override=1 AND (OLD.entropy_override=0 OR NEW.auto_postpone_period_in_days<>OLD.auto_postpone_period_in_days) BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,'Board',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(container_type,container_id) DO UPDATE SET updated_at=excluded.updated_at; UPDATE cards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.id; END")
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS entropy_records_board_update AFTER UPDATE OF auto_postpone_period_in_days,entropy_override ON boards WHEN NEW.entropy_override=1 AND (OLD.entropy_override=0 OR NEW.auto_postpone_period_in_days<>OLD.auto_postpone_period_in_days) BEGIN INSERT INTO entropy_records(id,account_id,container_type,container_id,created_at,updated_at) VALUES('0'||substr(lower(hex(randomblob(16))),1,24),NEW.account_id,'Board',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(container_type,container_id) DO UPDATE SET updated_at=excluded.updated_at; UPDATE cards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE board_id=NEW.id; END")
         .execute(&db).await?;
-    sqlx::query(
-        "CREATE UNIQUE INDEX IF NOT EXISTS boards_publication_key ON boards(publication_key)",
-    )
-    .execute(&db)
-    .await?;
-    rich_text_records::backfill(&db).await?;
-    let missing_join_codes=sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS boards_publication_key ON boards(publication_key)",
+        )
+        .execute(&db)
+        .await?;
+        rich_text_records::backfill(&db).await?;
+        let missing_join_codes=sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
         .fetch_all(&db).await?;
-    for account in missing_join_codes {
-        let mut tx = db.begin().await?;
-        insert_join_code_tx(&mut tx, &account.get::<String, _>("id"), false).await?;
-        tx.commit().await?;
-    }
-    sqlx::query(
-        "INSERT INTO app_secrets(name,value) VALUES('qr_codes',?) ON CONFLICT(name) DO NOTHING",
-    )
-    .bind(random_token())
-    .execute(&db)
-    .await?;
-    let qr_secret: String =
-        sqlx::query_scalar("SELECT value FROM app_secrets WHERE name='qr_codes'")
-            .fetch_one(&db)
-            .await?;
+        for account in missing_join_codes {
+            let mut tx = db.begin().await?;
+            insert_join_code_tx(&mut tx, &account.get::<String, _>("id"), false).await?;
+            tx.commit().await?;
+        }
+        sqlx::query(
+            "INSERT INTO app_secrets(name,value) VALUES('qr_codes',?) ON CONFLICT(name) DO NOTHING",
+        )
+        .bind(random_token())
+        .execute(&db)
+        .await?;
+        let qr_secret: String =
+            sqlx::query_scalar("SELECT value FROM app_secrets WHERE name='qr_codes'")
+                .fetch_one(&db)
+                .await?;
+        let board_etag_connection = if url.contains(":memory:") {
+            None
+        } else {
+            Some(tokio::sync::Mutex::new(
+                SqliteConnection::connect_with(&options).await?,
+            ))
+        };
+        (db, qr_secret, board_etag_connection)
+    };
     if env::args().nth(1).as_deref() == Some("init-db") {
         return Ok(());
     }
     if env::args().nth(1).as_deref() == Some("seed") {
-        seed(&db, false).await?;
+        seed(&db, mysql).await?;
         return Ok(());
     }
-    let board_etag_connection = if url.contains(":memory:") {
-        None
-    } else {
-        Some(tokio::sync::Mutex::new(
-            SqliteConnection::connect_with(&options).await?,
-        ))
-    };
     let app = Arc::new(App {
         db,
+        mysql,
         qr_secret,
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
@@ -2529,80 +2596,81 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         export_notify: tokio::sync::Notify::new(),
         import_notify: tokio::sync::Notify::new(),
     });
-    let plain_search_backfilled: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_plain_v2'")
-            .fetch_one(&app.db)
-            .await?;
-    if plain_search_backfilled == 0 {
-        let cards = sqlx::query("SELECT c.id,c.account_id,c.description,a.external_account_id AS slug FROM cards c JOIN accounts a ON a.id=c.account_id")
+    if !mysql {
+        let plain_search_backfilled: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_plain_v2'")
+                .fetch_one(&app.db)
+                .await?;
+        if plain_search_backfilled == 0 {
+            let cards = sqlx::query("SELECT c.id,c.account_id,c.description,a.external_account_id AS slug FROM cards c JOIN accounts a ON a.id=c.account_id")
             .fetch_all(&app.db).await?;
-        let mut card_text = Vec::with_capacity(cards.len());
-        for row in cards {
-            let (plain, _, _) = storage::render_rich_text(
-                &app,
-                &row.get::<String, _>("account_id"),
-                row.get("slug"),
-                &row.get::<String, _>("description"),
-            )
-            .await
-            .map_err(|error| std::io::Error::other(error.1))?;
-            card_text.push((row.get::<String, _>("id"), search_content(plain)));
-        }
-        let comments = sqlx::query("SELECT m.id,m.body,c.account_id,a.external_account_id AS slug FROM comments m JOIN cards c ON c.id=m.card_id JOIN accounts a ON a.id=c.account_id")
+            let mut card_text = Vec::with_capacity(cards.len());
+            for row in cards {
+                let (plain, _, _) = storage::render_rich_text(
+                    &app,
+                    &row.get::<String, _>("account_id"),
+                    row.get("slug"),
+                    &row.get::<String, _>("description"),
+                )
+                .await
+                .map_err(|error| std::io::Error::other(error.1))?;
+                card_text.push((row.get::<String, _>("id"), search_content(plain)));
+            }
+            let comments = sqlx::query("SELECT m.id,m.body,c.account_id,a.external_account_id AS slug FROM comments m JOIN cards c ON c.id=m.card_id JOIN accounts a ON a.id=c.account_id")
             .fetch_all(&app.db).await?;
-        let mut comment_text = Vec::with_capacity(comments.len());
-        for row in comments {
-            let (plain, _, _) = storage::render_rich_text(
-                &app,
-                &row.get::<String, _>("account_id"),
-                row.get("slug"),
-                &row.get::<String, _>("body"),
-            )
-            .await
-            .map_err(|error| std::io::Error::other(error.1))?;
-            comment_text.push((row.get::<String, _>("id"), search_content(plain)));
-        }
-        let mut tx = app.db.begin().await?;
-        for (id, content) in card_text {
-            sqlx::query("UPDATE cards SET search_text=? WHERE id=?")
-                .bind(content)
-                .bind(id)
+            let mut comment_text = Vec::with_capacity(comments.len());
+            for row in comments {
+                let (plain, _, _) = storage::render_rich_text(
+                    &app,
+                    &row.get::<String, _>("account_id"),
+                    row.get("slug"),
+                    &row.get::<String, _>("body"),
+                )
+                .await
+                .map_err(|error| std::io::Error::other(error.1))?;
+                comment_text.push((row.get::<String, _>("id"), search_content(plain)));
+            }
+            let mut tx = app.db.begin().await?;
+            for (id, content) in card_text {
+                sqlx::query("UPDATE cards SET search_text=? WHERE id=?")
+                    .bind(content)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            for (id, content) in comment_text {
+                sqlx::query("UPDATE comments SET search_text=? WHERE id=?")
+                    .bind(content)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            sqlx::raw_sql(include_str!("../search_triggers.sql"))
                 .execute(&mut *tx)
                 .await?;
-        }
-        for (id, content) in comment_text {
-            sqlx::query("UPDATE comments SET search_text=? WHERE id=?")
-                .bind(content)
-                .bind(id)
+            sqlx::query("DELETE FROM card_search")
                 .execute(&mut *tx)
                 .await?;
+            sqlx::query("DELETE FROM comment_search")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,search_text FROM cards WHERE status='published'")
+            .execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.search_text FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
+            .execute(&mut *tx).await?;
+            sqlx::query("INSERT OR IGNORE INTO search_migrations(key) VALUES('fts_plain_v2')")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
         }
-        sqlx::raw_sql(include_str!("../search_triggers.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM card_search")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM comment_search")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,search_text FROM cards WHERE status='published'")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.search_text FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT OR IGNORE INTO search_migrations(key) VALUES('fts_plain_v2')")
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-    }
-    let card_search_schema: String = sqlx::query_scalar(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='card_search'",
-    )
-    .fetch_one(&app.db)
-    .await?;
-    if !card_search_schema.contains("porter unicode61") {
-        let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::raw_sql(
+        let card_search_schema: String = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='card_search'",
+        )
+        .fetch_one(&app.db)
+        .await?;
+        if !card_search_schema.contains("porter unicode61") {
+            let mut tx = begin_write(&app).await?;
+            sqlx::raw_sql(
             "DROP TRIGGER IF EXISTS cards_search_insert;
              DROP TRIGGER IF EXISTS cards_search_update;
              DROP TRIGGER IF EXISTS cards_search_delete;
@@ -2616,14 +2684,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .execute(&mut *tx)
         .await?;
-        sqlx::raw_sql(include_str!("../search_triggers.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,search_text FROM cards WHERE status='published'")
+            sqlx::raw_sql(include_str!("../search_triggers.sql"))
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("INSERT INTO card_search(rowid,title,description) SELECT rowid,title,search_text FROM cards WHERE status='published'")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.search_text FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
+            sqlx::query("INSERT INTO comment_search(rowid,body) SELECT m.rowid,m.search_text FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.status='published'")
             .execute(&mut *tx).await?;
-        tx.commit().await?;
+            tx.commit().await?;
+        }
     }
     if env::args().nth(1).as_deref() == Some("deliver-notifications") {
         let count = notification_mail::deliver_due(&app)
@@ -3990,7 +4059,7 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    insert_join_code_tx(&mut tx, &account_id, false)
+    insert_join_code_tx(&mut tx, &account_id, app.mysql)
         .await
         .map_err(db_err)?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")
@@ -6767,8 +6836,17 @@ async fn create_board(
         .await
         .map_err(db_err)?;
     if all {
-        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
-            .bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+        let statement = if app.mysql {
+            "INSERT IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'"
+        } else {
+            "INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'"
+        };
+        sqlx::query(statement)
+            .bind(&id)
+            .bind(&p.account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
     let r = board(&app, &p, &id).await?;
@@ -9924,7 +10002,7 @@ async fn update_card(
     let _writer = app.write_lock.lock().await;
     // Reserve the SQLite writer before reading attachment state in this transaction.
     // A deferred WAL read cannot be promoted after another process commits a write.
-    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     if let Some(upload) = &input.image {
         storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
     }
@@ -10178,7 +10256,7 @@ async fn set_flag(
     };
     let timestamp = now();
     let _writer = app.write_lock.lock().await;
-    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     if flag == "golden" {
         sqlx::query(sql)
             .bind(effective_value)
@@ -11145,7 +11223,7 @@ async fn create_comment(
     let created_at =
         timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
     let _writer = app.write_lock.lock().await;
-    let mut tx = app.db.begin_with("BEGIN IMMEDIATE").await.map_err(db_err)?;
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id)
         .bind(c.get::<String, _>("id"))
