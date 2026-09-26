@@ -30,6 +30,9 @@ and the correct paginated total. The first concurrent initialization probe
 found a table-creation race; a MySQL advisory lock now serializes setup, and
 the fresh-database rerun passed. This checks correctness at small scale, not
 a maximum capacity or a faster-than-Fizzy result.
+Card and draft numbering now update the account counter and read it back in
+the same transaction on MySQL, avoiding the SQLite-specific `UPDATE RETURNING`
+statement. The core and two-process checks passed again after this change.
 SQLx 0.8.6's `Any` adapter treats MariaDB's `LONGTEXT` as binary data; the
 local `vendor/sqlx-mysql` patch decodes that server type as UTF-8 for Rizzy's
 text-only schema. This patch and the schema need a direct MySQL 8.x run;

@@ -9471,6 +9471,33 @@ async fn edit_card(
     let c = card(&app, &p, &number).await?;
     Ok(card_page::edit(&p, &c).into_response())
 }
+async fn next_card_number(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    mysql: bool,
+) -> Result<i64> {
+    if mysql {
+        sqlx::query("UPDATE accounts SET cards_count=cards_count+1 WHERE id=?")
+            .bind(account_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query_scalar("SELECT cards_count FROM accounts WHERE id=?")
+            .bind(account_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_err)
+    } else {
+        sqlx::query_scalar(
+            "UPDATE accounts SET cards_count=cards_count+1 WHERE id=? RETURNING cards_count",
+        )
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)
+    }
+}
+
 async fn create_card(
     State(app): Shared,
     Path((account, board_id)): Path<(String, String)>,
@@ -9501,13 +9528,7 @@ async fn create_card(
         timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
     let writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let number: i64 = sqlx::query_scalar(
-        "UPDATE accounts SET cards_count=cards_count+1 WHERE id=? RETURNING cards_count",
-    )
-    .bind(&p.account_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(db_err)?;
+    let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
     rich_text_records::sync(
@@ -9630,13 +9651,7 @@ async fn create_or_resume_draft(
             .execute(&mut *tx).await.map_err(db_err)?;
         number
     } else {
-        let number: i64 = sqlx::query_scalar(
-            "UPDATE accounts SET cards_count=cards_count+1 WHERE id=? RETURNING cards_count",
-        )
-        .bind(&p.account_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(db_err)?;
+        let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
         let card_id = id();
         sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,status,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,'','','drafted',?,?,?)")
             .bind(&card_id).bind(&p.account_id).bind(board_id).bind(&p.user_id).bind(number)
