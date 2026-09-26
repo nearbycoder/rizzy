@@ -110,7 +110,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "card_goldnesses",
-        query: "SELECT NULL id,account_id,id card_id,updated_at created_at,updated_at FROM cards WHERE account_id=? AND golden=1 ORDER BY id",
+        query: "SELECT id,account_id,card_id,created_at,updated_at FROM card_goldnesses WHERE account_id=? ORDER BY card_id",
         booleans: &[],
         json_fields: &[],
     },

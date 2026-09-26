@@ -87,6 +87,11 @@ def main():
             mutate(target, f"/cards/{card['number']}/taggings", payload={"tag_title": "#transfer"})
             mutate(target, f"/cards/{card['number']}/assignments", payload={"assignee_id": owner["id"]})
             mutate(target, f"/cards/{card['number']}/goldness")
+            with sqlite3.connect(db_path) as db:
+                gold_record = db.execute(
+                    "SELECT id,created_at,updated_at FROM card_goldnesses WHERE card_id=?",
+                    (card["id"],)).fetchone()
+            assert gold_record
             mutate(target, f"/cards/{card['number']}/closure")
             mutate(target, f"/cards/{card['number']}/reactions", payload={"reaction": {"content": "👍"}})
             mutate(target, f"/boards/{board['id']}/publication")
@@ -129,6 +134,9 @@ def main():
                 assert system_user["email_address"] is None and system_user["identity_id"] is None
                 card_data = json.loads(archive.read(f"data/cards/{card['id']}.json"))
                 assert card_data["title"] == "Transfer card" and "description" not in card_data
+                gold_data = json.loads(archive.read(f"data/card_goldnesses/{gold_record[0]}.json"))
+                assert (gold_data["card_id"], gold_data["created_at"], gold_data["updated_at"]) == (
+                    card["id"], gold_record[1], gold_record[2])
                 not_now_data = json.loads(archive.read(f"data/card_not_nows/{postponed_record[0]}.json"))
                 assert (not_now_data["card_id"], not_now_data["user_id"], not_now_data["created_at"]) == (
                     postponed_card["id"], owner["id"], postponed_record[2])

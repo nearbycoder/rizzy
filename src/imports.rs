@@ -766,8 +766,19 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for gold in records(&archive, "card_goldnesses") {
+        let card_id = field(gold, "card_id")?;
+        let created_at = field(gold, "created_at")?;
+        sqlx::query("INSERT INTO card_goldnesses(id,account_id,card_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+            .bind(field(gold, "id")?)
+            .bind(account_id)
+            .bind(card_id)
+            .bind(created_at)
+            .bind(maybe_field(gold, "updated_at").unwrap_or(created_at))
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
         sqlx::query("UPDATE cards SET golden=1 WHERE id=? AND account_id=?")
-            .bind(field(gold, "card_id")?)
+            .bind(card_id)
             .bind(account_id)
             .execute(&mut *tx)
             .await

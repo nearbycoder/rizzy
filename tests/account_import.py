@@ -111,6 +111,8 @@ def run(archive_path):
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
         dated_cards = [json.loads(z.read(name)) for name in z.namelist()
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
+        golden_records = [json.loads(z.read(name)) for name in z.namelist()
+                          if name.startswith("data/card_goldnesses/")]
         postponed_records = [json.loads(z.read(name)) for name in z.namelist()
                              if name.startswith("data/card_not_nows/")]
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
@@ -154,7 +156,7 @@ def run(archive_path):
                     "steps": "SELECT COUNT(*) FROM steps s JOIN cards c ON c.id=s.card_id WHERE c.account_id=?",
                     "taggings": "SELECT COUNT(*) FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=?",
                     "closures": "SELECT COUNT(*) FROM closures z JOIN cards c ON c.id=z.card_id WHERE c.account_id=?",
-                    "card_goldnesses": "SELECT COUNT(*) FROM cards WHERE account_id=? AND golden=1",
+                    "card_goldnesses": "SELECT COUNT(*) FROM card_goldnesses WHERE account_id=?",
                     "card_not_nows": "SELECT COUNT(*) FROM card_not_nows WHERE account_id=?",
                     "watches": "SELECT COUNT(*) FROM watches w JOIN cards c ON c.id=w.card_id WHERE c.account_id=?",
                     "board_publications": "SELECT COUNT(*) FROM boards WHERE account_id=? AND publication_key IS NOT NULL",
@@ -184,6 +186,10 @@ def run(archive_path):
                 for card in dated_cards:
                     due_on = db.execute("SELECT due_on FROM cards WHERE id=?", (card["id"],)).fetchone()[0]
                     assert due_on == card["due_on"]
+                for gold in golden_records:
+                    actual = db.execute("SELECT card_id,created_at,updated_at FROM card_goldnesses WHERE id=?",
+                                        (gold["id"],)).fetchone()
+                    assert actual == (gold["card_id"], gold["created_at"], gold["updated_at"])
                 for not_now in postponed_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM card_not_nows WHERE id=?",
                                         (not_now["id"],)).fetchone()
@@ -246,6 +252,10 @@ def run(archive_path):
                 for source_card in dated_cards:
                     card = json.loads(z.read(f"data/cards/{source_card['id']}.json"))
                     assert card["due_on"] == source_card["due_on"]
+                for source_gold in golden_records:
+                    restored = json.loads(z.read(f"data/card_goldnesses/{source_gold['id']}.json"))
+                    assert {key: restored[key] for key in ("card_id", "created_at", "updated_at")} == {
+                        key: source_gold[key] for key in ("card_id", "created_at", "updated_at")}
                 for source_not_now in postponed_records:
                     restored = json.loads(z.read(f"data/card_not_nows/{source_not_now['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {

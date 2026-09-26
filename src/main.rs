@@ -1353,6 +1353,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     sqlx::query("INSERT OR IGNORE INTO closures(card_id,user_id,created_at) SELECT c.id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id),COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action='card_closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) FROM cards c WHERE c.closed=1 AND NOT EXISTS(SELECT 1 FROM closures z WHERE z.card_id=c.id)")
         .execute(&db).await?;
+    let legacy_goldnesses = sqlx::query("SELECT c.id,c.account_id,c.updated_at FROM cards c WHERE c.golden=1 AND NOT EXISTS(SELECT 1 FROM card_goldnesses g WHERE g.card_id=c.id)")
+        .fetch_all(&db).await?;
+    if !legacy_goldnesses.is_empty() {
+        let mut tx = db.begin().await?;
+        for row in legacy_goldnesses {
+            let timestamp: String = row.get("updated_at");
+            sqlx::query("INSERT OR IGNORE INTO card_goldnesses(id,account_id,card_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+                .bind(uuid::Uuid::now_v7().to_string())
+                .bind(row.get::<String,_>("account_id"))
+                .bind(row.get::<String,_>("id"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+    }
     let legacy_not_nows = sqlx::query("SELECT c.id,c.account_id,COALESCE((SELECT e.creator_id FROM events e WHERE e.card_id=c.id AND e.action IN ('card_postponed','card_auto_postponed') ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.creator_id) AS user_id,COALESCE((SELECT e.created_at FROM events e WHERE e.card_id=c.id AND e.action IN ('card_postponed','card_auto_postponed') ORDER BY e.created_at DESC,e.id DESC LIMIT 1),c.updated_at) AS created_at FROM cards c WHERE c.postponed=1 AND NOT EXISTS(SELECT 1 FROM card_not_nows n WHERE n.card_id=c.id)")
         .fetch_all(&db).await?;
     if !legacy_not_nows.is_empty() {
@@ -8207,6 +8223,9 @@ async fn set_flag(
     } else {
         value
     };
+    if flag == "golden" && c.get::<i64, _>("golden") == value {
+        return Ok(StatusCode::NO_CONTENT);
+    }
     let sql = match (flag, value) {
         ("closed", 1) => {
             "UPDATE cards SET closed=?,postponed=0,updated_at=?,last_active_at=? WHERE id=?"
@@ -8216,19 +8235,46 @@ async fn set_flag(
             "UPDATE cards SET postponed=?,closed=0,column_id=NULL,updated_at=?,last_active_at=? WHERE id=?"
         }
         ("postponed", 0) => "UPDATE cards SET postponed=?,updated_at=?,last_active_at=? WHERE id=?",
-        ("golden", _) => "UPDATE cards SET golden=?,updated_at=?,last_active_at=? WHERE id=?",
+        ("golden", _) => "UPDATE cards SET golden=?,updated_at=? WHERE id=?",
         _ => return Err(bad("invalid flag")),
     };
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query(sql)
-        .bind(effective_value)
-        .bind(&timestamp)
-        .bind(&timestamp)
-        .bind(c.get::<String, _>("id"))
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
+    if flag == "golden" {
+        sqlx::query(sql)
+            .bind(effective_value)
+            .bind(&timestamp)
+            .bind(c.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        if value == 1 {
+            sqlx::query("INSERT INTO card_goldnesses(id,account_id,card_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+                .bind(uuid::Uuid::now_v7().to_string())
+                .bind(&p.account_id)
+                .bind(c.get::<String, _>("id"))
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        } else {
+            sqlx::query("DELETE FROM card_goldnesses WHERE card_id=?")
+                .bind(c.get::<String, _>("id"))
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
+    } else {
+        sqlx::query(sql)
+            .bind(effective_value)
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .bind(c.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     if flag == "postponed" && effective_value == 1 {
         sqlx::query("DELETE FROM card_not_nows WHERE card_id=?")
             .bind(c.get::<String, _>("id"))
