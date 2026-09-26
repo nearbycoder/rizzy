@@ -2006,6 +2006,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::query("CREATE TRIGGER IF NOT EXISTS events_updated_at_insert AFTER INSERT ON events WHEN NEW.updated_at='' BEGIN UPDATE events SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
+    let step_columns = sqlx::query("PRAGMA table_info(steps)")
+        .fetch_all(&db)
+        .await?;
+    if !step_columns
+        .iter()
+        .any(|r| r.get::<String, _>("name") == "updated_at")
+    {
+        sqlx::query("ALTER TABLE steps ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+            .execute(&db)
+            .await?;
+        sqlx::query("UPDATE steps SET updated_at=created_at WHERE updated_at=''")
+            .execute(&db)
+            .await?;
+    }
+    sqlx::query("CREATE TRIGGER IF NOT EXISTS steps_updated_at_insert AFTER INSERT ON steps WHEN NEW.updated_at='' BEGIN UPDATE steps SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        .execute(&db)
+        .await?;
     let tag_columns = sqlx::query("PRAGMA table_info(tags)")
         .fetch_all(&db)
         .await?;
@@ -9792,14 +9809,25 @@ async fn create_step(
     let v = nested(&body, "step");
     let content = required(v, "content")?;
     let id = id();
-    sqlx::query("INSERT INTO steps(id,card_id,content,created_at) VALUES(?,?,?,?)")
+    let timestamp = now();
+    let card_id: String = c.get("id");
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    sqlx::query("INSERT INTO steps(id,card_id,content,created_at,updated_at) VALUES(?,?,?,?,?)")
         .bind(&id)
-        .bind(c.get::<String, _>("id"))
+        .bind(&card_id)
         .bind(&content)
-        .bind(now())
-        .execute(&app.db)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     Ok(created(
         format!("/{account}/cards/{number}/steps/{id}.json"),
         json!({"id":id,"content":content,"completed":false}),
@@ -9822,18 +9850,38 @@ async fn update_step(
         .map_err(db_err)?
         .ok_or_else(missing)?;
     let v = nested(&body, "step");
-    let content = string(v, "content").unwrap_or_else(|| old.get("content"));
+    let previous_content: String = old.get("content");
+    let previous_completed = old.get::<i64, _>("completed") != 0;
+    let content = string(v, "content").unwrap_or_else(|| previous_content.clone());
     let completed = v
         .get("completed")
         .and_then(Value::as_bool)
-        .unwrap_or(old.get::<i64, _>("completed") != 0);
-    sqlx::query("UPDATE steps SET content=?,completed=? WHERE id=?")
+        .unwrap_or(previous_completed);
+    let timestamp = now();
+    let card_id: String = c.get("id");
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let changed = sqlx::query("UPDATE steps SET content=?,completed=?,updated_at=? WHERE id=? AND card_id=? AND (content<>? OR completed<>?)")
         .bind(&content)
         .bind(completed as i64)
+        .bind(&timestamp)
         .bind(&step)
-        .execute(&app.db)
+        .bind(&card_id)
+        .bind(&content)
+        .bind(completed as i64)
+        .execute(&mut *tx)
         .await
-        .map_err(db_err)?;
+        .map_err(db_err)?
+        .rows_affected()
+        != 0;
+    if changed {
+        sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+            .bind(&timestamp)
+            .bind(&card_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
     Ok(Json(
         json!({"id":step,"content":content,"completed":completed}),
     ))
@@ -9846,15 +9894,24 @@ async fn delete_step(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
+    let card_id: String = c.get("id");
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     let done = sqlx::query("DELETE FROM steps WHERE id=? AND card_id=?")
         .bind(step)
-        .bind(c.get::<String, _>("id"))
-        .execute(&app.db)
+        .bind(&card_id)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     if done.rows_affected() == 0 {
         return Err(missing());
     }
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(now())
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn comment_row(app: &App, card: &SqliteRow, id: &str) -> Result<SqliteRow> {

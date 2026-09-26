@@ -787,12 +787,13 @@ async fn apply_archive(
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for step in records(&archive, "steps") {
-        sqlx::query("INSERT INTO steps(id,card_id,content,completed,created_at) VALUES(?,?,?,?,?)")
+        sqlx::query("INSERT INTO steps(id,card_id,content,completed,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(field(step, "id")?)
             .bind(field(step, "card_id")?)
             .bind(field(step, "content")?)
             .bind(boolean(step, "completed", false))
             .bind(field(step, "created_at")?)
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;

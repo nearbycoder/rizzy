@@ -100,8 +100,33 @@ def main():
                     "SELECT id,user_id,created_at FROM card_not_nows WHERE card_id=?",
                     (postponed_card["id"],)).fetchone()
             assert postponed_record and postponed_record[1] == owner["id"]
+            with sqlite3.connect(db_path) as db:
+                before_step = db.execute("SELECT c.updated_at,b.updated_at FROM cards c JOIN boards b ON b.id=c.board_id "
+                                         "WHERE c.id=?", (card["id"],)).fetchone()
+            time.sleep(.01)
             step = api(target, f"/cards/{card['number']}/steps", "POST",
                        {"step": {"content": "First step"}}, 201)
+            with sqlite3.connect(db_path) as db:
+                after_create = db.execute("SELECT c.updated_at,b.updated_at FROM cards c JOIN boards b ON b.id=c.board_id "
+                                          "WHERE c.id=?", (card["id"],)).fetchone()
+            assert after_create[0] > before_step[0] and after_create[1] > before_step[1]
+            time.sleep(.01)
+            api(target, f"/cards/{card['number']}/steps/{step['id']}", "PUT",
+                {"step": {"content": "First step revised", "completed": True}})
+            with sqlite3.connect(db_path) as db:
+                step_times = db.execute("SELECT created_at,updated_at FROM steps WHERE id=?",
+                                        (step["id"],)).fetchone()
+                after_update = db.execute("SELECT c.updated_at,b.updated_at FROM cards c JOIN boards b ON b.id=c.board_id "
+                                          "WHERE c.id=?", (card["id"],)).fetchone()
+            assert step_times[0] != step_times[1]
+            assert after_update[0] > after_create[0] and after_update[1] > after_create[1]
+            api(target, f"/cards/{card['number']}/steps/{step['id']}", "PUT",
+                {"step": {"content": "First step revised", "completed": True}})
+            with sqlite3.connect(db_path) as db:
+                assert db.execute("SELECT created_at,updated_at FROM steps WHERE id=?",
+                                  (step["id"],)).fetchone() == step_times
+                assert db.execute("SELECT c.updated_at,b.updated_at FROM cards c JOIN boards b ON b.id=c.board_id "
+                                  "WHERE c.id=?", (card["id"],)).fetchone() == after_update
             comment = api(target, f"/cards/{card['number']}/comments", "POST",
                           {"comment": {"body": "An observation"}}, 201)
             mutate(target, f"/cards/{card['number']}/taggings", payload={"tag_title": "#transfer"})
@@ -182,6 +207,9 @@ def main():
                 assert system_user["email_address"] is None and system_user["identity_id"] is None
                 card_data = json.loads(archive.read(f"data/cards/{card['id']}.json"))
                 assert card_data["title"] == "Transfer card" and "description" not in card_data
+                step_data = json.loads(archive.read(f"data/steps/{step['id']}.json"))
+                assert (step_data["content"], step_data["completed"], step_data["created_at"],
+                        step_data["updated_at"]) == ("First step revised", True, *step_times)
                 gold_data = json.loads(archive.read(f"data/card_goldnesses/{gold_record[0]}.json"))
                 assert (gold_data["card_id"], gold_data["created_at"], gold_data["updated_at"]) == (
                     card["id"], gold_record[1], gold_record[2])

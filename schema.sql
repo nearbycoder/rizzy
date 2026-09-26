@@ -347,7 +347,8 @@ CREATE TABLE IF NOT EXISTS steps (
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   completed INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS steps_card ON steps(card_id);
 CREATE TABLE IF NOT EXISTS comments (

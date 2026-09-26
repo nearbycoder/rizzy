@@ -86,7 +86,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "steps",
-        query: "SELECT s.id,c.account_id,s.card_id,s.completed,s.content,s.created_at,s.created_at updated_at FROM steps s JOIN cards c ON c.id=s.card_id WHERE c.account_id=? ORDER BY s.id",
+        query: "SELECT s.id,c.account_id,s.card_id,s.completed,s.content,s.created_at,s.updated_at FROM steps s JOIN cards c ON c.id=s.card_id WHERE c.account_id=? ORDER BY s.id",
         booleans: &["completed"],
         json_fields: &[],
     },

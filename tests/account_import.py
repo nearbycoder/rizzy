@@ -28,6 +28,7 @@ FRESH_UPDATE_TABLES = {
     "accesses": "access_records",
     "cards": "cards",
     "comments": "comments",
+    "steps": "steps",
     "closures": "closures",
     "card_goldnesses": "card_goldnesses",
     "card_not_nows": "card_not_nows",
