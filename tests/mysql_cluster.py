@@ -329,10 +329,27 @@ def main():
                 assert status == 200 and tagged["title"] == f"Tagged title {index}"
                 assert "cluster-tag" in tagged["tags"]
 
+            def double_tag_toggle(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                return call(bases[(2 * index + kind) % 4], account, token,
+                            f"/cards/{number}/taggings", "POST",
+                            {"tag_title": "cluster-tag"})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                toggled = list(pool.map(double_tag_toggle, mixed_items))
+            failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, toggled)
+                        if status != 204]
+            assert not failures, failures[:5]
+            for index in range(200):
+                number = results[index + 200][1]["number"]
+                status, tagged, _ = call(bases[index % 4], account, token, f"/cards/{number}")
+                assert status == 200 and "cluster-tag" in tagged["tags"], (index, status, tagged)
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, step CRUD, mixed step/title, watch/title, triage/title, reaction/title, move/title, assignment/title, tag/title writes, and opposite-direction moves across four processes")
+            print("MySQL cluster passed: 400 unique cards, mixed writes, opposite-direction moves, and 200 double tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

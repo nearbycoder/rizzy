@@ -432,3 +432,14 @@ six runs also passed 200 tag/title pairs using one shared tag. The test
 samples returned assignments, tags, and final titles. The MySQL core flow and
 600 two-process SQLite card workflows passed after this change. These checks
 do not cover every callback or prove multi-host capacity.
+
+Tag toggles had a separate parity and contention gap: unlike Fizzy's Tagging
+model, Rizzy did not touch the card or board, and its membership check and
+write were separate transactions. A live source/Rust probe now matches the
+card and board update times for both tag-on and tag-off while leaving
+`last_active_at` unchanged. The Rust toggle now holds the board and card lock
+through the membership decision, mutation, and card touch. Five fresh-account
+MySQL cluster runs sent two concurrent toggles per card across four processes
+for 200 cards; every request succeeded and every card retained its tag after
+the pair. The MySQL core flow also passed. This is a same-host correctness
+check, not a tag throughput or maximum-scale result.

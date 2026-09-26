@@ -11899,28 +11899,38 @@ async fn toggle_tag(
         .await
         .map_err(db_err)?;
     let card_id: String = c.get("id");
+    let (mut tx, _) =
+        begin_card_board_write(&app, &card_id, &c.get::<String, _>("board_id")).await?;
     let exists: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM taggings WHERE card_id=? AND tag_id=?")
             .bind(&card_id)
             .bind(&tag_id)
-            .fetch_one(&app.db)
+            .fetch_one(&mut *tx)
             .await
             .map_err(db_err)?;
     if exists == 0 {
         sqlx::query("INSERT INTO taggings(card_id,tag_id) VALUES(?,?)")
             .bind(&card_id)
             .bind(&tag_id)
-            .execute(&app.db)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
     } else {
         sqlx::query("DELETE FROM taggings WHERE card_id=? AND tag_id=?")
             .bind(&card_id)
             .bind(&tag_id)
-            .execute(&app.db)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
     }
+    // Fizzy's Tagging touches its card; the card touch also updates the board.
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(now())
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     if wants_turbo_stream(&headers) {
         let tags = tagging_page::tags(&app, &p, &c).await?;
         let picker = tagging_page::picker(&app, &p, &c).await?;
