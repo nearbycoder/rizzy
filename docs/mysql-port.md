@@ -167,7 +167,9 @@ cluster flow also creates 20 columns on
 one board concurrently and checks that their positions are exactly 1 through
 20. Column position swaps now take the same database board lock, and the
 cluster flow concurrently swaps ten disjoint pairs right and then left across
-four processes. A matched SQLite benchmark found Rizzy faster on a 1,000-card
+four processes. Column updates now read the current row under that lock; the
+cluster test checks 30 simultaneous name/color edit pairs on one column and
+retains both fields after every pair. A matched SQLite benchmark found Rizzy faster on a 1,000-card
 delete but slower on 10,000- and 30,000-card deletes. MySQL large-board
 delete throughput and cross-host behavior remain unmeasured.
 

@@ -8313,12 +8313,33 @@ async fn update_column(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
-    let c = checked_column(&app, &p, &board_id, &column_id).await?;
+    checked_column(&app, &p, &board_id, &column_id).await?;
     let body = column_input(&headers, &body)?;
     let v = nested(&body, "column");
     if v.get("name").is_none() && v.get("color").is_none() {
         return Ok(column_param_error(&headers, StatusCode::BAD_REQUEST));
     }
+    if v.get("name").is_some_and(Value::is_null) {
+        return Ok(column_param_error(
+            &headers,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+    }
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+    let current_sql = if app.mysql {
+        "SELECT * FROM columns WHERE id=? AND board_id=? AND account_id=? FOR UPDATE"
+    } else {
+        "SELECT * FROM columns WHERE id=? AND board_id=? AND account_id=?"
+    };
+    let c = sqlx::query(current_sql)
+        .bind(&column_id)
+        .bind(&board_id)
+        .bind(&p.account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
     let name = match v.get("name") {
         None => c.get("name"),
         Some(value) => match column_scalar(value) {
@@ -8337,8 +8358,6 @@ async fn update_column(
     };
     if name != c.get::<String, _>("name") || color != c.get::<String, _>("color") {
         let timestamp = now();
-        let mut tx = begin_write(&app).await.map_err(db_err)?;
-        lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
         sqlx::query("UPDATE columns SET name=?,color=?,updated_at=? WHERE id=? AND board_id=?")
             .bind(name)
             .bind(color)
@@ -8360,8 +8379,8 @@ async fn update_column(
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-        tx.commit().await.map_err(db_err)?;
     }
+    tx.commit().await.map_err(db_err)?;
     let c = checked_column(&app, &p, &board_id, &column_id).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Ok(Json(column_json(&p, &c, &base(&headers))).into_response());

@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -189,6 +190,27 @@ def main():
                 url, "SELECT GROUP_CONCAT(name ORDER BY position) FROM columns "
                 f"WHERE board_id = '{columns_board['id']}'"
             ) == ",".join(column["name"] for column in ordered_columns)
+
+            column_id = ordered_columns[0]["id"]
+            column_path = f"/boards/{columns_board['id']}/columns/{column_id}"
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                for index in range(30):
+                    name = f"Concurrent name {index}"
+                    color = f"var(--color-card-{1 + index % 8})"
+                    barrier = threading.Barrier(2)
+
+                    def change_column(base, field, value):
+                        barrier.wait(timeout=10)
+                        return call(base, account, token, column_path, "PATCH",
+                                    {"column": {field: value}})
+
+                    name_result = pool.submit(change_column, bases[0], "name", name)
+                    color_result = pool.submit(change_column, bases[1], "color", color)
+                    assert name_result.result()[0] == 200
+                    assert color_result.result()[0] == 200
+                    assert mysql_scalar(
+                        url, f"SELECT CONCAT(name,'|',color) FROM columns WHERE id='{column_id}'"
+                    ) == name + "|" + color
 
             def create(index):
                 return call(
@@ -579,7 +601,7 @@ def main():
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 20 concurrent columns and 20 position swaps, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()
