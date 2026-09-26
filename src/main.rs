@@ -8163,8 +8163,29 @@ fn filter_timezone(headers: &HeaderMap) -> chrono_tz::Tz {
         .unwrap_or(chrono_tz::UTC)
 }
 fn time_window(input: &str, timezone: chrono_tz::Tz) -> Option<(String, String)> {
+    time_window_at(input, timezone, Utc::now())
+}
+fn local_day_start(date: chrono::NaiveDate, timezone: chrono_tz::Tz) -> Option<String> {
+    let midnight = date.and_hms_opt(0, 0, 0)?;
+    for minute in 0..=24 * 60 {
+        let local = midnight.checked_add_signed(chrono::Duration::minutes(minute))?;
+        if let Some(start) = chrono::TimeZone::from_local_datetime(&timezone, &local).latest() {
+            return Some(
+                start
+                    .with_timezone(&Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            );
+        }
+    }
+    None
+}
+fn time_window_at(
+    input: &str,
+    timezone: chrono_tz::Tz,
+    now: chrono::DateTime<Utc>,
+) -> Option<(String, String)> {
     let key = input.to_ascii_lowercase().replace([' ', '_', '-'], "");
-    let today = Utc::now().with_timezone(&timezone).date_naive();
+    let today = now.with_timezone(&timezone).date_naive();
     let week = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
     let month = today.with_day(1)?;
     let year = today.with_month(1)?.with_day(1)?;
@@ -8179,15 +8200,78 @@ fn time_window(input: &str, timezone: chrono_tz::Tz) -> Option<(String, String)>
         "lastyear" => (year.with_year(year.year() - 1)?, year),
         _ => return None,
     };
-    let format = |date: chrono::NaiveDate| {
-        Some(
-            chrono::TimeZone::from_local_datetime(&timezone, &date.and_hms_opt(0, 0, 0).unwrap())
-                .earliest()?
-                .with_timezone(&Utc)
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        )
-    };
-    Some((format(start)?, format(end)?))
+    Some((
+        local_day_start(start, timezone)?,
+        local_day_start(end, timezone)?,
+    ))
+}
+#[cfg(test)]
+mod time_window_tests {
+    use super::time_window_at;
+    use chrono::{DateTime, Utc};
+
+    #[test]
+    fn day_boundaries_match_pinned_fizzy_on_dst_and_skipped_dates() {
+        // UTC boundaries observed from the pinned TimeWindowParser under Time.use_zone.
+        for (zone, at, name, start, end) in [
+            (
+                chrono_tz::America::New_York,
+                "2026-03-08T16:00:00Z",
+                "today",
+                "2026-03-08T05:00:00.000Z",
+                "2026-03-09T04:00:00.000Z",
+            ),
+            (
+                chrono_tz::America::New_York,
+                "2026-11-01T17:00:00Z",
+                "today",
+                "2026-11-01T04:00:00.000Z",
+                "2026-11-02T05:00:00.000Z",
+            ),
+            (
+                chrono_tz::America::Santiago,
+                "2026-09-06T15:00:00Z",
+                "today",
+                "2026-09-06T04:00:00.000Z",
+                "2026-09-07T03:00:00.000Z",
+            ),
+            (
+                chrono_tz::Pacific::Apia,
+                "2011-12-29T22:00:00Z",
+                "today",
+                "2011-12-29T10:00:00.000Z",
+                "2011-12-30T10:00:00.000Z",
+            ),
+            (
+                chrono_tz::Pacific::Apia,
+                "2011-12-29T22:00:00Z",
+                "this month",
+                "2011-12-01T10:00:00.000Z",
+                "2011-12-31T10:00:00.000Z",
+            ),
+            (
+                chrono_tz::America::Havana,
+                "2026-03-08T16:00:00Z",
+                "today",
+                "2026-03-08T05:00:00.000Z",
+                "2026-03-09T04:00:00.000Z",
+            ),
+            (
+                chrono_tz::America::Havana,
+                "2026-11-01T17:00:00Z",
+                "today",
+                "2026-11-01T05:00:00.000Z",
+                "2026-11-02T05:00:00.000Z",
+            ),
+        ] {
+            let now: DateTime<Utc> = at.parse().unwrap();
+            assert_eq!(
+                time_window_at(name, zone, now),
+                Some((start.to_owned(), end.to_owned())),
+                "{zone} {at} {name}"
+            );
+        }
+    }
 }
 fn cards_query<'a>(
     select: &str,
