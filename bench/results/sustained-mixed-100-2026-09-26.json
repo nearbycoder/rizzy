@@ -335,54 +335,54 @@
       "runs": {
         "fizzy": {
           "seconds_requested": 60.0,
-          "seconds_elapsed": 60.72,
+          "seconds_elapsed": 60.75,
           "clients": 32,
-          "units_completed": 1380,
-          "units_per_second": 22.73,
-          "read_requests": 6900,
-          "write_requests": 5520,
-          "p95_unit_ms": 2524.68,
-          "p95_read_ms": 306.99,
-          "p95_workflow_ms": 1632.87,
+          "units_completed": 1580,
+          "units_per_second": 26.01,
+          "read_requests": 7900,
+          "write_requests": 6320,
+          "p95_unit_ms": 1812.58,
+          "p95_read_ms": 254.49,
+          "p95_workflow_ms": 1201.16,
           "errors": [],
           "server_resources": {
             "processes_end": 9,
-            "cpu_seconds": 278.87,
-            "cpu_cores_average": 4.59,
-            "pss_mib_start": 1057.5,
-            "pss_mib_end": 3044.1,
-            "write_mib": 39.9
+            "cpu_seconds": 278.09,
+            "cpu_cores_average": 4.58,
+            "pss_mib_start": 1019.4,
+            "pss_mib_end": 3187.1,
+            "write_mib": 46.4
           },
           "verified_counts": {
-            "cards": 1480,
-            "events": 5620,
-            "comments": 4140
+            "cards": 1680,
+            "events": 6420,
+            "comments": 4740
           }
         },
         "rizzy": {
           "seconds_requested": 60.0,
-          "seconds_elapsed": 60.21,
+          "seconds_elapsed": 60.23,
           "clients": 32,
-          "units_completed": 5108,
-          "units_per_second": 84.83,
-          "read_requests": 25540,
-          "write_requests": 20432,
-          "p95_unit_ms": 813.81,
-          "p95_read_ms": 201.56,
-          "p95_workflow_ms": 504.6,
+          "units_completed": 5456,
+          "units_per_second": 90.58,
+          "read_requests": 27280,
+          "write_requests": 21824,
+          "p95_unit_ms": 711.89,
+          "p95_read_ms": 213.97,
+          "p95_workflow_ms": 431.52,
           "errors": [],
           "server_resources": {
             "processes_end": 1,
-            "cpu_seconds": 343.24,
-            "cpu_cores_average": 5.7,
-            "pss_mib_start": 23.7,
-            "pss_mib_end": 93.2,
-            "write_mib": 34.4
+            "cpu_seconds": 419.15,
+            "cpu_cores_average": 6.96,
+            "pss_mib_start": 24.1,
+            "pss_mib_end": 104.0,
+            "write_mib": 36.7
           },
           "verified_counts": {
-            "cards": 5208,
-            "events": 20532,
-            "comments": 15324
+            "cards": 5556,
+            "events": 21924,
+            "comments": 16368
           }
         }
       }
@@ -680,54 +680,54 @@
       "runs": {
         "rizzy": {
           "seconds_requested": 60.0,
-          "seconds_elapsed": 60.29,
+          "seconds_elapsed": 60.23,
           "clients": 32,
-          "units_completed": 4676,
-          "units_per_second": 77.56,
-          "read_requests": 23380,
-          "write_requests": 18704,
-          "p95_unit_ms": 724.54,
-          "p95_read_ms": 223.36,
-          "p95_workflow_ms": 462.54,
+          "units_completed": 5370,
+          "units_per_second": 89.15,
+          "read_requests": 26850,
+          "write_requests": 21480,
+          "p95_unit_ms": 800.62,
+          "p95_read_ms": 212.15,
+          "p95_workflow_ms": 477.92,
           "errors": [],
           "server_resources": {
             "processes_end": 1,
-            "cpu_seconds": 292.37,
-            "cpu_cores_average": 4.85,
-            "pss_mib_start": 23.7,
-            "pss_mib_end": 92.7,
-            "write_mib": 30.6
+            "cpu_seconds": 405.25,
+            "cpu_cores_average": 6.73,
+            "pss_mib_start": 24.1,
+            "pss_mib_end": 104.2,
+            "write_mib": 37.2
           },
           "verified_counts": {
-            "cards": 4776,
-            "events": 18804,
-            "comments": 14028
+            "cards": 5470,
+            "events": 21580,
+            "comments": 16110
           }
         },
         "fizzy": {
           "seconds_requested": 60.0,
-          "seconds_elapsed": 60.75,
+          "seconds_elapsed": 60.7,
           "clients": 32,
-          "units_completed": 1598,
-          "units_per_second": 26.3,
-          "read_requests": 7990,
-          "write_requests": 6392,
-          "p95_unit_ms": 1832.07,
-          "p95_read_ms": 253.44,
-          "p95_workflow_ms": 1137.05,
+          "units_completed": 1524,
+          "units_per_second": 25.11,
+          "read_requests": 7620,
+          "write_requests": 6096,
+          "p95_unit_ms": 2242.2,
+          "p95_read_ms": 268.58,
+          "p95_workflow_ms": 1481.32,
           "errors": [],
           "server_resources": {
             "processes_end": 9,
-            "cpu_seconds": 277.44,
-            "cpu_cores_average": 4.57,
-            "pss_mib_start": 1047.2,
-            "pss_mib_end": 3174.2,
-            "write_mib": 48.2
+            "cpu_seconds": 279.77,
+            "cpu_cores_average": 4.61,
+            "pss_mib_start": 1039.5,
+            "pss_mib_end": 3123.5,
+            "write_mib": 42.9
           },
           "verified_counts": {
-            "cards": 1698,
-            "events": 6492,
-            "comments": 4794
+            "cards": 1624,
+            "events": 6196,
+            "comments": 4572
           }
         }
       }

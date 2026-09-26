@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Compare signed-in board pages and validators on disposable databases."""
+"""Compare board pages, filtered JSON, and validators on disposable databases."""
 
+import json
 import os
 import re
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -12,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from events_html import browser_cookie, html_response  # noqa: E402
+from card_workflow import expect  # noqa: E402
 from sustained_mixed import (fixture, prepare_rust, prepare_source,
                              start_server, stop_server)  # noqa: E402
 
@@ -40,6 +44,56 @@ def pages(target, board):
     return [count for _, count in results]
 
 
+def board_json(target, board, suffix="", etag=None):
+    headers = {"Authorization": f"Bearer {target['token']}",
+               "Accept": "application/json"}
+    if etag:
+        headers["If-None-Match"] = etag
+    request = urllib.request.Request(
+        f"{target['url']}/{target['account']}/boards/{board}{suffix}", headers=headers)
+    try:
+        response = urllib.request.urlopen(request, timeout=15)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        raw = response.read()
+        return response.status, response.headers, json.loads(raw) if raw else None
+
+
+def json_pages(target, board, first_card):
+    initial = []
+    for suffix, total, has_next in (("", 20, True), ("?page=2", 20, False)):
+        status, headers, body = board_json(target, board, suffix)
+        assert status == 200 and body["name"] == "Mixed workload"
+        assert int(headers["X-Total-Count"]) == total
+        assert ("Link" in headers) == has_next
+        assert headers.get("ETag")
+        conditional_status, conditional_headers, conditional_body = board_json(
+            target, board, suffix, headers["ETag"])
+        assert conditional_status == 304 and conditional_body is None
+        assert int(conditional_headers["X-Total-Count"]) == total
+        initial.append(headers["ETag"])
+    assert initial[0] != initial[1], target["name"]
+
+    expect(target, f"/cards/{first_card}/closure", "POST", status=204)
+    stale_status, _, stale_body = board_json(target, board, etag=initial[0])
+    assert stale_status == 200 and stale_body is not None, target["name"]
+    for suffix, total, has_next in (("", 19, True), ("?page=2", 19, False),
+                                    ("?indexed_by=closed", 1, False),
+                                    ("?indexed_by=closed&page=2", 1, True),
+                                    ("?terms%5B%5D=Fixture", 19, True)):
+        status, headers, body = board_json(target, board, suffix)
+        assert status == 200 and body["name"] == "Mixed workload", (target["name"], suffix, status)
+        assert int(headers["X-Total-Count"]) == total, (target["name"], suffix, headers)
+        assert ("Link" in headers) == has_next, (target["name"], suffix, headers)
+        assert headers.get("ETag"), (target["name"], suffix)
+        conditional_status, conditional_headers, conditional_body = board_json(
+            target, board, suffix, headers["ETag"])
+        assert conditional_status == 304 and conditional_body is None, (
+            target["name"], suffix, conditional_status)
+        assert int(conditional_headers["X-Total-Count"]) == total
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="rizzy-board-page-parity-") as temporary:
         root = Path(temporary)
@@ -62,9 +116,11 @@ def main():
                                     else "owner@example.com"),
                           "db": str(directory / ("db.sqlite3" if name == "fizzy"
                                                  else "rizzy.sqlite3"))}
-                board, _, _ = fixture(target, 20)
+                board, paths, _ = fixture(target, 20)
                 assert pages(target, board) == [15, 5]
-                print(f"{name}: 15 and 5 cards, page-specific 304, no HTML total header")
+                first_card = int(paths[1].rsplit("/", 1)[1])
+                json_pages(target, board, first_card)
+                print(f"{name}: HTML pages and filtered JSON counts, links, and 304 responses match")
         finally:
             for process in processes:
                 stop_server(process)

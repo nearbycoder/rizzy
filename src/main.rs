@@ -4399,6 +4399,44 @@ fn conditional_html_response(body: String, headers: &HeaderMap) -> Response {
     response
 }
 
+fn conditional_board_json_response(value: Value, headers: &HeaderMap, salt: &str) -> Response {
+    let body = serde_json::to_vec(&value).expect("JSON value is serializable");
+    let mut digest = Sha256::new();
+    digest.update(etag_timezone(headers).unwrap_or_default().as_bytes());
+    digest.update([0]);
+    digest.update(salt.as_bytes());
+    digest.update([0]);
+    digest.update(&body);
+    let etag = format!("W/\"{}\"", hex::encode(digest.finalize()));
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+        });
+    let mut response = if not_modified {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else {
+        let mut response = Response::new(Body::from(body));
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        response
+    };
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("hex ETag"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    response
+}
+
 async fn board_data_version(app: &App) -> Option<i64> {
     let connection = app.board_etag_connection.as_ref()?;
     let mut connection = connection.lock().await;
@@ -5897,25 +5935,25 @@ async fn show_board(
     let r = board(&app, &p, &id).await?;
     let mut query = parse_card_query(raw.clone());
     let page = query.page;
+    if let Some(filter_id) = query.filter_id.as_deref() {
+        let fields: String = sqlx::query_scalar(
+            "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
+        )
+        .bind(filter_id)
+        .bind(&p.account_id)
+        .bind(&p.user_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
+        let stored: Value = serde_json::from_str(&fields)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
+        query = card_query_from_filter(&stored, query.page);
+    }
+    query.terms.retain(|term| !term.trim().is_empty());
+    let filtered = board_filter_used(&query);
+    query.board_ids = vec![id.clone()];
     if !headers.contains_key("x-rizzy-json-request") {
-        if let Some(filter_id) = query.filter_id.as_deref() {
-            let fields: String = sqlx::query_scalar(
-                "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
-            )
-            .bind(filter_id)
-            .bind(&p.account_id)
-            .bind(&p.user_id)
-            .fetch_optional(&app.db)
-            .await
-            .map_err(db_err)?
-            .ok_or_else(missing)?;
-            let stored: Value = serde_json::from_str(&fields)
-                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
-            query = card_query_from_filter(&stored, query.page);
-        }
-        query.terms.retain(|term| !term.trim().is_empty());
-        let filtered = board_filter_used(&query);
-        query.board_ids = vec![id.clone()];
         return Ok(if filtered {
             board_page::show_filtered(&app, &p, &r, &query, raw.as_deref())
                 .await?
@@ -5939,13 +5977,47 @@ async fn show_board(
             response
         });
     }
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND column_id IS NULL")
-        .bind(&id)
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
+    let total: i64 = if filtered {
+        let mut count = cards_query("SELECT COUNT(*)", &p, &query);
+        count
+            .build_query_scalar()
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND column_id IS NULL")
+            .bind(&id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?
+    };
+    let mut etag_salt = String::new();
+    if !filtered {
+        let (offset, limit) = page_window(page);
+        etag_salt.push_str(&format!(
+            "page:{page}:board:{}:total:{total}:",
+            r.get::<&str, _>("updated_at")
+        ));
+        let rows = sqlx::query("SELECT id,updated_at FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND column_id IS NULL ORDER BY golden DESC,last_active_at DESC,id DESC LIMIT ? OFFSET ?")
+            .bind(&id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
+        for row in rows {
+            etag_salt.push_str(row.get::<&str, _>("id"));
+            etag_salt.push(':');
+            etag_salt.push_str(row.get::<&str, _>("updated_at"));
+            etag_salt.push(';');
+        }
+    }
     Ok(pagination_headers(
-        Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response(),
+        conditional_board_json_response(
+            board_detail(&app, &p, &r, &base(&headers)).await?,
+            &headers,
+            &etag_salt,
+        ),
         total,
         page,
         &uri,
