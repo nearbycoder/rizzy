@@ -915,6 +915,16 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     let schema = include_str!("../schema.mysql.sql");
     resume_mysql_schema(&db, schema).await?;
+    let bulk_touch_epoch_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cards' AND column_name='bulk_touch_epoch'",
+    )
+    .fetch_one(&db)
+    .await?;
+    if bulk_touch_epoch_exists == 0 {
+        sqlx::query("ALTER TABLE cards ADD COLUMN bulk_touch_epoch BIGINT NOT NULL DEFAULT 0")
+            .execute(&db)
+            .await?;
+    }
     let assignment_updated_at_exists: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='assignments' AND column_name='updated_at'",
     )
@@ -943,7 +953,7 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     validate_mysql_schema(&db, schema).await?;
     mysql_search::setup(&db).await?;
     let bulk_touch_triggers_installed: i64 = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='cards_bulk_touch_triggers_v2')",
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='cards_bulk_touch_triggers_v3')",
     )
     .fetch_one(&db)
     .await?;
@@ -977,7 +987,7 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
         }
     }
     if bulk_touch_triggers_installed == 0 {
-        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('cards_bulk_touch_triggers_v2','done') ON DUPLICATE KEY UPDATE value='done'")
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('cards_bulk_touch_triggers_v3','done') ON DUPLICATE KEY UPDATE value='done'")
             .execute(&db)
             .await?;
     }
@@ -2392,6 +2402,16 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::raw_sql(include_str!("../schema.sql"))
             .execute(&db)
             .await?;
+        let bulk_touch_epoch_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('cards') WHERE name='bulk_touch_epoch'",
+        )
+        .fetch_one(&db)
+        .await?;
+        if bulk_touch_epoch_exists == 0 {
+            sqlx::query("ALTER TABLE cards ADD COLUMN bulk_touch_epoch INTEGER NOT NULL DEFAULT 0")
+                .execute(&db)
+                .await?;
+        }
         rich_text_records::migrate(&db).await?;
         for (name, definition) in [
             (
@@ -8367,7 +8387,12 @@ async fn update_column(
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-        sqlx::query("UPDATE cards SET updated_at=? WHERE column_id=?")
+        let touch_cards_sql = if app.mysql {
+            "UPDATE cards SET updated_at=?,bulk_touch_epoch=bulk_touch_epoch+1 WHERE column_id=?"
+        } else {
+            "UPDATE cards SET updated_at=? WHERE column_id=?"
+        };
+        sqlx::query(touch_cards_sql)
             .bind(&timestamp)
             .bind(&column_id)
             .execute(&mut *tx)
@@ -8412,19 +8437,31 @@ async fn delete_column(
     checked_column(&app, &p, &board_id, &column_id).await?;
     let mut tx = begin_write(&app).await.map_err(db_err)?;
     lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
-    sqlx::query("INSERT INTO card_bulk_touches(board_id) VALUES(?)")
-        .bind(&board_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
+    if !app.mysql {
+        sqlx::query("INSERT INTO card_bulk_touches(board_id) VALUES(?)")
+            .bind(&board_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     let timestamp = now();
-    sqlx::query("UPDATE cards SET column_id=NULL WHERE board_id=? AND column_id=?")
+    let nullify_sql = if app.mysql {
+        "UPDATE cards SET column_id=NULL,bulk_touch_epoch=bulk_touch_epoch+1 WHERE board_id=? AND column_id=?"
+    } else {
+        "UPDATE cards SET column_id=NULL WHERE board_id=? AND column_id=?"
+    };
+    sqlx::query(nullify_sql)
         .bind(&board_id)
         .bind(&column_id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    sqlx::query("UPDATE cards SET updated_at=? WHERE board_id=?")
+    let touch_cards_sql = if app.mysql {
+        "UPDATE cards SET updated_at=?,bulk_touch_epoch=bulk_touch_epoch+1 WHERE board_id=?"
+    } else {
+        "UPDATE cards SET updated_at=? WHERE board_id=?"
+    };
+    sqlx::query(touch_cards_sql)
         .bind(&timestamp)
         .bind(&board_id)
         .execute(&mut *tx)
@@ -8436,13 +8473,16 @@ async fn delete_column(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    // The guard is visible only within this transaction and is removed before
-    // commit, so the bulk touch skips callbacks without changing later writes.
-    sqlx::query("DELETE FROM card_bulk_touches WHERE board_id=?")
-        .bind(&board_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
+    // SQLite's guard is visible only within this transaction. MySQL uses a
+    // row epoch that changes only on these bulk statements, so a failed write
+    // cannot leave callback suppression behind on a pooled connection.
+    if !app.mysql {
+        sqlx::query("DELETE FROM card_bulk_touches WHERE board_id=?")
+            .bind(&board_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
         .bind(&timestamp)
         .bind(&board_id)

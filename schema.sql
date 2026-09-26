@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS cards (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_active_at TEXT NOT NULL,
+  bulk_touch_epoch INTEGER NOT NULL DEFAULT 0,
   UNIQUE(account_id, number)
 );
 CREATE INDEX IF NOT EXISTS cards_board_active ON cards(board_id, status, closed, postponed, last_active_at DESC);

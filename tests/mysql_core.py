@@ -217,23 +217,36 @@ def main():
                 {"step": {"content": "MySQL step"}}, 201,
             )
             before_column_rename = column_times()
+            before_bulk_epoch = int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'"))
             time.sleep(.02)
             call(base, token, scope + f"/boards/{board['id']}/columns/{column['id']}",
                  "PATCH", {"column": {"name": "Renamed MySQL column"}})
             renamed_column = column_times()
             assert tuple(a != b for a, b in zip(before_column_rename, renamed_column)) == (
                 True, True, True)
+            renamed_epoch = int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'"))
+            assert renamed_epoch == before_bulk_epoch + 1
             call(base, token, scope + f"/boards/{board['id']}/columns/{column['id']}",
                  "PATCH", {"column": {"name": "Renamed MySQL column"}})
             assert column_times() == renamed_column
+            assert int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'")) == renamed_epoch
             with urllib.request.urlopen(urllib.request.Request(
                     column_cards_url, headers={**column_headers,
                                                "If-None-Match": column_etag}), timeout=8) as response:
                 assert response.status == 200 and response.headers["ETag"] != column_etag
+            before_step_touch = column_times()
+            time.sleep(.02)
             call(
                 base, token, scope + f"/cards/{number}/steps/{step['id']}", "PUT",
                 {"step": {"completed": True}},
             )
+            assert all(before != after for before, after in
+                       zip(before_step_touch, column_times()))
+            assert int(mysql_scalar(url,
+                f"SELECT bulk_touch_epoch FROM cards WHERE id='{card['id']}'")) == renamed_epoch
             assert call(base, token, scope + f"/cards/{number}")["steps"][0]["completed"] is True
             call(
                 base, token, scope + f"/cards/{number}/taggings", "POST",
@@ -572,7 +585,7 @@ def main():
                      {"column_id": column["id"]}, 204)
             def lifecycle_card_rows():
                 return [mysql_scalar(url,
-                    f"SELECT updated_at,last_active_at,COALESCE(column_id,'NO_COLUMN') "
+                    f"SELECT updated_at,last_active_at,COALESCE(column_id,'NO_COLUMN'),bulk_touch_epoch "
                     f"FROM cards WHERE id='{card['id']}'").split("\t")
                     for card in lifecycle_cards]
             before_cards = lifecycle_card_rows()
@@ -586,6 +599,8 @@ def main():
             after_cards = lifecycle_card_rows()
             assert all(before[0] != after[0] and before[1] == after[1]
                        for before, after in zip(before_cards, after_cards))
+            assert [int(after[3]) - int(before[3]) for before, after in
+                    zip(before_cards, after_cards)] == [2, 1, 1]
             assert after_cards[0][2] == "NO_COLUMN" and after_cards[1][2] == second["id"]
             assert after_cards[2][2] == "NO_COLUMN"
             assert mysql_scalar(url,

@@ -25,6 +25,7 @@ def main():
             db.execute("DROP TRIGGER cards_touch_board_update")
             db.execute("DROP TRIGGER cards_touch_column_update")
             db.execute("DROP TABLE card_bulk_touches")
+            db.execute("ALTER TABLE cards DROP COLUMN bulk_touch_epoch")
             db.execute("CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards "
                        "WHEN NEW.status='published' BEGIN "
                        "UPDATE boards SET updated_at=NEW.updated_at WHERE id=NEW.board_id; END")
@@ -37,6 +38,7 @@ def main():
         try:
             with sqlite3.connect(target["db"]) as db:
                 assert db.execute("SELECT COUNT(*) FROM card_bulk_touches").fetchone()[0] == 0
+                assert any(row[1] == "bulk_touch_epoch" for row in db.execute("PRAGMA table_info(cards)"))
                 for name in ("cards_touch_board_update", "cards_touch_column_update"):
                     definition = db.execute(
                         "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",

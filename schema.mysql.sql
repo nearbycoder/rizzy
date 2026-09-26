@@ -243,6 +243,7 @@ CREATE TABLE `cards` (
   `created_at` LONGTEXT NOT NULL,
   `updated_at` LONGTEXT NOT NULL,
   `last_active_at` VARCHAR(40) NOT NULL,
+  `bulk_touch_epoch` BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `card_bulk_touches` (
