@@ -373,7 +373,7 @@ pub(super) async fn show(
     query: &CardQuery,
     raw: Option<&str>,
 ) -> Result<Html<String>> {
-    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=? ORDER BY lower(b.name),b.id")
+    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=? ORDER BY x.accessed_at DESC,b.id")
         .bind(&principal.account_id).bind(&principal.user_id).fetch_all(&app.db).await.map_err(db_err)?;
     let tags = sqlx::query("SELECT id,title FROM tags WHERE account_id=? ORDER BY lower(title),id")
         .bind(&principal.account_id)

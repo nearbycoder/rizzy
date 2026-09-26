@@ -56,6 +56,7 @@ def run(target):
 
         plain = html()
         assert "card-columns" in plain and "cards--maybe" in plain and GRID not in plain
+        assert 'id="filter-settings-save-toggle"' not in plain, target["name"]
         if target["name"] == "rizzy":
             assert 'cards--maybe is-expanded' in plain and 'board-tools__watch-toggle' in plain
             assert 'data-card-number=' in plain and 'class="bottom-bar"' in plain

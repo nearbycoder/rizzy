@@ -18,6 +18,7 @@ def check(target):
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board": {"name": marker}}, bearer=True)
     assert status == 201, (target["name"], status, raw[:160])
     board_id = json.loads(raw)["id"]
+    second_board_id = None
     try:
         for index in range(17):
             status, _, raw = request(target, f"/{account}/boards/{board_id}/cards", "POST",
@@ -59,6 +60,7 @@ def check(target):
             return [index for index in range(17) if f"{marker} card {index:02d}" in body]
 
         first_body = html()
+        assert 'id="filter-settings-save-toggle"' not in first_body, target["name"]
         first = found(first_body)
         assert "preview-parity" in first_body and "1/1" in first_body, target["name"]
         second = found(html("&page=2"))
@@ -78,8 +80,32 @@ def check(target):
         json_path = f"/{account}/cards.json?board_ids%5B%5D={urllib.parse.quote(board_id)}"
         status, _, raw = request(target, json_path, bearer=True)
         assert status == 200 and len(json.loads(raw)) == 15, (target["name"], status)
+        status, _, raw = request(target, f"/{account}/boards", "POST",
+                                 {"board": {"name": marker + " second"}}, bearer=True)
+        assert status == 201, (target["name"], status, raw[:160])
+        second_board_id = json.loads(raw)["id"]
+        status, _, raw = request(target, f"/{account}/boards/{second_board_id}/cards", "POST",
+                                 {"card": {"title": "Access order probe"}}, bearer=True)
+        assert status == 201, (target["name"], status, raw[:160])
+        second_number = json.loads(raw)["number"]
+        for read_number in (newest["number"], second_number):
+            status, _, raw = request(target, f"/{account}/cards/{read_number}/reading", "POST", bearer=True)
+            assert status == 201, (target["name"], status, raw[:160])
+            time.sleep(0.02)
+        ordered_html = html()
+        if target["name"] == "fizzy":
+            choice = lambda board: f'data-multi-selection-combobox-value="{board}"'
+        else:
+            choice = lambda board: f'name="board_ids[]" value="{board}"'
+        first_position = ordered_html.find(choice(board_id))
+        second_position = ordered_html.find(choice(second_board_id))
+        assert second_position >= 0 and first_position > second_position, (
+            target["name"], "board choices are not ordered by recent access", first_position, second_position)
         return first, second, term, oldest, assigned, unassigned
     finally:
+        if second_board_id:
+            status, _, _ = request(target, f"/{account}/boards/{second_board_id}", "DELETE", bearer=True)
+            assert status == 204, (target["name"], status)
         status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
         assert status == 204, (target["name"], status)
 
@@ -105,7 +131,7 @@ def main():
         targets.append(target)
     left, right = (check(target) for target in targets)
     assert left == right, (left, right)
-    print("All-cards HTML parity passed: pages, status, term, sort, assignees, and JSON")
+    print("All-cards HTML parity passed: pages, filters, recent board order, and JSON")
 
 
 if __name__ == "__main__":

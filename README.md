@@ -51,7 +51,7 @@ For browser push, set `RIZZY_VAPID_PRIVATE_KEY` (or Fizzy's `VAPID_PRIVATE_KEY`)
 - An account home activity timeline with Added, Updated, and Done columns, board and person filters, timezone grouping, day pagination, column detail pages, and a user activity frame.
 - Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
 - A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
-- An account navigation menu for boards, people, tags, saved views, settings, and shortcuts, with conditional ETag responses.
+- An account navigation menu for boards, people, tags, settings, and shortcuts, with conditional ETag responses.
 - A dedicated card edit route with title and Lexxy description fields, alongside the card page's inline editor.
 - A Fizzy-matching service worker script and local offline bundle, plus a Rizzy web app manifest and icons. Automatic service worker registration across all browser pages is still pending.
 - SQLite WAL storage with indexes for the board and card lookup paths.
