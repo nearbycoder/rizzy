@@ -1,0 +1,192 @@
+{
+  "fixture": {
+    "cards": 100,
+    "comments": 20,
+    "page_results": [
+      15,
+      30,
+      50,
+      25
+    ]
+  },
+  "samples": {
+    "fizzy": [
+      {
+        "page": 1,
+        "results": 15,
+        "html_bytes": 56341
+      },
+      {
+        "page": 2,
+        "results": 30,
+        "html_bytes": 67780
+      },
+      {
+        "page": 3,
+        "results": 50,
+        "html_bytes": 83032
+      },
+      {
+        "page": 4,
+        "results": 25,
+        "html_bytes": 63630
+      }
+    ],
+    "rizzy": [
+      {
+        "page": 1,
+        "results": 15,
+        "html_bytes": 8680
+      },
+      {
+        "page": 2,
+        "results": 30,
+        "html_bytes": 14750
+      },
+      {
+        "page": 3,
+        "results": 50,
+        "html_bytes": 22846
+      },
+      {
+        "page": 4,
+        "results": 25,
+        "html_bytes": 12561
+      }
+    ]
+  },
+  "runs": {
+    "first_page": {
+      "fizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 2.0,
+          "requests": 96,
+          "errors": {},
+          "rps": 48.0,
+          "p50_ms": 20.46,
+          "p95_ms": 25.67,
+          "p99_ms": 29.91
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.02,
+          "requests": 587,
+          "errors": {},
+          "rps": 290.1,
+          "p50_ms": 26.1,
+          "p95_ms": 36.64,
+          "p99_ms": 45.69
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.04,
+          "requests": 1808,
+          "errors": {},
+          "rps": 888.0,
+          "p50_ms": 32.06,
+          "p95_ms": 60.52,
+          "p99_ms": 82.16
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 2.0,
+          "requests": 1628,
+          "errors": {},
+          "rps": 813.8,
+          "p50_ms": 1.13,
+          "p95_ms": 1.91,
+          "p99_ms": 2.4
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.0,
+          "requests": 6924,
+          "errors": {},
+          "rps": 3459.3,
+          "p50_ms": 2.11,
+          "p95_ms": 3.94,
+          "p99_ms": 5.13
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.01,
+          "requests": 7271,
+          "errors": {},
+          "rps": 3622.6,
+          "p50_ms": 8.58,
+          "p95_ms": 12.56,
+          "p99_ms": 15.42
+        }
+      ]
+    },
+    "fourth_page": {
+      "fizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 2.0,
+          "requests": 64,
+          "errors": {},
+          "rps": 32.0,
+          "p50_ms": 31.75,
+          "p95_ms": 39.65,
+          "p99_ms": 42.15
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.03,
+          "requests": 403,
+          "errors": {},
+          "rps": 198.3,
+          "p50_ms": 38.34,
+          "p95_ms": 50.79,
+          "p99_ms": 63.07
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.1,
+          "requests": 987,
+          "errors": {},
+          "rps": 469.5,
+          "p50_ms": 56.68,
+          "p95_ms": 119.81,
+          "p99_ms": 159.6
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 1,
+          "seconds": 2.0,
+          "requests": 891,
+          "errors": {},
+          "rps": 445.0,
+          "p50_ms": 2.14,
+          "p95_ms": 3.36,
+          "p99_ms": 3.92
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 3309,
+          "errors": {},
+          "rps": 1649.9,
+          "p50_ms": 4.67,
+          "p95_ms": 7.61,
+          "p99_ms": 9.0
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.01,
+          "requests": 5923,
+          "errors": {},
+          "rps": 2951.9,
+          "p50_ms": 10.4,
+          "p95_ms": 14.46,
+          "p99_ms": 18.32
+        }
+      ]
+    }
+  }
+}

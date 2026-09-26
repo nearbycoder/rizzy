@@ -45,18 +45,26 @@ fn excerpt(value: &str, pattern: Option<&Regex>) -> String {
     if words.is_empty() {
         return String::new();
     }
-    let hit = pattern
-        .and_then(|pattern| words.iter().position(|word| pattern.is_match(word)))
-        .unwrap_or(0);
-    let start = hit.saturating_sub(8);
-    let end = (start + 20).min(words.len());
+    let Some(hit) =
+        pattern.and_then(|pattern| words.iter().position(|word| pattern.is_match(word)))
+    else {
+        let mut chars = text.chars();
+        let prefix: String = chars.by_ref().take(197).collect();
+        return if chars.next().is_some() {
+            escape(&prefix) + "..."
+        } else {
+            escape(&text)
+        };
+    };
+    let start = hit.saturating_sub(9);
+    let end = (hit + 11).min(words.len());
     let mut result = String::new();
     if start > 0 {
-        result.push_str("... ");
+        result.push_str("...");
     }
     result.push_str(&highlighted(&words[start..end].join(" "), pattern));
     if end < words.len() {
-        result.push_str(" ...");
+        result.push_str("...");
     }
     result
 }
@@ -116,12 +124,17 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                    UNION ALL
                    SELECT 'comment' kind,m.card_id,m.id,m.created_at FROM comments m
                      WHERE m.rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ?)
-                 ) SELECT hits.kind,hits.hit_id,c.number,c.title,c.description,b.name board_name,m.body comment_body
-                   FROM hits JOIN cards c ON c.id=hits.card_id JOIN boards b ON b.id=c.board_id
-                   LEFT JOIN comments m ON m.id=hits.hit_id
-                   WHERE c.account_id=? AND c.status='published'
-                     AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?)
-                   ORDER BY hits.hit_at DESC,hits.hit_id DESC LIMIT ? OFFSET ?",
+                 ), page_hits AS MATERIALIZED (
+                   SELECT hits.kind,hits.card_id,hits.hit_id,hits.hit_at
+                     FROM hits JOIN cards c ON c.id=hits.card_id
+                    WHERE c.account_id=? AND c.status='published'
+                      AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
+                    ORDER BY hits.hit_at DESC,hits.hit_id DESC LIMIT ? OFFSET ?
+                 ) SELECT page_hits.kind,page_hits.hit_id,c.number,c.title,c.description,b.name board_name,m.body comment_body
+                   FROM page_hits JOIN cards c ON c.id=page_hits.card_id
+                   JOIN boards b ON b.id=c.board_id
+                   LEFT JOIN comments m ON m.id=page_hits.hit_id
+                   ORDER BY page_hits.hit_at DESC,page_hits.hit_id DESC",
             )
             .bind(&search)
             .bind(&search)

@@ -71,7 +71,7 @@ def main():
             filler = " ".join(["word"] * 20)
             call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": "Long winded", "description": f"{filler} needle {filler}"}}, bearer=token, status=201)
             long_excerpt = re.search(r'<div class="search__excerpt">(.*?)</div>', browser_search("needle")).group(1)
-            assert long_excerpt.startswith("... ") and long_excerpt.endswith(" ...")
+            assert long_excerpt.startswith("...") and long_excerpt.endswith("...")
             assert "needle" in long_excerpt
             for i in range(20):
                 call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": f"paginated card {i}"}}, bearer=token, status=201)

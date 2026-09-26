@@ -42,12 +42,12 @@ def cookie(headers, name):
     raise AssertionError(f"missing {name} cookie")
 
 
-def start(env):
+def start(env, binary=BINARY):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     server = subprocess.Popen(
-        [BINARY], cwd=ROOT,
+        [binary], cwd=ROOT,
         env={**env, "RIZZY_BIND": f"127.0.0.1:{port}", "RIZZY_DEV_MAGIC_LINKS": env.get("RIZZY_DEV_MAGIC_LINKS", "1")},
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
