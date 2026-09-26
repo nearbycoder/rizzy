@@ -5,8 +5,10 @@ Fizzy supports MySQL. Rizzy's MySQL work is in progress on this branch. The
 `tests/mysql_core.py` flow covers account seeding, board and card creation,
 columns, triage, steps, tags, account and board entropy, the closing-soon
 filter, assignment and activity spikes, watch and pin controls, saved filters,
-public board publication and viewing, comments, JSON and browser search,
-browser card and menu pages, closing a card, and API reads. It verifies the
+event and mention notifications, email and push queue records, notification
+settings and unsubscribe tokens, personal timezone, public board publication
+and viewing, comments, JSON and browser search, browser card and menu pages,
+closing a card, and API reads. It verifies the
 account entropy, user attachable and settings, access record, and board touch
 side effects in the database. Most routes have not yet been exercised on
 MySQL; some still use SQLite-only SQL, and this is not deployment parity.
@@ -18,6 +20,12 @@ The pinned source's filters controller suite passed 2 tests and 17 assertions
 on MySQL 8. Rizzy's core flow now checks repeat saves keep one filter and one
 board association, closed-card results, and deletion. Other filter
 combinations and browser controls still need comparison.
+The pinned source's selected notification, mention, settings, and unsubscribe
+suites passed 31 tests and 127 assertions on MySQL 8. Rizzy's MySQL core flow
+checks one recipient's event notification, repeated unread count, a card
+mention, three queued push records, one pending email bundle, settings record
+timestamps and repeat no-ops, token renewal after expiry, and unsubscribe.
+Delivery, larger recipient sets, revocation, and full browser parity remain.
 
 `schema.mysql.sql` is a snapshot of an initialized Rizzy SQLite database. To
 regenerate it after a SQLite schema change, seed a new SQLite database and run
@@ -26,10 +34,12 @@ The generator preserves the 63 application tables, ordinary indexes, foreign
 keys, 15 checks, and the partial uniqueness rules through generated columns.
 It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16
 account-routed FULLTEXT search tables and backfills published cards and
-comments. Sixteen MySQL triggers in
+comments. Twenty MySQL triggers in
 `schema.mysql.triggers.sql` cover the core flow, with an idempotent backfill
 for databases created before the triggers were added. Other SQLite trigger
 behavior still needs native MySQL equivalents or equivalent application code.
+An existing MySQL database installed the four added user settings triggers on
+restart and reported all twenty expected triggers.
 
 The schema and commands were exercised on a disposable local MariaDB 13.0.2
 instance on 2026-09-26. The Rust binary created all 63 tables through SQLx,

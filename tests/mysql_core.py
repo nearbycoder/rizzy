@@ -6,6 +6,7 @@ RIZZY_TEST_MYSQL_CLIENT to a MySQL CLI. This check adds one account and its
 records; use a database dedicated to tests.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -102,7 +103,7 @@ def check_metadata(url, account):
         env=client_env, check=True, capture_output=True, text=True,
     )
     values = [int(value) for value in result.stdout.split()]
-    assert values == [1, 2, 1, 1, 1], ("MySQL metadata", values)
+    assert values == [1, 3, 2, 2, 1], ("MySQL metadata", values)
     return True
 
 
@@ -341,9 +342,85 @@ def main():
                 assert response.status == 200
             assert len(call(base, token, scope + f"/cards/{number}/comments")) >= 1
             assert len(call(base, token, scope + "/activities")) >= 3
+            account_id = mysql_scalar(url, f"SELECT id FROM accounts WHERE external_account_id={account}")
+            member_id = uuid.uuid4().hex
+            identity_id = uuid.uuid4().hex
+            member_token = "mysql-notice-" + uuid.uuid4().hex
+            member_hash = hashlib.sha256(member_token.encode()).hexdigest()
+            timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            mysql_scalar(url, f"INSERT INTO identities(id,email_address,created_at) VALUES('{identity_id}','mysql-notice-{identity_id}@example.test','{timestamp}')")
+            mysql_scalar(url, f"INSERT INTO users(id,account_id,identity_id,name,role,verified_at,created_at) VALUES('{member_id}','{account_id}','{identity_id}','MySQL Member','member','{timestamp}','{timestamp}')")
+            mysql_scalar(url, f"INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES('{uuid.uuid4().hex}','{identity_id}','{member_hash}','Test','write','{timestamp}')")
+            mysql_scalar(url, f"INSERT INTO accesses(board_id,user_id,involvement) VALUES('{board['id']}','{member_id}','watching')")
+            notified_card = call(base, token, scope + f"/boards/{board['id']}/cards", "POST",
+                                 {"card": {"title": "MySQL notice card"}}, 201)
+            notices = call(base, member_token, scope + "/notifications")
+            assert len(notices) == 1 and notices[0]["title"] == "MySQL notice card", notices
+            assert notices[0]["unread_count"] == 1
+            call(base, member_token, scope + f"/cards/{notified_card['number']}/watch", "POST",
+                 expected=204, extra_headers=controls)
+            call(base, token, scope + f"/cards/{notified_card['number']}/comments", "POST",
+                 {"comment": {"body": "A second notice"}}, 201)
+            notices = call(base, member_token, scope + "/notifications")
+            assert len(notices) == 1 and notices[0]["unread_count"] == 2, notices
+            sgid = mysql_scalar(url, f"SELECT sgid FROM user_attachables WHERE user_id='{member_id}'")
+            mention = (f'<action-text-attachment sgid="{sgid}" '
+                       'content-type="application/vnd.actiontext.mention"></action-text-attachment>')
+            call(base, token, scope + f"/cards/{notified_card['number']}", "PUT",
+                 {"card": {"description": f"<p>Hello {mention}</p>"}})
+            notices = call(base, member_token, scope + "/notifications")
+            assert len(notices) == 1 and notices[0]["unread_count"] == 3 and notices[0]["source_type"] == "mention", notices
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM mentions WHERE mentionee_id='{member_id}' AND source_id='{notified_card['id']}'") == "1"
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM notification_bundles WHERE user_id='{member_id}' AND status=0") == "1"
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM push_deliveries WHERE notification_id='{notices[0]['id']}'") == "3"
+            reading_path = scope + f"/notifications/{notices[0]['id']}/reading"
+            call(base, member_token, reading_path, "POST", expected=204)
+            assert call(base, member_token, scope + "/notifications")[0]["read"] is True
+            assert call(base, member_token, scope + "/notifications/tray") == []
+            call(base, member_token, reading_path, "DELETE", expected=204)
+            assert call(base, member_token, scope + "/notifications")[0]["read"] is False
+            assert call(base, member_token, scope + "/notifications/settings") == {"bundle_email_frequency": "every_few_hours"}
+            def settings_record():
+                return tuple(mysql_scalar(url, f"SELECT id,created_at,updated_at FROM user_settings_records WHERE user_id='{member_id}'").split("\t"))
+
+            first_settings = settings_record()
+            assert len(first_settings) == 3
+            time.sleep(.02)
+            call(base, member_token, scope + "/notifications/settings", "PUT",
+                 {"user_settings": {"bundle_email_frequency": "daily"}}, 204)
+            changed_settings = settings_record()
+            assert changed_settings[:2] == first_settings[:2] and changed_settings[2] > first_settings[2]
+            unsubscribe_token = mysql_scalar(url, f"SELECT token FROM notification_unsubscribe_tokens WHERE user_id='{member_id}'")
+            assert unsubscribe_token
+            call(base, member_token, scope + "/notifications/settings", "PUT",
+                 {"user_settings": {"bundle_email_frequency": "daily"}}, 204)
+            assert settings_record() == changed_settings
+            assert mysql_scalar(url, f"SELECT token FROM notification_unsubscribe_tokens WHERE user_id='{member_id}'") == unsubscribe_token
+            mysql_scalar(url, f"UPDATE notification_unsubscribe_tokens SET expires_at='2000-01-01T00:00:00.000Z' WHERE user_id='{member_id}'")
+            call(base, member_token, scope + "/notifications/settings", "PUT",
+                 {"user_settings": {"bundle_email_frequency": "daily"}}, 204)
+            renewed_token = mysql_scalar(url, f"SELECT token FROM notification_unsubscribe_tokens WHERE user_id='{member_id}'")
+            assert renewed_token and renewed_token != unsubscribe_token
+            unsubscribe_token = renewed_token
+            time.sleep(.02)
+            call(base, member_token, scope + "/my/timezone", "PUT",
+                 {"timezone_name": "America/Chicago"}, 204)
+            timezone_settings = settings_record()
+            assert timezone_settings[:2] == first_settings[:2] and timezone_settings[2] > changed_settings[2]
+            call(base, member_token, scope + "/my/timezone", "PUT",
+                 {"timezone_name": "America/Chicago"}, 204)
+            assert settings_record() == timezone_settings
+            unsubscribe = urllib.request.Request(
+                base + scope + "/notifications/unsubscribe?access_token=" + quote(unsubscribe_token),
+                method="POST", headers={"Accept": "text/html"},
+            )
+            with urllib.request.urlopen(unsubscribe, timeout=8) as response:
+                assert response.status == 200 and "unsubscribed" in response.read().decode().lower()
+            assert call(base, member_token, scope + "/notifications/settings") == {"bundle_email_frequency": "never"}
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM notification_bundles WHERE user_id='{member_id}' AND status=0") == "0"
             metadata_checked = check_metadata(url, account)
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, public board, comment, search, browser card/menu, close, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, settings, unsubscribe, timezone, public board, comment, search, browser card/menu, close, reads{detail}")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise

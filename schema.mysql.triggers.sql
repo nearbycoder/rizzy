@@ -60,6 +60,45 @@ BEGIN
 END;
 
 -- trigger: boards_after_insert
+-- trigger: user_settings_frequency_update
+CREATE TRIGGER user_settings_frequency_update AFTER UPDATE ON notification_settings FOR EACH ROW
+BEGIN
+  IF NOT (NEW.bundle_email_frequency <=> OLD.bundle_email_frequency) THEN
+    UPDATE user_settings_records
+    SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')
+    WHERE user_id=NEW.user_id;
+  END IF;
+END;
+
+-- trigger: user_settings_timezone_insert
+CREATE TRIGGER user_settings_timezone_insert AFTER INSERT ON user_timezones FOR EACH ROW
+BEGIN
+  IF NEW.timezone_name IS NOT NULL THEN
+    UPDATE user_settings_records
+    SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')
+    WHERE user_id=NEW.user_id;
+  END IF;
+END;
+
+-- trigger: user_settings_timezone_update
+CREATE TRIGGER user_settings_timezone_update AFTER UPDATE ON user_timezones FOR EACH ROW
+BEGIN
+  IF NOT (NEW.timezone_name <=> OLD.timezone_name) THEN
+    UPDATE user_settings_records
+    SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')
+    WHERE user_id=NEW.user_id;
+  END IF;
+END;
+
+-- trigger: user_settings_timezone_delete
+CREATE TRIGGER user_settings_timezone_delete AFTER DELETE ON user_timezones FOR EACH ROW
+BEGIN
+  UPDATE user_settings_records
+  SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')
+  WHERE user_id=OLD.user_id;
+END;
+
+-- trigger: boards_after_insert
 CREATE TRIGGER boards_after_insert AFTER INSERT ON boards FOR EACH ROW
 BEGIN
   IF NEW.entropy_override=1 THEN

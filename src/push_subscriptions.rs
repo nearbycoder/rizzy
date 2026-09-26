@@ -123,14 +123,24 @@ pub(super) async fn create(
     let key = string(&input, "p256dh_key");
     let auth = string(&input, "auth_key");
     let timestamp = now();
-    sqlx::query("INSERT OR IGNORE INTO push_subscriptions(id,account_id,user_id,endpoint,p256dh_key,auth_key,user_agent,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    let statement = if app.mysql {
+        "INSERT IGNORE INTO push_subscriptions(id,account_id,user_id,endpoint,p256dh_key,auth_key,user_agent,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO push_subscriptions(id,account_id,user_id,endpoint,p256dh_key,auth_key,user_agent,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)"
+    };
+    sqlx::query(statement)
         .bind(id())
         .bind(&p.account_id)
         .bind(&p.user_id)
         .bind(endpoint)
         .bind(key)
         .bind(auth)
-        .bind(headers.get(header::USER_AGENT).and_then(|value|value.to_str().ok()).map(|value|value.chars().take(4096).collect::<String>()))
+        .bind(
+            headers
+                .get(header::USER_AGENT)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.chars().take(4096).collect::<String>()),
+        )
         .bind(&timestamp)
         .bind(&timestamp)
         .execute(&app.db)

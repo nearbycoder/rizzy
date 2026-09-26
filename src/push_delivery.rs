@@ -25,9 +25,21 @@ pub(super) async fn queue(
     card_id: &str,
 ) -> Result<()> {
     let timestamp = now();
-    sqlx::query("INSERT OR IGNORE INTO push_deliveries(id,account_id,notification_id,source_id,status,attempts,next_attempt_at,created_at,updated_at) SELECT ?,n.account_id,n.id,n.source_id,0,0,?,?,? FROM notifications n WHERE n.user_id=? AND n.card_id=?")
-        .bind(id()).bind(&timestamp).bind(&timestamp).bind(&timestamp).bind(user_id).bind(card_id)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let statement = if (**tx).backend_name() == "MySQL" {
+        "INSERT IGNORE INTO push_deliveries(id,account_id,notification_id,source_id,status,attempts,next_attempt_at,created_at,updated_at) SELECT ?,n.account_id,n.id,n.source_id,0,0,?,?,? FROM notifications n WHERE n.user_id=? AND n.card_id=?"
+    } else {
+        "INSERT OR IGNORE INTO push_deliveries(id,account_id,notification_id,source_id,status,attempts,next_attempt_at,created_at,updated_at) SELECT ?,n.account_id,n.id,n.source_id,0,0,?,?,? FROM notifications n WHERE n.user_id=? AND n.card_id=?"
+    };
+    sqlx::query(statement)
+        .bind(id())
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(user_id)
+        .bind(card_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
     Ok(())
 }
 
@@ -319,8 +331,17 @@ async fn deliver_one(
             .map_err(db_err)?;
         match send(&endpoint, &p256dh, &auth, &content, key).await {
             Ok(true) => {
-                sqlx::query("INSERT OR IGNORE INTO push_delivery_receipts(delivery_id,subscription_id) VALUES(?,?)")
-                    .bind(delivery_id).bind(&id).execute(&app.db).await.map_err(db_err)?;
+                let statement = if app.mysql {
+                    "INSERT IGNORE INTO push_delivery_receipts(delivery_id,subscription_id) VALUES(?,?)"
+                } else {
+                    "INSERT OR IGNORE INTO push_delivery_receipts(delivery_id,subscription_id) VALUES(?,?)"
+                };
+                sqlx::query(statement)
+                    .bind(delivery_id)
+                    .bind(&id)
+                    .execute(&app.db)
+                    .await
+                    .map_err(db_err)?;
             }
             Ok(false) => {
                 sqlx::query("DELETE FROM push_subscriptions WHERE id=? AND user_id=?")

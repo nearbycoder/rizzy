@@ -1379,10 +1379,25 @@ async fn queue_notifications(
         .into_iter()
         .filter(|user| user != &p.user_id && !mentioned.contains(user))
     {
-        let inserted = sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Event',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
-            .bind(id()).bind(&p.account_id).bind(&recipient).bind(&p.user_id).bind(card_id).bind(event_id)
-            .bind(timestamp).bind(timestamp).bind(board_id).bind(&recipient)
-            .execute(&mut **tx).await.map_err(db_err)?;
+        let statement = if (**tx).backend_name() == "MySQL" {
+            "INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON DUPLICATE KEY UPDATE source_id=VALUES(source_id),creator_id=VALUES(creator_id),source_type='Event',read_at=NULL,unread_count=unread_count+1,updated_at=VALUES(updated_at)"
+        } else {
+            "INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) SELECT ?,?,?,?,?,?,'Event',1,?,? WHERE EXISTS(SELECT 1 FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.user_id=? AND u.active=1) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Event',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at"
+        };
+        let inserted = sqlx::query(statement)
+            .bind(id())
+            .bind(&p.account_id)
+            .bind(&recipient)
+            .bind(&p.user_id)
+            .bind(card_id)
+            .bind(event_id)
+            .bind(timestamp)
+            .bind(timestamp)
+            .bind(board_id)
+            .bind(&recipient)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
         if inserted.rows_affected() != 0 {
             notification_mail::queue(tx, &recipient, timestamp).await?;
             push_delivery::queue(tx, &recipient, card_id).await?;
@@ -1416,13 +1431,38 @@ async fn create_new_mentions(
         if inserted.rows_affected() == 0 {
             continue;
         }
-        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1")
-            .bind(id()).bind(card_id).bind(&user_id).bind(&timestamp).bind(&timestamp)
-            .execute(&mut **tx).await.map_err(db_err)?;
+        let watch_statement = if (**tx).backend_name() == "MySQL" {
+            "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>1,VALUES(updated_at),updated_at),watching=1"
+        } else {
+            "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1"
+        };
+        sqlx::query(watch_statement)
+            .bind(id())
+            .bind(card_id)
+            .bind(&user_id)
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
         if user_id != p.user_id && p.role != "system" {
-            sqlx::query("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Mention',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at")
-                .bind(id()).bind(&p.account_id).bind(&user_id).bind(&p.user_id).bind(card_id).bind(&mention_id)
-                .bind(&timestamp).bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
+            let statement = if (**tx).backend_name() == "MySQL" {
+                "INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON DUPLICATE KEY UPDATE source_id=VALUES(source_id),creator_id=VALUES(creator_id),source_type='Mention',read_at=NULL,unread_count=unread_count+1,updated_at=VALUES(updated_at)"
+            } else {
+                "INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,unread_count,created_at,updated_at) VALUES(?,?,?,?,?,?,'Mention',1,?,?) ON CONFLICT(user_id,card_id) DO UPDATE SET source_id=excluded.source_id,creator_id=excluded.creator_id,source_type='Mention',read_at=NULL,unread_count=notifications.unread_count+1,updated_at=excluded.updated_at"
+            };
+            sqlx::query(statement)
+                .bind(id())
+                .bind(&p.account_id)
+                .bind(&user_id)
+                .bind(&p.user_id)
+                .bind(card_id)
+                .bind(&mention_id)
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
             notification_mail::queue(tx, &user_id, &timestamp).await?;
             push_delivery::queue(tx, &user_id, card_id).await?;
         }
@@ -4495,8 +4535,18 @@ async fn update_timezone(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let timezone = body.get("timezone_name").and_then(Value::as_str);
-    sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name WHERE user_timezones.timezone_name IS NOT excluded.timezone_name")
-        .bind(&p.user_id).bind(&p.account_id).bind(timezone).execute(&app.db).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON DUPLICATE KEY UPDATE timezone_name=VALUES(timezone_name)"
+    } else {
+        "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name WHERE user_timezones.timezone_name IS NOT excluded.timezone_name"
+    };
+    sqlx::query(statement)
+        .bind(&p.user_id)
+        .bind(&p.account_id)
+        .bind(timezone)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn my_identity(
@@ -8494,8 +8544,18 @@ async fn update_notification_settings(
     .fetch_optional(&app.db)
     .await
     .map_err(db_err)?;
-    sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency WHERE notification_settings.bundle_email_frequency<>excluded.bundle_email_frequency")
-        .bind(&p.user_id).bind(&p.account_id).bind(&frequency).execute(&app.db).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON DUPLICATE KEY UPDATE bundle_email_frequency=VALUES(bundle_email_frequency)"
+    } else {
+        "INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency WHERE notification_settings.bundle_email_frequency<>excluded.bundle_email_frequency"
+    };
+    sqlx::query(statement)
+        .bind(&p.user_id)
+        .bind(&p.account_id)
+        .bind(&frequency)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
     if previous.as_deref() != Some(frequency.as_str()) {
         if frequency == "never" {
             sqlx::query("DELETE FROM notification_bundles WHERE user_id=? AND status=0")
@@ -8877,7 +8937,12 @@ async fn notification_items(
 }
 
 async fn notification_page_version(app: &App, p: &Principal) -> Result<(i64, Option<String>, i64)> {
-    sqlx::query_as("SELECT COUNT(*),MAX(updated_at),COALESCE(SUM(unread_count),0) FROM notifications WHERE user_id=? AND account_id=?")
+    let statement = if app.mysql {
+        "SELECT COUNT(*),MAX(updated_at),CAST(COALESCE(SUM(unread_count),0) AS SIGNED) FROM notifications WHERE user_id=? AND account_id=?"
+    } else {
+        "SELECT COUNT(*),MAX(updated_at),COALESCE(SUM(unread_count),0) FROM notifications WHERE user_id=? AND account_id=?"
+    };
+    sqlx::query_as(statement)
         .bind(&p.user_id)
         .bind(&p.account_id)
         .fetch_one(&app.db)
