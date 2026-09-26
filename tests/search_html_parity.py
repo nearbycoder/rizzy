@@ -104,6 +104,8 @@ def check(target, tag):
         new_card("Fallback titlehit" + tag, "word " * 60)
         filler = " ".join(["word"] * 20)
         long_card = new_card("Long winded " + tag, f"{filler} needle{tag} {filler}")
+        ascii_card = new_card("caf " + tag)
+        new_card("café " + tag)
         for i in range(20):
             new_card(f"page{tag} card {i}")
 
@@ -131,6 +133,11 @@ def check(target, tag):
         assert "needle" + tag in long_doc and "..." in long_doc
         fallback_doc = html(target, "titlehit" + tag)
         assert len(card_excerpts(fallback_doc)) == 1
+        accent_doc = html(target, "café " + tag)
+        assert len(titles(accent_doc)) == 1
+        assert str(ascii_card["number"]) in titles(accent_doc)[0]
+        assert '<mark class="circled-text"><span></span>caf</mark>' in accent_doc
+        assert not titles(html(target, "東京"))
         first_page = titles(html(target, "page" + tag))
         second_page = titles(html(target, "page" + tag, 2))
         assert len(first_page) == 15 and len(second_page) == 5
@@ -148,6 +155,7 @@ def check(target, tag):
                 "card_excerpt": card_excerpts(card_doc),
                 "long_excerpt": card_excerpts(long_doc),
                 "fallback_excerpt": card_excerpts(fallback_doc),
+                "accent_titles": len(titles(accent_doc)),
                 "escaped_card": escaped["number"] > 0, "long_card": long_card["number"] > 0}
     finally:
         api(target, f"/boards/{board_id}", "DELETE", expected=204)

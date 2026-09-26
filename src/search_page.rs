@@ -6,7 +6,7 @@ use super::{App, Principal, Result, SearchQuery, card, db_err, escape, fts_query
 
 fn matcher(query: &str) -> Option<Regex> {
     let mut words: Vec<String> = query
-        .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
         .filter(|word| !word.is_empty())
         .map(regex::escape)
         .collect();

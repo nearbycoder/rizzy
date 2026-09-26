@@ -7448,7 +7448,7 @@ fn fts_query(raw: &str) -> Option<String> {
     let sanitized: String = raw
         .chars()
         .map(|ch| {
-            if ch.is_alphanumeric() || ch == '_' || (balanced && ch == '"') {
+            if ch.is_ascii_alphanumeric() || ch == '_' || (balanced && ch == '"') {
                 ch
             } else {
                 ' '
