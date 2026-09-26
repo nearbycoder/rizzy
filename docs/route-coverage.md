@@ -14,8 +14,8 @@ Path parameters and account mount prefixes are normalized before comparison.
 | Action Mailbox | 0 | 14 |
 
 The three Turbo Native history endpoints now return the pinned source's 200
-HTML responses and exact text, with and without the account prefix. The five
-All nine Active Storage routes are now registered. The blob proxy streams the
+HTML responses and exact text, with and without the account prefix. All nine
+Active Storage routes are now registered. The blob proxy streams the
 original bytes and supports single byte ranges; `tests/storage_proxy_parity.py`
 compares private/public access and cache headers against live Fizzy and Rizzy
 instances. `tests/storage_representation_parity.py` compares generated image
@@ -23,9 +23,17 @@ representation redirects, proxies, aliases, access, tampered variation keys,
 cache headers, and file cleanup. Rizzy signs its own variation keys and supports
 the app's limit/fill resize operations. It does not yet decode Rails-signed
 variation keys, implement arbitrary transformations, reproduce libvips bytes,
-or preview non-image files. The 14 Action Mailbox routes are installed
-by Rails in the source; their actual availability and behavior outside the
-test environment still need comparison.
+or preview non-image files. Rizzy now prepares the 800×600 and 1024×768 image
+variants when an image is embedded in rich text; the paired representation
+test confirms both cache files exist before the first image request.
+
+The 14 Action Mailbox routes are installed by Rails, but Fizzy has no mailbox
+classes or configured ingress. `tests/action_mailbox_source_probe.py` runs a
+disposable production Fizzy server and checks that it returns
+404 for all six ingress methods, 403 for the four conductor GET routes, and
+422 for the four conductor POST routes without CSRF tokens. Development
+conductor behavior and configured ingress behavior are still unimplemented in
+Rizzy; these routes remain outside the production app's normal workflow.
 
 This check establishes path and HTTP-method registration only. It does not
 verify response shape, permissions, side effects, browser behavior, or whether

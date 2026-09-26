@@ -340,6 +340,12 @@ pub(super) async fn render_rich_text(
             .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
         if let Some(blob) = blob {
             let filename: String = blob.get("filename");
+            if variable_image(&blob.get::<String, _>("content_type")) {
+                for (width, height) in [(800, 600), (1024, 768)] {
+                    let key = variation_key(app, "limit", width, height);
+                    ensure_variation(app, &blob, &key).await?;
+                }
+            }
             plain_input.push_str(&format!("[{}]", filename));
             replacements.push((
                 token.clone(),

@@ -29,6 +29,12 @@ def check(target):
                               {"card": {"title": "Representation", "description": markup}})
         assert status == 201, (target["name"], status, raw[:150])
         card = json.loads(raw)
+        variant_times = None
+        if target.get("storage"):
+            directory = target["storage"] / "variants" / blob["key"]
+            variants = list(directory.glob("*.jpg"))
+            assert len(variants) == 2, (target["name"], variants)
+            variant_times = {variant.name: variant.stat().st_mtime_ns for variant in variants}
         match = re.search(r'href="([^" ]*/representations/redirect/[^" ]+)"',
                           card["description_html"])
         assert match, (target["name"], card["description_html"])
@@ -49,6 +55,8 @@ def check(target):
             target["name"], status, len(content))
         assert headers.get_content_type() == "image/jpeg"
         assert "public" not in headers["Cache-Control"]
+        if variant_times is not None:
+            assert {variant.name: variant.stat().st_mtime_ns for variant in variants} == variant_times
         private_cache = headers["Cache-Control"]
 
         variation = redirect.rsplit("/", 2)[1]
