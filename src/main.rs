@@ -764,7 +764,15 @@ fn geared_page_count(total: i64) -> i64 {
     }
 }
 fn paginated(items: Value, total: i64, page: i64, uri: &Uri, headers: &HeaderMap) -> Response {
-    let mut response = Json(items).into_response();
+    pagination_headers(Json(items).into_response(), total, page, uri, headers)
+}
+fn pagination_headers(
+    mut response: Response,
+    total: i64,
+    page: i64,
+    uri: &Uri,
+    headers: &HeaderMap,
+) -> Response {
     response.headers_mut().insert(
         "x-total-count",
         HeaderValue::from_str(&total.to_string()).expect("count header"),
@@ -5702,8 +5710,69 @@ async fn list_boards(
     .fetch_all(&app.db)
     .await
     .map_err(db_err)?;
-    let out = boards_json_batch(&app, &p, &rows, &base(&headers)).await?;
-    Ok(paginated(json!(out), total, page, &uri, &headers))
+    let mut digest = Sha256::new();
+    digest.update(b"boards-index\0");
+    digest.update(p.account_id.as_bytes());
+    digest.update([0]);
+    digest.update(p.user_id.as_bytes());
+    digest.update(page.to_be_bytes());
+    for row in &rows {
+        digest.update(row.get::<String, _>("id").as_bytes());
+        digest.update([0]);
+        digest.update(row.get::<String, _>("updated_at").as_bytes());
+        digest.update([0]);
+        digest.update(row.get::<String, _>("name").as_bytes());
+        digest.update([0]);
+        digest.update(row.get::<i64, _>("all_access").to_be_bytes());
+        digest.update(
+            row.get::<i64, _>("auto_postpone_period_in_days")
+                .to_be_bytes(),
+        );
+        digest.update(row.get::<String, _>("creator_id").as_bytes());
+        digest.update([0]);
+        if let Some(key) = row.get::<Option<String>, _>("publication_key") {
+            digest.update(key.as_bytes());
+        }
+        digest.update([0]);
+        digest.update(row.get::<String, _>("public_description").as_bytes());
+        digest.update([0]);
+    }
+    let etag = format!("W/\"{}\"", hex::encode(&digest.finalize()[..16]));
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+        });
+    let mut response = if not_modified {
+        pagination_headers(
+            StatusCode::NOT_MODIFIED.into_response(),
+            total,
+            page,
+            &uri,
+            &headers,
+        )
+    } else {
+        let out = boards_json_batch(&app, &p, &rows, &base(&headers)).await?;
+        paginated(json!(out), total, page, &uri, &headers)
+    };
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("hex ETag"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("max-age=0, private, must-revalidate"),
+    );
+    if !not_modified {
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+    }
+    Ok(response)
 }
 async fn show_board(
     State(app): Shared,
