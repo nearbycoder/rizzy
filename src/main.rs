@@ -8128,6 +8128,16 @@ async fn list_columns(
     );
     Ok(with_card_page_headers(response, &etag))
 }
+fn named_column_count_sql(mysql: bool) -> &'static str {
+    if mysql {
+        // MySQL otherwise chooses the board-status index and scans cards in
+        // other columns before applying column_id to this count.
+        "SELECT COUNT(*) FROM cards FORCE INDEX(cards_board_column_active) WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0"
+    } else {
+        "SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0"
+    }
+}
+
 async fn show_column(
     State(app): Shared,
     Path((account, board_id, column_id)): Path<(String, String, String)>,
@@ -8140,7 +8150,7 @@ async fn show_column(
     let column_id: String = c.get("id");
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0")
+    let total: i64 = sqlx::query_scalar(named_column_count_sql(app.mysql))
         .bind(&board_id).bind(&column_id).fetch_one(&app.db).await.map_err(db_err)?;
     let rows = sqlx::query("SELECT c.*,(SELECT name FROM boards WHERE id=c.board_id) AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c WHERE c.board_id=? AND c.column_id=? AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT ? OFFSET ?")
         .bind(&board_id).bind(&column_id).bind(limit).bind(offset)
@@ -8238,7 +8248,7 @@ async fn column_stream_markup(
     c: &DbRow,
 ) -> Result<String> {
     let id: String = c.get("id");
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0")
+    let count: i64 = sqlx::query_scalar(named_column_count_sql(app.mysql))
         .bind(board_id).bind(&id).fetch_one(&app.db).await.map_err(db_err)?;
     Ok(board_page::named_column_html(
         p.slug,
@@ -10879,8 +10889,7 @@ async fn column_cards(
     checked_column(&app, &p, &board_id, &column_id).await?;
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
-    let scope = " FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0";
-    let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*){scope}"))
+    let total: i64 = sqlx::query_scalar(named_column_count_sql(app.mysql))
         .bind(&board_id)
         .bind(&column_id)
         .fetch_one(&app.db)
