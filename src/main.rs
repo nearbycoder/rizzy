@@ -4509,11 +4509,20 @@ async fn delete_user(
     let u = active_user(&app, &p, &id).await?;
     can_change_user(&p, &u)?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    let board_ids: Vec<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE user_id=?")
+            .bind(&id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(db_err)?;
     sqlx::query("DELETE FROM accesses WHERE user_id=?")
         .bind(&id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    for board_id in board_ids {
+        clean_inaccessible_board_data(&mut tx, &board_id, &id).await?;
+    }
     sqlx::query("UPDATE users SET active=0,identity_id=NULL WHERE id=?")
         .bind(&id)
         .execute(&mut *tx)
@@ -4529,6 +4538,40 @@ async fn delete_user(
         )
             .into_response()
     })
+}
+
+async fn clean_inaccessible_board_data(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    board_id: &str,
+    user_id: &str,
+) -> Result<()> {
+    let still_has_access: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM accesses WHERE board_id=? AND user_id=?)")
+            .bind(board_id)
+            .bind(user_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    if still_has_access != 0 {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM mentions WHERE mentionee_id=? AND ((source_type='Card' AND source_id IN (SELECT id FROM cards WHERE board_id=?)) OR (source_type='Comment' AND source_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.board_id=?)))")
+        .bind(user_id).bind(board_id).bind(board_id).execute(&mut **tx).await.map_err(db_err)?;
+    sqlx::query("DELETE FROM notifications WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+        .bind(user_id).bind(board_id).execute(&mut **tx).await.map_err(db_err)?;
+    sqlx::query("DELETE FROM watches WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+        .bind(user_id).bind(board_id).execute(&mut **tx).await.map_err(db_err)?;
+    sqlx::query(
+        "DELETE FROM pins WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)",
+    )
+    .bind(user_id)
+    .bind(board_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(db_err)?;
+    sqlx::query("DELETE FROM assignments WHERE assignee_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
+        .bind(user_id).bind(board_id).execute(&mut **tx).await.map_err(db_err)?;
+    Ok(())
 }
 async fn update_user_role(
     State(app): Shared,
@@ -6248,16 +6291,7 @@ async fn update_board(
                     .execute(&mut *tx)
                     .await
                     .map_err(db_err)?;
-                sqlx::query("DELETE FROM watches WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
-                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
-                sqlx::query("DELETE FROM mentions WHERE mentionee_id=? AND ((source_type='Card' AND source_id IN (SELECT id FROM cards WHERE board_id=?)) OR (source_type='Comment' AND source_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.board_id=?)))")
-                    .bind(user).bind(&id).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
-                sqlx::query("DELETE FROM notifications WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
-                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
-                sqlx::query("DELETE FROM pins WHERE user_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
-                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
-                sqlx::query("DELETE FROM assignments WHERE assignee_id=? AND card_id IN (SELECT id FROM cards WHERE board_id=?)")
-                    .bind(user).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+                clean_inaccessible_board_data(&mut tx, &id, user).await?;
             }
         }
     }

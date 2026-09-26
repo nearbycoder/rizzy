@@ -32,6 +32,27 @@ def main():
             db.execute("INSERT INTO boards(id,account_id,creator_id,name,created_at,updated_at) VALUES('board','account','owner','Everyone',?,?)", (stamp, stamp))
             db.execute("INSERT INTO accesses(board_id,user_id) VALUES('board','old-member')")
             db.execute("INSERT INTO accesses(board_id,user_id) VALUES('board','owner')")
+            db.execute("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,created_at,updated_at,last_active_at) "
+                       "VALUES('card','account','board','owner',1,'Shared card',?,?,?)", (stamp, stamp, stamp))
+            db.execute("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,created_at,updated_at,last_active_at) "
+                       "VALUES('other-card','account','board','owner',2,'Other card',?,?,?)", (stamp, stamp, stamp))
+            db.execute("INSERT INTO comments(id,card_id,creator_id,body,created_at,updated_at) "
+                       "VALUES('comment','card','owner','Hello',?,?)", (stamp, stamp))
+            db.execute("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,created_at) "
+                       "VALUES('event','account','board','card','owner','Card','card','published',?)", (stamp,))
+            for user in ("old-member", "owner"):
+                db.execute("INSERT INTO watches(id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?)",
+                           (f'watch-{user}', 'card', user, stamp, stamp))
+                db.execute("INSERT INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,'account','card',?,?)",
+                           (f'pin-{user}', user, stamp))
+                db.execute("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at) "
+                           "VALUES(?,'account','card',?,'owner',?)", (f'assignment-{user}', user, stamp))
+                db.execute("INSERT INTO mentions(id,account_id,mentionee_id,mentioner_id,source_type,source_id,created_at,updated_at) "
+                           "VALUES(?,'account',?,'owner','Comment','comment',?,?)",
+                           (f'mention-{user}', user, stamp, stamp))
+                db.execute("INSERT INTO notifications(id,account_id,user_id,creator_id,card_id,source_id,source_type,created_at,updated_at) "
+                           "VALUES(?,'account',?,'owner','card','event','Event',?,?)",
+                           (f'notification-{user}', user, stamp, stamp))
             for identity, token in (("owner-identity", "owner-token"), ("member-identity", "member-token")):
                 db.execute("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES(?,?,?,?,?,?)", (token, identity, hashlib.sha256(token.encode()).hexdigest(), "Migration", "write", stamp))
             old_sgid = db.execute("SELECT sgid FROM user_attachables WHERE user_id='old-member'").fetchone()[0]
@@ -49,6 +70,11 @@ def main():
             with sqlite3.connect(db_path) as db:
                 removed = db.execute("SELECT active,identity_id,updated_at FROM users WHERE id='old-member'").fetchone()
                 assert removed[:2] == (0, None) and removed[2] > stamp
+                for table, column in (("watches", "user_id"), ("pins", "user_id"),
+                                      ("assignments", "assignee_id"), ("mentions", "mentionee_id"),
+                                      ("notifications", "user_id")):
+                    assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE {column}='old-member'").fetchone()[0] == 0, table
+                    assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE {column}='owner'").fetchone()[0] == 1, table
             joined, _ = call(port, f"/1/join/{invite['code']}", "POST", {"email_address": "member@example.test"}, bearer="member-token")
             assert joined == {"joined": True, "requires_name": True, "account_slug": "/1"}, joined
             with sqlite3.connect(db_path) as db:
