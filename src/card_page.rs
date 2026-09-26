@@ -38,6 +38,61 @@ pub(super) fn edit(principal: &Principal, card: &SqliteRow) -> Html<String> {
     ))
 }
 
+pub(super) async fn update_stream(
+    app: &App,
+    principal: &Principal,
+    card: &SqliteRow,
+) -> Result<String> {
+    let card_id: String = card.get("id");
+    let number: i64 = card.get("number");
+    let title: String = card.get("title");
+    let description: String = card.get("description");
+    let (_, description_html, _) =
+        storage::render_rich_text(app, &principal.account_id, principal.slug, &description).await?;
+    let content = format!(
+        "<h1 class=\"card__title\"><a class=\"card__title-link\" href=\"/{}/cards/{number}/edit\">{}</a></h1><div class=\"card__description lexxy-content\">{description_html}</div>",
+        principal.slug,
+        board_views::public_html_title(&title)
+    );
+    let draft = card.get::<String, _>("status") == "drafted";
+    let container = if draft {
+        let image = storage::image_url_for_card(app, principal, &card_id)
+            .await?
+            .as_str()
+            .map(|url| {
+                format!(
+                    "<img class=\"card-perma__image\" src=\"{}\" alt=\"\">",
+                    escape(url)
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "<section id=\"card_container_card_{card_id}\" class=\"card-perma card-perma--draft\">{image}<div class=\"card__content\">{content}</div></section>"
+        )
+    } else {
+        let page = show(app, principal, card).await?.0;
+        let article = page
+            .find("<article class=\"card-perma")
+            .and_then(|start| {
+                page[start..]
+                    .find("</article>")
+                    .map(|end| &page[start..start + end + "</article>".len()])
+            })
+            .unwrap_or("");
+        format!("<section id=\"card_container_card_{card_id}\">{article}</section>")
+    };
+    let closure = if card.get::<i64, _>("closed") != 0 {
+        "<span>Completed</span>".to_owned()
+    } else if draft {
+        String::new()
+    } else {
+        "<button type=\"button\" id=\"closure\">Mark as done</button>".to_owned()
+    };
+    Ok(format!(
+        "<turbo-stream action=\"replace\" method=\"morph\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"update\" target=\"edit_card_{card_id}\"><template>{content}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template><div id=\"card_closure_toggle_card_{card_id}\">{closure}</div></template></turbo-stream>"
+    ))
+}
+
 pub(super) fn render_template(template: &str, values: &HashMap<&str, String>) -> String {
     let mut result = String::with_capacity(template.len() + 2048);
     let mut rest = template;

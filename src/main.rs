@@ -1,7 +1,7 @@
 use axum::{
     Json, Router, ServiceExt,
     body::{Body, Bytes},
-    extract::{ConnectInfo, OriginalUri, Path, Query, RawQuery, Request, State},
+    extract::{ConnectInfo, FromRequest, OriginalUri, Path, Query, RawQuery, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -2816,10 +2816,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}",
             get(show_card)
-                .post(delete_card_form)
+                .post(card_form_method)
                 .put(update_card)
                 .patch(update_card)
-                .delete(delete_card),
+                .delete(delete_card)
+                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
         .route("/{account}/cards/{number}/draft", get(show_draft))
         .route("/{account}/cards/{number}/edit", get(edit_card))
@@ -9009,16 +9010,109 @@ async fn create_new_draft(
     // Publishing with "add another" creates a fresh draft even if one remains.
     create_or_resume_draft(app, p, account, board_id, headers, true).await
 }
+
+struct CardUpdateInput {
+    body: Value,
+    image: Option<storage::PendingUpload>,
+}
+
+async fn card_update_input(request: Request) -> Result<CardUpdateInput> {
+    let method = request.method().clone();
+    let content_type = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    if content_type.starts_with("multipart/form-data") {
+        let mut multipart = axum::extract::Multipart::from_request(request, &())
+            .await
+            .map_err(|_| bad("Invalid multipart card update"))?;
+        let mut card = serde_json::Map::new();
+        let mut image = None;
+        let mut override_method = None;
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|_| bad("Invalid multipart card update"))?
+        {
+            let Some(name) = field.name().map(str::to_owned) else {
+                continue;
+            };
+            if name == "_method" {
+                override_method = Some(field.text().await.map_err(|_| bad("Invalid card update"))?);
+                continue;
+            }
+            let Some(key) = name
+                .strip_prefix("card[")
+                .and_then(|key| key.strip_suffix(']'))
+            else {
+                continue;
+            };
+            if key == "image" {
+                if field.file_name().is_some_and(|name| !name.is_empty()) {
+                    image = Some(storage::receive_multipart_image(field).await?);
+                } else {
+                    let value = field.text().await.map_err(|_| bad("Invalid card image"))?;
+                    if !value.is_empty() {
+                        card.insert(key.to_owned(), json!(value));
+                    }
+                }
+            } else {
+                let value = field.text().await.map_err(|_| bad("Invalid card update"))?;
+                card.insert(key.to_owned(), json!(value));
+            }
+        }
+        if method == Method::POST && !matches!(override_method.as_deref(), Some("patch" | "put")) {
+            return Err(missing());
+        }
+        return Ok(CardUpdateInput {
+            body: json!({"card": card}),
+            image,
+        });
+    }
+    let body = axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024)
+        .await
+        .map_err(|_| bad("Card update is too large"))?;
+    if content_type.starts_with("application/x-www-form-urlencoded") {
+        let mut card = serde_json::Map::new();
+        let mut override_method = None;
+        for (key, value) in url::form_urlencoded::parse(&body) {
+            if key == "_method" {
+                override_method = Some(value.to_string());
+                continue;
+            }
+            if let Some(key) = key
+                .strip_prefix("card[")
+                .and_then(|key| key.strip_suffix(']'))
+            {
+                card.insert(key.to_owned(), json!(value));
+            }
+        }
+        if method == Method::POST && !matches!(override_method.as_deref(), Some("patch" | "put")) {
+            return Err(missing());
+        }
+        Ok(CardUpdateInput {
+            body: json!({"card": card}),
+            image: None,
+        })
+    } else {
+        let body = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
+        Ok(CardUpdateInput { body, image: None })
+    }
+}
+
 async fn update_card(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    request: Request,
+) -> Result<Response> {
+    let headers = request.headers().clone();
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let v = nested(&body, "card");
+    let input = card_update_input(request).await?;
+    let v = nested(&input.body, "card");
     let mut title = string(v, "title").unwrap_or_else(|| c.get("title"));
     let old_title: String = c.get("title");
     let status: String = c.get("status");
@@ -9034,6 +9128,10 @@ async fn update_card(
     let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    if let Some(upload) = &input.image {
+        storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
+    }
+    let uploaded_image = input.image.as_ref().map(|upload| json!(upload.signed_id));
     sqlx::query(
         "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
     )
@@ -9059,9 +9157,13 @@ async fn update_card(
         &timestamp,
     )
     .await?;
-    let replaced_image_keys =
-        storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), v.get("image"))
-            .await?;
+    let replaced_image_keys = storage::attach_card_image_tx(
+        &mut tx,
+        &p,
+        &c.get::<String, _>("id"),
+        uploaded_image.as_ref().or(v.get("image")),
+    )
+    .await?;
     let removed_embed_keys =
         storage::sync_embeds_tx(&mut tx, &p, "Card", &c.get::<String, _>("id"), &description)
             .await?;
@@ -9078,6 +9180,9 @@ async fn update_card(
         .await?;
     }
     tx.commit().await.map_err(db_err)?;
+    if let Some(upload) = input.image {
+        upload.keep();
+    }
     storage::remove_files(replaced_image_keys).await;
     storage::remove_files(removed_embed_keys).await;
     if status == "published" && title != old_title && !old_title.is_empty() {
@@ -9114,7 +9219,20 @@ async fn update_card(
             .map_err(db_err)?;
     }
     let c = card(&app, &p, &number).await?;
-    Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?))
+    if wants_turbo_stream(&headers) && !headers.contains_key("x-rizzy-json-request") {
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            card_page::update_stream(&app, &p, &c).await?,
+        )
+            .into_response());
+    }
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
+    Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
 }
 async fn delete_card(
     State(app): Shared,
@@ -9149,24 +9267,41 @@ async fn delete_card(
     })
 }
 
-async fn delete_card_form(
+async fn card_form_method(
     state: Shared,
     path: Path<(String, String)>,
-    headers: HeaderMap,
-    body: Bytes,
+    request: Request,
 ) -> Result<Response> {
-    let is_form = headers
+    let is_form = request
+        .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
-    if is_form
-        && url::form_urlencoded::parse(&body)
-            .find(|(key, _)| key == "_method")
-            .is_some_and(|(_, value)| value == "delete")
-    {
-        delete_card(state, path, headers).await
-    } else {
-        Err(missing())
+    if !is_form {
+        let multipart = request
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("multipart/form-data"));
+        return if multipart {
+            update_card(state, path, request).await
+        } else {
+            Err(missing())
+        };
+    }
+    let (parts, body) = request.into_parts();
+    let body = axum::body::to_bytes(body, 2 * 1024 * 1024)
+        .await
+        .map_err(|_| bad("Card form is too large"))?;
+    let method = url::form_urlencoded::parse(&body)
+        .find(|(key, _)| key == "_method")
+        .map(|(_, value)| value.into_owned());
+    match method.as_deref() {
+        Some("delete") => delete_card(state, path, parts.headers).await,
+        Some("patch" | "put") => {
+            update_card(state, path, Request::from_parts(parts, Body::from(body))).await
+        }
+        _ => Err(missing()),
     }
 }
 

@@ -398,6 +398,113 @@ pub(super) async fn attach_card_image_tx(
     Ok(keys)
 }
 
+pub(super) struct PendingUpload {
+    pub signed_id: String,
+    key: Option<String>,
+    filename: String,
+    content_type: String,
+    byte_size: i64,
+    checksum: String,
+    dimensions: Option<(i64, i64)>,
+}
+
+impl PendingUpload {
+    pub fn keep(mut self) {
+        self.key = None;
+    }
+}
+
+impl Drop for PendingUpload {
+    fn drop(&mut self) {
+        if let Some(key) = &self.key {
+            let _ = std::fs::remove_file(storage_dir().join(key));
+        }
+    }
+}
+
+pub(super) async fn receive_multipart_image(
+    mut field: axum::extract::multipart::Field<'_>,
+) -> Result<PendingUpload> {
+    let filename = field
+        .file_name()
+        .unwrap_or("upload")
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("upload")
+        .to_owned();
+    let content_type = field
+        .content_type()
+        .unwrap_or("application/octet-stream")
+        .to_owned();
+    let key = random_token();
+    let mut pending = PendingUpload {
+        signed_id: random_token(),
+        key: Some(key.clone()),
+        filename,
+        content_type,
+        byte_size: 0,
+        checksum: String::new(),
+        dimensions: None,
+    };
+    fs::create_dir_all(storage_dir())
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Storage unavailable"))?;
+    let mut output = fs::File::create(storage_dir().join(&key))
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Storage unavailable"))?;
+    let mut digest = Md5::new();
+    while let Some(chunk) = field.chunk().await.map_err(|_| bad("Invalid card image"))? {
+        pending.byte_size = pending
+            .byte_size
+            .checked_add(i64::try_from(chunk.len()).map_err(|_| bad("Upload too large"))?)
+            .ok_or_else(|| bad("Upload too large"))?;
+        digest.update(&chunk);
+        output
+            .write_all(&chunk)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Storage unavailable"))?;
+    }
+    output
+        .flush()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Storage unavailable"))?;
+    pending.checksum = base64::engine::general_purpose::STANDARD.encode(digest.finalize());
+    pending.dimensions = if pending.content_type.starts_with("image/") {
+        let path = storage_dir().join(&key);
+        tokio::task::spawn_blocking(move || {
+            image::ImageReader::open(path)
+                .ok()?
+                .with_guessed_format()
+                .ok()?
+                .into_dimensions()
+                .ok()
+        })
+        .await
+        .ok()
+        .flatten()
+        .map(|(width, height)| (i64::from(width), i64::from(height)))
+    } else {
+        None
+    };
+    Ok(pending)
+}
+
+pub(super) async fn store_multipart_image_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    p: &Principal,
+    upload: &PendingUpload,
+) -> Result<()> {
+    let timestamp = now();
+    sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(id()).bind(&p.account_id).bind(upload.key.as_deref()).bind(&upload.filename).bind(&upload.content_type)
+        .bind(upload.byte_size)
+        .bind(&upload.checksum).bind(&upload.signed_id).bind(random_token())
+        .bind(hash(&random_token())).bind(expires_in(60)).bind(&timestamp)
+        .bind(upload.dimensions.map(|(width, _)| width)).bind(upload.dimensions.map(|(_, height)| height))
+        .bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
+    Ok(())
+}
+
 pub(super) async fn purge_card_images_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     account_id: &str,
