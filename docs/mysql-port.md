@@ -7,8 +7,9 @@ columns, triage, steps, tags, account and board entropy, the closing-soon
 filter, assignment and activity spikes, watch and pin controls, assigned-card
 moves into private boards, saved filters,
 event and mention notifications, email and push queue records, notification
-settings and unsubscribe tokens, personal timezone, public board publication
-and viewing, push-job draining without a VAPID key, passkey registration and
+settings and unsubscribe tokens, personal timezone, local creation and closure
+date filters around Los Angeles midnight, public board publication and viewing,
+push-job draining without a VAPID key, passkey registration and
 sign-in, comments, JSON and browser search, browser card and menu pages,
 closing a card, and API reads. It verifies the
 account entropy, user attachable and settings, access record, and board touch
@@ -370,6 +371,10 @@ A [16-client repeat](../bench/results/mysql-mixed-1000-c16-30s-2026-09-26.json)
 likewise produced one clean pair, 138.86 Rizzy versus 24.37 Fizzy
 workflows/s, and one Fizzy ActiveSearch deadlock phase. Lower concurrency did
 not remove this source failure from the 1,000-card fixture.
+An [eight-client repeat](../bench/results/mysql-mixed-1000-c8-30s-2026-09-26.json)
+had the same outcome: one clean pair at 139.10 versus 24.08 workflows/s and
+one Fizzy ActiveSearch deadlock. A clean two-round comparison of this larger
+fixture remains unverified.
 
 The write-path audit found additional routes that update cards without first
 locking their parent board, including draft publication, steps, triage, watches,

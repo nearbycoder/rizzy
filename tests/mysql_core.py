@@ -22,6 +22,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, unquote, urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 from auth import call as auth_call, cookie
 
@@ -434,8 +435,34 @@ def main():
             subprocess.run([BINARY, "deliver-push"], cwd=ROOT, env=push_env,
                            check=True, capture_output=True, text=True)
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM push_deliveries WHERE notification_id='{notices[0]['id']}' AND status=2") == "3"
+            zone = ZoneInfo("America/Los_Angeles")
+            local_midnight = datetime.combine(datetime.now(zone).date(), datetime.min.time(), zone)
+            window_board = call(base, token, scope + "/boards", "POST",
+                                {"board": {"name": "MySQL local date window"}}, 201)
+            for state in ("created", "closed"):
+                for side, stamp in (("before", local_midnight - timedelta(minutes=30)),
+                                    ("after", local_midnight + timedelta(minutes=30))):
+                    title = f"{state} {side} local midnight"
+                    card = call(base, token,
+                                scope + f"/boards/{window_board['id']}/cards", "POST",
+                                {"card": {"title": title,
+                                          "created_at": stamp.astimezone(timezone.utc).isoformat()}}, 201)
+                    if state == "closed":
+                        call(base, token, scope + f"/cards/{card['number']}/closure", "POST", expected=204)
+                        closed_at = stamp.astimezone(timezone.utc).isoformat(
+                            timespec="milliseconds").replace("+00:00", "Z")
+                        mysql_scalar(url, f"UPDATE closures SET created_at='{closed_at}' WHERE card_id='{card['id']}'")
+            filter_path = scope + "/cards?" + urlencode({"board_ids[]": window_board["id"]})
+            timezone_headers = {"Cookie": "timezone=America/Los_Angeles"}
+            created_today = call(base, token, filter_path + "&creation=today",
+                                 extra_headers=timezone_headers)
+            assert {card["title"] for card in created_today} == {"created after local midnight"}
+            closed_today = call(base, token, filter_path + "&closure=today",
+                                extra_headers=timezone_headers)
+            assert {card["title"] for card in closed_today} == {"closed after local midnight"}
+            call(base, token, scope + f"/boards/{window_board['id']}", "DELETE", expected=204)
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, push drain, settings, unsubscribe, timezone, public board, comment, search, browser card/menu, close, assigned card move, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, push drain, settings, unsubscribe, timezone and local date filters, public board, comment, search, browser card/menu, close, assigned card move, reads{detail}")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise
