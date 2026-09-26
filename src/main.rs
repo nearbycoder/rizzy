@@ -682,6 +682,13 @@ fn required(v: &Value, key: &str) -> Result<String> {
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| bad(&format!("{key} is required")))
 }
+fn comment_body_param(v: &Value) -> Result<Option<String>> {
+    match v.get("body") {
+        Some(Value::String(body)) => Ok(Some(body.clone())),
+        Some(Value::Null) => Ok(None),
+        _ => Err(err(StatusCode::BAD_REQUEST, "body is required")),
+    }
+}
 fn timestamp_param(v: &Value, key: &str) -> Result<Option<String>> {
     match v.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -1430,21 +1437,43 @@ async fn webhook_worker(app: Arc<App>) {
 }
 async fn board_json(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
     let creator: String = r.get("creator_id");
+    let id: String = r.get("id");
+    let present = if r.get::<Option<String>, _>("publication_key").is_some()
+        && r.get::<String, _>("public_description").is_empty()
+    {
+        !rich_text_records::present_ids(&app.db, "Board", "description", &[id])
+            .await?
+            .is_empty()
+    } else {
+        true
+    };
     Ok(board_json_row(
         p,
         r,
         host,
         user_json(app, p, &creator, host).await?,
+        present,
     ))
 }
-fn board_json_row(p: &Principal, r: &SqliteRow, host: &str, creator: Value) -> Value {
+fn board_json_row(
+    p: &Principal,
+    r: &SqliteRow,
+    host: &str,
+    creator: Value,
+    description_present: bool,
+) -> Value {
     let id: String = r.get("id");
     let all = r.get::<i64, _>("all_access") != 0;
     let mut value = json!({"id":id,"name":r.get::<String,_>("name"),"all_access":all,"created_at":r.get::<String,_>("created_at"),"auto_postpone_period_in_days":r.get::<i64,_>("auto_postpone_period_in_days"),"url":format!("{host}/{}/boards/{id}",p.slug),"creator":creator});
     if let Some(key) = r.get::<Option<String>, _>("publication_key") {
         let description: String = r.get("public_description");
         value["public_description"] = json!(rich_text::plain_text(&description));
-        value["public_description_html"] = json!(rich_html(&description));
+        value["public_description_html"] =
+            json!(if description.is_empty() && !description_present {
+                String::new()
+            } else {
+                rich_html(&description)
+            });
         value["public_url"] = json!(format!("{host}/{}/public/boards/{key}", p.slug));
     }
     value
@@ -1581,6 +1610,22 @@ async fn cards_json_batch(
             &card_ids
         )
     )?;
+    let empty_board_description_ids = unique_ids(
+        boards
+            .iter()
+            .filter(|b| {
+                b.get::<Option<String>, _>("publication_key").is_some()
+                    && b.get::<String, _>("public_description").is_empty()
+            })
+            .map(|b| b.get::<String, _>("id")),
+    );
+    let present_board_descriptions = rich_text_records::present_ids(
+        &app.db,
+        "Board",
+        "description",
+        &empty_board_description_ids,
+    )
+    .await?;
     let user_ids = unique_ids(
         cards
             .iter()
@@ -1605,7 +1650,13 @@ async fn cards_json_batch(
             .ok_or_else(missing)?;
         board_values.insert(
             board.get::<String, _>("id"),
-            board_json_row(p, board, host, creator),
+            board_json_row(
+                p,
+                board,
+                host,
+                creator,
+                present_board_descriptions.contains(&board.get::<String, _>("id")),
+            ),
         );
     }
     let column_values: HashMap<String, Value> = columns
@@ -6217,6 +6268,17 @@ async fn create_board(
         &timestamp,
     )
     .await?;
+    if v.get("public_description").and_then(Value::as_str) == Some("") {
+        rich_text_records::ensure(
+            &mut tx,
+            &p.account_id,
+            "Board",
+            &id,
+            "description",
+            &timestamp,
+        )
+        .await?;
+    }
     sqlx::query("INSERT INTO accesses(board_id,user_id,involvement) VALUES(?,?,'watching')")
         .bind(&id)
         .bind(&p.user_id)
@@ -6289,6 +6351,17 @@ async fn update_board(
         &timestamp,
     )
     .await?;
+    if v.get("public_description").and_then(Value::as_str) == Some("") {
+        rich_text_records::ensure(
+            &mut tx,
+            &p.account_id,
+            "Board",
+            &id,
+            "description",
+            &timestamp,
+        )
+        .await?;
+    }
     if all && b.get::<i64, _>("all_access") == 0 {
         sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
             .bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
@@ -7281,6 +7354,22 @@ async fn activity_items(
             .chain(events.iter().map(|e| e.get::<String, _>("board_id"))),
     );
     let board_rows = rows_for_ids(app, "SELECT * FROM boards WHERE id IN (", &board_ids).await?;
+    let empty_board_description_ids = unique_ids(
+        board_rows
+            .iter()
+            .filter(|b| {
+                b.get::<Option<String>, _>("publication_key").is_some()
+                    && b.get::<String, _>("public_description").is_empty()
+            })
+            .map(|b| b.get::<String, _>("id")),
+    );
+    let present_board_descriptions = rich_text_records::present_ids(
+        &app.db,
+        "Board",
+        "description",
+        &empty_board_description_ids,
+    )
+    .await?;
     let assignment_rows = assignment_rows_for_cards(app, &card_ids).await?;
     let tag_rows=rows_for_ids(app,"SELECT g.card_id,t.title FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",&card_ids).await?;
     let column_ids = unique_ids(
@@ -7297,6 +7386,14 @@ async fn activity_items(
     );
     let comment_rows =
         rows_for_ids(app, "SELECT * FROM comments WHERE id IN (", &comment_ids).await?;
+    let empty_comment_body_ids = unique_ids(
+        comment_rows
+            .iter()
+            .filter(|c| c.get::<String, _>("body").is_empty())
+            .map(|c| c.get::<String, _>("id")),
+    );
+    let present_comment_bodies =
+        rich_text_records::present_ids(&app.db, "Comment", "body", &empty_comment_body_ids).await?;
     let image_values = storage::image_urls_for_cards(app, p, &card_ids).await?;
     let user_ids = unique_ids(
         card_rows
@@ -7331,7 +7428,16 @@ async fn activity_items(
     for b in &board_rows {
         let creator = b.get::<String, _>("creator_id");
         let user = users.get(&creator).cloned().ok_or_else(missing)?;
-        boards.insert(b.get("id"), board_json_row(p, b, host, user));
+        boards.insert(
+            b.get("id"),
+            board_json_row(
+                p,
+                b,
+                host,
+                user,
+                present_board_descriptions.contains(&b.get::<String, _>("id")),
+            ),
+        );
     }
     let mut columns = HashMap::<String, Value>::new();
     for c in &column_rows {
@@ -7398,8 +7504,11 @@ async fn activity_items(
         let card_id: String = c.get("card_id");
         let (number, _, _) = card_meta.get(&card_id).ok_or_else(missing)?;
         let body: String = c.get("body");
-        let (body_plain, body_html, _) =
+        let (body_plain, mut body_html, _) =
             storage::render_rich_text(app, &p.account_id, p.slug, &body).await?;
+        if body.is_empty() && !present_comment_bodies.contains(&id) {
+            body_html.clear();
+        }
         let created: String = c.get("created_at");
         let updated = c
             .get::<Option<String>, _>("updated_at")
@@ -10399,12 +10508,19 @@ async fn comment_json(
         .get::<Option<String>, _>("updated_at")
         .unwrap_or_else(|| created.clone());
     let creator = user_json(app, p, &r.get::<String, _>("creator_id"), host).await?;
-    let (plain, html) = if creator["role"] == "system" {
+    let (plain, mut html) = if creator["role"] == "system" {
         (system_plain_text(&body), wrap_html(&body))
     } else {
         let (plain, html, _) = storage::render_rich_text(app, &p.account_id, p.slug, &body).await?;
         (plain, html)
     };
+    if body.is_empty()
+        && rich_text_records::present_ids(&app.db, "Comment", "body", std::slice::from_ref(&id))
+            .await?
+            .is_empty()
+    {
+        html.clear();
+    }
     Ok(
         json!({"id":id,"created_at":created,"updated_at":updated,"body":{"plain_text":plain,"html":html},"creator":creator,"card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},"reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),"url":format!("{host}/{}/cards/{number}/comments/{id}",p.slug)}),
     )
@@ -10459,7 +10575,10 @@ async fn create_comment(
         let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect();
-        let mut comment = json!({"body":fields.get("comment[body]")});
+        let mut comment = json!({});
+        if let Some(content) = fields.get("comment[body]") {
+            comment["body"] = json!(content);
+        }
         if let Some(created_at) = fields.get("comment[created_at]") {
             comment["created_at"] = json!(created_at);
         }
@@ -10474,7 +10593,13 @@ async fn create_comment(
         return Err(err(StatusCode::FORBIDDEN, "Card is not commentable"));
     }
     let comment_input = nested(&body, "comment");
-    let content = required(comment_input, "body")?;
+    let body_param =
+        if comment_input.get("body").is_none() && comment_input.get("created_at").is_some() {
+            None
+        } else {
+            comment_body_param(comment_input)?
+        };
+    let content = body_param.clone().unwrap_or_default();
     let (plain_body, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
     let search_text = search_content(plain_body);
@@ -10506,6 +10631,10 @@ async fn create_comment(
         &timestamp,
     )
     .await?;
+    if body_param.as_deref() == Some("") {
+        rich_text_records::ensure(&mut tx, &p.account_id, "Comment", &id, "body", &timestamp)
+            .await?;
+    }
     storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
     create_new_mentions(
         &mut tx,
@@ -10712,7 +10841,8 @@ async fn update_comment_data(
     if r.get::<String, _>("creator_id") != p.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }
-    let content = required(nested(&body, "comment"), "body")?;
+    let body_param = comment_body_param(nested(&body, "comment"))?;
+    let content = body_param.clone().unwrap_or_default();
     let (plain_body, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
     let search_text = search_content(plain_body);
@@ -10726,17 +10856,26 @@ async fn update_comment_data(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    rich_text_records::sync(
-        &mut tx,
-        &p.account_id,
-        "Comment",
-        &id,
-        "body",
-        &r.get::<String, _>("body"),
-        &content,
-        &timestamp,
-    )
-    .await?;
+    if body_param.is_some() {
+        rich_text_records::sync(
+            &mut tx,
+            &p.account_id,
+            "Comment",
+            &id,
+            "body",
+            &r.get::<String, _>("body"),
+            &content,
+            &timestamp,
+        )
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM rich_text_records WHERE record_type='Comment' AND record_id=? AND name='body'")
+            .bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+    }
+    if body_param.as_deref() == Some("") {
+        rich_text_records::ensure(&mut tx, &p.account_id, "Comment", &id, "body", &timestamp)
+            .await?;
+    }
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
     create_new_mentions(
         &mut tx,
