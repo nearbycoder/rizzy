@@ -94,7 +94,7 @@ def run_pair(args, server_cpus, order):
                   (("", ""), ("CABLE_", "_c"), ("CACHE_", "_k"), ("QUEUE_", "_q"))}
     rust_db = prefix + "_r"
     databases = [*source_dbs.values(), rust_db]
-    processes = {}
+    processes, logs = {}, {}
     active_name = "setup"
     created = False
     with tempfile.TemporaryDirectory(prefix="rizzy-mysql-bench-") as temp:
@@ -116,8 +116,22 @@ def run_pair(args, server_cpus, order):
                                                      args.mysql_port, rust_db)))
                 process, url = start_server(name, directory, env, server_cpus)
                 processes[name] = process
+                logs[name] = directory / f"{name}.log"
                 target = {"url": url, "account": str(credentials["account"]),
                           "token": credentials["token"], "pid": process.pid}
+                if name == "rizzy" and args.rizzy_processes > 1:
+                    target["urls"] = [url]
+                    target["pids"] = [process.pid]
+                    for index in range(2, args.rizzy_processes + 1):
+                        worker_directory = root / f"rizzy-{index}"
+                        worker_directory.mkdir()
+                        worker_process, worker_url = start_server(
+                            "rizzy", worker_directory, env, server_cpus)
+                        key = f"rizzy-{index}"
+                        processes[key] = worker_process
+                        logs[key] = worker_directory / "rizzy.log"
+                        target["urls"].append(worker_url)
+                        target["pids"].append(worker_process.pid)
                 targets[name] = target
                 shapes[name] = preflight(target)
                 boards[name], paths[name], samples[name] = fixture(target, args.cards)
@@ -157,8 +171,7 @@ def run_pair(args, server_cpus, order):
             if not result["paired_comparable"]:
                 failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
                 result["diagnostics"] = {}
-                for name in processes:
-                    log = root / name / (name + ".log")
+                for name, log in logs.items():
                     if log.exists():
                         preserved = failure_dir / f"{name}.log"
                         preserved.write_bytes(log.read_bytes())
@@ -173,8 +186,7 @@ def run_pair(args, server_cpus, order):
         except Exception:
             print(f"benchmark failed during {active_name}", file=sys.stderr)
             failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
-            for name in processes:
-                log = root / name / (name + ".log")
+            for name, log in logs.items():
                 if log.exists():
                     preserved = failure_dir / f"{name}.log"
                     preserved.write_bytes(log.read_bytes())
@@ -199,13 +211,15 @@ def main():
     parser.add_argument("--cards", type=int, default=100)
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--server-cpus", type=int, default=4)
+    parser.add_argument("--rizzy-processes", type=int, default=1)
     parser.add_argument("--mysql-client", default="/tmp/rizzy-mysql8/bin/mysql")
     parser.add_argument("--mysql-socket", default="/tmp/rizzy-mysql8/mysql.sock")
     parser.add_argument("--mysql-host", default="127.0.0.1")
     parser.add_argument("--mysql-port", type=int, default=33080)
     parser.add_argument("--output")
     args = parser.parse_args()
-    if min(args.seconds, args.clients, args.cards, args.rounds, args.server_cpus) <= 0:
+    if min(args.seconds, args.clients, args.cards, args.rounds,
+           args.server_cpus, args.rizzy_processes) <= 0:
         parser.error("all numeric arguments must be positive")
     available = sorted(os.sched_getaffinity(0))
     if len(available) <= args.server_cpus:
@@ -227,6 +241,7 @@ def main():
               "workload": "four JSON reads plus create/edit/comment/close/read per unit",
               "initial_cards": args.cards, "seconds_per_target": args.seconds,
               "clients": args.clients, "source_puma_workers": args.server_cpus,
+              "rizzy_processes": args.rizzy_processes,
               "server_cpus": server_cpus,
               "load_generator_cpus": sorted(os.sched_getaffinity(0)), "rounds": []}
     for number in range(args.rounds):

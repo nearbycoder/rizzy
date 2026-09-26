@@ -293,3 +293,26 @@ The raw result is
 Rizzy sustained this particular local workload at 64 clients while the
 source encountered an error under the same setup. It does not establish a
 maximum client count, multi-host scale, or whole-application speed.
+
+`bench/sustained_mixed_mysql.py --rizzy-processes 4` now routes workers across
+four independent Rust servers that share one MySQL database and the same four
+server CPUs as Fizzy's four Puma workers. The first eight-client run exposed
+MySQL error 1213 in Rizzy: card and event writes held shared foreign-key locks
+on the board, then the card update trigger tried to upgrade that board lock to
+exclusive. The affected card creation, update, closure, event, and reading
+transactions now lock the parent board before their child writes. A ten-second
+eight-client rerun completed 2,161 Rizzy workflows with zero errors and verified
+counts, distributed 538–542 across the four processes; Fizzy completed 261.
+
+In the [four-process 500-card run](../bench/results/mysql_mixed_500cards_c32_4process_20s_2026-09-26.json),
+Rizzy completed 3,866 and 3,908 workflows in two reversed-order 20-second
+rounds at 32 clients, or 192.03 and 194.50 workflows/s. Both had zero HTTP
+errors, verified card/event/comment counts, and near-even work distribution
+across all four Rust processes. Fizzy hit its previously observed ActiveSearch
+deadlock in the first round. Its second round completed 505 workflows at
+24.32/s without error, giving one valid paired ratio of 8.00×. All four app
+processes shared the same four assigned CPUs; MySQL ran outside that CPU set.
+The run tests one board and one API workflow on one host. A direct one-versus-
+four Rust process comparison, other routes and boards, retries for unrelated
+deadlocks, and multi-host deployment still need verification before claiming
+more general scale.

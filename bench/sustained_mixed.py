@@ -183,37 +183,45 @@ def read_four(target, paths):
     return timings
 
 
+def target_process_sample(target):
+    samples = [process_sample(pid) for pid in target.get("pids", [target["pid"]])]
+    return {key: sum(sample[key] for sample in samples) for key in samples[0]}
+
+
 def run_load(target, board_id, paths, seconds, clients):
-    before = process_sample(target["pid"])
+    before = target_process_sample(target)
     started = time.monotonic()
     deadline = started + seconds
     sequence = itertools.count(1)
     stop = threading.Event()
 
-    def worker(_):
+    def worker(worker_index):
         unit_times, read_times, workflow_times, errors = [], [], [], []
+        urls = target.get("urls")
+        worker_target = {**target, "url": urls[worker_index % len(urls)]} if urls else target
         while time.monotonic() < deadline and not stop.is_set():
             beginning = time.perf_counter()
             try:
-                reads = read_four(target, paths)
-                result = workflow(target, board_id, next(sequence))
+                reads = read_four(worker_target, paths)
+                result = workflow(worker_target, board_id, next(sequence))
                 read_times.extend(reads)
                 workflow_times.append(sum(result["timings"].values()))
                 unit_times.append(time.perf_counter() - beginning)
             except Exception as error:
                 errors.append(f"{type(error).__name__}: {str(error)[:180]}")
                 stop.set()
-        return unit_times, read_times, workflow_times, errors
+        return unit_times, read_times, workflow_times, errors, (
+            worker_index % len(urls) if urls else 0)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=clients) as pool:
         workers = list(pool.map(worker, range(clients)))
     elapsed = time.monotonic() - started
-    after = process_sample(target["pid"])
+    after = target_process_sample(target)
     units = [value for worker in workers for value in worker[0]]
     reads = [value for worker in workers for value in worker[1]]
     workflows = [value for worker in workers for value in worker[2]]
     errors = [error for worker in workers for error in worker[3]]
-    return {"seconds_requested": seconds, "seconds_elapsed": round(elapsed, 2),
+    result = {"seconds_requested": seconds, "seconds_elapsed": round(elapsed, 2),
             "clients": clients, "units_completed": len(units),
             "units_per_second": round(len(units) / elapsed, 2),
             "read_requests": len(reads) + len(workflows),
@@ -227,6 +235,11 @@ def run_load(target, board_id, paths, seconds, clients):
                 "pss_mib_start": round(before["pss_mib"], 1),
                 "pss_mib_end": round(after["pss_mib"], 1),
                 "write_mib": round(after["write_mib"] - before["write_mib"], 1)}}
+    if target.get("urls"):
+        result["units_by_process"] = [
+            sum(len(worker[0]) for worker in workers if worker[4] == index)
+            for index in range(len(target["urls"]))]
+    return result
 
 
 def verify_counts(database, board_id, initial_cards, units):

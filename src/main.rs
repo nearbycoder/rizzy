@@ -95,6 +95,20 @@ async fn begin_write(app: &App) -> std::result::Result<sqlx::Transaction<'_, Db>
         app.db.begin_with("BEGIN IMMEDIATE").await
     }
 }
+async fn lock_board_for_write(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    board_id: &str,
+    mysql: bool,
+) -> Result<()> {
+    if mysql {
+        sqlx::query("SELECT id FROM boards WHERE id=? FOR UPDATE")
+            .bind(board_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    }
+    Ok(())
+}
 struct NotificationHtmlCacheEntry {
     version: (i64, Option<String>, i64),
     html: String,
@@ -1290,6 +1304,7 @@ async fn record_event(
     let timestamp = now();
     let event_id = id();
     let mut tx = begin_write(&app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, board_id, app.mysql).await?;
     sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
         .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
@@ -10062,6 +10077,7 @@ async fn create_card(
         timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
     let writer = app.write_lock.lock().await;
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
     let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
@@ -10574,6 +10590,12 @@ async fn update_card(
     // Reserve the SQLite writer before reading attachment state in this transaction.
     // A deferred WAL read cannot be promoted after another process commits a write.
     let mut tx = begin_write(&app).await.map_err(db_err)?;
+    if status == "published" {
+        // The card UPDATE trigger touches its board. Lock that parent row before
+        // MySQL takes a shared foreign-key lock during the child update, so two
+        // app processes cannot deadlock while upgrading the shared lock to X.
+        lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    }
     if let Some(upload) = &input.image {
         storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
     }
@@ -10834,6 +10856,7 @@ async fn set_flag(
     let timestamp = now();
     let _writer = app.write_lock.lock().await;
     let mut tx = begin_write(&app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
     if flag == "golden" {
         sqlx::query(sql)
             .bind(effective_value)
@@ -10984,6 +11007,7 @@ async fn set_card_reading(
     let cutoff = (Utc::now() - chrono::Duration::minutes(5))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let mut tx = app.db.begin().await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
     let notification_id: Option<String> = sqlx::query_scalar(
         "SELECT id FROM notifications WHERE card_id=? AND user_id=? AND account_id=?",
     )
