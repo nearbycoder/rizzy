@@ -449,7 +449,10 @@ async fn allow_modern_browser(State(app): Shared, request: Request, next: Next) 
     {
         let mut response = (
             StatusCode::NOT_ACCEPTABLE,
-            [(header::CACHE_CONTROL, "no-cache")],
+            [
+                (header::CACHE_CONTROL, "no-cache"),
+                (header::CONTENT_SECURITY_POLICY, STATIC_CSP),
+            ],
             Html(include_str!("../static/406-unsupported-browser.html")),
         )
             .into_response();
@@ -528,6 +531,10 @@ fn platform_attributes(agent: &str, public_layout: bool) -> String {
     )
 }
 async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next) -> Response {
+    let static_error_page = matches!(
+        request.uri().path(),
+        "/400.html" | "/404.html" | "/406-unsupported-browser.html" | "/422.html" | "/500.html"
+    );
     let session_cookie = cookie_value(request.headers(), "session_token").is_some();
     let agent = platform_user_agent(request.headers());
     let public_layout = public_layout_path(request.uri().path());
@@ -537,6 +544,9 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
         None
     };
     let response = next.run(request).await;
+    if static_error_page {
+        return response;
+    }
     if matches!(
         response.status(),
         StatusCode::NOT_FOUND | StatusCode::INTERNAL_SERVER_ERROR
@@ -3099,6 +3109,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     });
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
+        .route("/400.html", get(|| async { static_error_page(include_str!("../static/400.html"), StatusCode::OK) }))
+        .route("/404.html", get(|| async { static_error_page(include_str!("../static/404.html"), StatusCode::OK) }))
+        .route("/406-unsupported-browser.html", get(|| async { static_error_page(include_str!("../static/406-unsupported-browser.html"), StatusCode::OK) }))
+        .route("/422.html", get(|| async { static_error_page(include_str!("../static/422.html"), StatusCode::OK) }))
+        .route("/500.html", get(|| async { static_error_page(include_str!("../static/500.html"), StatusCode::OK) }))
         .route("/", get(home))
         .route("/{account}/", get(events_page::index))
         .route("/{account}/landing", get(landing))
@@ -3123,6 +3138,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     [
                         (header::CONTENT_TYPE, "text/css; charset=utf-8"),
                         (header::CACHE_CONTROL, "public, max-age=300"),
+                        (header::CONTENT_SECURITY_POLICY, STATIC_CSP),
                     ],
                     include_str!("../static/error.css"),
                 )
@@ -3630,6 +3646,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/{account}/cards/{number}/comments/{comment}/reactions/{reaction}",
             axum::routing::delete(delete_comment_reaction),
         )
+        .fallback(static_not_found)
         .layer(middleware::from_fn_with_state(
             app.clone(),
             register_pwa_on_pages,
@@ -3641,7 +3658,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_state(app)
         .layer(middleware::from_fn(block_search_engine_indexing))
         .layer(middleware::from_fn(prevent_request_forgery))
-        .layer(middleware::from_fn(mark_request_format));
+        .layer(middleware::from_fn(mark_request_format))
+        .layer(middleware::from_fn(content_security_policy));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
     if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
         return Err("RIZZY_DEV_MAGIC_LINKS requires a loopback bind address".into());
@@ -4526,6 +4544,99 @@ fn config_response(body: &'static str) -> Response {
     )
         .into_response()
 }
+const STATIC_CSP: &str = "default-src 'none'; img-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+fn dynamic_csp(nonce: &str) -> String {
+    format!(
+        "default-src 'self'; script-src 'self' 'nonce-{nonce}'; connect-src 'self'; frame-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; font-src 'self' data: https:; media-src 'self' blob: data: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
+    )
+}
+
+async fn content_security_policy(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    if response
+        .headers_mut()
+        .remove("x-rizzy-exceptions-app")
+        .is_some()
+    {
+        return response;
+    }
+    if response
+        .headers()
+        .contains_key(header::CONTENT_SECURITY_POLICY)
+    {
+        return response;
+    }
+    let nonce = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        rand::rng().random::<[u8; 16]>(),
+    );
+    let mut response = if response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value.starts_with("text/html") || value.starts_with("text/vnd.turbo-stream.html")
+        }) {
+        let (mut parts, body) = response.into_parts();
+        let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not render page").into_response();
+        };
+        if let Ok(html) = String::from_utf8(bytes.to_vec()) {
+            static SCRIPT_TAG: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let pattern = SCRIPT_TAG.get_or_init(|| {
+                regex::Regex::new(r"(?i)<script\b([^>]*)>").expect("script tag pattern")
+            });
+            let rendered = pattern.replace_all(&html, |captures: &regex::Captures<'_>| {
+                if captures[1].to_ascii_lowercase().contains("nonce=") {
+                    captures[0].to_owned()
+                } else {
+                    format!("<script nonce=\"{nonce}\"{}>", &captures[1])
+                }
+            });
+            parts.headers.remove(header::CONTENT_LENGTH);
+            Response::from_parts(parts, Body::from(rendered.into_owned()))
+        } else {
+            Response::from_parts(parts, Body::from(bytes))
+        }
+    } else {
+        response
+    };
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_str(&dynamic_csp(&nonce)).expect("valid dynamic CSP"),
+    );
+    response
+}
+
+fn static_error_page(body: &'static str, status: StatusCode) -> Response {
+    (
+        status,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CONTENT_SECURITY_POLICY, STATIC_CSP),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+async fn static_not_found(headers: HeaderMap, OriginalUri(uri): OriginalUri) -> Response {
+    if headers.contains_key("x-rizzy-json-request") || uri.path().ends_with(".json") {
+        let mut response = (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "application/json; charset=UTF-8")],
+            r#"{"status":404,"error":"Not Found"}"#,
+        )
+            .into_response();
+        response
+            .headers_mut()
+            .insert("x-rizzy-exceptions-app", HeaderValue::from_static("1"));
+        response
+    } else {
+        static_error_page(include_str!("../static/404.html"), StatusCode::NOT_FOUND)
+    }
+}
 fn client_config_error(status: StatusCode, json: bool) -> Response {
     let (content_type, body) = match (status, json) {
         (StatusCode::NOT_FOUND, true) => (
@@ -4545,7 +4656,18 @@ fn client_config_error(status: StatusCode, json: bool) -> Response {
             include_str!("../static/500.html"),
         ),
     };
-    (status, [(header::CONTENT_TYPE, content_type)], body).into_response()
+    let mut response = (status, [(header::CONTENT_TYPE, content_type)], body).into_response();
+    if !json {
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(STATIC_CSP),
+        );
+    } else {
+        response
+            .headers_mut()
+            .insert("x-rizzy-exceptions-app", HeaderValue::from_static("1"));
+    }
+    response
 }
 async fn client_config(headers: HeaderMap, OriginalUri(uri): OriginalUri) -> Response {
     let name = uri.path().rsplit('/').next().unwrap_or("");

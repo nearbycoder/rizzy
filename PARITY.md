@@ -122,6 +122,16 @@ transformation, or reproduce libvips variant bytes. Fourteen Action Mailbox
 framework routes remain unmatched. Route
 registration alone does not prove behavioral parity for any of these areas.
 
+`tests/static_csp_parity.py` compares all five static error pages and the
+production 404 response byte-for-byte with Fizzy, including its locked-down
+static Content Security Policy. It also compares the default dynamic policy
+after normalizing the per-request nonce on public HTML, JSON, and a signed-in
+account settings page. Rizzy gives its inline scripts that nonce; a browser
+sign-in, board creation, and Search panel check completed without page errors.
+Fizzy's CSP environment overrides, report-only mode, and other deployment
+configurations still need parity checks. The extra HTML processing also needs
+a performance comparison on the current build.
+
 Rizzy's card and comment FTS5 indexes now use the Porter tokenizer from Fizzy's pinned SQLite search schema. `tests/search.py` checks stemmed title and comment queries such as `running`/`run`, `authentication`/`authenticate`, and `walking`/`walk`. `tests/search_stemming_migration.py` downgrades a populated disposable index to the older tokenizer, restarts Rizzy, and verifies both existing index row counts and stemmed matches. The pinned Fizzy search model and card-search suites pass 16 tests and 65 assertions; its custom MySQL stemmer suite passes 25 tests and 50 assertions. Full query grammar, Unicode tokenization, relevance ordering, and the production MySQL adapter still need direct parity checks.
 
 The pinned `api/flat_json_params_test.rb` suite passes 24 tests and 131 assertions. `tests/flat_json_params.py` exercises all 24 equivalent flat-JSON requests in Rizzy, including signup on a fresh account, and checks stored changes for representative records across boards, cards, columns, steps, reactions, notification preferences, join codes, account settings, users, tokens, webhooks, and push subscriptions. This establishes the tested flat-JSON parameter convention, not broader API response or permission parity.
