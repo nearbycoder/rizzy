@@ -105,8 +105,15 @@ def generate(db: sqlite3.Connection) -> str:
                     partial = 0  # UNIQUE already permits multiple NULLs in MySQL.
                 else:
                     continue  # Converted to generated-column indexes below.
+            indexed_columns = columns_for_index(db, name)
             key = name if not name.startswith("sqlite_autoindex_") else f"uniq_{table}_{index[0]}"
-            cols = ", ".join(map(quoted, columns_for_index(db, name)))
+            if table == "notifications" and indexed_columns == ["user_id", "card_id"]:
+                key = "uniq_notifications_1"  # Existing MySQL installations use this name.
+            cols = ", ".join(map(quoted, indexed_columns))
+            if table == "notifications" and key == "notifications_source":
+                # Existing MySQL databases have LONGTEXT columns. These
+                # prefixes cover current Event/Mention kinds and UUID IDs.
+                cols = "`source_type`(16), `source_id`(64)"
             prefix = "CREATE UNIQUE INDEX" if unique else "CREATE INDEX"
             indexes.append(f"{prefix} {quoted(key)} ON {quoted(table)} ({cols});")
         groups = defaultdict(list)

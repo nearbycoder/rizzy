@@ -67,6 +67,22 @@ before creating a session. The matching SQLite link flow was compared with
 Fizzy in `tests/session_transfer_parity.py`, and its generation, redemption,
 expiry, and race checks passed again after this change. The MySQL test checks
 Rizzy only.
+`tests/mysql_delete_cleanup.py` checks API deletion of comments, cards, and
+boards against direct MySQL records. It covers Action Text record rows, card
+and comment mentions and reactions, notifications sourced by deleted events
+or mentions, and a board event whose card survives on another board. The
+first run showed an orphaned comment rich-text record. Deletion now removes
+these polymorphic dependents in the same transaction before foreign-key
+cascades remove the owning rows. The matching SQLite rich-text lifecycle and
+the MySQL core flow passed after this change. The pinned source uses dependent
+model associations for these records; other destruction callbacks and large
+board deletion costs still need comparison.
+The notification source lookup now has a composite index in both schemas,
+matching Fizzy's source index. The MySQL index uses prefixes covering current
+Event/Mention kinds and UUID-style IDs, so startup could install it on existing
+databases where those columns are `LONGTEXT`. On that database, `EXPLAIN` chose
+`notifications_source` for an equality lookup. The regenerated fresh schema
+and interrupted-schema recovery test also passed.
 `tests/mysql_account_import.py` restores a populated account ZIP on MySQL. Its
 default Rizzy-generated fixture checks 43 records across 23 groups and two
 original file payloads. A ZIP produced by the pinned Fizzy app's MySQL test

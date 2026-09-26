@@ -482,6 +482,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   UNIQUE(user_id,card_id)
 );
 CREATE INDEX IF NOT EXISTS notifications_user_read ON notifications(user_id,read_at,updated_at DESC);
+CREATE INDEX IF NOT EXISTS notifications_source ON notifications(source_type,source_id);
 CREATE TRIGGER IF NOT EXISTS notifications_event_delete AFTER DELETE ON events BEGIN
   DELETE FROM notifications WHERE source_type='Event' AND source_id=OLD.id;
 END;

@@ -43,6 +43,7 @@ mod card_controls;
 mod card_page;
 mod cards_page;
 mod comment_edit_page;
+mod deletion_cleanup;
 mod events_page;
 mod exports;
 mod imports;
@@ -7519,6 +7520,7 @@ async fn delete_board(
     p.admin(&b.get::<String, _>("creator_id"))?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, None, Some(&id)).await?;
+    deletion_cleanup::board(&mut tx, &p.account_id, &id).await?;
     sqlx::query("DELETE FROM boards WHERE id=? AND account_id=?")
         .bind(id)
         .bind(&p.account_id)
@@ -10738,6 +10740,7 @@ async fn delete_card(
     let card_id: String = c.get("id");
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let keys = storage::purge_card_storage_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
+    deletion_cleanup::card(&mut tx, &p.account_id, &card_id).await?;
     sqlx::query("DELETE FROM cards WHERE id=?")
         .bind(card_id)
         .execute(&mut *tx)
@@ -12148,19 +12151,12 @@ async fn delete_comment(
     }
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &comment, "").await?;
+    deletion_cleanup::comment(&mut tx, &p.account_id, &comment).await?;
     sqlx::query(
         "DELETE FROM events WHERE eventable_type='Comment' AND eventable_id=? AND card_id=?",
     )
     .bind(&comment)
     .bind(c.get::<String, _>("id"))
-    .execute(&mut *tx)
-    .await
-    .map_err(db_err)?;
-    sqlx::query(
-        "DELETE FROM reactions WHERE reactable_type='Comment' AND reactable_id=? AND account_id=?",
-    )
-    .bind(&comment)
-    .bind(&p.account_id)
     .execute(&mut *tx)
     .await
     .map_err(db_err)?;

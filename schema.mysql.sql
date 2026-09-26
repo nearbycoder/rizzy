@@ -432,8 +432,8 @@ CREATE TABLE `notifications` (
   `user_id` VARCHAR(64) NOT NULL,
   `creator_id` VARCHAR(64) NOT NULL,
   `card_id` VARCHAR(64) NOT NULL,
-  `source_id` LONGTEXT NOT NULL,
-  `source_type` LONGTEXT NOT NULL DEFAULT ('Event'),
+  `source_id` VARCHAR(64) NOT NULL,
+  `source_type` VARCHAR(255) NOT NULL DEFAULT 'Event',
   `unread_count` BIGINT NOT NULL DEFAULT 1,
   `read_at` VARCHAR(40),
   `created_at` LONGTEXT NOT NULL,
@@ -648,6 +648,7 @@ CREATE INDEX `mentions_source` ON `mentions` (`source_type`, `source_id`);
 CREATE INDEX `events_eventable` ON `events` (`eventable_type`, `eventable_id`);
 CREATE INDEX `events_board_recent` ON `events` (`board_id`, `created_at`, `id`);
 CREATE INDEX `events_account_recent` ON `events` (`account_id`, `created_at`, `id`);
+CREATE INDEX `notifications_source` ON `notifications` (`source_type`(16), `source_id`(64));
 CREATE INDEX `notifications_user_read` ON `notifications` (`user_id`, `read_at`, `updated_at`);
 CREATE UNIQUE INDEX `uniq_notifications_1` ON `notifications` (`user_id`, `card_id`);
 CREATE INDEX `notification_bundles_due` ON `notification_bundles` (`status`, `ends_at`);
