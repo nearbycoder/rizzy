@@ -136,7 +136,11 @@ pub(super) async fn show_watch(
     show(&app, &account, &number, &headers, Control::Watch).await
 }
 
-async fn watcher_section(app: &App, principal: &Principal, card_id: &str) -> Result<String> {
+pub(super) async fn watcher_section(
+    app: &App,
+    principal: &Principal,
+    card_id: &str,
+) -> Result<String> {
     let watchers=sqlx::query("SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY u.name COLLATE NOCASE,u.id")
         .bind(card_id).fetch_all(&app.db).await.map_err(db_err)?;
     let count = watchers.len();

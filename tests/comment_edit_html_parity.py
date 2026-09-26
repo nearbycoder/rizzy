@@ -52,6 +52,11 @@ def check(target):
         new_target = f"new_comment_card_{card['id']}".encode()
         status, _, card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200 and new_target in card_html
+        for marker in (f'messages_card_{card["id"]}'.encode(),
+                       f'comment_watchers_card_{card["id"]}'.encode(),
+                       b'aria-label="Messages"', b'comment__avatar',
+                       b'comment__content', b'comment__author', b'comment__body'):
+            assert marker in card_html, (target["name"], "message layout", marker)
         status, headers, created_stream = request(target, f"/{account}/cards/{number}/comments",
                                                    "POST", {"comment":{"body":"Turbo-created comment"}},
                                                    accept="text/vnd.turbo-stream.html", csrf=csrf)

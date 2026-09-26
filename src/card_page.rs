@@ -16,6 +16,7 @@ pub(super) fn new_comment_form(principal: &Principal, card: &SqliteRow) -> Strin
         ("NUMBER", card.get::<i64, _>("number").to_string()),
         ("CARD_ID", escape(&card.get::<String, _>("id"))),
         ("BOARD_ID", escape(&card.get::<String, _>("board_id"))),
+        ("USER_ID", escape(&principal.user_id)),
     ]);
     render_template(NEW_COMMENT, &values)
 }
@@ -208,6 +209,7 @@ pub(super) async fn show(
             &comment_id,
             &comment.get::<String, _>("creator_id"),
             &comment.get::<String, _>("creator_name"),
+            &comment.get::<String, _>("creator_role"),
             &comment.get::<String, _>("created_at"),
             &content,
             &reactions,
@@ -284,6 +286,7 @@ pub(super) async fn show(
     let mut values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("NUMBER", number.to_string()),
+        ("CARD_ID", escape(&card_id)),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
         ("TITLE", escape(&title)),
@@ -297,6 +300,10 @@ pub(super) async fn show(
         ("COMMENTS", comment_html),
         ("REACTIONS", card_reactions),
         ("NEW_COMMENT_FORM", new_comment_form(principal, card)),
+        (
+            "COMMENT_WATCHERS",
+            super::card_controls::watcher_section(app, principal, &card_id).await?,
+        ),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
         ("IMAGE", image),

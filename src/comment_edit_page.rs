@@ -6,6 +6,7 @@ pub(super) fn comment_frame(
     id: &str,
     creator_id: &str,
     creator_name: &str,
+    creator_role: &str,
     created_at: &str,
     content: &str,
     reactions: &str,
@@ -14,15 +15,38 @@ pub(super) fn comment_frame(
     let id = escape(id);
     let path = format!("/{account}/cards/{number}/comments/{id}");
     let edit = if editable {
-        format!(" <a href=\"{path}/edit\" data-comment-edit>Edit</a>")
+        format!(
+            "<a class=\"comment__edit\" href=\"{path}/edit\" data-comment-edit aria-label=\"Edit this comment\">Edit</a>"
+        )
     } else {
         String::new()
     };
+    let system = creator_role == "system";
+    let frame_class = if system {
+        " class=\"comment-by-system\""
+    } else {
+        ""
+    };
+    let avatar = if system {
+        String::new()
+    } else {
+        format!(
+            "<figure class=\"comment__avatar\" aria-hidden=\"true\"><a href=\"/{account}/users/{}\" tabindex=\"-1\"><img src=\"/{account}/users/{}/avatar\" alt=\"\" width=\"38\" height=\"38\"></a></figure>",
+            escape(creator_id),
+            escape(creator_id)
+        )
+    };
+    let history = if system {
+        "<button class=\"comment__history\" type=\"button\" data-comment-history>Full history</button>"
+    } else {
+        ""
+    };
     format!(
-        "<turbo-frame id=\"container_comment_{id}\"><article id=\"comment_{id}\" class=\"comment\" data-creator-id=\"{}\"><h3><a href=\"/{account}/users/{}\">{}</a> <a href=\"{path}\"><time>{}</time></a>{edit}</h3><div class=\"comment__body lexxy-content\" data-turbo-permanent>{content}</div>{reactions}</article></turbo-frame>",
+        "<turbo-frame id=\"container_comment_{id}\"{frame_class}><article id=\"comment_{id}\" class=\"comment\" data-creator-id=\"{}\">{avatar}<div class=\"comment__content\"><div class=\"comment__author\"><h3><strong><a href=\"/{account}/users/{}\">{}</a></strong> <a class=\"comment__permalink-title\" href=\"{path}\"><time datetime=\"{}\">{}</time></a></h3>{history}{edit}</div><div class=\"comment__body lexxy-content\" data-turbo-permanent>{content}</div>{reactions}</div></article></turbo-frame>",
         escape(creator_id),
         escape(creator_id),
         escape(creator_name),
+        escape(created_at),
         escape(created_at),
     )
 }
@@ -57,6 +81,7 @@ pub(super) async fn rendered_comment_frame(
         &comment.get::<String, _>("id"),
         &creator_id,
         &creator.get::<String, _>("name"),
+        &creator.get::<String, _>("role"),
         &comment.get::<String, _>("created_at"),
         &content,
         &reactions,

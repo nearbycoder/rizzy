@@ -1,10 +1,13 @@
 <div id="new_comment_card_{{CARD_ID}}" class="comment comment--new">
+  <figure class="comment__avatar" aria-hidden="true"><a href="/{{ACCOUNT}}/users/{{USER_ID}}" tabindex="-1"><img src="/{{ACCOUNT}}/users/{{USER_ID}}/avatar" alt="" width="38" height="38"></a></figure>
+  <div class="comment__content"><div class="comment__body">
   <form id="comment-form" action="/{{ACCOUNT}}/cards/{{NUMBER}}/comments" method="post">
-    <label for="comment">Add a comment</label>
+    <label class="for-screen-reader" for="comment">Add a comment</label>
     <lexxy-editor id="comment" name="comment[body]" required placeholder="Add your thoughts…" data-direct-upload-url="/{{ACCOUNT}}/rails/active_storage/direct_uploads" data-blob-url-template="/{{ACCOUNT}}/rails/active_storage/blobs/redirect/:signed_id/:filename">
       <lexxy-prompt trigger="@" src="/{{ACCOUNT}}/prompts/boards/{{BOARD_ID}}/users" name="mention"></lexxy-prompt>
       <lexxy-prompt trigger="#" src="/{{ACCOUNT}}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt>
     </lexxy-editor>
-    <button type="submit">Post</button><p class="error" role="alert" id="comment-error"></p>
+    <button class="comment__submit" type="submit">Post</button><p class="error" role="alert" id="comment-error"></p>
   </form>
+  </div></div>
 </div>
