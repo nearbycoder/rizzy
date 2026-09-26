@@ -50,6 +50,7 @@ mod imports;
 mod join_code_page;
 mod my_menu;
 mod mysql_search;
+mod named_column_page;
 mod notification_mail;
 mod notification_page;
 mod passkeys;
@@ -8094,26 +8095,44 @@ async fn show_column(
         .bind(&board_id).bind(&column_id).bind(limit).bind(offset)
         .fetch_all(&app.db).await.map_err(db_err)?;
     let etag = card_page_etag(&rows);
-    if let Some(response) = cached_card_page(&etag, total, page, &uri, &headers) {
-        return Ok(response);
+    let json = headers.contains_key("x-rizzy-json-request");
+    if etag_matches(&headers, &etag) {
+        let response = StatusCode::NOT_MODIFIED.into_response();
+        return Ok(with_card_page_headers(
+            if json {
+                pagination_headers(response, total, page, &uri, &headers)
+            } else {
+                response
+            },
+            &etag,
+        ));
     }
-    let mut response = if headers.contains_key("x-rizzy-json-request") {
+    let response = if json {
         let mut response = Json(column_json(&p, &c, &base(&headers))).into_response();
         response.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json; charset=utf-8"),
         );
-        response
+        pagination_headers(response, total, page, &uri, &headers)
     } else {
-        let title = format!("Column: {}", c.get::<String, _>("name"));
+        let board_name: String = sqlx::query_scalar("SELECT name FROM boards WHERE id=?")
+            .bind(&board_id)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
         let previews = cards_page::previews(&app, &p, &rows).await?;
-        let body = format!(
-            "<nav><a href=\"/{account}/boards/{board_id}\">Back to board</a></nav><h1>{}</h1><section class=\"cards cards--grid\"><div class=\"cards__list\">{previews}</div></section>",
-            escape(&title),
-        );
-        public_page(&title, &body).into_response()
+        named_column_page::render(
+            &account,
+            &board_id,
+            &board_name,
+            &column_id,
+            &c.get::<String, _>("name"),
+            page,
+            offset + (rows.len() as i64) < total,
+            &previews,
+        )
+        .into_response()
     };
-    response = pagination_headers(response, total, page, &uri, &headers);
     Ok(with_card_page_headers(response, &etag))
 }
 async fn create_column(
