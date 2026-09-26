@@ -140,15 +140,24 @@ def run_rust(target, paths, concurrency, seconds, load_binary):
     env = {**os.environ, "LOAD_URL": target["url"], "LOAD_ACCOUNT": target["account"],
            "LOAD_TOKEN": target["token"], "LOAD_PATHS_JSON": json.dumps(paths),
            "LOAD_CONCURRENCY": str(concurrency), "LOAD_SECONDS": str(seconds)}
-    server_pid = target.get("pid")
-    before = process_sample(server_pid)
+    if target.get("urls"):
+        env["LOAD_URLS_JSON"] = json.dumps(target["urls"])
+    else:
+        env.pop("LOAD_URLS_JSON", None)
+    server_pids = target.get("pids", [target["pid"]] if target.get("pid") else [])
+
+    def server_sample():
+        samples = [process_sample(pid) for pid in server_pids]
+        return {key: sum(sample[key] for sample in samples) for key in samples[0]} if samples else None
+
+    before = server_sample()
     child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     process = subprocess.Popen([load_binary], env=env, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
     samples = [before] if before else []
     while process.poll() is None:
-        if server_pid:
-            samples.append(process_sample(server_pid))
+        if server_pids:
+            samples.append(server_sample())
         time.sleep(0.5)
     output, error = process.communicate()
     if process.returncode:
@@ -157,8 +166,8 @@ def run_rust(target, paths, concurrency, seconds, load_binary):
     child_after = resource.getrusage(resource.RUSAGE_CHILDREN)
     result["generator_cpu_seconds"] = round(
         child_after.ru_utime + child_after.ru_stime - child_before.ru_utime - child_before.ru_stime, 2)
-    if server_pid:
-        after = process_sample(server_pid)
+    if server_pids:
+        after = server_sample()
         samples.append(after)
         elapsed = result["seconds"]
         result["server_resources"] = {

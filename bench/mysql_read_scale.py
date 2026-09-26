@@ -59,6 +59,19 @@ def run_pair(args, cpus, generator_cpus, levels, number):
                 logs[name] = directory / f"{name}.log"
                 target = {"url": url, "account": str(credentials["account"]),
                           "token": credentials["token"], "pid": process.pid}
+                if name == "rizzy" and args.rizzy_processes > 1:
+                    target["urls"] = [url]
+                    target["pids"] = [process.pid]
+                    for index in range(2, args.rizzy_processes + 1):
+                        worker_directory = root / f"rizzy-{index}"
+                        worker_directory.mkdir()
+                        worker_process, worker_url = start_server(
+                            "rizzy", worker_directory, env, cpus)
+                        key = f"rizzy-{index}"
+                        processes[key] = worker_process
+                        logs[key] = worker_directory / "rizzy.log"
+                        target["urls"].append(worker_url)
+                        target["pids"].append(worker_process.pid)
                 targets[name] = target
                 preflight(target)
                 _, paths[name], samples[name] = fixture(target, args.cards)
@@ -70,6 +83,12 @@ def run_pair(args, cpus, generator_cpus, levels, number):
                 content[name] = comparable_json(responses, targets[name])
             if difference := first_difference(content["fizzy"], content["rizzy"]):
                 raise AssertionError("JSON content: " + difference)
+            for url in targets["rizzy"].get("urls", [])[1:]:
+                replica = {**targets["rizzy"], "url": url}
+                responses = [api(replica, path)[1] for path in paths["rizzy"]]
+                replica_content = comparable_json(responses, replica)
+                if difference := first_difference(content["rizzy"], replica_content):
+                    raise AssertionError("Rust replica JSON: " + difference)
             content_hash = hashlib.sha256(json.dumps(content["fizzy"], sort_keys=True)
                                           .encode()).hexdigest()
             expected = {"cards": args.cards, "events": args.cards, "comments": 0}
@@ -90,6 +109,10 @@ def run_pair(args, cpus, generator_cpus, levels, number):
                     round_result["runs"].append({"target": name, **sample})
                     if sample["errors"]:
                         round_result["comparable"] = False
+                    if name == "rizzy" and args.rizzy_processes > 1:
+                        requests = sample["server_requests"]
+                        if min(requests) == 0 or max(requests) - min(requests) > len(paths[name]):
+                            round_result["comparable"] = False
                     print(f"round {number} {name} c={concurrency}: "
                           f"{sample['rps']} req/s, p95 {sample['p95_ms']} ms, "
                           f"errors={sample['errors']}", file=sys.stderr, flush=True)
@@ -120,6 +143,7 @@ def main():
     parser.add_argument("--concurrency", default="8,32,128")
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--server-cpus", type=int, default=4)
+    parser.add_argument("--rizzy-processes", type=int, default=1)
     parser.add_argument("--mysql-client", default="/tmp/rizzy-mysql8/bin/mysql")
     parser.add_argument("--mysql-socket", default="/tmp/rizzy-mysql8/mysql.sock")
     parser.add_argument("--mysql-host", default="127.0.0.1")
@@ -127,7 +151,8 @@ def main():
     parser.add_argument("--output")
     args = parser.parse_args()
     levels = [int(value) for value in args.concurrency.split(",")]
-    if min(args.cards, args.seconds, args.rounds, args.server_cpus, *levels) <= 0:
+    if min(args.cards, args.seconds, args.rounds, args.server_cpus,
+           args.rizzy_processes, *levels) <= 0:
         parser.error("cards, seconds, rounds, CPU count, and concurrency must be positive")
     available = sorted(os.sched_getaffinity(0))
     if len(available) <= args.server_cpus:
@@ -143,7 +168,9 @@ def main():
                       LOAD.read_bytes()).hexdigest(), "initial_cards": args.cards,
               "workload": "Four JSON GET routes: board, card, scoped cards, scoped activities",
               "seconds_per_target_level": args.seconds, "concurrency": levels,
-              "server_cpus": cpus, "generator_cpus": generator_cpus, "rounds": []}
+              "server_cpus": cpus, "source_puma_workers": args.server_cpus,
+              "rizzy_processes": args.rizzy_processes,
+              "generator_cpus": generator_cpus, "rounds": []}
     os.sched_setaffinity(0, generator_cpus)
     for number in range(1, args.rounds + 1):
         result["rounds"].append(run_pair(args, cpus, generator_cpus, levels, number))
