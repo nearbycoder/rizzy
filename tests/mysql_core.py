@@ -592,6 +592,8 @@ def main():
                 f"SELECT updated_at FROM columns WHERE id='{second['id']}'") == other_column_stamp
             assert mysql_scalar(url,
                 f"SELECT updated_at FROM boards WHERE id='{lifecycle_board['id']}'") != before_board
+            assert mysql_scalar(url,
+                f"SELECT COUNT(*) FROM card_bulk_touches WHERE board_id='{lifecycle_board['id']}'") == "0"
             call(base, token, lifecycle_path, "DELETE", expected=204)
             detail = ", and metadata" if metadata_checked else ""
             print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, push drain, settings, unsubscribe, timezone and local date filters, public board, comment, search, browser card/menu, close, assigned card move, reads{detail}")

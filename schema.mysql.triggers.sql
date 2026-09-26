@@ -173,7 +173,7 @@ END;
 -- trigger: cards_touch_board_update
 CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards FOR EACH ROW
 BEGIN
-  IF NEW.status='published' THEN
+  IF NEW.status='published' AND NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) THEN
     UPDATE boards SET updated_at=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z') WHERE id=NEW.board_id;
   END IF;
 END;
@@ -190,12 +190,14 @@ END;
 CREATE TRIGGER cards_touch_column_update AFTER UPDATE ON cards FOR EACH ROW
 BEGIN
   DECLARE stamp VARCHAR(40);
-  SET stamp=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z');
-  IF NEW.column_id IS NOT NULL THEN
-    UPDATE columns SET updated_at=stamp WHERE id=NEW.column_id;
-  END IF;
-  IF OLD.column_id IS NOT NULL AND NOT (OLD.column_id <=> NEW.column_id) THEN
-    UPDATE columns SET updated_at=stamp WHERE id=OLD.column_id;
+  IF NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) THEN
+    SET stamp=CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z');
+    IF NEW.column_id IS NOT NULL THEN
+      UPDATE columns SET updated_at=stamp WHERE id=NEW.column_id;
+    END IF;
+    IF OLD.column_id IS NOT NULL AND NOT (OLD.column_id <=> NEW.column_id) THEN
+      UPDATE columns SET updated_at=stamp WHERE id=OLD.column_id;
+    END IF;
   END IF;
 END;
 

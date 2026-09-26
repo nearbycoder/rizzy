@@ -131,7 +131,7 @@ yet been exercised on MariaDB.
 `schema.mysql.sql` is a snapshot of an initialized Rizzy SQLite database. To
 regenerate it after a SQLite schema change, seed a new SQLite database and run
 `python3 scripts/generate_mysql_schema.py path/to/fresh.sqlite3 schema.mysql.sql`.
-The generator preserves the 63 application tables, ordinary indexes, foreign
+The generator preserves the current 64 application tables, ordinary indexes, foreign
 keys, 15 checks, and the partial uniqueness rules through generated columns.
 It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16
 account-routed FULLTEXT search tables and backfills published cards and
@@ -157,18 +157,23 @@ move/title pairs and opposite-direction moves. This checks those races on one
 MySQL host, not all concurrent card writes or multi-host deployment.
 
 Column creation now locks its board while allocating the next position and
-touches the board. Deletion locks the board, updates all of its cards without
-changing their activity timestamps, removes the column, and restores other
-columns' timestamps after MySQL card triggers. The core flow checks those
-timestamp effects. The four-process cluster flow also creates 20 columns on
+touches the board. Deletion locks the board, clears the deleted column from
+its cards, and touches all board cards without changing their activity times.
+A transaction-scoped `card_bulk_touches` row suppresses per-card board and
+column trigger updates during the bulk touch, then is removed before commit.
+The core flow checks these timestamp effects; an existing-schema recovery
+test recreates the guard table and replaces old MySQL triggers. The four-process
+cluster flow also creates 20 columns on
 one board concurrently and checks that their positions are exactly 1 through
 20. Column position swaps now take the same database board lock, and the
 cluster flow concurrently swaps ten disjoint pairs right and then left across
-four processes. Large-board delete throughput and cross-host behavior remain
-unmeasured.
+four processes. A matched SQLite benchmark found Rizzy faster on a 1,000-card
+delete but slower on 10,000- and 30,000-card deletes. MySQL large-board
+delete throughput and cross-host behavior remain unmeasured.
 
 The schema and commands were exercised on a disposable local MariaDB 13.0.2
-instance on 2026-09-26. The Rust binary created all 63 tables through SQLx,
+instance on 2026-09-26. The Rust binary created all 63 tables present at that
+revision through SQLx,
 then seeded one account, two users, one join code, and one access token. The
 generated partial unique, foreign key, and check constraints rejected invalid
 inserts. A fresh database and an existing database both passed the MySQL core
@@ -186,7 +191,7 @@ SQLx 0.8.6's `Any` adapter treats MariaDB's `LONGTEXT` as binary data; the
 local `vendor/sqlx-mysql` patch decodes that server type as UTF-8 for Rizzy's
 text-only schema.
 
-The same tests passed on a fresh Oracle MySQL 8.4.11 database: 63 core tables,
+The same tests passed on a fresh Oracle MySQL 8.4.11 database at that revision: 63 core tables,
 16 search tables, 16
 triggers, 114 foreign-key column mappings, the core API workflow, and 80
 concurrent card creations through two processes. The first fresh MySQL schema

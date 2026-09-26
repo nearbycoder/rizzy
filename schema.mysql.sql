@@ -245,6 +245,10 @@ CREATE TABLE `cards` (
   `last_active_at` VARCHAR(40) NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `card_bulk_touches` (
+  `board_id` VARCHAR(64),
+  PRIMARY KEY (`board_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `storage_blobs` (
   `id` VARCHAR(64),
   `account_id` VARCHAR(64) NOT NULL,

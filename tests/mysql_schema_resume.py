@@ -89,7 +89,7 @@ def main():
                 assert result.returncode == 0, (stage, command, result.stderr[-3000:])
             tables = int(mysql("SELECT COUNT(*) FROM information_schema.tables "
                                "WHERE table_schema=DATABASE();", database))
-            assert tables == 79, (stage, tables)  # 63 application + 16 search shards
+            assert tables == 80, (stage, tables)  # 64 application + 16 search shards
             triggers = int(mysql("SELECT COUNT(*) FROM information_schema.triggers "
                                  "WHERE trigger_schema=DATABASE();", database))
             assert triggers == 24, (stage, triggers)

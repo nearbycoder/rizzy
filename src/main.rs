@@ -942,6 +942,18 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     validate_mysql_schema(&db, schema).await?;
     mysql_search::setup(&db).await?;
+    let bulk_touch_triggers_installed: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='cards_bulk_touch_triggers_v2')",
+    )
+    .fetch_one(&db)
+    .await?;
+    if bulk_touch_triggers_installed == 0 {
+        for name in ["cards_touch_board_update", "cards_touch_column_update"] {
+            sqlx::raw_sql(&format!("DROP TRIGGER IF EXISTS {name}"))
+                .execute(&db)
+                .await?;
+        }
+    }
     let installed: HashSet<String> = sqlx::query_scalar(
         "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=DATABASE()",
     )
@@ -963,6 +975,11 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
         if !installed.contains(name.trim()) {
             sqlx::raw_sql(ddl).execute(&db).await?;
         }
+    }
+    if bulk_touch_triggers_installed == 0 {
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('cards_bulk_touch_triggers_v2','done') ON DUPLICATE KEY UPDATE value='done'")
+            .execute(&db)
+            .await?;
     }
     let backfilled: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='mysql_backfill_v1')",
@@ -2383,7 +2400,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             ),
             (
                 "cards_touch_board_update",
-                "CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
+                "CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' AND NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
             ),
         ] {
             let existing: Option<String> =
@@ -2391,10 +2408,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     .bind(name)
                     .fetch_optional(&db)
                     .await?;
-            if existing
-                .as_deref()
-                .is_none_or(|sql| !sql.contains("WHEN NEW.status='published'"))
-            {
+            let current = existing.as_deref().is_some_and(|sql| {
+                sql.contains("WHEN NEW.status='published'")
+                    && (name != "cards_touch_board_update" || sql.contains("card_bulk_touches"))
+            });
+            if !current {
                 let mut tx = db.begin().await?;
                 sqlx::query(&format!("DROP TRIGGER IF EXISTS {name}"))
                     .execute(&mut *tx)
@@ -2403,11 +2421,24 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 tx.commit().await?;
             }
         }
-        for statement in [
-            "CREATE TRIGGER IF NOT EXISTS cards_touch_column_insert AFTER INSERT ON cards WHEN NEW.column_id IS NOT NULL BEGIN UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.column_id; END",
-            "CREATE TRIGGER IF NOT EXISTS cards_touch_column_update AFTER UPDATE ON cards BEGIN UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.column_id; UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.column_id AND OLD.column_id IS NOT NEW.column_id; END",
-        ] {
-            sqlx::query(statement).execute(&db).await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS cards_touch_column_insert AFTER INSERT ON cards WHEN NEW.column_id IS NOT NULL BEGIN UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.column_id; END")
+            .execute(&db).await?;
+        let column_update_trigger: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='cards_touch_column_update'",
+        )
+        .fetch_optional(&db)
+        .await?;
+        if column_update_trigger
+            .as_deref()
+            .is_none_or(|sql| !sql.contains("card_bulk_touches"))
+        {
+            let mut tx = db.begin().await?;
+            sqlx::query("DROP TRIGGER IF EXISTS cards_touch_column_update")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("CREATE TRIGGER cards_touch_column_update AFTER UPDATE ON cards WHEN NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) BEGIN UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.column_id; UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.column_id AND OLD.column_id IS NOT NEW.column_id; END")
+                .execute(&mut *tx).await?;
+            tx.commit().await?;
         }
         let old_delete_trigger: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='cards_touch_board_delete'",
@@ -8313,15 +8344,19 @@ async fn delete_column(
     checked_column(&app, &p, &board_id, &column_id).await?;
     let mut tx = begin_write(&app).await.map_err(db_err)?;
     lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
-    let other_columns = sqlx::query("SELECT id,updated_at FROM columns WHERE board_id=? AND id<>?")
+    sqlx::query("INSERT INTO card_bulk_touches(board_id) VALUES(?)")
         .bind(&board_id)
-        .bind(&column_id)
-        .fetch_all(&mut *tx)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     let timestamp = now();
-    sqlx::query("UPDATE cards SET column_id=CASE WHEN column_id=? THEN NULL ELSE column_id END,updated_at=? WHERE board_id=?")
+    sqlx::query("UPDATE cards SET column_id=NULL WHERE board_id=? AND column_id=?")
+        .bind(&board_id)
         .bind(&column_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("UPDATE cards SET updated_at=? WHERE board_id=?")
         .bind(&timestamp)
         .bind(&board_id)
         .execute(&mut *tx)
@@ -8333,16 +8368,13 @@ async fn delete_column(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
-    // ActiveRecord touch_all skips card callbacks, so unrelated column
-    // validators retain their prior timestamps after the board-wide touch.
-    for column in other_columns {
-        sqlx::query("UPDATE columns SET updated_at=? WHERE id=?")
-            .bind(column.get::<String, _>("updated_at"))
-            .bind(column.get::<String, _>("id"))
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-    }
+    // The guard is visible only within this transaction and is removed before
+    // commit, so the bulk touch skips callbacks without changing later writes.
+    sqlx::query("DELETE FROM card_bulk_touches WHERE board_id=?")
+        .bind(&board_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
         .bind(&timestamp)
         .bind(&board_id)

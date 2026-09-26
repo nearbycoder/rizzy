@@ -255,6 +255,9 @@ CREATE TABLE IF NOT EXISTS cards (
 CREATE INDEX IF NOT EXISTS cards_board_active ON cards(board_id, status, closed, postponed, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS cards_board_column_active ON cards(board_id, column_id, status, closed, postponed, golden DESC, last_active_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS cards_account_latest ON cards(account_id, last_active_at DESC);
+CREATE TABLE IF NOT EXISTS card_bulk_touches (
+  board_id TEXT PRIMARY KEY REFERENCES boards(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS storage_blobs (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -630,7 +633,7 @@ CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(stat
 CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
-CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' AND NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
 CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(title,description,tokenize='porter unicode61');
