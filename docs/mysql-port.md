@@ -384,7 +384,7 @@ The harness checked the full decoded sampled JSON values, including cross-route
 ID relationships, after masking generated IDs, timestamps, and server addresses;
 it also checked pagination on board, card, scoped-card, and scoped-activity GET
 routes. The account number and owner details matched across targets. Rizzy
-served 3,757–4,012 requests/s versus Fizzy's 338–355, or 11.0–11.6× per
+served 3,251–4,117 requests/s versus Fizzy's 320–350, or 10.2–12.1× per
 paired level. Its serialized bodies were about 1% smaller. Unsampled responses,
 other routes, writes, and multi-host capacity remain unproven.
 

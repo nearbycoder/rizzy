@@ -8,7 +8,7 @@ number and owner name and email. Before timing, the harness compares complete
 sampled JSON values across all four routes after masking generated IDs,
 timestamps, and server addresses; it also checks pagination. Afterward, it
 checks unchanged card, event, and comment counts. At 8, 32, and 128 clients,
-Rizzy served 3,757–4,012 requests/s versus Fizzy's 338–355, or 11.0–11.6×
+Rizzy served 3,251–4,117 requests/s versus Fizzy's 320–350, or 10.2–12.1×
 per paired level. All twelve phases had zero errors. The serialized JSON
 bodies remain about 1% smaller for Rizzy despite matching decoded values.
 Full browser, side-effect, and unsampled response parity remains open. This

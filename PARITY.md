@@ -91,7 +91,7 @@ The [matched-fixture read-only MySQL comparison](bench/results/mysql-read-matche
 did complete two reversed-order rounds at 8, 32, and 128 clients with zero
 errors, unchanged counts, and matched complete sampled JSON values after
 masking generated IDs, timestamps, and server addresses. Rizzy served
-3,757–4,012 requests/s versus Fizzy's 338–355 on board, card, scoped-card,
+3,251–4,117 requests/s versus Fizzy's 320–350 on board, card, scoped-card,
 and scoped-activity GETs. Both used the same account number and owner details;
 Rizzy's serialized bodies were about 1% smaller. The result covers only those
 four read routes on one host.
