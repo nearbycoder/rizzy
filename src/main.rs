@@ -1478,6 +1478,59 @@ fn board_json_row(
     }
     value
 }
+async fn boards_json_batch(
+    app: &App,
+    p: &Principal,
+    boards: &[SqliteRow],
+    host: &str,
+) -> Result<Vec<Value>> {
+    if boards.is_empty() {
+        return Ok(Vec::new());
+    }
+    let creator_ids = unique_ids(
+        boards
+            .iter()
+            .map(|board| board.get::<String, _>("creator_id")),
+    );
+    let creators = rows_for_ids(
+        app,
+        "SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",
+        &creator_ids,
+    )
+    .await?;
+    let users: HashMap<String, Value> = creators
+        .iter()
+        .filter(|user| user.get::<String, _>("account_id") == p.account_id)
+        .map(|user| (user.get("id"), user_json_row(p, user, host)))
+        .collect();
+    let empty_description_ids = unique_ids(
+        boards
+            .iter()
+            .filter(|board| {
+                board.get::<Option<String>, _>("publication_key").is_some()
+                    && board.get::<String, _>("public_description").is_empty()
+            })
+            .map(|board| board.get::<String, _>("id")),
+    );
+    let present_descriptions =
+        rich_text_records::present_ids(&app.db, "Board", "description", &empty_description_ids)
+            .await?;
+    boards
+        .iter()
+        .map(|board| {
+            let creator_id: String = board.get("creator_id");
+            let creator = users.get(&creator_id).cloned().ok_or_else(missing)?;
+            let board_id: String = board.get("id");
+            Ok(board_json_row(
+                p,
+                board,
+                host,
+                creator,
+                present_descriptions.contains(&board_id),
+            ))
+        })
+        .collect()
+}
 async fn board_detail(app: &App, p: &Principal, r: &SqliteRow, host: &str) -> Result<Value> {
     let mut out = board_json(app, p, r, host).await?;
     if r.get::<i64, _>("all_access") == 0 {
@@ -5644,11 +5697,7 @@ async fn list_boards(
     .fetch_all(&app.db)
     .await
     .map_err(db_err)?;
-    let host = base(&headers);
-    let mut out = Vec::new();
-    for r in &rows {
-        out.push(board_json(&app, &p, r, &host).await?);
-    }
+    let out = boards_json_batch(&app, &p, &rows, &base(&headers)).await?;
     Ok(paginated(json!(out), total, page, &uri, &headers))
 }
 async fn show_board(
