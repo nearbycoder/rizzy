@@ -3238,10 +3238,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if env::args().nth(1).as_deref() == Some("auto-postpone") {
+        let started = Instant::now();
         let count = auto_postpone_all_due(&app)
             .await
             .map_err(|error| std::io::Error::other(error.1))?;
         println!("Auto-postponed {count} cards");
+        if env::var("RIZZY_BENCH_AUTO_POSTPONE").as_deref() == Ok("1") {
+            eprintln!(
+                "AUTO_POSTPONE_SECONDS={:.6}",
+                started.elapsed().as_secs_f64()
+            );
+        }
         return Ok(());
     }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {

@@ -2,6 +2,8 @@
 """Compare the due-card sweep with pinned Fizzy on two entropy periods."""
 
 import os
+import html
+import re
 import sqlite3
 import subprocess
 import sys
@@ -43,6 +45,27 @@ def system_comments(name, directory, cards):
             "SELECT COUNT(*) FROM comments m JOIN users u ON u.id=m.creator_id "
             "WHERE m.card_id=? AND u.role='system'", (card_id,),
         ).fetchone()[0] for label, card_id in cards.items()}
+
+
+def auto_comment_text(name, directory, card_id):
+    database = directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3")
+    with sqlite3.connect(database) as db:
+        if name == "fizzy":
+            row = db.execute(
+                "SELECT r.body FROM comments m JOIN users u ON u.id=m.creator_id "
+                "JOIN action_text_rich_texts r ON r.record_type='Comment' "
+                "AND r.record_id=m.id AND r.name='body' "
+                "WHERE m.card_id=? AND u.role='system' "
+                "ORDER BY m.created_at DESC LIMIT 1", (card_id,),
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT m.body FROM comments m JOIN users u ON u.id=m.creator_id "
+                "WHERE m.card_id=? AND u.role='system' "
+                "ORDER BY m.created_at DESC LIMIT 1", (card_id,),
+            ).fetchone()
+    assert row, (name, card_id)
+    return " ".join(html.unescape(re.sub(r"<[^>]*>", "", row[0])).split())
 
 
 def check(name, directory):
@@ -109,7 +132,11 @@ def check(name, directory):
     comment_delta = {label: comments_after[label] - comments_before[label] for label in ids}
     assert all(comment_delta[label] == 1 for label in
                ("inherited_due", "override_due")), (name, comment_delta)
-    return before, after, comment_delta
+    comment_text = {label: auto_comment_text(name, directory, ids[label]) for label in
+                    ("inherited_due", "override_due")}
+    assert set(comment_text.values()) == {"Moved to “Not Now” due to inactivity"}, (
+        name, comment_text)
+    return before, after, comment_delta, comment_text
 
 
 def main():
