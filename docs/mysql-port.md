@@ -10,7 +10,7 @@ event and mention notifications, email and push queue records, notification
 settings and unsubscribe tokens, personal timezone, local creation and closure
 date filters around Los Angeles midnight, public board publication and viewing,
 push-job draining without a VAPID key, passkey registration and
-sign-in, comments, JSON and browser search, browser card and menu pages,
+sign-in, comments, card and comment reaction timestamp side effects, JSON and browser search, browser card and menu pages,
 closing a card, and API reads. It verifies the
 account entropy, user attachable and settings, access record, and board touch
 side effects in the database. Most routes have not yet been exercised on
@@ -400,6 +400,13 @@ its insert and card touch together. The complete cluster test passed four fresh
 account runs after these changes, and the MySQL core flow plus SQLite step and
 watch regressions passed. This covers those specific races, not every lock
 cycle. That initial check had not exercised draft publication or card moves.
+
+Reaction removal now uses the same board-first card lock as creation and
+commits the delete with the card, board, and optional comment timestamp touches.
+The MySQL core flow verified Fizzy's four creation/removal timestamp patterns,
+and one fresh four-process cluster run passed 200 reaction deletions racing
+title edits on the same cards. This adds a specific delete-path check; other
+concurrent reaction and comment operations remain to be audited.
 
 A new move/title phase in that test reproduced MySQL 1213 deadlocks when a
 card moved between boards while another process edited its title. The move

@@ -263,6 +263,32 @@ def main():
                 base, token, scope + f"/cards/{number}/comments", "POST",
                 {"comment": {"body": "MySQL comment"}}, 201,
             )
+            def reaction_times():
+                return tuple(mysql_scalar(
+                    url, "SELECT c.updated_at,c.last_active_at,b.updated_at,m.updated_at "
+                         "FROM cards c JOIN boards b ON b.id=c.board_id "
+                         "JOIN comments m ON m.card_id=c.id "
+                         f"WHERE c.id='{card['id']}' AND m.id='{comment['id']}'"
+                ).split("\t"))
+
+            before_reaction = reaction_times()
+            for path, expected_create, expected_delete in (
+                (scope + f"/cards/{number}/reactions",
+                 (True, True, True, False), (True, False, True, False)),
+                (scope + f"/cards/{number}/comments/{comment['id']}/reactions",
+                 (True, True, True, True), (True, False, True, True)),
+            ):
+                time.sleep(.02)
+                reaction = call(base, token, path, "POST",
+                                {"reaction": {"content": "🎉"}}, 201)
+                current = reaction_times()
+                assert tuple(a != b for a, b in zip(current, before_reaction)) == expected_create
+                before_reaction = current
+                time.sleep(.02)
+                call(base, token, path + "/" + reaction["id"], "DELETE", expected=204)
+                current = reaction_times()
+                assert tuple(a != b for a, b in zip(current, before_reaction)) == expected_delete
+                before_reaction = current
             assert [item["id"] for item in call(base, token, scope + "/search?q=" + quote("comment"))] == [card["id"]]
             stemmed = call(
                 base, token, scope + f"/boards/{board['id']}/cards", "POST",

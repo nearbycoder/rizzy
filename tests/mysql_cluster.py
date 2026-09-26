@@ -242,6 +242,28 @@ def main():
             failures = [(item, status, value) for item, (status, value, _) in zip(mixed_items, reaction_mixed)
                         if status != (201 if item[1] == 0 else 200)]
             assert not failures, failures[:5]
+            reaction_ids = {
+                index: value["id"]
+                for (index, kind), (_, value, _) in zip(mixed_items, reaction_mixed)
+                if kind == 0
+            }
+
+            def mixed_reaction_delete(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token,
+                                f"/cards/{number}/reactions/{reaction_ids[index]}", "DELETE")
+                return call(base, account, token, f"/cards/{number}", "PATCH",
+                            {"card": {"title": f"Reaction removed title {index}"}})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                reaction_deleted = list(pool.map(mixed_reaction_delete, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, reaction_deleted)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, failures[:5]
 
             def mixed_move_write(item):
                 index, kind = item
@@ -349,7 +371,7 @@ def main():
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, mixed writes, opposite-direction moves, and 200 double tag toggles across four processes")
+            print("MySQL cluster passed: 400 unique cards, mixed writes including reaction deletion, opposite-direction moves, and 200 double tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

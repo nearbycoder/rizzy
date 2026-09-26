@@ -13079,13 +13079,24 @@ async fn create_reaction(
         ("Card", c.get::<String, _>("id"))
     };
     let id = id();
-    let mut tx = begin_write(app).await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let card_id: String = c.get("id");
+    let (mut tx, _) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
     sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content).bind(now()).execute(&mut *tx).await.map_err(db_err)?;
-    sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
-        .bind(now())
-        .bind(c.get::<String, _>("id"))
+    if kind == "Comment" {
+        sqlx::query("UPDATE comments SET updated_at=? WHERE id=?")
+            .bind(now())
+            .bind(&target)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    let timestamp = now();
+    sqlx::query("UPDATE cards SET last_active_at=?,updated_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(&card_id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
@@ -13135,16 +13146,34 @@ async fn delete_reaction(
     } else {
         ("Card", c.get::<String, _>("id"))
     };
+    let card_id: String = c.get("id");
+    let (mut tx, _) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
     let r=sqlx::query("SELECT reacter_id FROM reactions WHERE id=? AND account_id=? AND reactable_type=? AND reactable_id=?")
-        .bind(reaction).bind(&p.account_id).bind(kind).bind(target).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+        .bind(reaction).bind(&p.account_id).bind(kind).bind(&target).fetch_optional(&mut *tx).await.map_err(db_err)?.ok_or_else(missing)?;
     if r.get::<String, _>("reacter_id") != p.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Reaction creator required"));
     }
     sqlx::query("DELETE FROM reactions WHERE id=?")
         .bind(reaction)
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    if kind == "Comment" {
+        sqlx::query("UPDATE comments SET updated_at=? WHERE id=?")
+            .bind(now())
+            .bind(&target)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(now())
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     if wants_turbo_stream(headers) {
         return Ok((
             [(
