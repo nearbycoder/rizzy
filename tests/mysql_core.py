@@ -181,10 +181,22 @@ def main():
                 base, token, scope + f"/boards/{board['id']}/columns", "POST",
                 {"column": {"name": "MySQL column"}}, 201,
             )
+            def column_times():
+                return tuple(mysql_scalar(
+                    url, "SELECT c.updated_at,b.updated_at,x.updated_at "
+                         "FROM cards c JOIN boards b ON b.id=c.board_id "
+                         f"JOIN columns x ON x.id='{column['id']}' "
+                         f"WHERE c.id='{card['id']}'"
+                ).split("\t"))
+
+            before_column_triage = column_times()
+            time.sleep(.02)
             call(
                 base, token, scope + f"/cards/{number}/triage", "POST",
                 {"column_id": column["id"]}, 204,
             )
+            assert tuple(a != b for a, b in zip(before_column_triage, column_times())) == (
+                True, True, True)
             assert call(base, token, scope + f"/cards/{number}")["column"]["id"] == column["id"]
             column_cards_url = base + scope + f"/boards/{board['id']}/columns/{column['id']}/cards"
             column_headers = {"Authorization": "Bearer " + token,
@@ -204,6 +216,16 @@ def main():
                 base, token, scope + f"/cards/{number}/steps", "POST",
                 {"step": {"content": "MySQL step"}}, 201,
             )
+            before_column_rename = column_times()
+            time.sleep(.02)
+            call(base, token, scope + f"/boards/{board['id']}/columns/{column['id']}",
+                 "PATCH", {"column": {"name": "Renamed MySQL column"}})
+            renamed_column = column_times()
+            assert tuple(a != b for a, b in zip(before_column_rename, renamed_column)) == (
+                True, True, True)
+            call(base, token, scope + f"/boards/{board['id']}/columns/{column['id']}",
+                 "PATCH", {"column": {"name": "Renamed MySQL column"}})
+            assert column_times() == renamed_column
             with urllib.request.urlopen(urllib.request.Request(
                     column_cards_url, headers={**column_headers,
                                                "If-None-Match": column_etag}), timeout=8) as response:

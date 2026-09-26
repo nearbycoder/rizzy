@@ -90,6 +90,9 @@ def main():
             tables = int(mysql("SELECT COUNT(*) FROM information_schema.tables "
                                "WHERE table_schema=DATABASE();", database))
             assert tables == 79, (stage, tables)  # 63 application + 16 search shards
+            triggers = int(mysql("SELECT COUNT(*) FROM information_schema.triggers "
+                                 "WHERE trigger_schema=DATABASE();", database))
+            assert triggers == 24, (stage, triggers)
             accounts = int(mysql("SELECT COUNT(*) FROM accounts;", database))
             assert accounts == (2 if stage == "tables" else 1), (stage, accounts)
             if stage == "tables":

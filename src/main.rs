@@ -1154,6 +1154,16 @@ fn card_page_etag(rows: &[DbRow]) -> String {
     }
     format!("W/\"{}\"", hex::encode(&digest.finalize()[..16]))
 }
+fn etag_matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|candidates| {
+            candidates
+                .split(',')
+                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+        })
+}
 fn cached_card_page(
     etag: &str,
     total: i64,
@@ -1161,11 +1171,7 @@ fn cached_card_page(
     uri: &Uri,
     headers: &HeaderMap,
 ) -> Option<Response> {
-    let candidates = headers.get(header::IF_NONE_MATCH)?.to_str().ok()?;
-    if !candidates
-        .split(',')
-        .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
-    {
+    if !etag_matches(headers, etag) {
         return None;
     }
     Some(with_card_page_headers(
@@ -2395,6 +2401,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 sqlx::query(definition).execute(&mut *tx).await?;
                 tx.commit().await?;
             }
+        }
+        for statement in [
+            "CREATE TRIGGER IF NOT EXISTS cards_touch_column_insert AFTER INSERT ON cards WHEN NEW.column_id IS NOT NULL BEGIN UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.column_id; END",
+            "CREATE TRIGGER IF NOT EXISTS cards_touch_column_update AFTER UPDATE ON cards BEGIN UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.column_id; UPDATE columns SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.column_id AND OLD.column_id IS NOT NEW.column_id; END",
+        ] {
+            sqlx::query(statement).execute(&db).await?;
         }
         let old_delete_trigger: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='cards_touch_board_delete'",
@@ -8034,28 +8046,75 @@ async fn list_columns(
     State(app): Shared,
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let rows = sqlx::query("SELECT * FROM columns WHERE board_id=? ORDER BY position,id")
         .bind(board_id)
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(Json(json!(
+    let etag = card_page_etag(&rows);
+    if etag_matches(&headers, &etag) {
+        return Ok(with_card_page_headers(
+            StatusCode::NOT_MODIFIED.into_response(),
+            &etag,
+        ));
+    }
+    let mut response = Json(json!(
         rows.iter()
             .map(|r| column_json(&p, r, &base(&headers)))
             .collect::<Vec<_>>()
-    )))
+    ))
+    .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    Ok(with_card_page_headers(response, &etag))
 }
 async fn show_column(
     State(app): Shared,
     Path((account, board_id, column_id)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+    Query(query): Query<PageQuery>,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let c = checked_column(&app, &p, &board_id, &column_id).await?;
-    Ok(Json(column_json(&p, &c, &base(&headers))))
+    let column_id: String = c.get("id");
+    let page = query.page.unwrap_or(1).max(1);
+    let (offset, limit) = page_window(page);
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0")
+        .bind(&board_id).bind(&column_id).fetch_one(&app.db).await.map_err(db_err)?;
+    let rows = sqlx::query("SELECT c.*,(SELECT name FROM boards WHERE id=c.board_id) AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name FROM cards c WHERE c.board_id=? AND c.column_id=? AND c.status='published' AND c.closed=0 AND c.postponed=0 ORDER BY c.golden DESC,c.last_active_at DESC,c.id DESC LIMIT ? OFFSET ?")
+        .bind(&board_id).bind(&column_id).bind(limit).bind(offset)
+        .fetch_all(&app.db).await.map_err(db_err)?;
+    let etag = card_page_etag(&rows);
+    if let Some(response) = cached_card_page(&etag, total, page, &uri, &headers) {
+        return Ok(response);
+    }
+    let mut response = if headers.contains_key("x-rizzy-json-request") {
+        let mut response = Json(column_json(&p, &c, &base(&headers))).into_response();
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+        response
+    } else {
+        let title = format!("Column: {}", c.get::<String, _>("name"));
+        let previews = cards_page::previews(&app, &p, &rows).await?;
+        let body = format!(
+            "<nav><a href=\"/{account}/boards/{board_id}\">Back to board</a></nav><h1>{}</h1><section class=\"cards cards--grid\"><div class=\"cards__list\">{previews}</div></section>",
+            escape(&title),
+        );
+        public_page(&title, &body).into_response()
+    };
+    response = pagination_headers(response, total, page, &uri, &headers);
+    Ok(with_card_page_headers(response, &etag))
 }
 async fn create_column(
     State(app): Shared,
@@ -8100,15 +8159,33 @@ async fn update_column(
         return Err(bad("name is required"));
     }
     let color = string(v, "color").unwrap_or_else(|| c.get("color"));
-    sqlx::query("UPDATE columns SET name=?,color=?,updated_at=? WHERE id=? AND board_id=?")
-        .bind(name)
-        .bind(color)
-        .bind(now())
-        .bind(&column_id)
-        .bind(&board_id)
-        .execute(&app.db)
-        .await
-        .map_err(db_err)?;
+    if name != c.get::<String, _>("name") || color != c.get::<String, _>("color") {
+        let timestamp = now();
+        let mut tx = begin_write(&app).await.map_err(db_err)?;
+        lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+        sqlx::query("UPDATE columns SET name=?,color=?,updated_at=? WHERE id=? AND board_id=?")
+            .bind(name)
+            .bind(color)
+            .bind(&timestamp)
+            .bind(&column_id)
+            .bind(&board_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("UPDATE cards SET updated_at=? WHERE column_id=?")
+            .bind(&timestamp)
+            .bind(&column_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+            .bind(&timestamp)
+            .bind(&board_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+    }
     let c = checked_column(&app, &p, &board_id, &column_id).await?;
     Ok(Json(column_json(&p, &c, &base(&headers))))
 }
@@ -11088,13 +11165,22 @@ async fn update_card(
     let _writer = app.write_lock.lock().await;
     // Reserve the SQLite writer before reading attachment state in this transaction.
     // A deferred WAL read cannot be promoted after another process commits a write.
-    let mut tx = begin_write(&app).await.map_err(db_err)?;
-    if status == "published" {
-        // The card UPDATE trigger touches its board. Lock that parent row before
-        // MySQL takes a shared foreign-key lock during the child update, so two
-        // app processes cannot deadlock while upgrading the shared lock to X.
-        lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
-    }
+    let (mut tx, current_board_id) = if status == "published" {
+        // A move can invalidate the snapshot above. Lock the current board and
+        // card together so the UPDATE triggers never reach a different board
+        // while this transaction holds the card row.
+        begin_card_board_write(
+            &app,
+            &c.get::<String, _>("id"),
+            &c.get::<String, _>("board_id"),
+        )
+        .await?
+    } else {
+        (
+            begin_write(&app).await.map_err(db_err)?,
+            c.get::<String, _>("board_id"),
+        )
+    };
     if let Some(upload) = &input.image {
         storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
     }
@@ -11170,7 +11256,7 @@ async fn update_card(
         create_new_mentions(
             &mut tx,
             &p,
-            &c.get::<String, _>("board_id"),
+            &current_board_id,
             &c.get::<String, _>("id"),
             "Card",
             &c.get::<String, _>("id"),
@@ -11180,7 +11266,7 @@ async fn update_card(
         if !changed {
             sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
                 .bind(&timestamp)
-                .bind(c.get::<String, _>("board_id"))
+                .bind(&current_board_id)
                 .execute(&mut *tx)
                 .await
                 .map_err(db_err)?;

@@ -135,7 +135,7 @@ The generator preserves the 63 application tables, ordinary indexes, foreign
 keys, 15 checks, and the partial uniqueness rules through generated columns.
 It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16
 account-routed FULLTEXT search tables and backfills published cards and
-comments. Twenty-one MySQL triggers in
+comments. Twenty-four MySQL triggers in
 `schema.mysql.triggers.sql` cover the core flow, with an idempotent backfill
 for databases created before the triggers were added. Other SQLite trigger
 behavior still needs native MySQL equivalents or equivalent application code.
@@ -144,6 +144,17 @@ restart and reported all twenty triggers present at that point. A fresh database
 twenty-trigger schema passed concurrent initialization and 80 card creations
 across two processes. The first fresh run exposed an empty trigger section
 header; removing it fixed installation.
+
+Card insert and update triggers now advance a named column's timestamp when
+its cards change or move, matching the checked Fizzy callbacks. A changed
+column name also touches its cards and board; repeating the same name is a
+no-op. The MySQL core flow checks triage and rename timestamps, and both
+interrupted-schema recovery cases passed with all triggers installed. In the
+four-process cluster test, a move/title race exposed a stale board snapshot
+in card edits. Card edits now lock and recheck the card's current board before
+updating it. Three fresh-database cluster flows passed after the fix, each including 200
+move/title pairs and opposite-direction moves. This checks those races on one
+MySQL host, not all concurrent card writes or multi-host deployment.
 
 The schema and commands were exercised on a disposable local MariaDB 13.0.2
 instance on 2026-09-26. The Rust binary created all 63 tables through SQLx,
