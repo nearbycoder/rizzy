@@ -4,7 +4,7 @@ Rizzy is an in-progress Rust implementation of [Fizzy](https://github.com/baseca
 
 **Status: partial implementation.** Rizzy currently has a usable board view, email-code sign-in, and a subset of Fizzy's JSON API. It is not a one-for-one replacement. A parity checked local read workload runs faster, but a product-wide speed or scale advantage has not been established.
 
-The [auto-postponement comparison](bench/results/auto-postpone-sqlite-5000-2026-09-26.json) processed 5,000 overdue cards among 10,000 cards on four SQLite boards in 0.643–0.659 seconds for Rizzy versus 68.46–68.58 seconds for the pinned Fizzy method across two reversed-order rounds. The timing excludes process startup and setup; per-card Not Now, event, comment, rich-text, and activity-time outcomes were checked. This measures that background sweep, not the whole app.
+The [auto-postponement comparison](bench/results/auto-postpone-sqlite-5000-2026-09-26.json) processed 5,000 overdue cards among 10,000 cards on four SQLite boards in 0.645–0.689 seconds for Rizzy versus 68.08–68.11 seconds for the pinned Fizzy method across two reversed-order rounds. The timing excludes process startup and setup; per-card Not Now, event, comment, rich-text, and activity-time outcomes were checked. This measures that background sweep, not the whole app.
 
 ## Run
 

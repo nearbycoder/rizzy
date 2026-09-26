@@ -1,6 +1,7 @@
 {
   "source_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
-  "rust_commit": "4e1757946b46b2054df4cf7ae2ab70334ae63a6b",
+  "rust_commit": "8b0d7133218b507cc50725c9670877e67f10da64",
+  "rust_worktree_dirty_at_run": true,
   "cpu_affinity": [
     0,
     1
@@ -15,8 +16,8 @@
       "boards": 4,
       "round": 1,
       "app": "fizzy",
-      "seconds": 68.582168,
-      "cards_per_second": 72.91,
+      "seconds": 68.10909,
+      "cards_per_second": 73.41,
       "counts": {
         "not_now": 5000,
         "events": 5000,
@@ -31,8 +32,8 @@
       "boards": 4,
       "round": 1,
       "app": "rizzy",
-      "seconds": 0.642625,
-      "cards_per_second": 7780.59,
+      "seconds": 0.688732,
+      "cards_per_second": 7259.72,
       "counts": {
         "not_now": 5000,
         "events": 5000,
@@ -47,8 +48,8 @@
       "boards": 4,
       "round": 2,
       "app": "rizzy",
-      "seconds": 0.658633,
-      "cards_per_second": 7591.48,
+      "seconds": 0.645407,
+      "cards_per_second": 7747.05,
       "counts": {
         "not_now": 5000,
         "events": 5000,
@@ -63,8 +64,8 @@
       "boards": 4,
       "round": 2,
       "app": "fizzy",
-      "seconds": 68.458627,
-      "cards_per_second": 73.04,
+      "seconds": 68.083402,
+      "cards_per_second": 73.44,
       "counts": {
         "not_now": 5000,
         "events": 5000,
@@ -73,6 +74,5 @@
         "cards_verified": 10000
       }
     }
-  ],
-  "rust_worktree_dirty_at_run": true
+  ]
 }

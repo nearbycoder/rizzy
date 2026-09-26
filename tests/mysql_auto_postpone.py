@@ -64,6 +64,17 @@ def main():
             status, recent, _ = call(base, account, token, f"/boards/{board['id']}/cards", "POST",
                                      {"card": {"title": "Recent"}})
             assert status == 201
+            status, stale_flag, _ = call(base, account, token,
+                                         f"/boards/{board['id']}/cards", "POST",
+                                         {"card": {"title": "Stale flag without record"}})
+            assert status == 201
+            status, stale_record, _ = call(base, account, token,
+                                           f"/boards/{board['id']}/cards", "POST",
+                                           {"card": {"title": "Stale record without flag"}})
+            assert status == 201
+            status, _, _ = call(base, account, token,
+                                f"/cards/{stale_record['number']}/not_now", "POST")
+            assert status == 204
         finally:
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=10)
@@ -72,6 +83,14 @@ def main():
             timespec="milliseconds").replace("+00:00", "Z")
         mysql_scalar(url, f"UPDATE cards SET last_active_at='{stamp}' "
                           f"WHERE board_id='{board['id']}' AND id<>'{recent['id']}'")
+        mysql_scalar(url, f"UPDATE cards SET postponed=1 WHERE id='{stale_flag['id']}'")
+        mysql_scalar(url, f"UPDATE cards SET postponed=0 WHERE id='{stale_record['id']}'")
+        plan = mysql_scalar(url,
+            f"EXPLAIN SELECT c.id FROM cards c WHERE c.board_id='{board['id']}' "
+            "AND c.status='published' AND c.closed=0 AND c.postponed=0 "
+            f"AND c.last_active_at<='{stamp}' AND NOT EXISTS(SELECT 1 FROM card_not_nows n "
+            "WHERE n.card_id=c.id) ORDER BY c.last_active_at,c.id LIMIT 100")
+        assert "cards_board_active" in plan and "Not exists" in plan, plan
 
         def run():
             return subprocess.run([BINARY, "auto-postpone"], cwd=ROOT, env=env,
@@ -82,22 +101,28 @@ def main():
             outputs = list(pool.map(lambda _: run(), range(2)))
         counts = [int(re.search(r"Auto-postponed (\d+) cards", output).group(1))
                   for output in outputs]
-        assert sum(counts) == due_count, outputs
+        assert sum(counts) == due_count + 1, outputs
         assert run() == "Auto-postponed 0 cards"
         assert mysql_scalar(url,
             f"SELECT COUNT(*) FROM card_not_nows n JOIN cards c ON c.id=n.card_id "
-            f"WHERE c.board_id='{board['id']}'") == str(due_count)
+            f"WHERE c.board_id='{board['id']}'") == str(due_count + 2)
         assert mysql_scalar(url,
             f"SELECT COUNT(*) FROM card_not_nows WHERE card_id='{recent['id']}'") == "0"
         assert mysql_scalar(url,
+            f"SELECT u.role FROM card_not_nows n JOIN users u ON u.id=n.user_id "
+            f"WHERE n.card_id='{stale_flag['id']}'") == "system"
+        assert mysql_scalar(url,
+            f"SELECT u.role FROM card_not_nows n JOIN users u ON u.id=n.user_id "
+            f"WHERE n.card_id='{stale_record['id']}'") == "owner"
+        assert mysql_scalar(url,
             f"SELECT COUNT(*) FROM events WHERE board_id='{board['id']}' "
-            f"AND action='card_auto_postponed'") == str(due_count)
+            f"AND action='card_auto_postponed'") == str(due_count + 1)
         assert mysql_scalar(url,
             f"SELECT COUNT(*) FROM comments m JOIN cards c ON c.id=m.card_id "
             f"WHERE c.board_id='{board['id']}' "
-            f"AND m.body LIKE '%due to inactivity%'") == str(due_count)
+            f"AND m.body LIKE '%due to inactivity%'") == str(due_count + 1)
         assert len(set(due_ids)) == due_count
-        print(f"MySQL auto-postponement passed across {due_count} cards and concurrent commands")
+        print(f"MySQL auto-postponement passed across {due_count} ordinary due cards, both stale flag cases, and concurrent commands")
 
 
 if __name__ == "__main__":

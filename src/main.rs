@@ -12174,74 +12174,77 @@ async fn auto_postpone_all_due(app: &App) -> Result<usize> {
             let days: i64 = board.get("auto_postpone_period_in_days");
             let cutoff = (as_of - chrono::Duration::days(days))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            loop {
-                // The board/status/last_active index keeps each batch bounded
-                // even when many accounts have large card collections.
-                let cards = sqlx::query("SELECT id FROM cards WHERE board_id=? AND status='published' AND closed=0 AND postponed=0 AND last_active_at<=? ORDER BY last_active_at,id LIMIT 100")
-                    .bind(&board_id).bind(&cutoff).fetch_all(&app.db).await.map_err(db_err)?;
-                if cards.is_empty() {
-                    break;
-                }
-                for card in cards {
-                    let card_id: String = card.get("id");
-                    let _writer = app.write_lock.lock().await;
-                    let mut tx = begin_write(app).await.map_err(db_err)?;
-                    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
-                    let still_due = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM cards WHERE id=? AND board_id=? AND status='published' AND closed=0 AND postponed=0 AND last_active_at<=?")
+            // Fizzy's active scope uses the absence of a Not Now record. Scan
+            // both flag values separately so a stale flag cannot hide a due
+            // card, while each scan still uses cards_board_active.
+            for flagged in [0_i64, 1] {
+                loop {
+                    let cards = sqlx::query("SELECT c.id FROM cards c WHERE c.board_id=? AND c.status='published' AND c.closed=0 AND c.postponed=? AND c.last_active_at<=? AND NOT EXISTS(SELECT 1 FROM card_not_nows n WHERE n.card_id=c.id) ORDER BY c.last_active_at,c.id LIMIT 100")
+                    .bind(&board_id).bind(flagged).bind(&cutoff).fetch_all(&app.db).await.map_err(db_err)?;
+                    if cards.is_empty() {
+                        break;
+                    }
+                    for card in cards {
+                        let card_id: String = card.get("id");
+                        let _writer = app.write_lock.lock().await;
+                        let mut tx = begin_write(app).await.map_err(db_err)?;
+                        lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+                        let still_due = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM cards c WHERE c.id=? AND c.board_id=? AND c.status='published' AND c.closed=0 AND c.last_active_at<=? AND NOT EXISTS(SELECT 1 FROM card_not_nows n WHERE n.card_id=c.id)")
                         .bind(&card_id).bind(&board_id).bind(&cutoff)
                         .fetch_one(&mut *tx).await.map_err(db_err)? != 0;
-                    if !still_due {
-                        continue;
-                    }
-                    let timestamp = now();
-                    sqlx::query("UPDATE cards SET postponed=1,closed=0,column_id=NULL,updated_at=?,last_active_at=? WHERE id=?")
+                        if !still_due {
+                            continue;
+                        }
+                        let timestamp = now();
+                        sqlx::query("UPDATE cards SET postponed=1,closed=0,column_id=NULL,updated_at=?,last_active_at=? WHERE id=?")
                         .bind(&timestamp).bind(&timestamp).bind(&card_id)
                         .execute(&mut *tx).await.map_err(db_err)?;
-                    sqlx::query("DELETE FROM card_activity_spikes WHERE card_id=?")
-                        .bind(&card_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(db_err)?;
-                    sqlx::query("INSERT INTO card_not_nows(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+                        sqlx::query("DELETE FROM card_activity_spikes WHERE card_id=?")
+                            .bind(&card_id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(db_err)?;
+                        sqlx::query("INSERT INTO card_not_nows(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                         .bind(id()).bind(&account_id).bind(&card_id).bind(&system_user_id)
                         .bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-                    let event_id = id();
-                    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_auto_postponed','{}',?,?)")
+                        let event_id = id();
+                        sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_auto_postponed','{}',?,?)")
                         .bind(&event_id).bind(&account_id).bind(&board_id).bind(&card_id)
                         .bind(&system_user_id).bind(&card_id).bind(&timestamp).bind(&timestamp)
                         .execute(&mut *tx).await.map_err(db_err)?;
-                    queue_webhooks(
-                        &mut tx,
-                        &account_id,
-                        &board_id,
-                        &event_id,
-                        "card_auto_postponed",
-                        &timestamp,
-                    )
-                    .await?;
-                    let comment_id = id();
-                    sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+                        queue_webhooks(
+                            &mut tx,
+                            &account_id,
+                            &board_id,
+                            &event_id,
+                            "card_auto_postponed",
+                            &timestamp,
+                        )
+                        .await?;
+                        let comment_id = id();
+                        sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
                         .bind(&comment_id).bind(&card_id).bind(&system_user_id)
                         .bind(comment_body).bind(&comment_search).bind(&timestamp).bind(&timestamp)
                         .execute(&mut *tx).await.map_err(db_err)?;
-                    rich_text_records::sync(
-                        &mut tx,
-                        &account_id,
-                        "Comment",
-                        &comment_id,
-                        "body",
-                        "",
-                        comment_body,
-                        &timestamp,
-                    )
-                    .await?;
-                    if app.mysql {
-                        mysql_search::sync_comment(&mut tx, &account_id, &comment_id)
-                            .await
-                            .map_err(db_err)?;
+                        rich_text_records::sync(
+                            &mut tx,
+                            &account_id,
+                            "Comment",
+                            &comment_id,
+                            "body",
+                            "",
+                            comment_body,
+                            &timestamp,
+                        )
+                        .await?;
+                        if app.mysql {
+                            mysql_search::sync_comment(&mut tx, &account_id, &comment_id)
+                                .await
+                                .map_err(db_err)?;
+                        }
+                        tx.commit().await.map_err(db_err)?;
+                        postponed += 1;
                     }
-                    tx.commit().await.map_err(db_err)?;
-                    postponed += 1;
                 }
             }
         }

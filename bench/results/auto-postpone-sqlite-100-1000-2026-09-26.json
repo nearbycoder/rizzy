@@ -1,6 +1,7 @@
 {
   "source_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
-  "rust_commit": "4e1757946b46b2054df4cf7ae2ab70334ae63a6b",
+  "rust_commit": "8b0d7133218b507cc50725c9670877e67f10da64",
+  "rust_worktree_dirty_at_run": true,
   "cpu_affinity": [
     0,
     1
@@ -15,8 +16,8 @@
       "boards": 4,
       "round": 1,
       "app": "fizzy",
-      "seconds": 1.915202,
-      "cards_per_second": 52.21,
+      "seconds": 1.952268,
+      "cards_per_second": 51.22,
       "counts": {
         "not_now": 100,
         "events": 100,
@@ -31,8 +32,8 @@
       "boards": 4,
       "round": 1,
       "app": "rizzy",
-      "seconds": 0.011682,
-      "cards_per_second": 8560.18,
+      "seconds": 0.011635,
+      "cards_per_second": 8594.76,
       "counts": {
         "not_now": 100,
         "events": 100,
@@ -47,8 +48,8 @@
       "boards": 4,
       "round": 2,
       "app": "rizzy",
-      "seconds": 0.011175,
-      "cards_per_second": 8948.55,
+      "seconds": 0.011807,
+      "cards_per_second": 8469.55,
       "counts": {
         "not_now": 100,
         "events": 100,
@@ -63,8 +64,8 @@
       "boards": 4,
       "round": 2,
       "app": "fizzy",
-      "seconds": 1.926078,
-      "cards_per_second": 51.92,
+      "seconds": 1.931385,
+      "cards_per_second": 51.78,
       "counts": {
         "not_now": 100,
         "events": 100,
@@ -79,8 +80,8 @@
       "boards": 4,
       "round": 1,
       "app": "fizzy",
-      "seconds": 14.189501,
-      "cards_per_second": 70.47,
+      "seconds": 14.180305,
+      "cards_per_second": 70.52,
       "counts": {
         "not_now": 1000,
         "events": 1000,
@@ -95,8 +96,8 @@
       "boards": 4,
       "round": 1,
       "app": "rizzy",
-      "seconds": 0.119456,
-      "cards_per_second": 8371.28,
+      "seconds": 0.119935,
+      "cards_per_second": 8337.85,
       "counts": {
         "not_now": 1000,
         "events": 1000,
@@ -111,8 +112,8 @@
       "boards": 4,
       "round": 2,
       "app": "rizzy",
-      "seconds": 0.117023,
-      "cards_per_second": 8545.33,
+      "seconds": 0.121108,
+      "cards_per_second": 8257.09,
       "counts": {
         "not_now": 1000,
         "events": 1000,
@@ -127,8 +128,8 @@
       "boards": 4,
       "round": 2,
       "app": "fizzy",
-      "seconds": 14.200799,
-      "cards_per_second": 70.42,
+      "seconds": 14.232998,
+      "cards_per_second": 70.26,
       "counts": {
         "not_now": 1000,
         "events": 1000,
@@ -137,6 +138,5 @@
         "cards_verified": 2000
       }
     }
-  ],
-  "rust_worktree_dirty_at_run": true
+  ]
 }
