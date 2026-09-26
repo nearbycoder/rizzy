@@ -6,7 +6,7 @@ use md5::Md5;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
 pub(super) fn storage_dir() -> PathBuf {
@@ -940,27 +940,18 @@ async fn storage_user_id(app: &App, headers: &HeaderMap, account_id: &str) -> Re
         .ok_or_else(|| err(StatusCode::FORBIDDEN, "Account access required"))
 }
 
-pub(super) async fn show_blob(
-    State(app): Shared,
-    Path((account, signed_id, _filename)): Path<(String, String, String)>,
-    Query(query): Query<HashMap<String, String>>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Result<Response> {
+async fn authorized_blob(
+    app: &App,
+    account: &str,
+    signed_id: &str,
+    headers: &HeaderMap,
+) -> Result<(DbRow, bool)> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
     let blob = sqlx::query("SELECT b.* FROM storage_blobs b JOIN accounts a ON a.id=b.account_id WHERE b.signed_id=? AND a.external_account_id=?")
-        .bind(&signed_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+        .bind(signed_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     if blob.get::<Option<String>, _>("uploaded_at").is_none() {
         return Err(missing());
     }
-    let variant = if uri.path().contains("/representations/redirect/") {
-        if !variable_image(&blob.get::<String, _>("content_type")) {
-            return Err(missing());
-        }
-        "large"
-    } else {
-        "original"
-    };
     let account_id: String = blob.get("account_id");
     let attachments =
         sqlx::query("SELECT record_type,record_id FROM storage_attachments WHERE blob_id=?")
@@ -1005,7 +996,7 @@ pub(super) async fn show_blob(
         }
     }
     if !public {
-        let user_id = storage_user_id(&app, &headers, &account_id).await?;
+        let user_id = storage_user_id(app, headers, &account_id).await?;
         let mut accessible = attachments.is_empty();
         for card in &cards {
             let access: i64 =
@@ -1024,6 +1015,25 @@ pub(super) async fn show_blob(
             return Err(err(StatusCode::FORBIDDEN, "Blob access required"));
         }
     }
+    Ok((blob, public))
+}
+
+pub(super) async fn show_blob(
+    State(app): Shared,
+    Path((account, signed_id, _filename)): Path<(String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, _) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    let variant = if uri.path().contains("/representations/redirect/") {
+        if !variable_image(&blob.get::<String, _>("content_type")) {
+            return Err(missing());
+        }
+        "large"
+    } else {
+        "original"
+    };
     let token = random_token();
     let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
         "attachment"
@@ -1093,15 +1103,58 @@ pub(super) async fn download_file(
     let slug: i64 = account.parse().map_err(|_| missing())?;
     let blob = sqlx::query("SELECT b.*,t.disposition,t.variant FROM storage_download_tokens t JOIN storage_blobs b ON b.id=t.blob_id JOIN accounts a ON a.id=b.account_id WHERE t.token_hash=? AND a.external_account_id=? AND t.expires_at>=?")
         .bind(hash(&token)).bind(slug).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    let variant: String = blob.get("variant");
+    let disposition: String = blob.get("disposition");
+    serve_blob_file(&blob, &variant, &disposition, None, "public, max-age=300").await
+}
+
+pub(super) async fn proxy_blob(
+    State(app): Shared,
+    Path((account, signed_id, _filename)): Path<(String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, public) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    let mut response = serve_blob_file(
+        &blob,
+        "original",
+        disposition,
+        headers
+            .get(header::RANGE)
+            .and_then(|value| value.to_str().ok()),
+        if public {
+            "max-age=3155695200, public, immutable"
+        } else {
+            "max-age=3155695200, private, immutable"
+        },
+    )
+    .await?;
+    response
+        .headers_mut()
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    Ok(response)
+}
+
+async fn serve_blob_file(
+    blob: &DbRow,
+    variant: &str,
+    requested_disposition: &str,
+    range_header: Option<&str>,
+    cache_control: &str,
+) -> Result<Response> {
     let key: String = blob.get("storage_key");
     let declared: String = blob.get("content_type");
-    let variant: String = blob.get("variant");
     let path = if variant == "large" {
         ensure_large_variant(&key, &declared).await?
     } else {
         storage_dir().join(&key)
     };
-    let file = fs::File::open(&path).await.map_err(|_| missing())?;
+    let mut file = fs::File::open(&path).await.map_err(|_| missing())?;
     let length = file.metadata().await.map_err(|_| missing())?.len();
     let lowercase = declared.to_ascii_lowercase();
     let dangerous = !declared.is_ascii()
@@ -1117,7 +1170,59 @@ pub(super) async fn download_file(
     } else {
         declared.as_str()
     };
-    let mut response = Body::from_stream(ReaderStream::new(file)).into_response();
+    let range = if let Some(value) = range_header {
+        let Some(spec) = value.strip_prefix("bytes=") else {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        };
+        if spec.contains(',') || length == 0 {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        }
+        let Some((start, end)) = spec.split_once('-') else {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        };
+        let range = if start.is_empty() {
+            let suffix = end.parse::<u64>().ok().filter(|size| *size > 0);
+            suffix.map(|size| (length.saturating_sub(size), length - 1))
+        } else {
+            let start = start.parse::<u64>().ok().filter(|start| *start < length);
+            let end = if end.is_empty() {
+                Some(length - 1)
+            } else {
+                end.parse::<u64>().ok().map(|end| end.min(length - 1))
+            };
+            start.zip(end).filter(|(start, end)| start <= end)
+        };
+        let Some(range) = range else {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        };
+        if range.1 - range.0 + 1 > 5 * 1024 * 1024 {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        }
+        Some(range)
+    } else {
+        None
+    };
+    let mut response = if let Some((start, end)) = range {
+        file.seek(std::io::SeekFrom::Start(start))
+            .await
+            .map_err(|_| missing())?;
+        let mut bytes =
+            vec![
+                0;
+                usize::try_from(end - start + 1)
+                    .map_err(|_| err(StatusCode::RANGE_NOT_SATISFIABLE, "Range too large"))?
+            ];
+        file.read_exact(&mut bytes).await.map_err(|_| missing())?;
+        let mut response = (StatusCode::PARTIAL_CONTENT, bytes).into_response();
+        response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            HeaderValue::from_str(&format!("bytes {start}-{end}/{length}"))
+                .expect("valid byte range"),
+        );
+        response
+    } else {
+        Body::from_stream(ReaderStream::new(file)).into_response()
+    };
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_str(content_type)
@@ -1125,11 +1230,16 @@ pub(super) async fn download_file(
     );
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=300"),
+        HeaderValue::from_str(cache_control).expect("static cache control"),
     );
     response.headers_mut().insert(
         header::CONTENT_LENGTH,
-        HeaderValue::from_str(&length.to_string()).expect("nonnegative blob size"),
+        HeaderValue::from_str(
+            &range
+                .map_or(length, |(start, end)| end - start + 1)
+                .to_string(),
+        )
+        .expect("nonnegative blob size"),
     );
     let filename: String = blob.get("filename");
     let safe_filename: String = filename
@@ -1144,7 +1254,7 @@ pub(super) async fn download_file(
         .collect();
     let disposition = format!(
         "{}; filename=\"{}\"",
-        if dangerous || blob.get::<String, _>("disposition") == "attachment" {
+        if dangerous || requested_disposition == "attachment" {
             "attachment"
         } else {
             "inline"

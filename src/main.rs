@@ -3194,6 +3194,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             get(storage::show_blob),
         )
         .route(
+            "/{account}/rails/active_storage/blobs/proxy/{signed_id}/{filename}",
+            get(storage::proxy_blob),
+        )
+        .route(
+            "/{account}/rails/active_storage/blobs/{signed_id}/{filename}",
+            get(storage::show_blob),
+        )
+        .route(
             "/{account}/rails/active_storage/representations/redirect/{signed_id}/thumb/{filename}",
             get(storage::show_avatar_representation),
         )

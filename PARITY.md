@@ -113,8 +113,11 @@ The first fidelity gate is to run each upstream API controller test against an e
 The [route registration inventory](docs/route-coverage.md) compares the pinned
 source's dispatchable controller actions with Rizzy's path and method table:
 all 211 application routes and three Turbo Native navigation routes are now
-registered. The Turbo Native responses match the source's HTML text. Five
-Active Storage and 14 Action Mailbox framework routes remain unmatched. Route
+registered. The Turbo Native responses match the source's HTML text. Rizzy now
+registers the legacy blob redirect alias and blob proxy; a live paired test
+compares full bytes, private/public access, single byte ranges, and disposition.
+Three general Active Storage representation and 14 Action Mailbox framework
+routes remain unmatched. Route
 registration alone does not prove behavioral parity for any of these areas.
 
 Rizzy's card and comment FTS5 indexes now use the Porter tokenizer from Fizzy's pinned SQLite search schema. `tests/search.py` checks stemmed title and comment queries such as `running`/`run`, `authentication`/`authenticate`, and `walking`/`walk`. `tests/search_stemming_migration.py` downgrades a populated disposable index to the older tokenizer, restarts Rizzy, and verifies both existing index row counts and stemmed matches. The pinned Fizzy search model and card-search suites pass 16 tests and 65 assertions; its custom MySQL stemmer suite passes 25 tests and 50 assertions. Full query grammar, Unicode tokenization, relevance ordering, and the production MySQL adapter still need direct parity checks.

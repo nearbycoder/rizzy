@@ -10,13 +10,18 @@ Path parameters and account mount prefixes are normalized before comparison.
 | --- | ---: | ---: |
 | Fizzy application controllers | 211 | 0 |
 | Turbo Native navigation | 3 | 0 |
-| Active Storage | 4 | 5 |
+| Active Storage | 6 | 3 |
 | Action Mailbox | 0 | 14 |
 
 The three Turbo Native history endpoints now return the pinned source's 200
 HTML responses and exact text, with and without the account prefix. The five
-unregistered Active Storage routes include blob proxy and legacy alias paths
-plus general representation routes. The 14 Action Mailbox routes are installed
+Active Storage's blob redirect alias and proxy are now registered. The proxy
+streams the original bytes, supports single byte ranges, and passes the
+private/public access checks in `tests/storage_proxy_parity.py` against live
+Fizzy and Rizzy instances. The three remaining Active Storage routes are
+general representation redirect, proxy, and alias paths. Rizzy's existing
+`thumb` and `preview` paths do not accept arbitrary Rails variation keys or
+reproduce all image transformations. The 14 Action Mailbox routes are installed
 by Rails in the source; their actual availability and behavior outside the
 test environment still need comparison.
 
