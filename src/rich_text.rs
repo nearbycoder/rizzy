@@ -3,43 +3,300 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 fn allowed_html(input: &str) -> String {
-    let mut sanitizer = ammonia::Builder::new();
-    sanitizer
-        .tags(HashSet::from([
-            "a",
-            "b",
-            "blockquote",
-            "br",
-            "code",
-            "del",
-            "div",
-            "em",
-            "figcaption",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "hr",
-            "i",
-            "li",
-            "ol",
-            "p",
-            "pre",
-            "s",
-            "span",
-            "strike",
-            "strong",
-            "u",
-            "ul",
-        ]))
-        .tag_attributes(HashMap::from([("a", HashSet::from(["href", "title"]))]))
-        .generic_attributes(HashSet::from(["class"]))
-        .clean_content_tags(HashSet::new())
-        .link_rel(None)
-        .url_relative(ammonia::UrlRelative::PassThrough);
-    sanitizer.clean(input).to_string()
+    static SANITIZER: OnceLock<ammonia::Builder<'static>> = OnceLock::new();
+    let sanitizer = SANITIZER.get_or_init(|| {
+        let mut sanitizer = ammonia::Builder::new();
+        let style_properties = HashSet::from([
+            "azimuth",
+            "align-content",
+            "align-items",
+            "align-self",
+            "aspect-ratio",
+            "background",
+            "background-color",
+            "border",
+            "border-bottom",
+            "border-bottom-color",
+            "border-collapse",
+            "border-color",
+            "border-left",
+            "border-left-color",
+            "border-right",
+            "border-right-color",
+            "border-top",
+            "border-top-color",
+            "clear",
+            "color",
+            "cursor",
+            "direction",
+            "display",
+            "elevation",
+            "flex",
+            "flex-basis",
+            "flex-direction",
+            "flex-flow",
+            "flex-grow",
+            "flex-shrink",
+            "flex-wrap",
+            "float",
+            "font",
+            "font-family",
+            "font-size",
+            "font-style",
+            "font-variant",
+            "font-weight",
+            "height",
+            "justify-content",
+            "letter-spacing",
+            "line-height",
+            "list-style",
+            "list-style-type",
+            "margin",
+            "margin-bottom",
+            "margin-left",
+            "margin-right",
+            "margin-top",
+            "max-height",
+            "max-width",
+            "min-height",
+            "min-width",
+            "order",
+            "overflow",
+            "overflow-x",
+            "overflow-y",
+            "padding",
+            "padding-bottom",
+            "padding-left",
+            "padding-right",
+            "padding-top",
+            "page-break-after",
+            "page-break-before",
+            "page-break-inside",
+            "pause",
+            "pause-after",
+            "pause-before",
+            "pitch",
+            "pitch-range",
+            "richness",
+            "speak",
+            "speak-header",
+            "speak-numeral",
+            "speak-punctuation",
+            "speech-rate",
+            "stress",
+            "text-align",
+            "text-decoration",
+            "text-indent",
+            "unicode-bidi",
+            "vertical-align",
+            "voice-family",
+            "volume",
+            "white-space",
+            "width",
+            "fill",
+            "fill-opacity",
+            "fill-rule",
+            "stroke",
+            "stroke-width",
+            "stroke-linecap",
+            "stroke-linejoin",
+            "stroke-opacity",
+        ]);
+        sanitizer
+            .tags(HashSet::from([
+                "a",
+                "abbr",
+                "acronym",
+                "action-text-attachment",
+                "address",
+                "audio",
+                "b",
+                "big",
+                "blockquote",
+                "br",
+                "cite",
+                "code",
+                "dd",
+                "del",
+                "details",
+                "dfn",
+                "div",
+                "dl",
+                "dt",
+                "em",
+                "embed",
+                "figcaption",
+                "figure",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "hr",
+                "i",
+                "img",
+                "ins",
+                "kbd",
+                "li",
+                "mark",
+                "ol",
+                "p",
+                "pre",
+                "s",
+                "samp",
+                "small",
+                "source",
+                "span",
+                "strong",
+                "sub",
+                "summary",
+                "sup",
+                "table",
+                "tbody",
+                "td",
+                "th",
+                "thead",
+                "time",
+                "tr",
+                "tt",
+                "ul",
+                "var",
+                "video",
+            ]))
+            .tag_attributes(HashMap::from([("a", HashSet::from(["href", "title"]))]))
+            .generic_attributes(HashSet::from([
+                "abbr",
+                "alt",
+                "caption",
+                "cite",
+                "class",
+                "content",
+                "content-type",
+                "controls",
+                "data-language",
+                "data-lightbox-caption-value",
+                "data-lightbox-target",
+                "data-turbo-frame",
+                "datetime",
+                "filename",
+                "filesize",
+                "height",
+                "href",
+                "lang",
+                "name",
+                "poster",
+                "presentation",
+                "previewable",
+                "sgid",
+                "src",
+                "start",
+                "style",
+                "title",
+                "type",
+                "url",
+                "value",
+                "width",
+                "xml:lang",
+            ]))
+            .filter_style_properties(style_properties)
+            .clean_content_tags(HashSet::new())
+            .link_rel(None)
+            .url_relative(ammonia::UrlRelative::PassThrough);
+        sanitizer
+    });
+    normalize_styles(sanitizer.clean(input).to_string())
+}
+
+fn normalize_styles(input: String) -> String {
+    static STYLE: OnceLock<regex::Regex> = OnceLock::new();
+    static FUNCTION: OnceLock<regex::Regex> = OnceLock::new();
+    static COMMA: OnceLock<regex::Regex> = OnceLock::new();
+    static IMPORTANT: OnceLock<regex::Regex> = OnceLock::new();
+    let style = STYLE.get_or_init(|| regex::Regex::new(r#"style="([^"]*)""#).unwrap());
+    let function = FUNCTION.get_or_init(|| regex::Regex::new(r"(?i)([a-z-]+)\s*\(").unwrap());
+    let comma = COMMA.get_or_init(|| regex::Regex::new(r"\s*,\s*").unwrap());
+    let important = IMPORTANT.get_or_init(|| regex::Regex::new(r"(?i)!\s+important").unwrap());
+    style
+        .replace_all(&input, |captures: &regex::Captures<'_>| {
+            let declarations = captures[1]
+                .split(';')
+                .filter_map(|declaration| {
+                    let (property, value) = declaration.split_once(':')?;
+                    let property = property.trim().to_ascii_lowercase();
+                    let value = value.trim();
+                    let lowered = value.to_ascii_lowercase();
+                    if value.is_empty()
+                        || lowered.contains(['\\', '@'])
+                        || lowered.contains("javascript:")
+                        || lowered.contains("vbscript:")
+                        || lowered.contains("data:")
+                        || function.captures_iter(value).any(|match_| {
+                            !matches!(
+                                &match_[1].to_ascii_lowercase()[..],
+                                "attr"
+                                    | "blur"
+                                    | "brightness"
+                                    | "calc"
+                                    | "circle"
+                                    | "contrast"
+                                    | "counter"
+                                    | "counters"
+                                    | "cubic-bezier"
+                                    | "drop-shadow"
+                                    | "ellipse"
+                                    | "grayscale"
+                                    | "hsl"
+                                    | "hsla"
+                                    | "hue-rotate"
+                                    | "hwb"
+                                    | "inset"
+                                    | "invert"
+                                    | "linear-gradient"
+                                    | "matrix"
+                                    | "matrix3d"
+                                    | "opacity"
+                                    | "perspective"
+                                    | "polygon"
+                                    | "radial-gradient"
+                                    | "repeating-linear-gradient"
+                                    | "repeating-radial-gradient"
+                                    | "rgb"
+                                    | "rgba"
+                                    | "rotate"
+                                    | "rotate3d"
+                                    | "rotatex"
+                                    | "rotatey"
+                                    | "rotatez"
+                                    | "saturate"
+                                    | "sepia"
+                                    | "scale"
+                                    | "scale3d"
+                                    | "scalex"
+                                    | "scaley"
+                                    | "scalez"
+                                    | "skew"
+                                    | "skewx"
+                                    | "skewy"
+                                    | "symbols"
+                                    | "translate"
+                                    | "translate3d"
+                                    | "translatex"
+                                    | "translatey"
+                                    | "translatez"
+                            )
+                        })
+                    {
+                        return None;
+                    }
+                    let value = comma.replace_all(value, ", ");
+                    let value = important.replace_all(&value, "!important");
+                    Some(format!("{property}:{value};"))
+                })
+                .collect::<String>();
+            format!("style=\"{declarations}\"")
+        })
+        .into_owned()
 }
 
 fn linkify_text(input: &str) -> String {
@@ -131,93 +388,89 @@ pub(super) fn html(input: &str) -> String {
     )
 }
 
-fn line_break(out: &mut String, count: usize) {
-    if out.is_empty() {
-        return;
-    }
-    let existing = out.chars().rev().take_while(|c| *c == '\n').count();
-    if existing < count {
-        out.extend(std::iter::repeat_n('\n', count - existing));
-    }
+fn without_trailing_newlines(value: &str) -> &str {
+    value.trim_end_matches(['\n', '\r'])
 }
 
-fn walk(node: &NodeRef, out: &mut String) {
+fn plain_node(node: &NodeRef) -> String {
     if let Some(text) = node.as_text() {
-        let value = text.borrow();
-        if !value.trim().is_empty() || !value.contains('\n') {
-            out.push_str(&value);
-        }
-        return;
+        return without_trailing_newlines(&text.borrow()).to_owned();
     }
     let tag = node
         .as_element()
         .map(|element| element.name.local.to_string())
         .unwrap_or_default();
     if matches!(tag.as_str(), "script" | "style" | "noscript") {
-        return;
+        return String::new();
     }
     if tag == "br" {
-        line_break(out, 1);
-        return;
+        return "\n".to_owned();
     }
-    if tag == "p"
-        && node.children().any(|child| {
-            child
-                .as_element()
-                .is_some_and(|element| element.name.local.as_ref() == "br")
-        })
-        && node.children().all(|child| {
-            child
-                .as_text()
-                .is_some_and(|text| text.borrow().trim().is_empty())
-                || child
+    let children: String = node.children().map(|child| plain_node(&child)).collect();
+    match tag.as_str() {
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" => {
+            format!("{}\n\n", without_trailing_newlines(&children))
+        }
+        "ul" | "ol" => {
+            let nested = node.ancestors().any(|ancestor| {
+                ancestor
                     .as_element()
-                    .is_some_and(|element| element.name.local.as_ref() == "br")
-        })
-    {
-        line_break(out, 4);
-        return;
-    }
-    if tag == "ul" || tag == "ol" {
-        if tag == "ol" && out.is_empty() {
-            out.push('\n');
+                    .is_some_and(|element| matches!(element.name.local.as_ref(), "ul" | "ol"))
+            });
+            format!(
+                "{}{}\n\n",
+                if nested { "\n" } else { "" },
+                without_trailing_newlines(&children)
+            )
         }
-        if !out.is_empty() && !out.ends_with('\n') {
-            line_break(out, 2);
-        }
-        let mut index = 1;
-        for child in node.children() {
-            if child
-                .as_element()
-                .is_some_and(|element| element.name.local.as_ref() == "li")
-            {
-                if !out.is_empty() && !out.ends_with('\n') {
-                    line_break(out, 1);
-                }
-                if tag == "ol" {
-                    out.push_str(&format!("  {index}. "));
-                } else {
-                    out.push_str("• ");
-                }
-                for item in child.children() {
-                    walk(&item, out);
-                }
-                line_break(out, if tag == "ol" { 2 } else { 1 });
-                index += 1;
+        "div" => format!("{}\n", without_trailing_newlines(&children)),
+        "figcaption" => format!("[{}]", without_trailing_newlines(&children)),
+        "blockquote" => {
+            let mut value = format!("{}\n\n", without_trailing_newlines(&children));
+            let bounds = value
+                .char_indices()
+                .filter(|(_, ch)| !ch.is_whitespace())
+                .map(|(index, ch)| (index, index + ch.len_utf8()))
+                .collect::<Vec<_>>();
+            if let (Some(first), Some(last)) = (bounds.first(), bounds.last()) {
+                value.insert_str(last.1, "”");
+                value.insert_str(first.0, "“");
+                value
             } else {
-                walk(&child, out);
+                "“”".to_owned()
             }
         }
-        line_break(out, 2);
-        return;
-    }
-    for child in node.children() {
-        walk(&child, out);
-    }
-    match tag.as_str() {
-        "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre" => line_break(out, 2),
-        "div" | "li" => line_break(out, 1),
-        _ => {}
+        "li" => {
+            let lists = node
+                .ancestors()
+                .filter_map(|ancestor| {
+                    ancestor
+                        .as_element()
+                        .map(|element| element.name.local.to_string())
+                })
+                .filter(|name| matches!(name.as_str(), "ul" | "ol"))
+                .collect::<Vec<_>>();
+            let bullet = if lists.first().is_some_and(|name| name == "ol") {
+                let mut index = 1;
+                let mut previous = node.previous_sibling();
+                while let Some(sibling) = previous {
+                    if sibling.as_element().is_some() {
+                        index += 1;
+                    }
+                    previous = sibling.previous_sibling();
+                }
+                format!("{index}.")
+            } else {
+                "•".to_owned()
+            };
+            format!(
+                "{}{} {}\n",
+                "  ".repeat(lists.len().saturating_sub(1)),
+                bullet,
+                without_trailing_newlines(&children)
+            )
+        }
+        _ => children,
     }
 }
 
@@ -229,11 +482,12 @@ pub(super) fn plain_text(input: &str) -> String {
     let Ok(body) = document.select_first("body") else {
         return input.to_owned();
     };
-    let mut text = String::new();
-    for child in body.as_node().children() {
-        walk(&child, &mut text);
-    }
-    text.trim_end_matches('\n').to_owned()
+    let text: String = body
+        .as_node()
+        .children()
+        .map(|child| plain_node(&child))
+        .collect();
+    without_trailing_newlines(&text).to_owned()
 }
 
 pub(super) fn attachment_sgids(input: &str) -> Vec<String> {
