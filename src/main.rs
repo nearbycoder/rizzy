@@ -13305,6 +13305,20 @@ async fn create_comment(
         &content,
     )
     .await?;
+    let watch_statement = if app.mysql {
+        "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>1,VALUES(updated_at),updated_at),watching=1"
+    } else {
+        "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1"
+    };
+    sqlx::query(watch_statement)
+        .bind(crate::id())
+        .bind(c.get::<String, _>("id"))
+        .bind(&p.user_id)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     if app.mysql {
         mysql_search::sync_comment(&mut tx, &p.account_id, &id)
             .await

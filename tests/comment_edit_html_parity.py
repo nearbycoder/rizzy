@@ -35,12 +35,20 @@ def check(target):
         assert status == 201, (target["name"], "card", status)
         card = json.loads(raw)
         number = card["number"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/watch", "DELETE", bearer=True)
+        assert status == 204, (target["name"], "unwatch", status)
+        with sqlite3.connect(target["db"]) as db:
+            watch_rows = db.execute("SELECT watching FROM watches WHERE card_id=(SELECT id FROM cards WHERE number=?)", (number,)).fetchall()
+        assert watch_rows == [(0,)], (target["name"], "before comment", watch_rows)
         status, _, first_card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200 and "Next, add some notes, context, pictures, or video about this…".encode() in first_card_html
         status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
                                  {"comment":{"body":"Original comment"}}, bearer=True)
         assert status == 201, (target["name"], "comment", status)
         comment_id = json.loads(raw)["id"]
+        with sqlite3.connect(target["db"]) as db:
+            watch_rows = db.execute("SELECT watching FROM watches WHERE card_id=(SELECT id FROM cards WHERE number=?)", (number,)).fetchall()
+        assert watch_rows == [(1,)], (target["name"], "comment rewatch", watch_rows)
         path = f"/{account}/cards/{number}/comments/{comment_id}"
         index_path = f"/{account}/cards/{number}/comments"
         for method in ("POST", "DELETE"):
