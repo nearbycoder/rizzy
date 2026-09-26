@@ -428,26 +428,90 @@ async fn allow_modern_browser(State(app): Shared, request: Request, next: Next) 
     }
     next.run(request).await
 }
+fn platform_user_agent(headers: &HeaderMap) -> String {
+    if let Some(cookie) = cookie_value(headers, "x_user_agent") {
+        let decoded =
+            url::form_urlencoded::parse(format!("agent={}", cookie.trim_matches('"')).as_bytes())
+                .next()
+                .map(|(_, value)| value.into_owned())
+                .unwrap_or_default();
+        if !decoded.trim().is_empty() {
+            return decoded;
+        }
+    }
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned()
+}
+fn public_layout_path(path: &str) -> bool {
+    path == "/session/new"
+        || path == "/session/menu"
+        || path.starts_with("/session/magic_link")
+        || path.starts_with("/signup")
+        || path.starts_with("/join_codes/")
+        || path.contains("/public/")
+        || path.contains("/users/joins")
+        || path.contains("/users/verifications")
+        || path.starts_with("/account/imports")
+}
+fn platform_attributes(agent: &str, public_layout: bool) -> String {
+    let ios = agent.contains("iPhone") || agent.contains("iPad");
+    let android = agent.contains("Android");
+    let native = agent.contains("Hotwire Native");
+    let platform = if native && android {
+        "native android"
+    } else if native && ios {
+        "native ios"
+    } else if ios || android {
+        "mobile web"
+    } else {
+        "desktop web"
+    };
+    if public_layout {
+        return format!(" data-platform=\"{platform}\"");
+    }
+    let bridge = if native && android {
+        "android"
+    } else if native && ios {
+        "ios"
+    } else {
+        ""
+    };
+    let components = if native {
+        agent
+            .split_once("bridge-components: [")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(components, _)| components)
+            .unwrap_or_default()
+    } else {
+        ""
+    };
+    format!(
+        " data-platform=\"{platform}\" data-bridge-platform=\"{bridge}\" data-bridge-components=\"{}\"",
+        escape(components)
+    )
+}
 async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next) -> Response {
     let session_cookie = cookie_value(request.headers(), "session_token").is_some();
-    let headers = if session_cookie {
+    let agent = platform_user_agent(request.headers());
+    let public_layout = public_layout_path(request.uri().path());
+    let session_headers = if session_cookie {
         Some(request.headers().clone())
     } else {
         None
     };
     let response = next.run(request).await;
-    if !response.status().is_success()
-        || !response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/html"))
+    if !response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html"))
     {
         return response;
     }
-    let Some(headers) = headers else {
-        return response;
-    };
+    let successful = response.status().is_success();
     let (mut parts, body) = response.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "Could not render page").into_response();
@@ -462,20 +526,34 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
     {
         return Response::from_parts(parts, Body::from(bytes));
     }
-    if identity_auth(&app, &headers).await.is_err() {
-        return Response::from_parts(parts, Body::from(bytes));
-    }
     let Ok(mut html) = String::from_utf8(bytes.to_vec()) else {
         return Response::from_parts(parts, Body::from(bytes));
     };
-    if let Some(head) = html.find("</head>") {
-        html.insert_str(head, "<link rel=\"manifest\" href=\"/manifest.json\">");
+    if let Some(body) = html
+        .find("<body")
+        .and_then(|start| html[start..].find('>').map(|end| start + end))
+    {
+        html.insert_str(body, &platform_attributes(&agent, public_layout));
     }
-    let script_position = html
-        .find("</body>")
-        .or_else(|| html.find("</html>"))
-        .unwrap_or(html.len());
-    html.insert_str(script_position, include_str!("../assets/pwa_register.html"));
+    let register_pwa = if successful {
+        if let Some(headers) = &session_headers {
+            identity_auth(&app, headers).await.is_ok()
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if register_pwa {
+        if let Some(head) = html.find("</head>") {
+            html.insert_str(head, "<link rel=\"manifest\" href=\"/manifest.json\">");
+        }
+        let script_position = html
+            .find("</body>")
+            .or_else(|| html.find("</html>"))
+            .unwrap_or(html.len());
+        html.insert_str(script_position, include_str!("../assets/pwa_register.html"));
+    }
     parts.headers.remove(header::CONTENT_LENGTH);
     Response::from_parts(parts, Body::from(html))
 }
@@ -3971,7 +4049,7 @@ async fn active_user(app: &App, p: &Principal, id: &str) -> Result<SqliteRow> {
         .map_err(db_err)?
         .ok_or_else(missing)
 }
-fn prompt_response(body: String, headers: &HeaderMap) -> Response {
+fn conditional_html_response(body: String, headers: &HeaderMap) -> Response {
     let etag = format!("W/\"{}\"", hash(&body));
     let not_modified = headers
         .get(header::IF_NONE_MATCH)
@@ -4030,7 +4108,7 @@ async fn prompt_users(
     let p = principal(&app, &headers, &account).await?;
     let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id WHERE u.account_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
         .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
-    Ok(prompt_response(
+    Ok(conditional_html_response(
         rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
         &headers,
     ))
@@ -4045,7 +4123,7 @@ async fn prompt_board_users(
     board(&app, &p, &board_id).await?;
     let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id JOIN accesses a ON a.user_id=u.id WHERE u.account_id=? AND a.board_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
         .bind(&p.account_id).bind(&board_id).fetch_all(&app.db).await.map_err(db_err)?;
-    Ok(prompt_response(
+    Ok(conditional_html_response(
         rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
         &headers,
     ))
@@ -4099,7 +4177,7 @@ async fn prompt_cards(
         .iter()
         .map(|row| prompt_card_item(p.slug, row))
         .collect();
-    Ok(prompt_response(html, &headers))
+    Ok(conditional_html_response(html, &headers))
 }
 async fn list_users(
     State(app): Shared,
@@ -5333,7 +5411,7 @@ async fn show_board(
                 .await?
                 .into_response()
         } else {
-            board_page::show(&app, &p, &r).await?.into_response()
+            conditional_html_response(board_page::show(&app, &p, &r).await?.0, &headers)
         });
     }
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
