@@ -1,5 +1,15 @@
 # Comparative load runs
 
+The [CSP-enabled board HTML run](results/board-html-csp-2026-09-26.json)
+rechecks a fresh 100-card board fixture after Rizzy began adding per-response
+script nonces. Two reversed-order five-second rounds at 8 and 32 clients used
+the same four available server CPUs. Rizzy handled 5,219–5,843 requests/s and
+Fizzy 77–89, with zero HTTP errors and 15 visible cards in both samples. The
+Rust page is about 50.5 KB versus 158 KB for Fizzy and lacks complete UI
+parity, so this is a scoped diagnostic, not a product-wide speed or scale
+claim. Run `python3 bench/board_html_csp.py` to repeat it with disposable
+databases.
+
 The [sustained mixed workload](results/sustained-mixed-100-2026-09-26.json) runs `python3 bench/sustained_mixed.py --seconds 60 --clients 32 --cards 100 --rounds 2 --server-cpus 8` against the pinned Fizzy revision and a release Rizzy build. The result records both source revisions and the release binary SHA-256. Each of two reversed-order rounds uses fresh disposable databases, eight CPU-affined production Puma workers for Fizzy and one CPU-affined Rizzy process, with the Python clients on other CPUs. Both accounts start with the same 100-card board. A unit reads board, card, filtered cards, and filtered activities JSON, then creates, edits, comments on, closes, and reads a new card: five reads and four writes. Before timing, the harness compares sampled response shapes, content, counts, and pagination headers; afterward, it checks card, event, and comment totals in each database.
 
 With account update time included in board JSON ETags, a repeat at 32 clients measured 91.10 and 90.99 Rizzy units/s versus Fizzy's 28.03 and 25.61, a 3.25× and 3.55× ratio by round. The p95 unit times were 689.16 and 698.29 ms for Rizzy versus 1,538.74 and 1,783.69 ms for Fizzy. All four runs had zero HTTP errors and the expected final records. Fizzy's eight-process tree grew from about 1.0 GiB to 3.0–3.1 GiB proportional memory; Rizzy grew from about 24 MiB to 100–102 MiB. Rizzy used about 7.0 of its eight assigned CPU cores on average versus Fizzy's 4.6. The different process and feature models, incomplete HTML and side-effect parity, one-host generator, SQLite's single-writer limit, and one tested concurrency level prevent a whole-app performance or maximum-scale claim. The shorter five-second pilot was only a harness check. `tests/board_show_pagination_parity.py` separately compares the 20-card signed-in board HTML and filtered JSON pages and conditional responses on fresh databases.

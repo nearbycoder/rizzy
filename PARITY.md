@@ -129,8 +129,15 @@ after normalizing the per-request nonce on public HTML, JSON, and a signed-in
 account settings page. Rizzy gives its inline scripts that nonce; a browser
 sign-in, board creation, and Search panel check completed without page errors.
 Fizzy's CSP environment overrides, report-only mode, and other deployment
-configurations still need parity checks. The extra HTML processing also needs
-a performance comparison on the current build.
+configurations still need parity checks. The [CSP-enabled board HTML run](bench/results/board-html-csp-2026-09-26.json)
+used fresh 100-card databases, four available server CPUs, two production
+Fizzy workers, a release Rizzy process, and two reversed-order five-second
+rounds at 8 and 32 clients. Rizzy served 5,219–5,843 requests/s versus
+Fizzy's 77–89, with no HTTP errors and 15 visible cards in both samples.
+The Rust page was about 50.5 KB versus 158 KB for Fizzy, and its visual and
+interaction parity remains incomplete. This run confirms the current CSP
+build remains faster on this fixture; it does not isolate CSP overhead or
+support a product-wide performance claim.
 
 Rizzy's card and comment FTS5 indexes now use the Porter tokenizer from Fizzy's pinned SQLite search schema. `tests/search.py` checks stemmed title and comment queries such as `running`/`run`, `authentication`/`authenticate`, and `walking`/`walk`. `tests/search_stemming_migration.py` downgrades a populated disposable index to the older tokenizer, restarts Rizzy, and verifies both existing index row counts and stemmed matches. The pinned Fizzy search model and card-search suites pass 16 tests and 65 assertions; its custom MySQL stemmer suite passes 25 tests and 50 assertions. Full query grammar, Unicode tokenization, relevance ordering, and the production MySQL adapter still need direct parity checks.
 
