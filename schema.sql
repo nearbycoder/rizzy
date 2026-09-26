@@ -620,14 +620,11 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 );
 CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_recent ON webhook_deliveries(webhook_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(state,created_at);
-CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards BEGIN
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
-CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards BEGIN
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
-END;
-CREATE TRIGGER IF NOT EXISTS cards_touch_board_delete AFTER DELETE ON cards BEGIN
-  UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.board_id;
 END;
 CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(title,description);
 CREATE VIRTUAL TABLE IF NOT EXISTS comment_search USING fts5(body);

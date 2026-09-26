@@ -1665,6 +1665,43 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(&db)
         .await?;
+    for (name, definition) in [
+        (
+            "cards_touch_board_insert",
+            "CREATE TRIGGER cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
+        ),
+        (
+            "cards_touch_board_update",
+            "CREATE TRIGGER cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id; END",
+        ),
+    ] {
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?")
+                .bind(name)
+                .fetch_optional(&db)
+                .await?;
+        if existing
+            .as_deref()
+            .is_none_or(|sql| !sql.contains("WHEN NEW.status='published'"))
+        {
+            let mut tx = db.begin().await?;
+            sqlx::query(&format!("DROP TRIGGER IF EXISTS {name}"))
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query(definition).execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+    }
+    let old_delete_trigger: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='cards_touch_board_delete'",
+    )
+    .fetch_optional(&db)
+    .await?;
+    if old_delete_trigger.is_some() {
+        sqlx::query("DROP TRIGGER cards_touch_board_delete")
+            .execute(&db)
+            .await?;
+    }
     let closure_columns = sqlx::query("PRAGMA table_info(closures)")
         .fetch_all(&db)
         .await?;
