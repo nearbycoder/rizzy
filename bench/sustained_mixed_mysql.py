@@ -90,6 +90,7 @@ def run_pair(args, server_cpus, order):
     rust_db = prefix + "_r"
     databases = [*source_dbs.values(), rust_db]
     processes = {}
+    active_name = "setup"
     created = False
     with tempfile.TemporaryDirectory(prefix="rizzy-mysql-bench-") as temp:
         root = Path(temp)
@@ -98,6 +99,7 @@ def run_pair(args, server_cpus, order):
             create_databases(args.mysql_client, args.mysql_socket, databases)
             targets, paths, samples, boards, shapes = {}, {}, {}, {}, {}
             for name in ("fizzy", "rizzy"):
+                active_name = name + " setup"
                 directory = root / name
                 directory.mkdir()
                 env, credentials = (
@@ -120,9 +122,10 @@ def run_pair(args, server_cpus, order):
                 raise AssertionError("fixture: " + difference)
             result = {"sample_parity": samples["fizzy"], "runs": {}}
             for name in order:
+                active_name = name + " load"
                 result["runs"][name] = run_load(targets[name], boards[name], paths[name],
                                                  args.seconds, args.clients)
-                assert not result["runs"][name]["errors"], result["runs"][name]["errors"]
+                assert not result["runs"][name]["errors"], (name, result["runs"][name]["errors"])
                 database = source_dbs[""] if name == "fizzy" else rust_db
                 result["runs"][name]["verified_counts"] = verify_counts(
                     args.mysql_client, args.mysql_socket, database, args.cards,
@@ -132,10 +135,19 @@ def run_pair(args, server_cpus, order):
                       file=sys.stderr, flush=True)
             return result
         except Exception:
+            print(f"benchmark failed during {active_name}", file=sys.stderr)
+            failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
             for name in processes:
                 log = root / name / (name + ".log")
                 if log.exists():
-                    print(f"{name} log tail: {log.read_text()[-1500:]}", file=sys.stderr)
+                    preserved = failure_dir / f"{name}.log"
+                    preserved.write_bytes(log.read_bytes())
+                    print(f"{name} full log: {preserved}", file=sys.stderr)
+                    lines = log.read_text().splitlines()
+                    errors = [line for line in lines if "ERROR" in line or "500 Internal" in line
+                              or "Exception" in line]
+                    print(f"{name} error lines: {errors[-20:]}", file=sys.stderr)
+                    print(f"{name} log tail: {'\n'.join(lines[-25:])}", file=sys.stderr)
             raise
         finally:
             for process in processes.values():
@@ -169,8 +181,12 @@ def main():
         binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
     result = {"database": "MySQL", "source_revision": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], cwd=SOURCE, text=True).strip(),
+              "source_dirty": bool(subprocess.check_output(
+                  ["git", "status", "--porcelain"], cwd=SOURCE)),
               "rizzy_revision": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+              "rizzy_dirty": bool(subprocess.check_output(
+                  ["git", "status", "--porcelain"], cwd=ROOT)),
               "rizzy_binary_sha256": binary_sha256,
               "workload": "four JSON reads plus create/edit/comment/close/read per unit",
               "initial_cards": args.cards, "seconds_per_target": args.seconds,

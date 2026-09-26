@@ -419,8 +419,23 @@ def main():
             assert call(base, member_token, scope + "/notifications/settings") == {"bundle_email_frequency": "never"}
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM notification_bundles WHERE user_id='{member_id}' AND status=0") == "0"
             metadata_checked = check_metadata(url, account)
+            destination = call(base, token, scope + "/boards", "POST",
+                               {"board": {"name": "MySQL private move", "all_access": False}}, 201)
+            moving = call(base, token, scope + f"/boards/{board['id']}/cards", "POST",
+                          {"card": {"title": "Assigned move"}}, 201)
+            call(base, token, scope + f"/cards/{moving['number']}/assignments", "POST",
+                 {"assignee_id": member_id}, 204)
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM accesses WHERE board_id='{destination['id']}' AND user_id='{member_id}'") == "0"
+            call(base, token, scope + f"/cards/{moving['number']}/board", "PATCH",
+                 {"board_id": destination["id"]})
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM accesses WHERE board_id='{destination['id']}' AND user_id='{member_id}'") == "1"
+            assert call(base, member_token, scope + f"/cards/{moving['number']}")["board"]["id"] == destination["id"]
+            push_env = {**env, "RIZZY_VAPID_PRIVATE_KEY": "", "VAPID_PRIVATE_KEY": ""}
+            subprocess.run([BINARY, "deliver-push"], cwd=ROOT, env=push_env,
+                           check=True, capture_output=True, text=True)
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM push_deliveries WHERE notification_id='{notices[0]['id']}' AND status=2") == "3"
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, settings, unsubscribe, timezone, public board, comment, search, browser card/menu, close, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, push drain, settings, unsubscribe, timezone, public board, comment, search, browser card/menu, close, assigned card move, reads{detail}")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise

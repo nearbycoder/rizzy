@@ -410,8 +410,17 @@ async fn process_job(app: &App, row: DbRow, key: &str) -> Result<usize> {
 
 pub(super) async fn deliver_due(app: &App) -> Result<usize> {
     let Some(key) = private_key() else {
-        sqlx::query("UPDATE push_deliveries SET status=2,updated_at=? WHERE id IN (SELECT id FROM push_deliveries WHERE status=0 AND next_attempt_at<=? LIMIT 1000)")
-            .bind(now()).bind(now()).execute(&app.db).await.map_err(db_err)?;
+        let statement = if app.mysql {
+            "UPDATE push_deliveries SET status=2,updated_at=? WHERE status=0 AND next_attempt_at<=? LIMIT 1000"
+        } else {
+            "UPDATE push_deliveries SET status=2,updated_at=? WHERE id IN (SELECT id FROM push_deliveries WHERE status=0 AND next_attempt_at<=? LIMIT 1000)"
+        };
+        sqlx::query(statement)
+            .bind(now())
+            .bind(now())
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
         return Ok(0);
     };
     VapidSignatureBuilder::from_base64_no_sub(&key)

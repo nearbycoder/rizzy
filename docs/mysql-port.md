@@ -4,10 +4,12 @@ Fizzy supports MySQL. Rizzy's MySQL work is in progress on this branch. The
 `mysql:` URL now starts the web server. The repeatable
 `tests/mysql_core.py` flow covers account seeding, board and card creation,
 columns, triage, steps, tags, account and board entropy, the closing-soon
-filter, assignment and activity spikes, watch and pin controls, saved filters,
+filter, assignment and activity spikes, watch and pin controls, assigned-card
+moves into private boards, saved filters,
 event and mention notifications, email and push queue records, notification
 settings and unsubscribe tokens, personal timezone, public board publication
-and viewing, comments, JSON and browser search, browser card and menu pages,
+and viewing, push-job draining without a VAPID key, comments, JSON and browser
+search, browser card and menu pages,
 closing a card, and API reads. It verifies the
 account entropy, user attachable and settings, access record, and board touch
 side effects in the database. Most routes have not yet been exercised on
@@ -26,6 +28,19 @@ checks one recipient's event notification, repeated unread count, a card
 mention, three queued push records, one pending email bundle, settings record
 timestamps and repeat no-ops, token renewal after expiry, and unsubscribe.
 Delivery, larger recipient sets, revocation, and full browser parity remain.
+`tests/join.py` now runs its invite flow against MySQL, including the
+two-process single-slot race and recovery of a missing join code on restart.
+`tests/email_change.py` runs validation, expiry, one-use confirmation, session
+switch, and local sendmail checks on both databases. A MySQL trigger cannot
+update a table being read by the statement that fired it, so the access-grant
+paths now read eligible board or user IDs before inserting access rows. The
+MySQL core flow also checks a card move that grants a private-board assignee
+access, and invokes `deliver-push` to drain three queued jobs without a VAPID
+key. These are selected flows; other invitation, email, push, and move cases
+still need full cross-app comparison.
+The pinned source's selected invite, join, and email-change model and
+controller suites passed 51 tests and 232 assertions on the same MySQL 8
+server.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,
@@ -150,8 +165,9 @@ Raw measurements and revisions are in
 `bench/results/mysql_mixed_c16_2026-09-26.json`. The spread is wide, including
 within one target, so these are preliminary local measurements for this one
 API workload, not a claim of maximum capacity or full application speed. An
-earlier two-client probe saw one Rizzy HTTP 500 on a card update; a later
-10-second two-client run and these four rounds did not reproduce it. That
-transient failure still needs diagnosis. Larger datasets, a concurrency sweep,
+earlier two-client probe saw one Fizzy HTTP 500 on a card update during its
+first load phase; Rizzy had not begun its load phase. A later 10-second
+two-client run and these four rounds did not reproduce it. That transient
+source failure still needs diagnosis. Larger datasets, a concurrency sweep,
 multiple application processes, full background jobs, and representative
 browser workflows remain necessary before claiming greater scale.

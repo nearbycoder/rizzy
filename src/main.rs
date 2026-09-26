@@ -825,6 +825,14 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
             .await?;
         tx.commit().await?;
     }
+    let missing_join_codes = sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
+        .fetch_all(&db)
+        .await?;
+    for account in missing_join_codes {
+        let mut tx = db.begin().await?;
+        insert_join_code_tx(&mut tx, &account.get::<String, _>("id"), true).await?;
+        tx.commit().await?;
+    }
     sqlx::query("INSERT IGNORE INTO app_secrets(name,value) VALUES('qr_codes',?)")
         .bind(random_token())
         .execute(&db)
@@ -5611,7 +5619,12 @@ async fn confirm_email_change(
     }
     let new_email: String = request.get("new_email_address");
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+    let insert_identity = if app.mysql {
+        "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+    };
+    sqlx::query(insert_identity)
         .bind(id())
         .bind(&new_email)
         .bind(now())
@@ -5624,9 +5637,19 @@ async fn confirm_email_change(
             .fetch_one(&mut *tx)
             .await
             .map_err(db_err)?;
-    let changed=sqlx::query("UPDATE OR IGNORE users SET identity_id=? WHERE id=? AND account_id=? AND identity_id=? AND active=1")
-        .bind(&new_identity).bind(&user_id).bind(user.get::<String,_>("account_id")).bind(&old_identity)
-        .execute(&mut *tx).await.map_err(db_err)?;
+    let update_user = if app.mysql {
+        "UPDATE IGNORE users SET identity_id=? WHERE id=? AND account_id=? AND identity_id=? AND active=1"
+    } else {
+        "UPDATE OR IGNORE users SET identity_id=? WHERE id=? AND account_id=? AND identity_id=? AND active=1"
+    };
+    let changed = sqlx::query(update_user)
+        .bind(&new_identity)
+        .bind(&user_id)
+        .bind(user.get::<String, _>("account_id"))
+        .bind(&old_identity)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     if changed.rows_affected() == 0 {
         return Ok(email_change_invalid(&headers, slug, &user_id));
     }
@@ -5869,8 +5892,18 @@ async fn reset_join_code(
     p.write()?;
     p.account_admin()?;
     loop {
-        let result=sqlx::query("UPDATE OR IGNORE account_join_codes SET code=?,usage_count=0,updated_at=? WHERE account_id=?")
-            .bind(join_code()).bind(now()).bind(&p.account_id).execute(&app.db).await.map_err(db_err)?;
+        let statement = if app.mysql {
+            "UPDATE IGNORE account_join_codes SET code=?,usage_count=0,updated_at=? WHERE account_id=?"
+        } else {
+            "UPDATE OR IGNORE account_join_codes SET code=?,usage_count=0,updated_at=? WHERE account_id=?"
+        };
+        let result = sqlx::query(statement)
+            .bind(join_code())
+            .bind(now())
+            .bind(&p.account_id)
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
         if result.rows_affected() == 1 {
             break;
         }
@@ -5993,7 +6026,12 @@ async fn redeem_join_code(
     if claimed.rows_affected() == 0 {
         return Err(err(StatusCode::GONE, "That code is all used up"));
     }
-    sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
+    let insert_identity = if app.mysql {
+        "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+    };
+    sqlx::query(insert_identity)
         .bind(id())
         .bind(&email)
         .bind(now())
@@ -6005,12 +6043,51 @@ async fn redeem_join_code(
         .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;
-    let inserted=sqlx::query("INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,active,created_at) VALUES(?,?,?,?,'member',1,?)")
-        .bind(id()).bind(&account_id).bind(&identity_id).bind(&email).bind(now())
-        .execute(&mut *tx).await.map_err(db_err)?;
+    let insert_user = if app.mysql {
+        "INSERT IGNORE INTO users(id,account_id,identity_id,name,role,active,created_at) VALUES(?,?,?,?,'member',1,?)"
+    } else {
+        "INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,active,created_at) VALUES(?,?,?,?,'member',1,?)"
+    };
+    let inserted = sqlx::query(insert_user)
+        .bind(id())
+        .bind(&account_id)
+        .bind(&identity_id)
+        .bind(&email)
+        .bind(now())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     if inserted.rows_affected() == 1 {
-        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT b.id,u.id FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.account_id=? AND b.all_access=1 AND u.identity_id=?")
-            .bind(&account_id).bind(&identity_id).execute(&mut *tx).await.map_err(db_err)?;
+        if app.mysql {
+            let user_id: String =
+                sqlx::query_scalar("SELECT id FROM users WHERE account_id=? AND identity_id=?")
+                    .bind(&account_id)
+                    .bind(&identity_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            let board_ids: Vec<String> =
+                sqlx::query_scalar("SELECT id FROM boards WHERE account_id=? AND all_access=1")
+                    .bind(&account_id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            for board_id in board_ids {
+                sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id) VALUES(?,?)")
+                    .bind(board_id)
+                    .bind(&user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
+        } else {
+            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT b.id,u.id FROM boards b JOIN users u ON u.account_id=b.account_id WHERE b.account_id=? AND b.all_access=1 AND u.identity_id=?")
+                .bind(&account_id)
+                .bind(&identity_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
     } else {
         sqlx::query("UPDATE account_join_codes SET usage_count=usage_count-1 WHERE account_id=?")
             .bind(&account_id)
@@ -7089,17 +7166,30 @@ async fn create_board(
         .await
         .map_err(db_err)?;
     if all {
-        let statement = if app.mysql {
-            "INSERT IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'"
-        } else {
-            "INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'"
-        };
-        sqlx::query(statement)
-            .bind(&id)
+        if app.mysql {
+            let user_ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM users WHERE account_id=? AND active=1 AND role!='system'",
+            )
             .bind(&p.account_id)
-            .execute(&mut *tx)
+            .fetch_all(&mut *tx)
             .await
             .map_err(db_err)?;
+            for user_id in user_ids {
+                sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id) VALUES(?,?)")
+                    .bind(&id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
+        } else {
+            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
+                .bind(&id)
+                .bind(&p.account_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
     }
     tx.commit().await.map_err(db_err)?;
     let r = board(&app, &p, &id).await?;
@@ -7214,8 +7304,30 @@ async fn update_board(
         .await?;
     }
     if all && b.get::<i64, _>("all_access") == 0 {
-        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
-            .bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+        if app.mysql {
+            let user_ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM users WHERE account_id=? AND active=1 AND role!='system'",
+            )
+            .bind(&p.account_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(db_err)?;
+            for user_id in user_ids {
+                sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id) VALUES(?,?)")
+                    .bind(&id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
+        } else {
+            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
+                .bind(&id)
+                .bind(&p.account_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
     }
     if let Some(ids) = body
         .get("user_ids")
@@ -7224,8 +7336,30 @@ async fn update_board(
     {
         let wanted: HashSet<&str> = ids.iter().filter_map(Value::as_str).collect();
         for user in ids.iter().filter_map(Value::as_str) {
-            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE id=? AND account_id=? AND active=1 AND role!='system'")
-                .bind(&id).bind(user).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
+            if app.mysql {
+                let eligible: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND account_id=? AND active=1 AND role!='system')")
+                    .bind(user)
+                    .bind(&p.account_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                if eligible != 0 {
+                    sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id) VALUES(?,?)")
+                        .bind(&id)
+                        .bind(user)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db_err)?;
+                }
+            } else {
+                sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE id=? AND account_id=? AND active=1 AND role!='system'")
+                    .bind(&id)
+                    .bind(user)
+                    .bind(&p.account_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
         }
         if !all {
             let current_users: Vec<String> =
@@ -11122,12 +11256,28 @@ async fn move_card(
         if new_board.get::<i64, _>("all_access") == 0
             && p.admin(&new_board.get::<String, _>("creator_id")).is_ok()
         {
-            sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT ?,a.assignee_id,'access_only' FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
-                .bind(&destination)
-                .bind(&card_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_err)?;
+            if app.mysql {
+                let user_ids: Vec<String> = sqlx::query_scalar("SELECT a.assignee_id FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
+                    .bind(&card_id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                for user_id in user_ids {
+                    sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id,involvement) VALUES(?,?,'access_only')")
+                        .bind(&destination)
+                        .bind(user_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db_err)?;
+                }
+            } else {
+                sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT ?,a.assignee_id,'access_only' FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
+                    .bind(&destination)
+                    .bind(&card_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
         }
         for table in ["pins", "watches", "notifications"] {
             let query = format!(
