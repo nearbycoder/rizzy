@@ -68,10 +68,18 @@ pub(super) async fn show(
     let devices = if self_profile {
         let identity_id: String = user.get("identity_id");
         let transfer = session_transfer::active_token(app, &identity_id).await?;
-        let current = transfer.map(|token| {
+        let current = if let Some(token) = transfer {
             let url = format!("{}/session/transfers/{token}", base(headers));
-            format!("<input type=\"text\" id=\"session_transfer_url\" value=\"{}\" aria-labelledby=\"session_transfer_label\" readonly><button type=\"button\" class=\"button button--secondary\" id=\"show-transfer-qr\">Display auto-login QR code</button><button type=\"button\" class=\"button button--secondary\" id=\"copy-transfer\">Copy auto-login link</button><dialog id=\"transfer-qr-dialog\"><p><strong>Scan this code to instantly log in on another device:</strong></p><img src=\"/{}/qr_codes/{}\" alt=\"QR Code\" width=\"280\" height=\"280\"><form method=\"dialog\"><button class=\"button\">Done</button></form></dialog>",escape(&url),principal.slug,escape(&token))
-        }).unwrap_or_default();
+            let qr_id = session_transfer::qr_link(app, principal.slug, &url);
+            format!(
+                "<input type=\"text\" id=\"session_transfer_url\" value=\"{}\" aria-labelledby=\"session_transfer_label\" readonly><button type=\"button\" class=\"button button--secondary\" id=\"show-transfer-qr\">Display auto-login QR code</button><button type=\"button\" class=\"button button--secondary\" id=\"copy-transfer\">Copy auto-login link</button><dialog id=\"transfer-qr-dialog\"><p><strong>Scan this code to instantly log in on another device:</strong></p><img src=\"/{}/qr_codes/{}\" alt=\"QR Code\" width=\"280\" height=\"280\"><form method=\"dialog\"><button class=\"button\">Done</button></form></dialog>",
+                escape(&url),
+                principal.slug,
+                escape(&qr_id)
+            )
+        } else {
+            String::new()
+        };
         format!(
             "<section class=\"profile-card\"><h2>Devices</h2><p><a class=\"button button--secondary\" href=\"/my/passkeys\">Manage passkeys</a></p><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
             principal.slug

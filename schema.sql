@@ -1,4 +1,8 @@
 PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS app_secrets (
+  name TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
   external_account_id INTEGER NOT NULL UNIQUE,

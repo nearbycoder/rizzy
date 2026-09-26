@@ -465,6 +465,7 @@ mod tests {
             .execute(&db).await.unwrap();
         let app = App {
             db,
+            qr_secret: "test-qr-secret".into(),
             write_lock: tokio::sync::Mutex::new(()),
             auth_lock: tokio::sync::Mutex::new(()),
             notification_html_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),

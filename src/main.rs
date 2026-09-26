@@ -69,6 +69,7 @@ mod webhook_page;
 
 struct App {
     db: SqlitePool,
+    qr_secret: String,
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
     notification_html_cache: tokio::sync::Mutex<HashMap<String, NotificationHtmlCacheEntry>>,
@@ -2134,12 +2135,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         insert_join_code_tx(&mut tx, &account.get::<String, _>("id")).await?;
         tx.commit().await?;
     }
+    sqlx::query(
+        "INSERT INTO app_secrets(name,value) VALUES('qr_codes',?) ON CONFLICT(name) DO NOTHING",
+    )
+    .bind(random_token())
+    .execute(&db)
+    .await?;
+    let qr_secret: String =
+        sqlx::query_scalar("SELECT value FROM app_secrets WHERE name='qr_codes'")
+            .fetch_one(&db)
+            .await?;
     if env::args().nth(1).as_deref() == Some("seed") {
         seed(&db).await?;
         return Ok(());
     }
     let app = Arc::new(App {
         db,
+        qr_secret,
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
         notification_html_cache: tokio::sync::Mutex::new(HashMap::new()),

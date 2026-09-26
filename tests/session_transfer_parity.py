@@ -39,10 +39,13 @@ def verify_qr(target, user_id, transfer):
     path = urllib.parse.urlparse(html.unescape(source)).path
     status, headers, svg = request(target, path, accept="image/svg+xml")
     assert status == 200 and headers.get_content_type() == "image/svg+xml", (target["name"], "QR image", status)
+    cache = headers.get("Cache-Control", "")
+    assert "public" in cache and "max-age=31556952" in cache, (target["name"], cache)
     assert b"<svg" in svg and b"</svg>" in svg, (target["name"], "QR SVG")
     png = subprocess.run(["rsvg-convert", "--width", "512"], input=svg, capture_output=True, check=True).stdout
     scan = subprocess.run(["zbarimg", "--quiet", "--raw", "-"], input=png, capture_output=True, check=True)
     assert urllib.parse.urlparse(scan.stdout.decode().strip()).path == transfer, (target["name"], "QR destination")
+    return path
 
 
 def run(target):
@@ -65,9 +68,11 @@ def run(target):
         return transfer_path(target, user_id)
 
     first = generate()
-    verify_qr(target, user_id, first)
+    first_qr = verify_qr(target, user_id, first)
     second = generate()
     assert first != second, target["name"]
+    status, _, _ = request(target, first_qr, accept="image/svg+xml")
+    assert status == 200, (target["name"], "revoked transfer QR", status)
     anonymous = {**target, "opener": opener()}
     status, _, _ = request(anonymous, first, "PUT", b"", accept="text/html")
     assert status == 400, (target["name"], "revoked link", status)
@@ -78,6 +83,8 @@ def run(target):
     assert "session_token" in headers.get("Set-Cookie", "")
     status, _, _ = request({**target, "opener": opener()}, second, "PUT", b"", accept="text/html")
     assert status == 400, (target["name"], "replay", status)
+    status, _, _ = request(target, first_qr, accept="image/svg+xml")
+    assert status == 200, (target["name"], "redeemed transfer QR", status)
     third = generate()
     status, headers, _ = request({**target, "opener": opener()}, third, "PATCH", b"", accept="text/html")
     assert status == 302 and urllib.parse.urlparse(headers["Location"]).path == "/session/menu", (target["name"], "patch redeem", status)
@@ -96,6 +103,7 @@ def rust_expiry_and_race(target):
         return transfer_path(target, user_id)
 
     expired = generate()
+    expired_qr = verify_qr(target, user_id, expired)
     token = expired.rsplit("/", 1)[-1]
     db_path = os.environ["RIZZY_DB_PATH"]
     with sqlite3.connect(db_path) as db:
@@ -103,6 +111,14 @@ def rust_expiry_and_race(target):
                    ((datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(timespec="milliseconds").replace("+00:00", "Z"), token))
     status, _, _ = request({**target, "opener": opener()}, expired, "PUT", b"", accept="text/html")
     assert status == 400, ("expired", status)
+    status, _, _ = request(target, expired_qr, accept="image/svg+xml")
+    assert status == 200, ("expired transfer QR", status)
+    changed = expired_qr[:-1] + ("a" if expired_qr[-1] != "a" else "b")
+    status, _, _ = request(target, changed, accept="image/svg+xml")
+    assert status == 404, ("tampered QR", status)
+    other_account = expired_qr.replace(f"/{account}/qr_codes/", "/999999/qr_codes/", 1)
+    status, _, _ = request(target, other_account, accept="image/svg+xml")
+    assert status == 404, ("cross-account QR", status)
     race = generate()
 
     def redeem_once(_):

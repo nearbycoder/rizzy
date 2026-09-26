@@ -1,4 +1,5 @@
 use super::*;
+use base64::Engine as _;
 use qrcodegen::{QrCode, QrCodeEcc};
 
 fn active_cutoff() -> String {
@@ -12,6 +13,13 @@ pub(super) async fn active_token(app: &App, identity_id: &str) -> Result<Option<
         .fetch_optional(&app.db)
         .await
         .map_err(db_err)
+}
+
+pub(super) fn qr_link(app: &App, slug: i64, destination: &str) -> String {
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(json!({"account":slug,"url":destination}).to_string());
+    let signature = hmac_sha256(&app.qr_secret, &format!("qr_code:{payload}"));
+    format!("{payload}--{signature}")
 }
 
 pub(super) async fn create(
@@ -63,21 +71,42 @@ pub(super) async fn show(Path(token): Path<String>) -> Html<String> {
 
 pub(super) async fn qr_code(
     State(app): Shared,
-    Path((_account, token)): Path<(String, String)>,
-    headers: HeaderMap,
+    Path((account, token)): Path<(String, String)>,
 ) -> Result<Response> {
-    let exists: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM identity_transfers WHERE token=? AND created_at>=? LIMIT 1",
-    )
-    .bind(&token)
-    .bind(active_cutoff())
-    .fetch_optional(&app.db)
-    .await
-    .map_err(db_err)?;
-    if exists.is_none() {
+    let slug: i64 = account.parse().map_err(|_| missing())?;
+    let (payload, signature) = token.rsplit_once("--").ok_or_else(missing)?;
+    let expected = hmac_sha256(&app.qr_secret, &format!("qr_code:{payload}"));
+    if signature.len() != expected.len()
+        || signature
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            })
+            != 0
+    {
         return Err(missing());
     }
-    let url = format!("{}/session/transfers/{token}", base(&headers));
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|_| missing())?;
+    let signed: Value = serde_json::from_slice(&decoded).map_err(|_| missing())?;
+    if signed.get("account").and_then(Value::as_i64) != Some(slug) {
+        return Err(missing());
+    }
+    let url = signed
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(missing)?;
+    let account_exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
+            .bind(slug)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    if account_exists == 0 {
+        return Err(missing());
+    }
     let qr = QrCode::encode_text(&url, QrCodeEcc::Medium)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "Link too long for QR code"))?;
     let size = qr.size();
@@ -94,7 +123,14 @@ pub(super) async fn qr_code(
         size + 32,
         size + 32
     );
-    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], svg).into_response())
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "max-age=31556952, public"),
+        ],
+        svg,
+    )
+        .into_response())
 }
 
 pub(super) async fn redeem(
