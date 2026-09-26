@@ -31,12 +31,22 @@ pub(super) async fn show(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
+    let tags_statement = if app.mysql {
+        "SELECT id,title FROM tags WHERE account_id=? ORDER BY LOWER(title),id"
+    } else {
+        "SELECT id,title FROM tags WHERE account_id=? ORDER BY title COLLATE NOCASE"
+    };
+    let users_statement = if app.mysql {
+        "SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY LOWER(name),id"
+    } else {
+        "SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY name COLLATE NOCASE"
+    };
     let (boards, tags, users, filters, accounts) = tokio::try_join!(
         sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses a ON a.board_id=b.id WHERE b.account_id=? AND a.user_id=? ORDER BY a.accessed_at DESC,b.created_at DESC")
             .bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db),
-        sqlx::query("SELECT id,title FROM tags WHERE account_id=? ORDER BY title COLLATE NOCASE")
+        sqlx::query(tags_statement)
             .bind(&p.account_id).fetch_all(&app.db),
-        sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY name COLLATE NOCASE")
+        sqlx::query(users_statement)
             .bind(&p.account_id).fetch_all(&app.db),
         sqlx::query("SELECT id,fields FROM filters WHERE account_id=? AND creator_id=? ORDER BY updated_at DESC")
             .bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db),

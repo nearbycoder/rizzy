@@ -3,12 +3,18 @@
 Fizzy supports MySQL. Rizzy's MySQL work is in progress on this branch. The
 `mysql:` URL now starts the web server. The repeatable
 `tests/mysql_core.py` flow covers account seeding, board and card creation,
-columns, triage, steps, tags, account entropy, public board publication and
-viewing, comments, JSON and browser search, closing a card, and API reads. It
+columns, triage, steps, tags, account and board entropy, the closing-soon
+filter, assignment and activity spikes, watch and pin controls, public board
+publication and viewing, comments, JSON and browser search, browser card and
+menu pages, closing a card, and API reads. It
 verifies the account entropy, user attachable and settings, access record,
 and board touch side effects in
 the database. Most routes have not yet been exercised on MySQL; some still use
 SQLite-only SQL, and this is not deployment parity.
+The pinned source's `Card::Entropic` suite passed 8 tests and 19 assertions on
+the same MySQL 8 server. The closing-soon MySQL query checks both account and
+board periods with recent, eligible, and overdue cards; it does not cover
+precise threshold boundaries or large indexed scans.
 
 `schema.mysql.sql` is a snapshot of an initialized Rizzy SQLite database. To
 regenerate it after a SQLite schema change, seed a new SQLite database and run

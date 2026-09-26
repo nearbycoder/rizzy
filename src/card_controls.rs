@@ -141,8 +141,16 @@ pub(super) async fn watcher_section(
     principal: &Principal,
     card_id: &str,
 ) -> Result<String> {
-    let watchers=sqlx::query("SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY u.name COLLATE NOCASE,u.id")
-        .bind(card_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY LOWER(u.name),u.id"
+    } else {
+        "SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY u.name COLLATE NOCASE,u.id"
+    };
+    let watchers = sqlx::query(statement)
+        .bind(card_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
     let count = watchers.len();
     let avatars=watchers.iter().map(|row|{
         let id:String=row.get("id");

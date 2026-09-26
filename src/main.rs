@@ -1240,9 +1240,20 @@ async fn record_event(
 async fn record_activity_spike(app: &App, account_id: &str, card_id: &str) -> Result<()> {
     let timestamp = now();
     let mut tx = begin_write(&app).await.map_err(db_err)?;
-    sqlx::query("INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at")
-        .bind(uuid::Uuid::now_v7().to_string()).bind(card_id).bind(account_id).bind(&timestamp).bind(&timestamp)
-        .execute(&mut *tx).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)"
+    } else {
+        "INSERT INTO card_activity_spikes(id,card_id,account_id,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET updated_at=excluded.updated_at"
+    };
+    sqlx::query(statement)
+        .bind(uuid::Uuid::now_v7().to_string())
+        .bind(card_id)
+        .bind(account_id)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
         .bind(&timestamp)
         .bind(card_id)
@@ -7656,7 +7667,11 @@ fn cards_query<'a>(
             builder.push(" AND c.golden=1");
         }
         Some("postponing_soon") => {
-            builder.push(" AND julianday(c.last_active_at)>julianday('now')-b.auto_postpone_period_in_days AND julianday(c.last_active_at)<=julianday('now')-b.auto_postpone_period_in_days*0.75");
+            if mysql {
+                builder.push(" AND c.last_active_at>CONCAT(LEFT(DATE_FORMAT(DATE_SUB(UTC_TIMESTAMP(3), INTERVAL b.auto_postpone_period_in_days DAY),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z') AND c.last_active_at<=CONCAT(LEFT(DATE_FORMAT(DATE_SUB(UTC_TIMESTAMP(3), INTERVAL (b.auto_postpone_period_in_days*18) HOUR),'%Y-%m-%dT%H:%i:%s.%f'),23),'Z')");
+            } else {
+                builder.push(" AND julianday(c.last_active_at)>julianday('now')-b.auto_postpone_period_in_days AND julianday(c.last_active_at)<=julianday('now')-b.auto_postpone_period_in_days*0.75");
+            }
         }
         Some("stalled") => {
             let cutoff = (Utc::now() - chrono::Duration::days(14))
@@ -12013,9 +12028,20 @@ async fn toggle_assignment_to(
         )
         .await?;
         let timestamp = now();
-        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1")
-            .bind(id()).bind(&card_id).bind(&assignee_id).bind(&timestamp).bind(&timestamp)
-            .execute(&app.db).await.map_err(db_err)?;
+        let statement = if app.mysql {
+            "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>1,VALUES(updated_at),updated_at),watching=1"
+        } else {
+            "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=1,updated_at=excluded.updated_at WHERE watches.watching!=1"
+        };
+        sqlx::query(statement)
+            .bind(id())
+            .bind(&card_id)
+            .bind(&assignee_id)
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
         system_comment(
             &app,
             &p,
@@ -12033,9 +12059,21 @@ async fn set_watch(app: &App, p: &Principal, number: &str, watching: bool) -> Re
     let card_id: String = c.get("id");
     let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let result = sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=excluded.watching,updated_at=excluded.updated_at WHERE watches.watching!=excluded.watching")
-        .bind(id()).bind(&card_id).bind(&p.user_id).bind(watching as i64).bind(&timestamp).bind(&timestamp)
-        .execute(&mut *tx).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>VALUES(watching),VALUES(updated_at),updated_at),watching=VALUES(watching)"
+    } else {
+        "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(card_id,user_id) DO UPDATE SET watching=excluded.watching,updated_at=excluded.updated_at WHERE watches.watching!=excluded.watching"
+    };
+    let result = sqlx::query(statement)
+        .bind(id())
+        .bind(&card_id)
+        .bind(&p.user_id)
+        .bind(watching as i64)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     if result.rows_affected() != 0 {
         sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
             .bind(&timestamp)
@@ -12052,8 +12090,20 @@ async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result
     let c = card(app, p, number).await?;
     let card_id: String = c.get("id");
     if pinned {
-        sqlx::query("INSERT OR IGNORE INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)")
-        .bind(id()).bind(&p.account_id).bind(&card_id).bind(&p.user_id).bind(now()).execute(&app.db).await.map_err(db_err)?;
+        let statement = if app.mysql {
+            "INSERT IGNORE INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)"
+        } else {
+            "INSERT OR IGNORE INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)"
+        };
+        sqlx::query(statement)
+            .bind(id())
+            .bind(&p.account_id)
+            .bind(&card_id)
+            .bind(&p.user_id)
+            .bind(now())
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
     } else {
         sqlx::query("DELETE FROM pins WHERE card_id=? AND user_id=?")
             .bind(&card_id)

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Exercise Rizzy's initial MySQL-backed API workflow on a disposable database.
 
-Set RIZZY_TEST_MYSQL_URL to a pre-created MySQL database URL. This check adds
-one account and its records; use a database dedicated to tests.
+Set RIZZY_TEST_MYSQL_URL to a pre-created MySQL database URL and
+RIZZY_TEST_MYSQL_CLIENT to a MySQL CLI. This check adds one account and its
+records; use a database dedicated to tests.
 """
 
 import json
@@ -17,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
@@ -27,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "target/debug/rizzy"
 
 
-def call(base, token, path, method="GET", body=None, expected=200):
+def call(base, token, path, method="GET", body=None, expected=200, extra_headers=None):
     request = urllib.request.Request(
         base + path,
         json.dumps(body).encode() if body is not None else None,
@@ -36,6 +38,7 @@ def call(base, token, path, method="GET", body=None, expected=200):
             "Authorization": "Bearer " + token,
             "Accept": "application/json",
             "Content-Type": "application/json",
+            **(extra_headers or {}),
         },
     )
     try:
@@ -46,6 +49,21 @@ def call(base, token, path, method="GET", body=None, expected=200):
         data = response.read()
         assert response.status == expected, (path, response.status, data[:400])
         return json.loads(data) if data else None
+
+
+def mysql_scalar(url, statement):
+    parsed = urlparse(url)
+    client_env = {**os.environ, "MYSQL_PWD": unquote(parsed.password or "")}
+    result = subprocess.run(
+        [os.environ["RIZZY_TEST_MYSQL_CLIENT"], "--no-defaults",
+         "--host=" + (parsed.hostname or "localhost"),
+         "--port=" + str(parsed.port or 3306),
+         "--user=" + unquote(parsed.username or ""),
+         "--database=" + parsed.path.lstrip("/"),
+         "--skip-column-names", "--execute=" + statement],
+        env=client_env, check=True, capture_output=True, text=True,
+    )
+    return result.stdout.strip()
 
 
 def check_metadata(url, account):
@@ -77,6 +95,8 @@ def main():
     url = os.environ.get("RIZZY_TEST_MYSQL_URL")
     if not url or not url.startswith("mysql:"):
         raise SystemExit("Set RIZZY_TEST_MYSQL_URL to a dedicated MySQL database URL")
+    if not os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+        raise SystemExit("Set RIZZY_TEST_MYSQL_CLIENT to the MySQL CLI")
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="rizzy-mysql-core-") as temp:
         email = "mysql-core-" + uuid.uuid4().hex + "@example.test"
@@ -127,6 +147,19 @@ def main():
             number = card["number"]
             assert [item["number"] for item in call(base, token, scope + "/cards")] == [number]
             assert [item["id"] for item in call(base, token, scope + "/search?q=" + quote("MySQL card"))] == [card["id"]]
+            soon_path = scope + "/cards?" + quote("board_ids[]") + "=" + board["id"] + "&indexed_by=postponing_soon"
+
+            def age_card(days):
+                stamp = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(
+                    timespec="milliseconds").replace("+00:00", "Z")
+                mysql_scalar(url, f"UPDATE cards SET last_active_at='{stamp}' WHERE id='{card['id']}'")
+
+            assert call(base, token, soon_path) == []
+            age_card(25)
+            assert [item["id"] for item in call(base, token, soon_path)] == [card["id"]]
+            age_card(31)
+            assert call(base, token, soon_path) == []
+            age_card(0)
             column = call(
                 base, token, scope + f"/boards/{board['id']}/columns", "POST",
                 {"column": {"name": "MySQL column"}}, 201,
@@ -155,6 +188,53 @@ def main():
                 base, token, scope + "/account/entropy", "PUT",
                 {"entropy": {"auto_postpone_period_in_days": 7}},
             )["auto_postpone_period_in_days"] == 7
+            age_card(6)
+            assert [item["id"] for item in call(base, token, soon_path)] == [card["id"]]
+            age_card(8)
+            assert call(base, token, soon_path) == []
+            age_card(0)
+            assert call(base, token, scope + f"/boards/{board['id']}/entropy", "PUT",
+                        {"board": {"auto_postpone_period_in_days": 11}})["auto_postpone_period_in_days"] == 11
+            age_card(10)
+            assert [item["id"] for item in call(base, token, soon_path)] == [card["id"]]
+            age_card(13)
+            assert call(base, token, soon_path) == []
+            age_card(0)
+            controls = {"X-Rizzy-Json-Request": "1"}
+            call(base, token, scope + f"/cards/{number}/self_assignment", "POST",
+                 expected=204, extra_headers=controls)
+            spike = mysql_scalar(url, f"SELECT id FROM card_activity_spikes WHERE card_id='{card['id']}'")
+            assert spike
+            call(base, token, scope + f"/cards/{number}/self_assignment", "POST",
+                 expected=204, extra_headers=controls)
+            call(base, token, scope + f"/cards/{number}/self_assignment", "POST",
+                 expected=204, extra_headers=controls)
+            assert mysql_scalar(url, f"SELECT id FROM card_activity_spikes WHERE card_id='{card['id']}'") == spike
+            def watch_record():
+                return tuple(mysql_scalar(url, f"SELECT id,watching,created_at,updated_at FROM watches WHERE card_id='{card['id']}'").split("\t"))
+
+            first_watch = watch_record()
+            assert len(first_watch) == 4 and first_watch[1] == "1"
+            call(base, token, scope + f"/cards/{number}/watch", "DELETE",
+                 expected=204, extra_headers=controls)
+            off_watch = watch_record()
+            assert off_watch[0] == first_watch[0] and off_watch[1] == "0"
+            call(base, token, scope + f"/cards/{number}/watch", "DELETE",
+                 expected=204, extra_headers=controls)
+            assert watch_record() == off_watch
+            call(base, token, scope + f"/cards/{number}/watch", "POST",
+                 expected=204, extra_headers=controls)
+            on_watch = watch_record()
+            assert on_watch[0] == first_watch[0] and on_watch[1] == "1"
+            call(base, token, scope + f"/cards/{number}/watch", "POST",
+                 expected=204, extra_headers=controls)
+            assert watch_record() == on_watch
+            call(base, token, scope + f"/cards/{number}/pin", "POST",
+                 expected=204, extra_headers=controls)
+            pin = mysql_scalar(url, f"SELECT id FROM pins WHERE card_id='{card['id']}'")
+            call(base, token, scope + f"/cards/{number}/pin", "POST",
+                 expected=204, extra_headers=controls)
+            assert pin and mysql_scalar(url, f"SELECT id FROM pins WHERE card_id='{card['id']}'") == pin
             published = call(
                 base, token, scope + f"/boards/{board['id']}/publication", "POST",
                 expected=201,
@@ -189,6 +269,14 @@ def main():
             with urllib.request.urlopen(html_request, timeout=8) as response:
                 html = response.read().decode()
             assert "authentication" in html and 'class="search__title"' in html, html[:4000]
+            for path, marker in ((f"/cards/{number}", "MySQL card"),
+                                 ("/my/menu", "MySQL core")):
+                request = urllib.request.Request(
+                    base + scope + path,
+                    headers={"Accept": "text/html", "Cookie": session},
+                )
+                with urllib.request.urlopen(request, timeout=8) as response:
+                    assert marker in response.read().decode(), path
             prompt_request = urllib.request.Request(
                 base + scope + "/prompts/cards?filter=authenticate",
                 headers={"Accept": "text/html", "Cookie": session},
@@ -228,7 +316,7 @@ def main():
             assert len(call(base, token, scope + "/activities")) >= 3
             metadata_checked = check_metadata(url, account)
             detail = ", and metadata" if metadata_checked else ""
-            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, public board, comment, search, close, reads{detail}")
+            print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, public board, comment, search, browser card/menu, close, reads{detail}")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise
