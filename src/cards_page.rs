@@ -289,13 +289,17 @@ fn choice_group(
     name: &str,
     choices: &[(String, String)],
     selected: &[String],
+    extra: Option<(&str, &str, &str, bool)>,
 ) -> String {
     let selected_ids: HashSet<&str> = selected.iter().map(String::as_str).collect();
-    let selected_names: Vec<&str> = choices
+    let mut selected_names: Vec<&str> = choices
         .iter()
         .filter(|(id, _)| selected_ids.contains(id.as_str()))
         .map(|(_, title)| title.as_str())
         .collect();
+    if let Some((_, _, title, true)) = extra {
+        selected_names.push(title);
+    }
     let summary = match selected_names.len() {
         0 => label.to_owned(),
         1 => selected_names[0].to_owned(),
@@ -306,6 +310,16 @@ fn choice_group(
         escape(&summary),
         escape(label)
     );
+    if let Some((field, value, title, checked)) = extra {
+        let _ = write!(
+            html,
+            "<label class=\"choice-popover__item\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{}><span>{}</span></label>",
+            escape(field),
+            escape(value),
+            if checked { " checked" } else { "" },
+            escape(title)
+        );
+    }
     for (id, title) in choices {
         let checked = if selected_ids.contains(id.as_str()) {
             " checked"
@@ -381,25 +395,39 @@ pub(super) async fn show(
         .iter()
         .map(|user| (user.get("id"), user.get("name")))
         .collect();
-    let board_control = choice_group("Board", "board_ids[]", &board_choices, &query.board_ids);
-    let tag_control = choice_group("Tag", "tag_ids[]", &tag_choices, &query.tag_ids);
+    let board_control = choice_group(
+        "Board",
+        "board_ids[]",
+        &board_choices,
+        &query.board_ids,
+        None,
+    );
+    let tag_control = choice_group("Tag", "tag_ids[]", &tag_choices, &query.tag_ids, None);
     let assignee_control = choice_group(
         "Assigned to",
         "assignee_ids[]",
         &user_choices,
         &query.assignee_ids,
+        Some((
+            "assignment_status",
+            "unassigned",
+            "No one",
+            query.assignment_status.as_deref() == Some("unassigned"),
+        )),
     );
     let creator_control = choice_group(
         "Added by",
         "creator_ids[]",
         &user_choices,
         &query.creator_ids,
+        None,
     );
     let closer_control = choice_group(
         "Closed by",
         "closer_ids[]",
         &user_choices,
         &query.closer_ids,
+        None,
     );
     let mut preserved = String::new();
     for (key, values) in [
@@ -417,29 +445,24 @@ pub(super) async fn show(
     }
     let statuses = [
         ("all", "Open"),
-        ("maybe", "Maybe?"),
-        ("not_now", "Not now"),
         ("closed", "Done"),
-        ("golden", "Golden"),
+        ("not_now", "Not now"),
         ("stalled", "Stalled"),
         ("postponing_soon", "Closing soon"),
+        ("golden", "Golden"),
     ];
     let status_options = statuses
         .iter()
         .map(|(value, label)| option(value, label, query.indexed_by.as_deref()))
         .collect::<String>();
     let sort_options = [
-        ("latest", "Latest activity"),
         ("newest", "Newest"),
         ("oldest", "Oldest"),
+        ("latest", "Latest activity"),
     ]
     .iter()
     .map(|(value, label)| option(value, label, query.sorted_by.as_deref()))
     .collect::<String>();
-    let assignment_options = [("", "Any assignment"), ("unassigned", "Unassigned")]
-        .iter()
-        .map(|(value, label)| option(value, label, query.assignment_status.as_deref()))
-        .collect::<String>();
     let mut list = previews(app, principal, cards).await?;
     if cards.is_empty() {
         list.push_str("<div class=\"blank-slate\">No cards match this filter</div>");
@@ -467,7 +490,7 @@ pub(super) async fn show(
         String::new()
     };
     let form = format!(
-        "<form class=\"filter-form\" action=\"/{}/cards\" method=\"get\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{board_control}<details class=\"more-filters\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"more-filters__fields\"><label>Status<select name=\"indexed_by\">{status_options}</select></label><label>Sort<select name=\"sorted_by\">{sort_options}</select></label>{tag_control}{assignee_control}{creator_control}{closer_control}<label>Assignment<select name=\"assignment_status\">{assignment_options}</select></label><label>Created<input name=\"creation\" value=\"{}\" placeholder=\"This week\"></label><label>Closed<input name=\"closure\" value=\"{}\" placeholder=\"This month\"></label><button type=\"submit\">Apply filters</button></div></details>{preserved}<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all filters\" title=\"Clear all filters\">×</a></form>",
+        "<form class=\"filter-form\" action=\"/{}/cards\" method=\"get\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{board_control}<details class=\"more-filters\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"more-filters__fields\"><label>Status<select name=\"indexed_by\">{status_options}</select></label><label>Sort<select name=\"sorted_by\">{sort_options}</select></label>{tag_control}{assignee_control}{creator_control}{closer_control}<label>Created<input name=\"creation\" value=\"{}\" placeholder=\"This week\"></label><label>Closed<input name=\"closure\" value=\"{}\" placeholder=\"This month\"></label><button type=\"submit\">Apply filters</button></div></details>{preserved}<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all filters\" title=\"Clear all filters\">×</a></form>",
         principal.slug,
         escape(query.terms.first().map(String::as_str).unwrap_or("")),
         escape(query.creation.as_deref().unwrap_or("")),

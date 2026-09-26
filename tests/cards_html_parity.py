@@ -36,6 +36,10 @@ def check(target):
         status, _, _ = request(target, f"/{account}/cards/{number}/taggings", "POST",
                                {"tag_title": "#preview-parity"}, bearer=True)
         assert status == 204, (target["name"], status)
+        assignee_id = newest["creator"]["id"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/assignments", "POST",
+                               {"assignee_id": assignee_id}, bearer=True)
+        assert status == 204, (target["name"], status)
         status, _, raw = request(target, f"/{account}/boards/{board_id}/cards", "POST",
                                  {"card": {"title": f"{marker} completed"}}, bearer=True)
         assert status == 201, (target["name"], status)
@@ -61,15 +65,20 @@ def check(target):
         closed = html("&indexed_by=closed")
         term = found(html("&terms%5B%5D=" + urllib.parse.quote(marker + " card 05")))
         oldest = found(html("&sorted_by=oldest"))
+        assigned = found(html("&assignee_ids%5B%5D=" + urllib.parse.quote(assignee_id)))
+        unassigned_body = html("&assignment_status=unassigned")
+        unassigned = found(unassigned_body)
         assert first == list(range(2, 17)), (target["name"], first)
         assert second == [0, 1], (target["name"], second)
         assert f"{marker} completed" in closed and not found(closed)
         assert term == [5], (target["name"], term)
         assert oldest == list(range(15)), (target["name"], oldest)
+        assert assigned == [16], (target["name"], assigned)
+        assert unassigned == list(range(1, 16)), (target["name"], unassigned)
         json_path = f"/{account}/cards.json?board_ids%5B%5D={urllib.parse.quote(board_id)}"
         status, _, raw = request(target, json_path, bearer=True)
         assert status == 200 and len(json.loads(raw)) == 15, (target["name"], status)
-        return first, second, term, oldest
+        return first, second, term, oldest, assigned, unassigned
     finally:
         status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
         assert status == 204, (target["name"], status)
@@ -96,7 +105,7 @@ def main():
         targets.append(target)
     left, right = (check(target) for target in targets)
     assert left == right, (left, right)
-    print("All-cards HTML parity passed: first and second pages, status, term, sort, and JSON")
+    print("All-cards HTML parity passed: pages, status, term, sort, assignees, and JSON")
 
 
 if __name__ == "__main__":

@@ -177,7 +177,7 @@ async fn filter_form(
         [
             ("all", "Open"),
             ("closed", "Done"),
-            ("not_now", "Not Now"),
+            ("not_now", "Not now"),
             ("stalled", "Stalled"),
             ("postponing_soon", "Closing soon"),
             ("golden", "Golden")
@@ -186,9 +186,9 @@ async fn filter_form(
         .map(|(value, label)| option(value, label, Some(index)))
         .collect::<String>(),
         [
-            ("latest", "Latest activity"),
             ("newest", "Newest"),
-            ("oldest", "Oldest")
+            ("oldest", "Oldest"),
+            ("latest", "Latest activity")
         ]
         .iter()
         .map(|(value, label)| option(value, label, Some(sort)))
