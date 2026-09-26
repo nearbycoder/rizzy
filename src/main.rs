@@ -56,6 +56,7 @@ mod push_subscriptions;
 mod pwa;
 mod reaction_page;
 mod rich_text;
+mod rich_text_records;
 mod search_page;
 mod session_transfer;
 mod signup_page;
@@ -570,10 +571,24 @@ async fn system_user(app: &App, p: &Principal) -> Result<String> {
 async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> Result<()> {
     let system = system_user(app, p).await?;
     let timestamp = now();
+    let comment_id = id();
     let (plain, _, _) = storage::render_rich_text(app, &p.account_id, p.slug, body).await?;
     let content = search_content(plain);
+    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(id()).bind(card_id).bind(system).bind(body).bind(content).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+        .bind(&comment_id).bind(card_id).bind(system).bind(body).bind(content).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Comment",
+        &comment_id,
+        "body",
+        "",
+        body,
+        &timestamp,
+    )
+    .await?;
+    tx.commit().await.map_err(db_err)?;
     Ok(())
 }
 async fn record_event(
@@ -1631,6 +1646,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )
     .execute(&db)
     .await?;
+    rich_text_records::backfill(&db).await?;
     let missing_join_codes=sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
         .fetch_all(&db).await?;
     for account in missing_join_codes {
@@ -5400,7 +5416,18 @@ async fn create_board(
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let public_description = string(v, "public_description").unwrap_or_default();
     sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,auto_postpone_period_in_days,entropy_override,public_description,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&p.user_id).bind(name).bind(all as i64).bind(days).bind(requested_days.is_some() as i64).bind(public_description).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&id).bind(&p.account_id).bind(&p.user_id).bind(name).bind(all as i64).bind(days).bind(requested_days.is_some() as i64).bind(&public_description).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Board",
+        &id,
+        "description",
+        "",
+        &public_description,
+        &timestamp,
+    )
+    .await?;
     sqlx::query("INSERT INTO accesses(board_id,user_id,involvement) VALUES(?,?,'watching')")
         .bind(&id)
         .bind(&p.user_id)
@@ -5458,9 +5485,21 @@ async fn update_board(
     let override_days = requested_days.is_some() || b.get::<i64, _>("entropy_override") != 0;
     let public_description =
         string(v, "public_description").unwrap_or_else(|| b.get("public_description"));
+    let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE boards SET name=?,all_access=?,auto_postpone_period_in_days=?,entropy_override=?,public_description=?,updated_at=? WHERE id=?")
-        .bind(name).bind(all as i64).bind(days).bind(override_days as i64).bind(public_description).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(name).bind(all as i64).bind(days).bind(override_days as i64).bind(&public_description).bind(&timestamp).bind(&id).execute(&mut *tx).await.map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Board",
+        &id,
+        "description",
+        &b.get::<String, _>("public_description"),
+        &public_description,
+        &timestamp,
+    )
+    .await?;
     if all && b.get::<i64, _>("all_access") == 0 {
         sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id) SELECT ?,id FROM users WHERE account_id=? AND active=1 AND role!='system'")
             .bind(&id).bind(&p.account_id).execute(&mut *tx).await.map_err(db_err)?;
@@ -7863,6 +7902,17 @@ async fn create_card(
     .map_err(db_err)?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Card",
+        &id,
+        "description",
+        "",
+        &description,
+        &timestamp,
+    )
+    .await?;
     storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
     storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
     sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
@@ -8203,6 +8253,7 @@ async fn update_card(
     let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
     let custom_last_active_at = timestamp_param(v, "last_active_at")?;
     let last_active_at = custom_last_active_at.clone().unwrap_or_else(now);
+    let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query(
         "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
@@ -8212,12 +8263,23 @@ async fn update_card(
     .bind(&search_text)
     .bind(&status)
     .bind(&created_at)
-    .bind(now())
+    .bind(&timestamp)
     .bind(&last_active_at)
     .bind(c.get::<String, _>("id"))
     .execute(&mut *tx)
     .await
     .map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Card",
+        &c.get::<String, _>("id"),
+        "description",
+        &c.get::<String, _>("description"),
+        &description,
+        &timestamp,
+    )
+    .await?;
     let replaced_image_keys =
         storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), v.get("image"))
             .await?;
@@ -9256,6 +9318,17 @@ async fn create_comment(
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Comment",
+        &id,
+        "body",
+        "",
+        &content,
+        &timestamp,
+    )
+    .await?;
     storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
     create_new_mentions(
         &mut tx,
@@ -9466,15 +9539,27 @@ async fn update_comment_data(
     let (plain_body, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
     let search_text = search_content(plain_body);
+    let timestamp = now();
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE comments SET body=?,search_text=?,updated_at=? WHERE id=?")
         .bind(&content)
         .bind(&search_text)
-        .bind(now())
+        .bind(&timestamp)
         .bind(&id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+    rich_text_records::sync(
+        &mut tx,
+        &p.account_id,
+        "Comment",
+        &id,
+        "body",
+        &r.get::<String, _>("body"),
+        &content,
+        &timestamp,
+    )
+    .await?;
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
     create_new_mentions(
         &mut tx,

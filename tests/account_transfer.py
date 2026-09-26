@@ -94,8 +94,12 @@ def main():
                 watch_record = db.execute(
                     "SELECT id,user_id,watching,created_at,updated_at FROM watches WHERE card_id=? AND user_id=?",
                     (card["id"], owner["id"])).fetchone()
+                rich_record = db.execute(
+                    "SELECT id,created_at,updated_at FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'",
+                    (card["id"],)).fetchone()
             assert gold_record
             assert watch_record
+            assert rich_record
             with sqlite3.connect(db_path) as db:
                 spike_record = db.execute(
                     "SELECT id,created_at,updated_at FROM card_activity_spikes WHERE card_id=?",
@@ -158,6 +162,9 @@ def main():
                     postponed_card["id"], owner["id"], postponed_record[2])
                 rich_texts = [json.loads(archive.read(name)) for name in names
                               if name.startswith("data/action_text_rich_texts/")]
+                assert f"data/action_text_rich_texts/{rich_record[0]}.json" in names
+                rich_record_data = json.loads(archive.read(f"data/action_text_rich_texts/{rich_record[0]}.json"))
+                assert (rich_record_data["created_at"], rich_record_data["updated_at"]) == rich_record[1:]
                 assert any(item["record_id"] == card["id"]
                            and f'gid="gid://fizzy/ActiveStorage::Blob/{embed["id"]}"' in item["body"]
                            and embed["attachable_sgid"] not in item["body"]

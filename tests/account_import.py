@@ -218,6 +218,15 @@ def run(archive_path):
                     assert imported_watches[watch["id"]] == (
                         watch["card_id"], watch["user_id"], int(watch["watching"]),
                         watch["created_at"], watch["updated_at"])
+                imported_rich_texts = {
+                    row[0]: row[1:] for row in db.execute(
+                        "SELECT id,record_type,record_id,name,created_at,updated_at "
+                        "FROM rich_text_records WHERE account_id=?", (imported_id,))}
+                assert len(imported_rich_texts) == len(rich_texts)
+                for rich in rich_texts:
+                    assert imported_rich_texts[rich["id"]] == (
+                        rich["record_type"], rich["record_id"], rich["name"],
+                        rich["created_at"], rich["updated_at"])
                 for not_now in postponed_records:
                     actual = db.execute("SELECT card_id,user_id,created_at,updated_at FROM card_not_nows WHERE id=?",
                                         (not_now["id"],)).fetchone()
@@ -302,6 +311,10 @@ def run(archive_path):
                     restored = json.loads(z.read(f"data/watches/{source_watch['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "user_id", "watching", "created_at", "updated_at")} == {
                         key: source_watch[key] for key in ("card_id", "user_id", "watching", "created_at", "updated_at")}
+                for source_rich in rich_texts:
+                    restored = json.loads(z.read(f"data/action_text_rich_texts/{source_rich['id']}.json"))
+                    assert {key: restored[key] for key in ("body", "created_at", "name", "record_id", "record_type", "updated_at")} == {
+                        key: source_rich[key] for key in ("body", "created_at", "name", "record_id", "record_type", "updated_at")}
                 for source_not_now in postponed_records:
                     restored = json.loads(z.read(f"data/card_not_nows/{source_not_now['id']}.json"))
                     assert {key: restored[key] for key in ("card_id", "user_id", "created_at", "updated_at")} == {

@@ -320,6 +320,29 @@ CREATE TABLE IF NOT EXISTS comments (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS comments_card_created ON comments(card_id,created_at);
+CREATE TABLE IF NOT EXISTS rich_text_records (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(record_type,record_id,name)
+);
+CREATE INDEX IF NOT EXISTS rich_text_records_account ON rich_text_records(account_id);
+CREATE TRIGGER IF NOT EXISTS cards_delete_rich_text AFTER DELETE ON cards
+BEGIN
+  DELETE FROM rich_text_records WHERE record_type='Card' AND record_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS comments_delete_rich_text AFTER DELETE ON comments
+BEGIN
+  DELETE FROM rich_text_records WHERE record_type='Comment' AND record_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS boards_delete_rich_text AFTER DELETE ON boards
+BEGIN
+  DELETE FROM rich_text_records WHERE record_type='Board' AND record_id=OLD.id;
+END;
 CREATE TABLE IF NOT EXISTS tags (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),

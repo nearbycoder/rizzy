@@ -206,7 +206,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "action_text_rich_texts",
-        query: "SELECT NULL id,account_id,description body,created_at,'description' name,id record_id,'Card' record_type,updated_at FROM cards WHERE account_id=? AND description!='' UNION ALL SELECT NULL,c.account_id,m.body,m.created_at,'body',m.id,'Comment',COALESCE(m.updated_at,m.created_at) FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND m.body!='' UNION ALL SELECT NULL,account_id,public_description,created_at,'description',id,'Board',updated_at FROM boards WHERE account_id=? AND public_description!=''",
+        query: "SELECT r.id,r.account_id,c.description body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN cards c ON c.id=r.record_id WHERE r.account_id=? AND r.record_type='Card' AND r.name='description' UNION ALL SELECT r.id,r.account_id,m.body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN comments m ON m.id=r.record_id WHERE r.account_id=? AND r.record_type='Comment' AND r.name='body' UNION ALL SELECT r.id,r.account_id,b.public_description body,r.created_at,r.name,r.record_id,r.record_type,r.updated_at FROM rich_text_records r JOIN boards b ON b.id=r.record_id WHERE r.account_id=? AND r.record_type='Board' AND r.name='description'",
         booleans: &[],
         json_fields: &[],
     },

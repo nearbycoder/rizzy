@@ -36,6 +36,11 @@ pub(super) async fn playground(
             .bind(&card_id).bind(account_id).bind(&board_id).bind(owner_id)
             .bind((index + 1) as i64).bind(&card.title).bind(&card.description).bind(search)
             .bind(created_at).bind(created_at).bind(created_at).execute(&mut **tx).await?;
+        if !card.description.is_empty() {
+            sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,'Card',?,'description',?,?)")
+                .bind(id()).bind(account_id).bind(&card_id).bind(created_at).bind(created_at)
+                .execute(&mut **tx).await?;
+        }
         sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
             .bind(id())
             .bind(&card_id)

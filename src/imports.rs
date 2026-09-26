@@ -1031,6 +1031,15 @@ async fn apply_archive(
         if changed.rows_affected() != 1 {
             return Err("Rich text references unknown record".into());
         }
+        sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+            .bind(field(rich, "id")?)
+            .bind(account_id)
+            .bind(field(rich, "record_type")?)
+            .bind(field(rich, "record_id")?)
+            .bind(field(rich, "name")?)
+            .bind(field(rich, "created_at")?)
+            .bind(field(rich, "updated_at")?)
+            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     let rich_targets: HashMap<&str, (&str, &str)> = records(&archive, "action_text_rich_texts")
         .iter()
