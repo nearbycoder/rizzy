@@ -331,16 +331,41 @@ def main():
                 {"comment": {"body": "Walking swiftly"}}, 201,
             )
             assert [item["id"] for item in call(base, token, scope + "/search?q=walk")] == [stemmed["id"]]
+            def comment_times():
+                return tuple(mysql_scalar(
+                    url, "SELECT c.updated_at,c.last_active_at,b.updated_at,m.updated_at "
+                         "FROM cards c JOIN boards b ON b.id=c.board_id "
+                         "JOIN comments m ON m.card_id=c.id "
+                         f"WHERE c.id='{stemmed['id']}' AND m.id='{walk['id']}'"
+                ).split("\t"))
+
+            before_comment_edit = comment_times()
+            time.sleep(.02)
             call(
                 base, token, scope + f"/cards/{stemmed_number}/comments/{walk['id']}", "PUT",
                 {"comment": {"body": "Sprinting swiftly"}},
             )
+            after_comment_edit = comment_times()
+            assert tuple(a != b for a, b in zip(before_comment_edit, after_comment_edit)) == (
+                True, False, True, True)
+            time.sleep(.02)
+            call(base, token, scope + f"/cards/{stemmed_number}/comments/{walk['id']}",
+                 "PUT", {"comment": {"body": "Sprinting swiftly"}})
+            assert comment_times() == after_comment_edit
             assert call(base, token, scope + "/search?q=walk") == []
             assert [item["id"] for item in call(base, token, scope + "/search?q=sprint")] == [stemmed["id"]]
+            time.sleep(.02)
             call(
                 base, token, scope + f"/cards/{stemmed_number}/comments/{walk['id']}",
                 "DELETE", expected=204,
             )
+            after_comment_delete = tuple(mysql_scalar(
+                url, "SELECT c.updated_at,c.last_active_at,b.updated_at "
+                     "FROM cards c JOIN boards b ON b.id=c.board_id "
+                     f"WHERE c.id='{stemmed['id']}'"
+            ).split("\t"))
+            assert tuple(a != b for a, b in zip(after_comment_edit, after_comment_delete)) == (
+                True, False, True)
             assert call(base, token, scope + "/search?q=sprint") == []
             call(
                 base, token, scope + f"/cards/{stemmed_number}", "PUT",

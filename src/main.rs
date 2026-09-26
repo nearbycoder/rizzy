@@ -12433,7 +12433,12 @@ async fn create_comment(
     let created_at =
         timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
     let _writer = app.write_lock.lock().await;
-    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    let (mut tx, _) = begin_card_board_write(
+        &app,
+        &c.get::<String, _>("id"),
+        &c.get::<String, _>("board_id"),
+    )
+    .await?;
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id)
         .bind(c.get::<String, _>("id"))
@@ -12676,8 +12681,33 @@ async fn update_comment_data(
     let (plain_body, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
     let search_text = search_content(plain_body);
+    let card_id: String = c.get("id");
+    let (mut tx, board_id) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+    let old_body: String =
+        sqlx::query_scalar("SELECT body FROM comments WHERE id=? AND card_id=? AND creator_id=?")
+            .bind(id)
+            .bind(&card_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(missing)?;
+    let old_rich: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM rich_text_records WHERE record_type='Comment' AND record_id=? AND name='body' AND body_is_null=0",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    let changed =
+        old_body != content || (old_body.is_empty() && (old_rich > 0) != body_param.is_some());
+    if !changed {
+        tx.rollback().await.map_err(db_err)?;
+        let r = comment_row(app, &c, id).await?;
+        return comment_json(app, &p, &c, &r, &base(headers)).await;
+    }
     let timestamp = now();
-    let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE comments SET body=?,search_text=?,updated_at=? WHERE id=?")
         .bind(&content)
         .bind(&search_text)
@@ -12693,7 +12723,7 @@ async fn update_comment_data(
             "Comment",
             &id,
             "body",
-            &r.get::<String, _>("body"),
+            &old_body,
             &content,
             &timestamp,
         )
@@ -12707,21 +12737,18 @@ async fn update_comment_data(
             .await?;
     }
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
-    create_new_mentions(
-        &mut tx,
-        &p,
-        &c.get::<String, _>("board_id"),
-        &c.get::<String, _>("id"),
-        "Comment",
-        &id,
-        &content,
-    )
-    .await?;
+    create_new_mentions(&mut tx, &p, &board_id, &card_id, "Comment", &id, &content).await?;
     if app.mysql {
         mysql_search::sync_comment(&mut tx, &p.account_id, id)
             .await
             .map_err(db_err)?;
     }
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
     let r = comment_row(&app, &c, &id).await?;
@@ -12739,7 +12766,9 @@ async fn delete_comment(
     if r.get::<String, _>("creator_id") != p.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let card_id: String = c.get("id");
+    let (mut tx, _) =
+        begin_card_board_write(&app, &card_id, &c.get::<String, _>("board_id")).await?;
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &comment, "").await?;
     deletion_cleanup::comment(&mut tx, &p.account_id, &comment).await?;
     sqlx::query(
@@ -12765,6 +12794,12 @@ async fn delete_comment(
             .await
             .map_err(db_err)?;
     }
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(now())
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(keys).await;
     if wants_turbo_stream(&headers) {
