@@ -131,11 +131,12 @@ pub(super) async fn show_filtered(
     board: &DbRow,
     query: &CardQuery,
     raw_query: Option<&str>,
+    timezone: chrono_tz::Tz,
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
     let (offset, limit) = page_window(query.page);
-    let mut count = cards_query("SELECT COUNT(*)", principal, query, app.mysql);
+    let mut count = cards_query("SELECT COUNT(*)", principal, query, app.mysql, timezone);
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -147,6 +148,7 @@ pub(super) async fn show_filtered(
         principal,
         query,
         app.mysql,
+        timezone,
     );
     builder
         .push(format!(" ORDER BY {order} LIMIT "))

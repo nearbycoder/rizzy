@@ -6820,9 +6820,16 @@ async fn show_board(
     query.board_ids = vec![id.clone()];
     if !headers.contains_key("x-rizzy-json-request") {
         return Ok(if filtered {
-            board_page::show_filtered(&app, &p, &r, &query, raw.as_deref())
-                .await?
-                .into_response()
+            board_page::show_filtered(
+                &app,
+                &p,
+                &r,
+                &query,
+                raw.as_deref(),
+                filter_timezone(&headers),
+            )
+            .await?
+            .into_response()
         } else {
             let key = board_etag_key(&p, &id, page, &headers);
             if let Some(response) = cached_board_not_modified(&app, &key, &headers).await {
@@ -6843,7 +6850,13 @@ async fn show_board(
         });
     }
     let total: i64 = if filtered {
-        let mut count = cards_query("SELECT COUNT(*)", &p, &query, app.mysql);
+        let mut count = cards_query(
+            "SELECT COUNT(*)",
+            &p,
+            &query,
+            app.mysql,
+            filter_timezone(&headers),
+        );
         count
             .build_query_scalar()
             .fetch_one(&app.db)
@@ -8144,9 +8157,14 @@ fn card_query_from_filter(fields: &Value, page: i64) -> CardQuery {
         ..Default::default()
     }
 }
-fn time_window(input: &str) -> Option<(String, String)> {
+fn filter_timezone(headers: &HeaderMap) -> chrono_tz::Tz {
+    etag_timezone(headers)
+        .and_then(|name| timezone::resolve(&name))
+        .unwrap_or(chrono_tz::UTC)
+}
+fn time_window(input: &str, timezone: chrono_tz::Tz) -> Option<(String, String)> {
     let key = input.to_ascii_lowercase().replace([' ', '_', '-'], "");
-    let today = Utc::now().date_naive();
+    let today = Utc::now().with_timezone(&timezone).date_naive();
     let week = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
     let month = today.with_day(1)?;
     let year = today.with_month(1)?.with_day(1)?;
@@ -8162,25 +8180,31 @@ fn time_window(input: &str) -> Option<(String, String)> {
         _ => return None,
     };
     let format = |date: chrono::NaiveDate| {
-        date.and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        Some(
+            chrono::TimeZone::from_local_datetime(&timezone, &date.and_hms_opt(0, 0, 0).unwrap())
+                .earliest()?
+                .with_timezone(&Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        )
     };
-    Some((format(start), format(end)))
+    Some((format(start)?, format(end)?))
 }
 fn cards_query<'a>(
     select: &str,
     p: &'a Principal,
     q: &'a CardQuery,
     mysql: bool,
+    timezone: chrono_tz::Tz,
 ) -> QueryBuilder<'a, Db> {
     let mut builder = QueryBuilder::new(format!(
         "{select} FROM cards c JOIN boards b ON b.id=c.board_id WHERE c.account_id="
     ));
     builder.push_bind(&p.account_id).push(" AND c.status='published' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=").push_bind(&p.user_id).push(")");
     if q.indexed_by.as_deref() != Some("closed")
-        && q.closure.as_deref().and_then(time_window).is_none()
+        && q.closure
+            .as_deref()
+            .and_then(|value| time_window(value, timezone))
+            .is_none()
         && q.closer_ids.is_empty()
         && q.card_ids.is_empty()
     {
@@ -8270,14 +8294,22 @@ fn cards_query<'a>(
     if q.assignment_status.as_deref() == Some("unassigned") {
         builder.push(" AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.card_id=c.id)");
     }
-    if let Some((start, end)) = q.creation.as_deref().and_then(time_window) {
+    if let Some((start, end)) = q
+        .creation
+        .as_deref()
+        .and_then(|value| time_window(value, timezone))
+    {
         builder
             .push(" AND c.created_at>=")
             .push_bind(start)
             .push(" AND c.created_at<")
             .push_bind(end);
     }
-    if let Some((start, end)) = q.closure.as_deref().and_then(time_window) {
+    if let Some((start, end)) = q
+        .closure
+        .as_deref()
+        .and_then(|value| time_window(value, timezone))
+    {
         builder
             .push(" AND EXISTS (SELECT 1 FROM closures z WHERE z.card_id=c.id AND z.created_at>=")
             .push_bind(start)
@@ -9767,7 +9799,13 @@ async fn list_cards(
     let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
     let order = card_sort_order(&query);
-    let mut count = cards_query("SELECT COUNT(*)", &p, &query, app.mysql);
+    let mut count = cards_query(
+        "SELECT COUNT(*)",
+        &p,
+        &query,
+        app.mysql,
+        filter_timezone(&headers),
+    );
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -9779,7 +9817,7 @@ async fn list_cards(
     } else {
         "SELECT c.*,b.name AS board_name"
     };
-    let mut builder = cards_query(select, &p, &query, app.mysql);
+    let mut builder = cards_query(select, &p, &query, app.mysql, filter_timezone(&headers));
     builder
         .push(format!(" ORDER BY {order} LIMIT "))
         .push_bind(limit)
@@ -9822,7 +9860,13 @@ async fn card_previews(
     let query = resolved_card_query(&app, &p, raw.clone()).await?;
     let (offset, limit) = page_window(query.page);
     let order = card_sort_order(&query);
-    let mut count = cards_query("SELECT COUNT(*)", &p, &query, app.mysql);
+    let mut count = cards_query(
+        "SELECT COUNT(*)",
+        &p,
+        &query,
+        app.mysql,
+        filter_timezone(&headers),
+    );
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -9833,6 +9877,7 @@ async fn card_previews(
         &p,
         &query,
         app.mysql,
+        filter_timezone(&headers),
     );
     builder
         .push(format!(" ORDER BY {order} LIMIT "))
