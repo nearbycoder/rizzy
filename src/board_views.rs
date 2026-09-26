@@ -209,8 +209,17 @@ async fn public_view(
     };
     let (rows, total) = cards_for_view(app, &board_id, view, column_id, page, true).await?;
     let title = view.title(column_name.as_deref());
+    let (frame_id, column_path) = match view {
+        View::Stream => ("stream_column".to_owned(), "stream".to_owned()),
+        View::Closed => ("closed_column".to_owned(), "closed".to_owned()),
+        View::NotNow => ("not_now_column".to_owned(), "not_now".to_owned()),
+        View::Column => {
+            let id = column_id.expect("named public column has an id");
+            (format!("cards_column_{id}"), id.to_owned())
+        }
+    };
     let mut body = format!(
-        "<nav><a href=\"/{account}/public/boards/{key}\">{}</a></nav><h1>{}</h1><section class=\"cards cards--grid\"><div class=\"cards__list\"><ul>",
+        "<nav><a href=\"/{account}/public/boards/{key}\">{}</a></nav><h1>{}</h1><section class=\"cards cards--grid\"><turbo-frame id=\"{frame_id}\"><div class=\"cards__list hide-scrollbar\"><div id=\"{frame_id}-pagination-list\" class=\"{frame_id} display-contents\" data-controller=\"pagination\" data-pagination-paginate-on-intersection-value=\"true\"><turbo-frame id=\"{frame_id}-pagination-contents-{page}\" role=\"presentation\"><ul>",
         escape(&board.get::<String, _>("name")),
         escape(&title)
     );
@@ -250,13 +259,17 @@ async fn public_view(
     if total == 0 {
         body.push_str("<li class=\"blank-slate\">No cards here</li>");
     }
-    body.push_str("</ul></div></section>");
+    body.push_str("</ul>");
     if (page_window(page).0 + rows.len() as i64) < total {
         body.push_str(&format!(
-            "<a rel=\"next\" href=\"?page={}\">More cards</a>",
+            "<a rel=\"next\" id=\"{frame_id}-pagination-link-{}\" class=\"pagination-link pagination-link--active-when-observed\" aria-label=\"Load page {}\" data-frame=\"{frame_id}-pagination-contents-{}\" data-pagination-target=\"paginationLink\" href=\"/{account}/public/boards/{key}/columns/{column_path}?page={}\">Load more…</a>",
+            page + 1,
+            page + 1,
+            page + 1,
             page + 1
         ));
     }
+    body.push_str("</turbo-frame></div></div></turbo-frame></section>");
     let mut response = public_page(&title, &body).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,

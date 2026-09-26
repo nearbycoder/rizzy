@@ -155,14 +155,64 @@ pub(super) async fn board(
     ));
     content.push_str("</div></div></turbo-frame>");
     content.push_str(r#"<script>
-      async function loadPublicColumn(frame) {
-        if (frame.dataset.loaded) return;
-        const response = await fetch(frame.getAttribute('src'));
-        if (!response.ok) return;
-        const document = new DOMParser().parseFromString(await response.text(), 'text/html');
-        const list = document.querySelector('.cards__list');
-        if (list) { frame.replaceChildren(list); frame.dataset.loaded = 'true'; }
+      const paginationObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) loadNextPage(entry.target);
+        });
+      });
+      function observeNextPage(frame) {
+        const link = frame.querySelector('.pagination-link');
+        if (link) paginationObserver.observe(link);
       }
+      async function loadNextPage(link) {
+        if (link.dataset.loading) return;
+        link.dataset.loading = 'true';
+        paginationObserver.unobserve(link);
+        try {
+          const response = await fetch(link.href);
+          if (!response.ok) throw new Error('Could not load more cards');
+          const document = new DOMParser().parseFromString(await response.text(), 'text/html');
+          const nextList = document.querySelector('.cards__list');
+          const list = link.closest('.cards__list');
+          const currentCards = list?.querySelector('ul');
+          const newCards = nextList?.querySelector('ul');
+          if (!currentCards || !newCards) throw new Error('Missing card list');
+          currentCards.append(...newCards.children);
+          const nextLink = nextList.querySelector('.pagination-link');
+          link.remove();
+          if (nextLink) {
+            list.append(nextLink);
+            paginationObserver.observe(nextLink);
+          }
+        } catch (error) {
+          delete link.dataset.loading;
+        }
+      }
+      async function loadPublicColumn(frame) {
+        if (!frame || frame.dataset.loaded || frame.dataset.loading) return;
+        frame.dataset.loading = 'true';
+        try {
+          const response = await fetch(frame.getAttribute('src'));
+          if (!response.ok) return;
+          const document = new DOMParser().parseFromString(await response.text(), 'text/html');
+          const list = document.querySelector('.cards__list');
+          if (list) {
+            frame.replaceChildren(list);
+            frame.dataset.loaded = 'true';
+            observeNextPage(frame);
+          }
+        } catch (error) {
+          // Keep the column available for another attempt when its request fails.
+        } finally {
+          delete frame.dataset.loading;
+        }
+      }
+      document.getElementById('cards_container').addEventListener('click', event => {
+        const link = event.target.closest('.pagination-link');
+        if (!link) return;
+        event.preventDefault();
+        loadNextPage(link);
+      });
       document.querySelectorAll('.cards__expander').forEach(button => button.addEventListener('click', () => {
         const section = button.closest('.cards');
         const expanded = section.classList.toggle('is-expanded');

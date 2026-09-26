@@ -97,8 +97,12 @@ def run(target):
     result["private_pagination"] = (len(first_page), len(second_page), bool(headers.get("Link")))
     code, public_first, _ = request(target, f"/public/boards/{key}/columns/stream?page=1", accept="text/html", public=True)
     assert code == 200 and "Paged stream card 16" in public_first and "Paged stream card 00" not in public_first
+    assert 'id="stream_column-pagination-link-2"' in public_first
+    assert 'aria-label="Load page 2"' in public_first
+    assert f"/public/boards/{key}/columns/stream?page=2" in public_first
     code, public_second, _ = request(target, f"/public/boards/{key}/columns/stream?page=2", accept="text/html", public=True)
     assert code == 200 and "Paged stream card 00" in public_second and "Parity card maybe" in public_second
+    assert 'id="stream_column-pagination-link-3"' not in public_second
     result["public_pagination"] = (code, "Paged stream card 00" in public_second)
     code, _, _ = request(target, f"/boards/{board_id}", "DELETE")
     assert code == 204
