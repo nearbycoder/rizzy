@@ -63,10 +63,10 @@ def prepare_source(directory, workers, env=None):
     subprocess.run(["bin/rails", "db:prepare"], cwd=SOURCE, env=env,
                    capture_output=True, text=True, check=True)
     script = '''require "json"
-      identity = Identity.create!(email_address: "mixed-benchmark@example.com")
+      identity = Identity.create!(email_address: "owner@example.com")
       account = Account.create_with_owner(
-        account: { external_account_id: 123456789, name: "Mixed benchmark" },
-        owner: { name: "Benchmark Owner", identity: identity })
+        account: { external_account_id: 1, name: "Rizzy" },
+        owner: { name: "Owner", identity: identity })
       token = identity.access_tokens.create!(description: "Benchmark", permission: "write")
       puts JSON.generate({ account: account.external_account_id, token: token.token })'''
     result = subprocess.run(["bin/rails", "runner", script], cwd=SOURCE, env=env,
@@ -164,6 +164,38 @@ def first_difference(left, right, path="sample"):
     elif left != right:
         return f"{path}: values {left!r} and {right!r}"
     return None
+
+
+def comparable_json(value, target):
+    """Keep response content while masking fixture-specific IDs, URLs, and times.
+
+    IDs are numbered by first use, so repeated references must still agree within
+    each response. Sorting object keys makes that numbering independent of the
+    serializer's object field order.
+    """
+    identifiers = {}
+    root = f"{target['url']}/{target['account']}"
+    timestamp = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z")
+    generated_id = re.compile(r"\b[0-9a-z]{25}\b")
+
+    def replace_id(match):
+        identifier = match.group()
+        if identifier not in identifiers:
+            identifiers[identifier] = f"$ID{len(identifiers)}"
+        return identifiers[identifier]
+
+    def normalize(item):
+        if isinstance(item, dict):
+            return {key: normalize(item[key]) for key in sorted(item)}
+        if isinstance(item, list):
+            return [normalize(entry) for entry in item]
+        if isinstance(item, str):
+            if timestamp.fullmatch(item):
+                return "$TIME"
+            return generated_id.sub(replace_id, item.replace(root, "$ROOT"))
+        return item
+
+    return normalize(value)
 
 
 def read_four(target, paths):

@@ -376,15 +376,17 @@ had the same outcome: one clean pair at 139.10 versus 24.08 workflows/s and
 one Fizzy ActiveSearch deadlock. A clean two-round comparison of this larger
 fixture remains unverified.
 
-The [separate MySQL JSON read comparison](../bench/results/mysql-read-1000-8-32-128-15s-2026-09-26.json)
+The [matched-fixture MySQL JSON read comparison](../bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 avoids that write-path failure. Fresh 1,000-card databases, the same four
 available app CPUs, two reversed-order rounds, and 15-second phases at 8,
 32, and 128 clients yielded zero HTTP errors and unchanged record counts.
-The harness checked sampled JSON structures, selected values, and pagination
-on board, card, scoped-card, and scoped-activity GET routes. Rizzy served
-3,579–3,990 requests/s versus Fizzy's 317–353, or 11.0–12.2× per paired
-level. Rizzy's responses were about 8% smaller. Exact field values on every
-response, other routes, writes, and multi-host capacity remain unproven.
+The harness checked the full decoded sampled JSON values, including cross-route
+ID relationships, after masking generated IDs, timestamps, and server addresses;
+it also checked pagination on board, card, scoped-card, and scoped-activity GET
+routes. The account number and owner details matched across targets. Rizzy
+served 3,757–4,012 requests/s versus Fizzy's 338–355, or 11.0–11.6× per
+paired level. Its serialized bodies were about 1% smaller. Unsampled responses,
+other routes, writes, and multi-host capacity remain unproven.
 
 The write-path audit found additional routes that update cards without first
 locking their parent board, including draft publication, steps, triage, watches,

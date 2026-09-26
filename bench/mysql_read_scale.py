@@ -12,7 +12,8 @@ import uuid
 from pathlib import Path
 
 from compare import run_rust
-from sustained_mixed import (ROOT, RUST, SOURCE, first_difference, fixture,
+from card_workflow import api
+from sustained_mixed import (ROOT, RUST, SOURCE, comparable_json, first_difference, fixture,
                              preflight, prepare_rust, prepare_source, start_server,
                              stop_server)
 from sustained_mixed_mysql import (create_databases, drop_databases, observed_counts,
@@ -63,6 +64,14 @@ def run_pair(args, cpus, generator_cpus, levels, number):
                 _, paths[name], samples[name] = fixture(target, args.cards)
             if difference := first_difference(samples["fizzy"], samples["rizzy"]):
                 raise AssertionError("JSON fixture: " + difference)
+            content = {}
+            for name in ("fizzy", "rizzy"):
+                responses = [api(targets[name], path)[1] for path in paths[name]]
+                content[name] = comparable_json(responses, targets[name])
+            if difference := first_difference(content["fizzy"], content["rizzy"]):
+                raise AssertionError("JSON content: " + difference)
+            content_hash = hashlib.sha256(json.dumps(content["fizzy"], sort_keys=True)
+                                          .encode()).hexdigest()
             expected = {"cards": args.cards, "events": args.cards, "comments": 0}
             baseline = {
                 "fizzy": observed_counts(args.mysql_client, args.mysql_socket, source_dbs[""]),
@@ -70,6 +79,7 @@ def run_pair(args, cpus, generator_cpus, levels, number):
             }
             assert baseline == {"fizzy": expected, "rizzy": expected}, baseline
             round_result = {"number": number, "order": [], "sample_parity": samples["fizzy"],
+                            "canonical_json_sha256": content_hash,
                             "baseline_counts": baseline, "runs": [], "comparable": True}
             for concurrency in levels:
                 order = (("fizzy", "rizzy") if number % 2 else ("rizzy", "fizzy"))

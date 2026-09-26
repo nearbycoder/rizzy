@@ -1,15 +1,18 @@
 # Comparative load runs
 
-The [1,000-card MySQL JSON read run](results/mysql-read-1000-8-32-128-15s-2026-09-26.json)
+The [matched-fixture 1,000-card MySQL JSON read run](results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 uses fresh databases for two reversed-order rounds, four available app CPUs,
 and a separate Rust load generator. Its four GET routes read the board, one
-card, scoped cards, and scoped activities. Before timing, the harness compares
-sampled JSON structures, selected values, and pagination; afterward, it
+card, scoped cards, and scoped activities. Both targets use the same account
+number and owner name and email. Before timing, the harness compares complete
+sampled JSON values across all four routes after masking generated IDs,
+timestamps, and server addresses; it also checks pagination. Afterward, it
 checks unchanged card, event, and comment counts. At 8, 32, and 128 clients,
-Rizzy served 3,579–3,990 requests/s versus Fizzy's 317–353, or 11.0–12.2×
-per paired level. All twelve phases had zero errors. Rizzy's bodies were about
-8% smaller, and full field-value, browser, and side-effect parity remains
-open. This is one-host read throughput, not a whole-app or maximum-scale
+Rizzy served 3,757–4,012 requests/s versus Fizzy's 338–355, or 11.0–11.6×
+per paired level. All twelve phases had zero errors. The serialized JSON
+bodies remain about 1% smaller for Rizzy despite matching decoded values.
+Full browser, side-effect, and unsampled response parity remains open. This
+is one-host read throughput, not a whole-app or maximum-scale
 result. Run `python3 bench/mysql_read_scale.py --mysql-port 33081` against a
 local Oracle MySQL server to repeat it.
 
