@@ -106,8 +106,9 @@ async function loadUtility(kind,term=''){utilityContent.textContent='Loading…'
 document.querySelectorAll('[data-utility]').forEach(button=>button.addEventListener('click',()=>{const kind=button.dataset.utility;utilityTitle.textContent=kind==='pins'?'Pinned cards':kind==='notifications'?'Notifications':'Search cards';utilitySearch.hidden=kind!=='search';utilityContent.replaceChildren();utility.showModal();if(kind==='search'){utilitySearch.value='';utilitySearch.focus()}else loadUtility(kind)}));
 utility.querySelector('.utility-close').addEventListener('click',()=>utility.close());utility.addEventListener('click',event=>{if(event.target===utility)utility.close()});let utilitySearchTimer;utilitySearch.addEventListener('input',()=>{clearTimeout(utilitySearchTimer);if(utilitySearch.value.trim())utilitySearchTimer=setTimeout(()=>loadUtility('search',utilitySearch.value.trim()),300);else utilityContent.replaceChildren()});
 </script>
-<script type="module">
-import { DirectUpload } from '@rails/activestorage';
-document.getElementById('image-upload')?.addEventListener('change',async event=>{const input=event.currentTarget,file=input.files?.[0];if(!file)return;input.disabled=true;try{const account=document.body.dataset.account,number=document.body.dataset.number;const blob=await new Promise((resolve,reject)=>new DirectUpload(file,`/${account}/rails/active_storage/direct_uploads`).create((error,blob)=>error?reject(error):resolve(blob)));const response=await fetch(`/${account}/cards/${number}`,{method:'PATCH',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({card:{image:blob.signed_id}})});if(!response.ok)throw Error('Could not attach image');location.reload()}catch(error){input.disabled=false;alert(error.message||String(error))}});
+<script>
+const imageForm=document.getElementById('image-upload-form');
+document.getElementById('image-upload')?.addEventListener('change',event=>{if(event.currentTarget.files?.length)imageForm.requestSubmit()});
+imageForm?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('image-upload');if(!input.files?.length)return;const data=new FormData(imageForm);input.disabled=true;try{const response=await fetch(imageForm.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:data});if(!response.ok)throw Error('Could not attach image');location.reload()}catch(error){input.disabled=false;alert(error.message||String(error))}});
 </script>
 </body></html>

@@ -8858,6 +8858,20 @@ async fn show_draft(
         .await
         .map_err(db_err)?;
     let creator_name = escape(&creator_name);
+    let image_control = if let Some(url) =
+        storage::image_url_for_card(&app, &p, &c.get::<String, _>("id"))
+            .await?
+            .as_str()
+    {
+        format!(
+            "<div class=\"draft-image\"><img src=\"{}\" alt=\"\"><button id=\"remove-image\" type=\"button\" aria-label=\"Remove background image\">Remove background image</button></div>",
+            escape(url)
+        )
+    } else {
+        format!(
+            "<form id=\"image-upload-form\" action=\"/{account}/cards/{number}\" method=\"post\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label>Add background image<input id=\"image-upload\" name=\"card[image]\" type=\"file\" accept=\"image/png,image/jpeg,image/jpg,image/webp\" aria-label=\"Add background image\"></label><noscript><button type=\"submit\">Save background image</button></noscript></form>"
+        )
+    };
     let html = format!(
         r##"<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>New card | Rizzy</title>
@@ -8884,10 +8898,12 @@ lexxy-editor:focus-within{{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}}
 button{{border:1px solid #d5a94c;background:#e7bd61;color:#201b12;border-radius:9px;padding:9px 15px;font-weight:700;cursor:pointer}}
 button:hover{{background:#f0ca77}}button.secondary{{border-color:#666158;background:#393733;color:#f6f0e8}}button.secondary:hover{{background:#4a463f}}
 form{{display:inline}}@media(max-width:600px){{main{{margin-top:22px}}.card-body,.card-head,.card-foot{{padding-left:18px;padding-right:18px}}}}
+.draft-image img{{display:block;width:100%;max-height:360px;object-fit:cover}}#image-upload-form{{display:block;margin:18px 28px}}#image-upload-form input[type=file]{{display:block;margin-top:8px}}
 </style></head>
 <body><a class="skip" href="#main">Skip to main content</a><header><a href="/">Rizzy</a></header>
 <main id="main"><nav><a href="/{account}/boards/{board_id}">← Back to {board_name}</a></nav>
 <article class="card-perma card-perma--draft"><div class="card-head">Card number {number}<strong>{board_name}</strong></div>
+{image_control}
 <div class="card-body"><label>Name it<textarea id="title" maxlength="255" placeholder="Name it…">{title}</textarea></label>
 <label for="description">Add some notes, context, pictures, or video</label>
 <lexxy-editor id="description" name="card[description]" value="{description_value}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename">
@@ -8921,10 +8937,34 @@ document.getElementById('title').addEventListener('blur', saveDraft);
 editor.addEventListener('lexxy:change', scheduleSave);
 editor.addEventListener('focusout', saveDraft);
 document.getElementById('save').onclick = saveDraft;
-document.querySelectorAll('form').forEach(form => form.addEventListener('submit', async event => {{
+document.querySelectorAll('form[action$="/publish"]').forEach(form => form.addEventListener('submit', async event => {{
   event.preventDefault();
   if (await saveDraft()) form.submit();
 }}));
+const imageForm = document.getElementById('image-upload-form');
+document.getElementById('image-upload')?.addEventListener('change', event => {{ if (event.currentTarget.files?.length) imageForm.requestSubmit(); }});
+imageForm?.addEventListener('submit', async event => {{
+  event.preventDefault();
+  const input = document.getElementById('image-upload');
+  if (!input.files?.length || !await saveDraft()) return;
+  const data = new FormData(imageForm);
+  input.disabled = true;
+  try {{
+    const response = await fetch(imageForm.action, {{method:'POST',headers:{{Accept:'text/vnd.turbo-stream.html'}},body:data}});
+    if (!response.ok) throw new Error('Could not attach image');
+    location.reload();
+  }} catch (error) {{ input.disabled = false; alert(error.message); }}
+}});
+document.getElementById('remove-image')?.addEventListener('click', async event => {{
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {{
+    if (!await saveDraft()) throw new Error('Could not save draft');
+    const response = await fetch('/{account}/cards/{number}/image', {{method:'DELETE',headers:{{Accept:'application/json'}}}});
+    if (!response.ok) throw new Error('Could not remove image');
+    location.reload();
+  }} catch (error) {{ button.disabled = false; alert(error.message); }}
+}});
 </script></body></html>"##,
         description_value = escape(&description)
     );

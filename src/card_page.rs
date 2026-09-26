@@ -238,12 +238,17 @@ pub(super) async fn show(
             )
         })
         .unwrap_or_default();
+    let closed = card.get::<i64, _>("closed") != 0;
     let image_button = if image_url.as_str().is_some() {
         "<button class=\"side-action side-action--image\" id=\"remove-image\" type=\"button\" aria-label=\"Remove background image\" title=\"Remove background image\">⊠</button>".to_owned()
+    } else if closed {
+        String::new()
     } else {
-        "<label class=\"side-action side-action--image\" title=\"Add background image\"><span class=\"for-screen-reader\">Add background image</span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><circle cx=\"8\" cy=\"9\" r=\"2\"/><path d=\"m3 18 6-6 4 4 3-3 5 5M18 1v6M15 4h6\"/></svg><input id=\"image-upload\" type=\"file\" accept=\"image/png,image/jpeg,image/webp\" aria-label=\"Add background image\"></label>".to_owned()
+        format!(
+            "<form id=\"image-upload-form\" action=\"/{}/cards/{number}\" method=\"post\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label class=\"side-action side-action--image\" title=\"Add background image\"><span class=\"for-screen-reader\">Add background image</span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><circle cx=\"8\" cy=\"9\" r=\"2\"/><path d=\"m3 18 6-6 4 4 3-3 5 5M18 1v6M15 4h6\"/></svg><input id=\"image-upload\" name=\"card[image]\" type=\"file\" accept=\"image/png,image/jpeg,image/jpg,image/webp\" aria-label=\"Add background image\"></label><noscript><button type=\"submit\">Save background image</button></noscript></form>",
+            principal.slug
+        )
     };
-    let closed = card.get::<i64, _>("closed") != 0;
     let tag_control = tagging_page::tags(app, principal, card).await?;
     let postponed = card.get::<i64, _>("postponed") != 0;
     let column_id: Option<String> = card.get("column_id");

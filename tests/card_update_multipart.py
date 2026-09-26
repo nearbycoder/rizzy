@@ -55,6 +55,8 @@ def main():
                                      {"card": {"title": "Original"}}, bearer=True)
             assert status == 201, (status, raw[:200])
             published = json.loads(raw)
+            status, _, page = request(target, f"/{account}/cards/{published['number']}", accept="text/html")
+            assert status == 200 and b'id="image-upload-form"' in page and b'name="card[image]"' in page
             stream = update(target, published["number"],
                             {"card[title]": "Logo needs to change",
                              "card[description]": "Something more in-depth"}, image)
@@ -70,8 +72,10 @@ def main():
                     "SELECT b.filename,b.storage_key,b.checksum FROM storage_attachments a "
                     "JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_id=? AND a.name='image'",
                     (published["id"],)).fetchone()
-                assert filename == "moon.jpg" and checksum
-                assert (Path(temp) / "storage" / key).read_bytes() == image
+            assert filename == "moon.jpg" and checksum
+            assert (Path(temp) / "storage" / key).read_bytes() == image
+            status, _, page = request(target, f"/{account}/cards/{published['number']}", accept="text/html")
+            assert status == 200 and b'id="remove-image"' in page and b'id="image-upload-form"' not in page
 
             status, headers, _ = request(target, f"/{account}/boards/{board['id']}/cards",
                                          "POST", b"", accept="text/html")
@@ -79,10 +83,14 @@ def main():
             number = headers["Location"].split("/cards/")[1].split("/")[0]
             with sqlite3.connect(target["db"]) as db:
                 draft_id = db.execute("SELECT id FROM cards WHERE number=?", (number,)).fetchone()[0]
+            status, _, page = request(target, f"/{account}/cards/{number}/draft", accept="text/html")
+            assert status == 200 and b'id="image-upload-form"' in page and b'name="card[image]"' in page
             stream = update(target, number, {}, image, method="POST")
             assert "card-perma--draft" in stream and "reactions" not in stream
             with sqlite3.connect(target["db"]) as db:
                 assert db.execute("SELECT b.filename FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_id=? AND a.name='image'", (draft_id,)).fetchone()[0] == "moon.jpg"
+            status, _, page = request(target, f"/{account}/cards/{number}/draft", accept="text/html")
+            assert status == 200 and b'id="remove-image"' in page and b'id="image-upload-form"' not in page
         finally:
             stop(process)
     print("Multipart card image edits and Turbo responses passed for published and draft cards")
