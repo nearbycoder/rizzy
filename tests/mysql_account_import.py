@@ -115,7 +115,10 @@ def main():
             assert mysql_scalar(url, f"SELECT name FROM accounts WHERE id='{account_id}'") == account["name"]
             for group, expected in counts.items():
                 table = GROUP_TABLES.get(group, group)
-                if group in CARD_SCOPED_GROUPS:
+                if group == "webhook_delinquency_trackers":
+                    query = ("SELECT COUNT(*) FROM webhooks WHERE consecutive_failures_count>0 "
+                             f"AND account_id='{account_id}'")
+                elif group in CARD_SCOPED_GROUPS:
                     query = (f"SELECT COUNT(*) FROM `{table}` r JOIN cards c ON c.id=r.card_id "
                              f"WHERE c.account_id='{account_id}'")
                 else:

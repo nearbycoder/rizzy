@@ -136,6 +136,9 @@ def run(archive_path):
                          if name.startswith("data/active_storage_blobs/")]
         bundles = [json.loads(z.read(name)) for name in z.namelist()
                    if name.startswith("data/notification_bundles/")]
+        owner_notices = [json.loads(z.read(name)) for name in z.namelist()
+                         if name.startswith("data/notifications/")
+                         and json.loads(z.read(name))["user_id"] == owner["id"]]
         rich_texts = [json.loads(z.read(name)) for name in z.namelist()
                       if name.startswith("data/action_text_rich_texts/")]
         described_cards = sum(rich.get("record_type") == "Card" and
@@ -376,21 +379,28 @@ def run(archive_path):
                         assert owner["name"].split()[0] in card["description"]
                         assert 'class="mention"' in card["description_html"]
             board_ids = set()
+            visible_board_ids = {access["board_id"] for access in access_records
+                                 if access["user_id"] == owner["id"]}
             for page in range(1, counts["boards"] + 2):
                 status, boards = call(url, token, f"/{created['account']}/boards?page={page}")
                 assert status == 200, (status, page)
                 board_ids.update(board["id"] for board in boards)
-                if len(board_ids) == counts["boards"] or not boards:
+                if len(board_ids) == len(visible_board_ids) or not boards:
                     break
-            assert len(board_ids) == counts["boards"], (len(board_ids), counts["boards"])
-            if counts["notifications"]:
+            assert board_ids == visible_board_ids, (board_ids, visible_board_ids)
+            if owner_notices:
                 status, notices = call(url, token, f"/{created['account']}/notifications")
-                assert status == 200 and any(notice["source_type"] == "mention"
-                                             and notice["title"] == f"{owner['name'].split()[0]} @mentioned you"
-                                             and "Hello world" in notice["body"] for notice in notices), notices
-                if has_user_mention:
-                    assert any(owner["name"].split()[0] in notice["body"]
-                               for notice in notices if notice["source_type"] == "mention"), notices
+                assert status == 200 and len(notices) == len(owner_notices), (status, notices, owner_notices)
+                if any(item["source_type"] == "Mention" for item in owner_notices):
+                    assert any(notice["source_type"] == "mention"
+                                          and notice["title"] == f"{owner['name'].split()[0]} @mentioned you"
+                                          and "Hello world" in notice["body"] for notice in notices), notices
+                    if has_user_mention:
+                        assert any(owner["name"].split()[0] in notice["body"]
+                                   for notice in notices if notice["source_type"] == "mention"), notices
+            else:
+                status, notices = call(url, token, f"/{created['account']}/notifications")
+                assert status == 200 and notices == [], (status, notices)
             status, export = call(url, token, f"/{created['account']}/account/exports", "POST")
             assert status == 201 and export["status"] == "pending", (status, export)
             for _ in range(300):

@@ -26,7 +26,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "user_settings",
-        query: "SELECT r.id,r.account_id,COALESCE(n.bundle_email_frequency,'every_few_hours') bundle_email_frequency,r.created_at,t.timezone_name,r.updated_at,r.user_id FROM user_settings_records r JOIN users u ON u.id=r.user_id LEFT JOIN notification_settings n ON n.user_id=r.user_id LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.account_id=? AND u.role!='system' ORDER BY r.user_id",
+        query: "SELECT r.id,r.account_id,COALESCE(n.bundle_email_frequency,'every_few_hours') bundle_email_frequency,r.created_at,t.timezone_name,r.updated_at,r.user_id FROM user_settings_records r JOIN users u ON u.id=r.user_id LEFT JOIN notification_settings n ON n.user_id=r.user_id LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.account_id=? ORDER BY r.user_id",
         booleans: &[],
         json_fields: &[],
     },

@@ -67,19 +67,23 @@ before creating a session. The matching SQLite link flow was compared with
 Fizzy in `tests/session_transfer_parity.py`, and its generation, redemption,
 expiry, and race checks passed again after this change. The MySQL test checks
 Rizzy only.
-`tests/mysql_account_import.py` restores a populated account ZIP on MySQL,
-checking 43 records across 23 groups, two original file payloads, account
-name and card count. It re-exports the imported account and compares all 23
-record-group counts and both file payloads. It also checks that a cross-account
+`tests/mysql_account_import.py` restores a populated account ZIP on MySQL. Its
+default Rizzy-generated fixture checks 43 records across 23 groups and two
+original file payloads. A ZIP produced by the pinned Fizzy app's MySQL test
+account through `tests/source_mysql_account_export_test.rb` also restored and
+re-exported: 92 records across 24 groups, including users, settings,
+notifications, filters, and webhook deliveries. For both fixtures the test
+checks account name, card count, re-exported record-group counts, and any file
+payloads. It also checks that a cross-account
 reference leaves no restored records and that a second import of the same ZIP
 reports a conflict without adding cards. The import worker now uses MySQL upserts and scalar
 `GREATEST` where SQLite used `ON CONFLICT` and scalar `MAX`. A new MySQL board
 update trigger supplies the entropy metadata expected during restore, and the
-export query quotes MySQL's reserved `key` column. The
-full SQLite account import regression still passes. The default fixture is a
-Rizzy-created Fizzy-format ZIP; direct restoration of a ZIP exported by the
-pinned Fizzy application on MySQL and wider archive variants remain to be
-verified.
+export query quotes MySQL's reserved `key` column. Import and export now
+preserve a source system user's settings record and omit generated settings
+for an imported user whose archive has none. The SQLite account import check
+also passed with the Fizzy-produced ZIP. These fixtures do not cover every
+source archive variant, especially source-generated file attachments.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,
@@ -97,12 +101,12 @@ The generator preserves the 63 application tables, ordinary indexes, foreign
 keys, 15 checks, and the partial uniqueness rules through generated columns.
 It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16
 account-routed FULLTEXT search tables and backfills published cards and
-comments. Twenty MySQL triggers in
+comments. Twenty-one MySQL triggers in
 `schema.mysql.triggers.sql` cover the core flow, with an idempotent backfill
 for databases created before the triggers were added. Other SQLite trigger
 behavior still needs native MySQL equivalents or equivalent application code.
 An existing MySQL database installed the four added user settings triggers on
-restart and reported all twenty expected triggers. A fresh database with the
+restart and reported all twenty triggers present at that point. A fresh database with that
 twenty-trigger schema passed concurrent initialization and 80 card creations
 across two processes. The first fresh run exposed an empty trigger section
 header; removing it fixed installation.

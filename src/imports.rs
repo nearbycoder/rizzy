@@ -647,8 +647,57 @@ async fn apply_archive(
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
-        if changed.rows_affected() != 1 {
-            return Err("User settings metadata was not restored".into());
+        if changed.rows_affected() == 0 {
+            let existing: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM user_settings_records WHERE user_id=? AND account_id=?",
+            )
+            .bind(user_id)
+            .bind(account_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            if existing.is_none() {
+                sqlx::query("INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+                    .bind(field(settings, "id")?)
+                    .bind(account_id)
+                    .bind(user_id)
+                    .bind(field(settings, "created_at")?)
+                    .bind(&imported_at)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    // Fizzy inserts imported users in bulk, bypassing their create callbacks.
+    // Rizzy's database triggers make default settings for every regular user;
+    // discard those defaults when the archive has no settings for that user.
+    let settings_users: HashSet<String> = records(&archive, "user_settings")
+        .iter()
+        .filter_map(|settings| maybe_field(settings, "user_id").map(str::to_owned))
+        .collect();
+    let imported_user_ids: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM users WHERE account_id=?")
+            .bind(account_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    for user_id in imported_user_ids {
+        if !settings_users.contains(&user_id) {
+            for table in [
+                "user_timezones",
+                "notification_settings",
+                "user_settings_records",
+            ] {
+                sqlx::query(&format!(
+                    "DELETE FROM {table} WHERE user_id=? AND account_id=?"
+                ))
+                .bind(&user_id)
+                .bind(account_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
         }
     }
     if !records(&archive, "users")
@@ -659,16 +708,6 @@ async fn apply_archive(
             .bind(id()).bind(account_id).bind(system_identity).bind(now())
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
-    let insert_settings = if app.mysql {
-        "INSERT IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE account_id=? AND role!='system'"
-    } else {
-        "INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE account_id=? AND role!='system'"
-    };
-    sqlx::query(insert_settings)
-        .bind(account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
     for tag in records(&archive, "tags") {
         sqlx::query("INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)")
             .bind(field(tag, "id")?)
