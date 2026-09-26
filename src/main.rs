@@ -7055,11 +7055,11 @@ fn activities_query<'a>(
     q: &'a ActivityQuery,
 ) -> QueryBuilder<'a, Sqlite> {
     let mut builder = QueryBuilder::new(format!(
-        "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=c.board_id WHERE e.account_id="
+        "{select} FROM events e JOIN cards c ON c.id=e.card_id JOIN boards b ON b.id=e.board_id WHERE e.account_id="
     ));
     builder.push_bind(&p.account_id).push(" AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=")
-        .push_bind(&p.user_id).push(") AND (e.eventable_type='Card' OR EXISTS (SELECT 1 FROM comments m WHERE m.id=e.eventable_id AND m.card_id=c.id))");
-    for (field, values) in [("e.creator_id", &q.creators), ("c.board_id", &q.boards)] {
+        .push_bind(&p.user_id).push(") AND e.action IN ('card_assigned','card_auto_postponed','card_board_changed','card_closed','card_postponed','card_published','card_reopened','card_sent_back_to_triage','card_title_changed','card_triaged','card_unassigned','comment_created') AND (e.eventable_type='Card' OR EXISTS (SELECT 1 FROM comments m WHERE m.id=e.eventable_id AND m.card_id=c.id))");
+    for (field, values) in [("e.creator_id", &q.creators), ("e.board_id", &q.boards)] {
         if !values.is_empty() {
             builder.push(" AND ").push(field).push(" IN (");
             let mut separated = builder.separated(",");
@@ -7187,7 +7187,12 @@ async fn activity_items(
     }
     let card_ids = unique_ids(events.iter().map(|e| e.get::<String, _>("card_id")));
     let card_rows = rows_for_ids(app, "SELECT * FROM cards WHERE id IN (", &card_ids).await?;
-    let board_ids = unique_ids(card_rows.iter().map(|c| c.get::<String, _>("board_id")));
+    let board_ids = unique_ids(
+        card_rows
+            .iter()
+            .map(|c| c.get::<String, _>("board_id"))
+            .chain(events.iter().map(|e| e.get::<String, _>("board_id"))),
+    );
     let board_rows = rows_for_ids(app, "SELECT * FROM boards WHERE id IN (", &board_ids).await?;
     let assignment_rows = assignment_rows_for_cards(app, &card_ids).await?;
     let tag_rows=rows_for_ids(app,"SELECT g.card_id,t.title FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",&card_ids).await?;
@@ -7318,7 +7323,8 @@ async fn activity_items(
     let mut items = Vec::with_capacity(events.len());
     for e in events {
         let card_id: String = e.get("card_id");
-        let (number, title, board_id) = card_meta.get(&card_id).ok_or_else(missing)?;
+        let (number, title, _) = card_meta.get(&card_id).ok_or_else(missing)?;
+        let board_id: String = e.get("board_id");
         let eventable_id: String = e.get("eventable_id");
         let eventable_type: String = e.get("eventable_type");
         let (eventable, url) = if eventable_type == "Comment" {
@@ -7339,7 +7345,7 @@ async fn activity_items(
             "created_at":e.get::<String,_>("created_at"),
             "description":activity_description(p,e,title,&users),"particulars":particulars,
             "url":url,"eventable_type":eventable_type,"eventable":eventable,
-            "board":boards.get(board_id).cloned().ok_or_else(missing)?,
+            "board":boards.get(&board_id).cloned().ok_or_else(missing)?,
             "creator":users.get(&e.get::<String,_>("creator_id")).cloned().ok_or_else(missing)?}),
         );
     }
