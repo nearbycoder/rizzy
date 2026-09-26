@@ -1,5 +1,18 @@
 # Comparative load runs
 
+The [1,000-card MySQL JSON read run](results/mysql-read-1000-8-32-128-15s-2026-09-26.json)
+uses fresh databases for two reversed-order rounds, four available app CPUs,
+and a separate Rust load generator. Its four GET routes read the board, one
+card, scoped cards, and scoped activities. Before timing, the harness compares
+sampled JSON structures, selected values, and pagination; afterward, it
+checks unchanged card, event, and comment counts. At 8, 32, and 128 clients,
+Rizzy served 3,579–3,990 requests/s versus Fizzy's 317–353, or 11.0–12.2×
+per paired level. All twelve phases had zero errors. Rizzy's bodies were about
+8% smaller, and full field-value, browser, and side-effect parity remains
+open. This is one-host read throughput, not a whole-app or maximum-scale
+result. Run `python3 bench/mysql_read_scale.py --mysql-port 33081` against a
+local Oracle MySQL server to repeat it.
+
 The [CSP-enabled board HTML run](results/board-html-csp-2026-09-26.json)
 rechecks a fresh 100-card board fixture after Rizzy began adding per-response
 script nonces. Two reversed-order five-second rounds at 8 and 32 clients used
