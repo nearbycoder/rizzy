@@ -3,6 +3,7 @@
 import re
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 from draft_workflow_parity import request
@@ -48,6 +49,7 @@ def run(target, suffix):
                        {"card": {"title": title, "description": description}}, 201)
 
         maybe = card("Maybe " + suffix, "<p>Body <strong>bold</strong></p>")
+        formatted = card("Format `code` " + suffix)
         doing = card("Doing " + suffix)
         not_now = card("Not now " + suffix)
         done = card("Done " + suffix)
@@ -60,6 +62,11 @@ def run(target, suffix):
         blob = upload(target)
         api(target, f"/cards/{maybe['number']}.json", "PATCH",
             {"card": {"image": blob["signed_id"]}})
+        api(target, f"/cards/{maybe['number']}/taggings", "POST",
+            {"tag_title": "#public-preview-parity"}, 204)
+        owner = next(user for user in api(target, "/users") if user["role"] == "owner")
+        api(target, f"/cards/{doing['number']}/assignments", "POST",
+            {"assignee_id": owner["id"]}, 204)
         api(target, f"/cards/{doing['number']}/triage", "POST", {"column_id": named["id"]}, 204)
         api(target, f"/cards/{not_now['number']}/not_now", "POST", expected=204)
         api(target, f"/cards/{done['number']}/closure", "POST", expected=204)
@@ -84,6 +91,31 @@ def run(target, suffix):
             assert f"/{target['account']}/public/boards/{key}/columns/" in column(board_html, section)[1]
         assert "public" in headers.get("Cache-Control", "")
 
+        def preview(document, card_id):
+            article = re.search(r'<article id="article_card_' + re.escape(str(card_id)) + r'".*?</article>', document, re.S)
+            assert article, (target["name"], card_id)
+            return article.group(0)
+
+        maybe_column, _ = anonymous(target, path + "/columns/stream")
+        maybe_preview = preview(maybe_column, maybe["id"])
+        assert "<code>code</code>" in preview(maybe_column, formatted["id"])
+        for marker in ('class="card__header"', 'class="card__body justify-space-between"',
+                       'class="card__meta"', 'class="card__tags"',
+                       'class="card__background"', 'class="card__link"'):
+            assert marker in maybe_preview, (target["name"], marker)
+        assert "public-preview-parity" in maybe_preview
+        preview_image = re.search(r'<div class="card__background">\s*<img[^>]+src="([^"]+)"', maybe_preview)
+        assert preview_image
+        with urllib.request.urlopen(urllib.parse.urljoin(target["url"], preview_image.group(1)), timeout=10) as image:
+            assert image.status == 200 and image.read() == IMAGE
+        named_column, _ = anonymous(target, path + f"/columns/{named['id']}")
+        doing_preview = preview(named_column, doing["id"])
+        assert f'id="columns_card_{doing["id"]}"' in doing_preview
+        assert 'card__column-name--current' in doing_preview
+        assert 'Assigned to' in doing_preview and owner["name"].split()[0] in doing_preview
+        done_column, _ = anonymous(target, path + "/columns/closed")
+        assert 'class="card__closed"' in preview(done_column, done["id"])
+
         card_path = path + f"/cards/{maybe['number']}"
         card_html, card_headers = anonymous(target, card_path)
         assert 'class="card-perma card-perma--public"' in card_html
@@ -105,7 +137,8 @@ def run(target, suffix):
         anonymous(target, card_path, 404)
         return {"board_columns": 4, "card_steps": 2, "anonymous": True,
                 "rich_board_description": True, "social_meta": True,
-                "public_image": True, "unpublish_hides_pages": True}
+                "public_image": True, "preview_metadata": True,
+                "unpublish_hides_pages": True}
     finally:
         api(target, f"/boards/{board_id}", "DELETE", expected=204)
 

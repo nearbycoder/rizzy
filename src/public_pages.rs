@@ -174,14 +174,13 @@ pub(super) async fn board(
           const document = new DOMParser().parseFromString(await response.text(), 'text/html');
           const nextList = document.querySelector('.cards__list');
           const list = link.closest('.cards__list');
-          const currentCards = list?.querySelector('ul');
-          const newCards = nextList?.querySelector('ul');
-          if (!currentCards || !newCards) throw new Error('Missing card list');
-          currentCards.append(...newCards.children);
+          const newCards = nextList?.querySelectorAll('.public-card-preview');
+          if (!list || !newCards) throw new Error('Missing card list');
+          link.before(...newCards);
           const nextLink = nextList.querySelector('.pagination-link');
           link.remove();
           if (nextLink) {
-            list.append(nextLink);
+            list.querySelector('turbo-frame[id*="-pagination-contents-"]').append(nextLink);
             paginationObserver.observe(nextLink);
           }
         } catch (error) {

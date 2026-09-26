@@ -40,6 +40,13 @@ fn image_url(p: &Principal, signed_id: &str, filename: &str) -> String {
     )
 }
 
+pub(super) fn public_image_path(slug: i64, signed_id: &str, filename: &str) -> String {
+    format!(
+        "/{slug}/rails/active_storage/blobs/redirect/{signed_id}/{}",
+        encoded_filename(filename)
+    )
+}
+
 pub(super) async fn image_url_for_card(app: &App, p: &Principal, card_id: &str) -> Result<Value> {
     let row = sqlx::query("SELECT b.signed_id,b.filename FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='Card' AND a.name='image' AND a.record_id=? AND a.account_id=?")
         .bind(card_id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?;
@@ -62,10 +69,10 @@ pub(super) async fn public_image_url_for_card(
     let row = sqlx::query("SELECT b.signed_id,b.filename FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='Card' AND a.name='image' AND a.record_id=? AND a.account_id=?")
         .bind(card_id).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
     Ok(row.map(|row| {
-        format!(
-            "/{slug}/rails/active_storage/blobs/redirect/{}/{}",
-            row.get::<String, _>("signed_id"),
-            encoded_filename(&row.get::<String, _>("filename"))
+        public_image_path(
+            slug,
+            &row.get::<String, _>("signed_id"),
+            &row.get::<String, _>("filename"),
         )
     }))
 }
