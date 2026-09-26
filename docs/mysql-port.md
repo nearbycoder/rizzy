@@ -213,9 +213,11 @@ API workload, not a claim of maximum capacity or full application speed. An
 earlier two-client probe saw one Fizzy HTTP 500 on a card update during its
 first load phase; Rizzy had not begun its load phase. A later 10-second
 two-client run and these four rounds did not reproduce it. That transient
-source failure still needs diagnosis. Larger datasets, a concurrency sweep,
-multiple application processes, full background jobs, and representative
-browser workflows remain necessary before claiming greater scale.
+source failure was not diagnosed from that run. The later 500-card failures
+below identify a MySQL search-index deadlock at the same endpoint. Larger
+datasets, a concurrency sweep, multiple application processes, full background
+jobs, and representative browser workflows remain necessary before claiming
+greater scale.
 After the invite, email, and access changes, a clean-build eight-client
 two-round run at commit `73d0e50` completed with matching samples, verified
 stored counts, and zero HTTP errors. Fizzy completed 24.37 and 23.43 units/s;
@@ -223,3 +225,19 @@ Rizzy completed 169.39 and 62.54 units/s. The corresponding ratios were 6.95×
 and 2.67×. The raw artifact is
 `bench/results/mysql_mixed_after_join_2026-09-26.json`. The larger spread in
 Rizzy throughput needs investigation before drawing a capacity conclusion.
+
+With 500 initial cards, one 20-second eight-client paired round completed:
+Fizzy handled 23.25 units/s and Rizzy 156.16 units/s, with matching preflight
+samples, zero HTTP errors, and verified stored counts. In the reverse-order
+round, Rizzy completed 149.93 units/s with zero errors and verified counts,
+but Fizzy returned HTTP 500 during `PATCH /cards/818`, so that round has no
+valid paired throughput ratio. A separate 16-client run stopped on Fizzy's
+first load phase before Rizzy ran. Both failures were MySQL error 1213
+deadlocks in the pinned source's ActiveSearch MySQL shard upsert, reported as
+`ActiveSearch::AdapterError` from `CardsController#update`. The benchmark
+intentionally stops on the first HTTP error and does not count partial
+workflows as completed units. The two failure records are
+`bench/results/mysql_mixed_500cards_c8_partial_2026-09-26.json` and
+`bench/results/mysql_mixed_500cards_c16_failed_2026-09-26.json`. A repeated,
+error-free concurrency sweep and checks with multiple app and database hosts
+are still needed to establish a greater-scale claim.
