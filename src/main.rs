@@ -66,6 +66,7 @@ mod session_transfer;
 mod signup_page;
 mod signup_seed;
 mod storage;
+mod tag_cleanup;
 mod tagging_page;
 mod timezone;
 mod unsubscribes;
@@ -3251,6 +3252,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("delete-unused-tags") {
+        let count = tag_cleanup::delete_unused_tags(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Deleted {count} unused tags");
+        return Ok(());
+    }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
@@ -3357,6 +3365,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
             }
         });
+    }
+    if env::var("RIZZY_DISABLE_TAG_CLEANUP").as_deref() != Ok("1") {
+        tokio::spawn(tag_cleanup::worker(app.clone()));
     }
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
