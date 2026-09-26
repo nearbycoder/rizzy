@@ -92,7 +92,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "assignments",
-        query: "SELECT id,account_id,assignee_id,assigner_id,card_id,created_at,created_at updated_at FROM assignments WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,assignee_id,assigner_id,card_id,created_at,updated_at FROM assignments WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },

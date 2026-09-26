@@ -869,10 +869,10 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for assignment in records(&archive, "assignments") {
-        sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at) VALUES(?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
             .bind(field(assignment,"id")?).bind(account_id).bind(field(assignment,"card_id")?)
             .bind(field(assignment,"assignee_id")?).bind(field(assignment,"assigner_id")?)
-            .bind(field(assignment,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(field(assignment,"created_at")?).bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for tagging in records(&archive, "taggings") {
         sqlx::query("INSERT INTO taggings(card_id,tag_id) VALUES(?,?)")

@@ -145,6 +145,10 @@ def main():
             mutate(target, f"/cards/{card['number']}/assignments", payload={"assignee_id": owner["id"]})
             mutate(target, f"/cards/{card['number']}/goldness")
             with sqlite3.connect(db_path) as db:
+                assignment_record = db.execute(
+                    "SELECT id,card_id,assignee_id,assigner_id,created_at,updated_at "
+                    "FROM assignments WHERE card_id=? AND assignee_id=?",
+                    (card["id"], owner["id"])).fetchone()
                 gold_record = db.execute(
                     "SELECT id,created_at,updated_at FROM card_goldnesses WHERE card_id=?",
                     (card["id"],)).fetchone()
@@ -154,6 +158,7 @@ def main():
                 rich_record = db.execute(
                     "SELECT id,created_at,updated_at FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'",
                     (card["id"],)).fetchone()
+            assert assignment_record and assignment_record[4] == assignment_record[5]
             assert gold_record
             assert watch_record
             assert rich_record
@@ -239,6 +244,10 @@ def main():
                 step_data = json.loads(archive.read(f"data/steps/{step['id']}.json"))
                 assert (step_data["content"], step_data["completed"], step_data["created_at"],
                         step_data["updated_at"]) == ("First step revised", True, *step_times)
+                assignment_data = json.loads(archive.read(f"data/assignments/{assignment_record[0]}.json"))
+                assert (assignment_data["card_id"], assignment_data["assignee_id"],
+                        assignment_data["assigner_id"], assignment_data["created_at"],
+                        assignment_data["updated_at"]) == assignment_record[1:]
                 gold_data = json.loads(archive.read(f"data/card_goldnesses/{gold_record[0]}.json"))
                 assert (gold_data["card_id"], gold_data["created_at"], gold_data["updated_at"]) == (
                     card["id"], gold_record[1], gold_record[2])

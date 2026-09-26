@@ -29,6 +29,7 @@ FRESH_UPDATE_TABLES = {
     "cards": "cards",
     "comments": "comments",
     "steps": "steps",
+    "assignments": "assignments",
     "closures": "closures",
     "card_goldnesses": "card_goldnesses",
     "card_not_nows": "card_not_nows",

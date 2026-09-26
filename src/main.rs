@@ -914,6 +914,31 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     let schema = include_str!("../schema.mysql.sql");
     resume_mysql_schema(&db, schema).await?;
+    let assignment_updated_at_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='assignments' AND column_name='updated_at'",
+    )
+    .fetch_one(&db)
+    .await?;
+    if assignment_updated_at_exists == 0 {
+        sqlx::query(
+            "ALTER TABLE assignments ADD COLUMN updated_at VARCHAR(40) NOT NULL DEFAULT ''",
+        )
+        .execute(&db)
+        .await?;
+    }
+    let assignment_update_backfilled: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='assignments_updated_at_v1')",
+    )
+    .fetch_one(&db)
+    .await?;
+    if assignment_updated_at_exists == 0 || assignment_update_backfilled == 0 {
+        sqlx::query("UPDATE assignments SET updated_at=created_at WHERE updated_at=''")
+            .execute(&db)
+            .await?;
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('assignments_updated_at_v1','done') ON DUPLICATE KEY UPDATE value='done'")
+            .execute(&db)
+            .await?;
+    }
     validate_mysql_schema(&db, schema).await?;
     mysql_search::setup(&db).await?;
     let installed: HashSet<String> = sqlx::query_scalar(
@@ -2711,6 +2736,33 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .await?;
         }
         sqlx::query("CREATE TRIGGER IF NOT EXISTS steps_updated_at_insert AFTER INSERT ON steps WHEN NEW.updated_at='' BEGIN UPDATE steps SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+        .execute(&db)
+        .await?;
+        let assignment_columns = sqlx::query("PRAGMA table_info(assignments)")
+            .fetch_all(&db)
+            .await?;
+        let assignment_updated_at_exists = assignment_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at");
+        if !assignment_updated_at_exists {
+            sqlx::query("ALTER TABLE assignments ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+                .execute(&db)
+                .await?;
+        }
+        let assignment_update_backfilled: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='assignments_updated_at_v1')",
+        )
+        .fetch_one(&db)
+        .await?;
+        if !assignment_updated_at_exists || assignment_update_backfilled == 0 {
+            sqlx::query("UPDATE assignments SET updated_at=created_at WHERE updated_at=''")
+                .execute(&db)
+                .await?;
+            sqlx::query("INSERT INTO app_secrets(name,value) VALUES('assignments_updated_at_v1','done') ON CONFLICT(name) DO UPDATE SET value='done'")
+                .execute(&db)
+                .await?;
+        }
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS assignments_updated_at_insert AFTER INSERT ON assignments WHEN NEW.updated_at='' BEGIN UPDATE assignments SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
         let tag_columns = sqlx::query("PRAGMA table_info(tags)")
@@ -12833,48 +12885,31 @@ async fn toggle_assignment_to(
     c: &DbRow,
     assignee_id: &str,
 ) -> Result<StatusCode> {
-    let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
+    let who = escape(&actor_name(app, p).await?);
+    let (mut tx, board_id) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
     let assignee=sqlx::query("SELECT u.id,u.name FROM users u JOIN boards b ON b.id=? WHERE u.id=? AND u.account_id=? AND u.active=1 AND u.role!='system' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=u.id)")
-        .bind(&board_id).bind(&assignee_id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+        .bind(&board_id).bind(assignee_id).bind(&p.account_id).fetch_optional(&mut *tx).await.map_err(db_err)?.ok_or_else(missing)?;
     let existed: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM assignments WHERE card_id=? AND assignee_id=?")
             .bind(&card_id)
-            .bind(&assignee_id)
-            .fetch_one(&app.db)
+            .bind(assignee_id)
+            .fetch_one(&mut *tx)
             .await
             .map_err(db_err)?;
-    let who = escape(&actor_name(&app, &p).await?);
     let target = escape(&assignee.get::<String, _>("name"));
     if existed > 0 {
         sqlx::query("DELETE FROM assignments WHERE card_id=? AND assignee_id=?")
             .bind(&card_id)
-            .bind(&assignee_id)
-            .execute(&app.db)
+            .bind(assignee_id)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-        record_event(
-            &app,
-            &p,
-            &board_id,
-            &card_id,
-            "Card",
-            &card_id,
-            "card_unassigned",
-            json!({"assignee_ids":[&assignee_id]}),
-        )
-        .await?;
-        system_comment(
-            &app,
-            &p,
-            &card_id,
-            &format!("{who} <strong>unassigned</strong> from {target}."),
-        )
-        .await?;
     } else {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM assignments WHERE card_id=?")
             .bind(&card_id)
-            .fetch_one(&app.db)
+            .fetch_one(&mut *tx)
             .await
             .map_err(db_err)?;
         if count >= 100 {
@@ -12883,19 +12918,9 @@ async fn toggle_assignment_to(
                 "Card already has the maximum of 100 assignees",
             ));
         }
-        sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at) VALUES(?,?,?,?,?,?)")
-            .bind(id()).bind(&p.account_id).bind(&card_id).bind(&assignee_id).bind(&p.user_id).bind(now()).execute(&app.db).await.map_err(db_err)?;
-        record_event(
-            &app,
-            &p,
-            &board_id,
-            &card_id,
-            "Card",
-            &card_id,
-            "card_assigned",
-            json!({"assignee_ids":[&assignee_id]}),
-        )
-        .await?;
+        let timestamp = now();
+        sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+            .bind(id()).bind(&p.account_id).bind(&card_id).bind(assignee_id).bind(&p.user_id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
         let timestamp = now();
         let statement = if app.mysql {
             "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>1,VALUES(updated_at),updated_at),watching=1"
@@ -12905,19 +12930,44 @@ async fn toggle_assignment_to(
         sqlx::query(statement)
             .bind(id())
             .bind(&card_id)
-            .bind(&assignee_id)
+            .bind(assignee_id)
             .bind(&timestamp)
             .bind(&timestamp)
-            .execute(&app.db)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-        system_comment(
-            &app,
-            &p,
-            &card_id,
-            &format!("{who} <strong>assigned</strong> this to {target}."),
+    }
+    sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+        .bind(now())
+        .bind(&card_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    let (action, comment) = if existed > 0 {
+        (
+            "card_unassigned",
+            format!("{who} <strong>unassigned</strong> from {target}."),
         )
-        .await?;
+    } else {
+        (
+            "card_assigned",
+            format!("{who} <strong>assigned</strong> this to {target}."),
+        )
+    };
+    record_event(
+        app,
+        p,
+        &board_id,
+        &card_id,
+        "Card",
+        &card_id,
+        action,
+        json!({"assignee_ids":[assignee_id]}),
+    )
+    .await?;
+    system_comment(app, p, &card_id, &comment).await?;
+    if existed == 0 {
         record_activity_spike(&app, &p.account_id, &card_id).await?;
     }
     Ok(StatusCode::NO_CONTENT)

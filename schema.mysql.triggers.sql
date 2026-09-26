@@ -1,4 +1,10 @@
 -- Each named section is one statement sent through the MySQL simple query protocol.
+-- trigger: assignments_before_insert
+CREATE TRIGGER assignments_before_insert BEFORE INSERT ON assignments FOR EACH ROW
+BEGIN
+  IF NEW.updated_at='' THEN SET NEW.updated_at=NEW.created_at; END IF;
+END;
+
 -- trigger: accounts_before_insert
 CREATE TRIGGER accounts_before_insert BEFORE INSERT ON accounts FOR EACH ROW
 BEGIN

@@ -372,6 +372,7 @@ CREATE TABLE `assignments` (
   `assignee_id` VARCHAR(64) NOT NULL,
   `assigner_id` VARCHAR(64) NOT NULL,
   `created_at` LONGTEXT NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `watches` (

@@ -408,6 +408,7 @@ CREATE TABLE IF NOT EXISTS assignments (
   assignee_id TEXT NOT NULL REFERENCES users(id),
   assigner_id TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(card_id,assignee_id)
 );
 CREATE INDEX IF NOT EXISTS assignments_assignee ON assignments(assignee_id,card_id);

@@ -403,6 +403,32 @@ def main():
                 assert status == 200 and tagged["title"] == f"Tagged title {index}"
                 assert "cluster-tag" in tagged["tags"]
 
+            def double_assignment_toggle(item):
+                index, kind = item
+                number = results[index][1]["number"]
+                return call(bases[(2 * index + kind) % 4], account, token,
+                            f"/cards/{number}/assignments", "POST",
+                            {"assignee_id": owner_id})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                assignment_toggled = list(pool.map(double_assignment_toggle, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, assignment_toggled)
+                        if status != 204]
+            assert not failures, failures[:5]
+            for index in (0, 99, 199):
+                number = results[index][1]["number"]
+                status, assigned, _ = call(bases[index % 4], account, token,
+                                            f"/cards/{number}")
+                assert status == 200 and any(user["id"] == owner_id
+                                             for user in assigned["assignees"]), index
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                card_ids = ",".join(f"'{results[index][1]['id']}'" for index in range(200))
+                assignment_count = mysql_scalar(
+                    url, "SELECT COUNT(*) FROM assignments WHERE "
+                         f"assignee_id='{owner_id}' AND card_id IN ({card_ids})")
+                assert assignment_count == "200", assignment_count
+
             def double_tag_toggle(item):
                 index, kind = item
                 number = results[index + 200][1]["number"]
@@ -423,7 +449,7 @@ def main():
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, mixed writes including reaction deletion and watch/move races, opposite-direction moves, and 200 double tag toggles across four processes")
+            print("MySQL cluster passed: 400 unique cards, mixed writes including reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

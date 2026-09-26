@@ -415,6 +415,18 @@ the same cards across four processes; with `RIZZY_TEST_MYSQL_CLIENT` configured,
 it checked representative persisted watch states after the race. Other
 cross-board write paths still need the same stale-board audit.
 
+Assignments now have a stored `updated_at` on both databases. MySQL startup
+adds and backfills that column on existing databases before installing the
+legacy-insert trigger; a four-row upgrade, fresh schema, direct legacy insert,
+interrupted-backfill recovery, and the core flow passed. A migration marker
+keeps later process starts from scanning all assignment rows. A new cluster
+phase runs two assignment toggles on
+each of 200 cards across four processes. Before serializing the membership
+decision under the card's board lock, one run returned success for both
+requests but left a sampled card unassigned. Four runs after the fix checked
+all 200 final assignment rows and passed. Associated event, comment, and
+notification writes are still separate from the membership transaction.
+
 A new move/title phase in that test reproduced MySQL 1213 deadlocks when a
 card moved between boards while another process edited its title. The move
 transaction now locks both boards in ID order before changing the card and
