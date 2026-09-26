@@ -30,6 +30,11 @@ old flag says otherwise. The two processes create only one set of side effects
 across the 100-card batch boundary. Both query plans use `cards_board_active`
 and an indexed Not Now lookup. The hourly scheduler's database claim and
 larger MySQL account sweeps still need load testing.
+`tests/mysql_unused_tag_cleanup.py` checks the daily unused-tag job's manual
+command on MySQL 8.4.11. Two concurrent commands deleted 209 unused tags across
+the 100-tag batch boundary, retained a used tag, updated or removed affected
+saved filters, and left no work for a repeat command. The timed schedule and a
+tag insertion racing with cleanup remain unverified.
 It checks a named-column card JSON ETag, a conditional 304 response, and
 invalidation after a step is added to that column's card.
 The pinned source's `Card::Entropic` suite passed 8 tests and 19 assertions on
