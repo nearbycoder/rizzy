@@ -1,0 +1,124 @@
+{
+  "fixture_cards": 100,
+  "rich_preview": true,
+  "sample_parity": {
+    "fizzy": {
+      "visible_cards": 15,
+      "html_bytes": 161442
+    },
+    "rizzy": {
+      "visible_cards": 15,
+      "html_bytes": 48482
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 5.0,
+        "requests": 397,
+        "errors": {},
+        "rps": 79.4,
+        "p50_ms": 10.91,
+        "p95_ms": 19.45,
+        "p99_ms": 43.23
+      },
+      {
+        "concurrency": 8,
+        "seconds": 5.05,
+        "requests": 970,
+        "errors": {},
+        "rps": 192.2,
+        "p50_ms": 40.56,
+        "p95_ms": 65.08,
+        "p99_ms": 70.41
+      },
+      {
+        "concurrency": 32,
+        "seconds": 5.18,
+        "requests": 960,
+        "errors": {},
+        "rps": 185.3,
+        "p50_ms": 169.68,
+        "p95_ms": 207.86,
+        "p99_ms": 227.58
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 1,
+        "seconds": 5.0,
+        "requests": 9323,
+        "errors": {},
+        "rps": 1864.5,
+        "p50_ms": 0.52,
+        "p95_ms": 0.65,
+        "p99_ms": 0.74
+      },
+      {
+        "concurrency": 8,
+        "seconds": 5.0,
+        "requests": 12437,
+        "errors": {},
+        "rps": 2486.1,
+        "p50_ms": 3.29,
+        "p95_ms": 4.36,
+        "p99_ms": 5.28
+      },
+      {
+        "concurrency": 32,
+        "seconds": 5.01,
+        "requests": 10791,
+        "errors": {},
+        "rps": 2152.9,
+        "p50_ms": 14.74,
+        "p95_ms": 16.9,
+        "p99_ms": 18.04
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 1,
+      "rps_ratio_rizzy_over_fizzy": 23.482,
+      "p95_ratio_fizzy_over_rizzy": 29.923
+    },
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 12.935,
+      "p95_ratio_fizzy_over_rizzy": 14.927
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 11.618,
+      "p95_ratio_fizzy_over_rizzy": 12.299
+    }
+  ],
+  "fizzy_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_commit": "73de6d9d056e380508cd12e8cb57c1776e4d6992",
+  "rizzy_binary_sha256": "c0ecf1d95dd7b49295644eef4d9eea2500d2f0469df918d0c1101fa065218707",
+  "assigned_server_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "command": [
+    "python3",
+    "bench/cards_html.py",
+    "--cards",
+    "100",
+    "--seconds",
+    "5",
+    "--concurrency",
+    "1,8,32",
+    "--rich"
+  ],
+  "source_workers": 2,
+  "database": "fresh SQLite databases for each application",
+  "browser_login": "Fizzy magic link; Rizzy local development magic link on loopback"
+}
