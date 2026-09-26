@@ -339,3 +339,8 @@ This supports higher throughput through application-process scaling on this
 local, four-board API workload. The shared account card counter and database
 remain contention points; other routes, larger datasets, durability under
 failure, and multiple hosts still need direct tests.
+The write-path audit found additional routes that update cards without first
+locking their parent board, including draft publication, step changes, triage,
+watches, and reactions. The current lock fix is verified for the mixed workload;
+these other routes need concurrent MySQL tests and a consistent lock order
+before treating clustered write reliability as complete.
