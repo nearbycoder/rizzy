@@ -297,6 +297,29 @@ fn column_html(
     html
 }
 
+pub(super) fn named_column_html(
+    account: i64,
+    board_id: &str,
+    id: &str,
+    name: &str,
+    color: &str,
+    count: i64,
+) -> String {
+    column_html(
+        account,
+        board_id,
+        id,
+        name,
+        color,
+        count,
+        None,
+        None,
+        &format!("/columns/{id}"),
+        false,
+        None,
+    )
+}
+
 async fn board_footer(app: &App, principal: &Principal, board_id: &str) -> Result<String> {
     let rows = sqlx::query("SELECT u.id,u.name FROM accesses a JOIN users u ON u.id=a.user_id WHERE a.board_id=? AND a.involvement='watching' AND u.active=1 ORDER BY lower(u.name),u.id")
         .bind(board_id)

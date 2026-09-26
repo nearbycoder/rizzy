@@ -8135,43 +8135,120 @@ async fn show_column(
     };
     Ok(with_card_page_headers(response, &etag))
 }
+fn column_input(headers: &HeaderMap, body: &[u8]) -> Result<Value> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    if form {
+        let mut fields = serde_json::Map::new();
+        for (key, value) in url::form_urlencoded::parse(body) {
+            let field = key
+                .strip_prefix("column[")
+                .and_then(|key| key.strip_suffix(']'))
+                .unwrap_or(&key);
+            if matches!(field, "name" | "color") {
+                fields.insert(field.to_owned(), Value::String(value.into_owned()));
+            }
+        }
+        Ok(json!({"column": fields}))
+    } else {
+        serde_json::from_slice(body).map_err(|_| bad("Invalid JSON"))
+    }
+}
+async fn column_stream_markup(
+    app: &App,
+    p: &Principal,
+    board_id: &str,
+    c: &DbRow,
+) -> Result<String> {
+    let id: String = c.get("id");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE board_id=? AND column_id=? AND status='published' AND closed=0 AND postponed=0")
+        .bind(board_id).bind(&id).fetch_one(&app.db).await.map_err(db_err)?;
+    Ok(board_page::named_column_html(
+        p.slug,
+        board_id,
+        &id,
+        &c.get::<String, _>("name"),
+        &c.get::<String, _>("color"),
+        count,
+    ))
+}
 async fn create_column(
     State(app): Shared,
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     board(&app, &p, &board_id).await?;
+    let body = column_input(&headers, &body)?;
     let v = nested(&body, "column");
     let name = required(v, "name")?;
     let color = string(v, "color").unwrap_or_else(|| "var(--color-card-default)".into());
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
     let position: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(position),-1)+1 FROM columns WHERE board_id=?")
+        sqlx::query_scalar("SELECT COALESCE(MAX(position),0)+1 FROM columns WHERE board_id=?")
             .bind(&board_id)
-            .fetch_one(&app.db)
+            .fetch_one(&mut *tx)
             .await
             .map_err(db_err)?;
     let id = id();
     let timestamp = now();
     sqlx::query("INSERT INTO columns(id,account_id,board_id,name,color,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&board_id).bind(name).bind(color).bind(position).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+        .bind(&id).bind(&p.account_id).bind(&board_id).bind(name).bind(color).bind(position).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(&board_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     let c = checked_column(&app, &p, &board_id, &id).await?;
-    Ok(created(
-        format!("/{account}/boards/{board_id}/columns/{id}.json"),
-        column_json(&p, &c, &base(&headers)),
-    ))
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(created(
+            format!("/{account}/boards/{board_id}/columns/{id}.json"),
+            column_json(&p, &c, &base(&headers)),
+        ));
+    }
+    if wants_turbo_stream(&headers) {
+        let content = column_stream_markup(&app, &p, &board_id, &c).await?;
+        let mut stream = format!(
+            "<turbo-stream action=\"before\" target=\"closed-cards\" method=\"morph\"><template>{content}</template></turbo-stream>"
+        );
+        let previous = sqlx::query("SELECT * FROM columns WHERE board_id=? AND position<? ORDER BY position DESC,id DESC LIMIT 1")
+            .bind(&board_id).bind(position).fetch_optional(&app.db).await.map_err(db_err)?;
+        if let Some(previous) = previous {
+            let previous_id: String = previous.get("id");
+            let content = column_stream_markup(&app, &p, &board_id, &previous).await?;
+            stream.push_str(&format!(
+                "<turbo-stream action=\"replace\" target=\"column_{}\" method=\"morph\"><template>{content}</template></turbo-stream>",
+                escape(&previous_id),
+            ));
+        }
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
 }
 async fn update_column(
     State(app): Shared,
     Path((account, board_id, column_id)): Path<(String, String, String)>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>> {
+    body: Bytes,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = checked_column(&app, &p, &board_id, &column_id).await?;
+    let body = column_input(&headers, &body)?;
     let v = nested(&body, "column");
     let name = string(v, "name").unwrap_or_else(|| c.get("name"));
     if name.trim().is_empty() {
@@ -8206,23 +8283,88 @@ async fn update_column(
         tx.commit().await.map_err(db_err)?;
     }
     let c = checked_column(&app, &p, &board_id, &column_id).await?;
-    Ok(Json(column_json(&p, &c, &base(&headers))))
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(Json(column_json(&p, &c, &base(&headers))).into_response());
+    }
+    if wants_turbo_stream(&headers) {
+        let content = column_stream_markup(&app, &p, &board_id, &c).await?;
+        let stream = format!(
+            "<turbo-stream action=\"replace\" target=\"column_{}\" method=\"morph\"><template>{content}</template></turbo-stream>",
+            escape(&column_id),
+        );
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
 }
 async fn delete_column(
     State(app): Shared,
     Path((account, board_id, column_id)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     checked_column(&app, &p, &board_id, &column_id).await?;
-    sqlx::query("DELETE FROM columns WHERE id=? AND board_id=?")
-        .bind(column_id)
-        .bind(board_id)
-        .execute(&app.db)
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
+    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+    let other_columns = sqlx::query("SELECT id,updated_at FROM columns WHERE board_id=? AND id<>?")
+        .bind(&board_id)
+        .bind(&column_id)
+        .fetch_all(&mut *tx)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    let timestamp = now();
+    sqlx::query("UPDATE cards SET column_id=CASE WHEN column_id=? THEN NULL ELSE column_id END,updated_at=? WHERE board_id=?")
+        .bind(&column_id)
+        .bind(&timestamp)
+        .bind(&board_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("DELETE FROM columns WHERE id=? AND board_id=?")
+        .bind(&column_id)
+        .bind(&board_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    // ActiveRecord touch_all skips card callbacks, so unrelated column
+    // validators retain their prior timestamps after the board-wide touch.
+    for column in other_columns {
+        sqlx::query("UPDATE columns SET updated_at=? WHERE id=?")
+            .bind(column.get::<String, _>("updated_at"))
+            .bind(column.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+        .bind(&timestamp)
+        .bind(&board_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    let html = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_none_or(|value| value.contains("text/html") || value.contains("*/*"));
+    if html {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("/{account}/boards/{board_id}"))],
+        )
+            .into_response());
+    }
+    Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
 }
 
 async fn move_column(

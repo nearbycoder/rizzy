@@ -139,6 +139,29 @@ def main():
             )
             assert status == 201, (status, destination)
 
+            status, columns_board, _ = call(
+                bases[0], account, token, "/boards", "POST",
+                {"board": {"name": "Concurrent columns"}}
+            )
+            assert status == 201, (status, columns_board)
+
+            def create_column(index):
+                return call(
+                    bases[index % 4], account, token,
+                    f"/boards/{columns_board['id']}/columns", "POST",
+                    {"column": {"name": f"Column {index:02d}"}},
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+                created_columns = list(pool.map(create_column, range(20)))
+            failures = [(index, status, value) for index, (status, value, _)
+                        in enumerate(created_columns) if status != 201]
+            assert not failures, failures[:5]
+            assert mysql_scalar(
+                url, "SELECT GROUP_CONCAT(position ORDER BY position) FROM columns "
+                f"WHERE board_id = '{columns_board['id']}'"
+            ) == ",".join(str(position) for position in range(1, 21))
+
             def create(index):
                 return call(
                     bases[index % 4], account, token, f"/boards/{board['id']}/cards", "POST",
@@ -528,7 +551,7 @@ def main():
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            print("MySQL cluster passed: 20 ordered concurrent columns, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion and watch/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

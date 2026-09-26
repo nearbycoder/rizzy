@@ -156,6 +156,14 @@ updating it. Three fresh-database cluster flows passed after the fix, each inclu
 move/title pairs and opposite-direction moves. This checks those races on one
 MySQL host, not all concurrent card writes or multi-host deployment.
 
+Column creation now locks its board while allocating the next position and
+touches the board. Deletion locks the board, updates all of its cards without
+changing their activity timestamps, removes the column, and restores other
+columns' timestamps after MySQL card triggers. The core flow checks those
+timestamp effects. The four-process cluster flow also creates 20 columns on
+one board concurrently and checks that their positions are exactly 1 through
+20. Large-board delete throughput and cross-host behavior remain unmeasured.
+
 The schema and commands were exercised on a disposable local MariaDB 13.0.2
 instance on 2026-09-26. The Rust binary created all 63 tables through SQLx,
 then seeded one account, two users, one join code, and one access token. The

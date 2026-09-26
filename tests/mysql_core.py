@@ -552,6 +552,47 @@ def main():
                                 extra_headers=timezone_headers)
             assert {card["title"] for card in closed_today} == {"closed after local midnight"}
             call(base, token, scope + f"/boards/{window_board['id']}", "DELETE", expected=204)
+            lifecycle_board = call(base, token, scope + "/boards", "POST",
+                                   {"board": {"name": "MySQL column lifecycle"}}, 201)
+            lifecycle_path = scope + f"/boards/{lifecycle_board['id']}"
+            board_stamp = mysql_scalar(url, f"SELECT updated_at FROM boards WHERE id='{lifecycle_board['id']}'")
+            time.sleep(.02)
+            first = call(base, token, lifecycle_path + "/columns", "POST",
+                         {"column": {"name": "First"}}, 201)
+            assert mysql_scalar(url, f"SELECT updated_at FROM boards WHERE id='{lifecycle_board['id']}'") != board_stamp
+            second = call(base, token, lifecycle_path + "/columns", "POST",
+                          {"column": {"name": "Second"}}, 201)
+            assert mysql_scalar(url,
+                f"SELECT GROUP_CONCAT(position ORDER BY position) FROM columns WHERE board_id='{lifecycle_board['id']}'") == "1,2"
+            lifecycle_cards = [call(base, token, lifecycle_path + "/cards", "POST",
+                                    {"card": {"title": title}}, 201)
+                               for title in ("First card", "Second card", "Maybe card")]
+            for card, column in ((lifecycle_cards[0], first), (lifecycle_cards[1], second)):
+                call(base, token, scope + f"/cards/{card['number']}/triage", "POST",
+                     {"column_id": column["id"]}, 204)
+            def lifecycle_card_rows():
+                return [mysql_scalar(url,
+                    f"SELECT updated_at,last_active_at,COALESCE(column_id,'NO_COLUMN') "
+                    f"FROM cards WHERE id='{card['id']}'").split("\t")
+                    for card in lifecycle_cards]
+            before_cards = lifecycle_card_rows()
+            other_column_stamp = mysql_scalar(url,
+                f"SELECT updated_at FROM columns WHERE id='{second['id']}'")
+            before_board = mysql_scalar(url,
+                f"SELECT updated_at FROM boards WHERE id='{lifecycle_board['id']}'")
+            time.sleep(.02)
+            call(base, token, lifecycle_path + f"/columns/{first['id']}",
+                 "DELETE", expected=204)
+            after_cards = lifecycle_card_rows()
+            assert all(before[0] != after[0] and before[1] == after[1]
+                       for before, after in zip(before_cards, after_cards))
+            assert after_cards[0][2] == "NO_COLUMN" and after_cards[1][2] == second["id"]
+            assert after_cards[2][2] == "NO_COLUMN"
+            assert mysql_scalar(url,
+                f"SELECT updated_at FROM columns WHERE id='{second['id']}'") == other_column_stamp
+            assert mysql_scalar(url,
+                f"SELECT updated_at FROM boards WHERE id='{lifecycle_board['id']}'") != before_board
+            call(base, token, lifecycle_path, "DELETE", expected=204)
             detail = ", and metadata" if metadata_checked else ""
             print(f"MySQL core passed: seed, board, card, column, triage, step, tag, entropy, closing soon, assignment, watch, pin, saved filter, event/mention notifications, push drain, settings, unsubscribe, timezone and local date filters, public board, comment, search, browser card/menu, close, assigned card move, reads{detail}")
         except Exception:
