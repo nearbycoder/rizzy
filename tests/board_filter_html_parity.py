@@ -59,7 +59,8 @@ def run(target):
         assert 'id="filter-settings-save-toggle"' not in plain, target["name"]
         if target["name"] == "rizzy":
             assert 'cards--maybe is-expanded' in plain and 'board-tools__watch-toggle' in plain
-            assert 'data-card-number=' in plain and 'class="bottom-bar"' in plain
+            assert 'data-card-number=' in plain and 'id="footer"' in plain
+            assert 'data-open-menu' in plain and 'id="pin-tray"' in plain
             target["extra_headers"] = {"X-Rizzy-Card-Fragment": "1"}
             try:
                 status, _, fragment = request(target, board_path + "/columns/stream?page=2", accept="text/html")

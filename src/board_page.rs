@@ -12,6 +12,24 @@ use super::{
 
 const TEMPLATE: &str = include_str!("../static/board.html");
 
+fn add_shell(values: &mut HashMap<&'static str, String>, account: i64) {
+    values.insert(
+        "SHELL_STYLES",
+        [
+            ":root{--color-canvas:#101b20;--color-ink:#f4f5f6}",
+            include_str!("../static/shell_footer.css"),
+            include_str!("../static/notification_cards.css"),
+            include_str!("../static/menu_overlay.css"),
+        ]
+        .concat(),
+    );
+    values.insert(
+        "SHELL_FOOTER",
+        include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &account.to_string()),
+    );
+    values.insert("SHELL_SCRIPT", include_str!("../static/events.js").into());
+}
+
 fn webhook_link(principal: &Principal, board_id: &str) -> String {
     if principal.role == "owner" || principal.role == "admin" {
         format!(
@@ -289,11 +307,10 @@ pub(super) async fn show_filtered(
         ));
     }
     list.push_str("</section></div>");
-    let values = HashMap::from([
+    let mut values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
-        ("HOME_PATH", format!("/{}/", principal.slug)),
         ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
         (
             "SETTINGS_LINK",
@@ -312,6 +329,7 @@ pub(super) async fn show_filtered(
         ),
         ("COLUMNS", list),
     ]);
+    add_shell(&mut values, principal.slug);
     Ok(Html(render_template(TEMPLATE, &values)))
 }
 
@@ -695,11 +713,10 @@ pub(super) async fn show(
         None,
     ));
     column_markup.push_str("</div>");
-    let values = HashMap::from([
+    let mut values = HashMap::from([
         ("ACCOUNT", account.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
-        ("HOME_PATH", format!("/{account}/")),
         ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
         (
             "SETTINGS_LINK",
@@ -723,5 +740,6 @@ pub(super) async fn show(
         ),
         ("COLUMNS", column_markup),
     ]);
+    add_shell(&mut values, account);
     Ok(Html(render_template(TEMPLATE, &values)))
 }

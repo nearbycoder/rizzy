@@ -1,5 +1,14 @@
 # Comparative load runs
 
+The [shared-shell signed-in board run](results/board-html-1000-shared-shell-2026-09-27.json)
+used fresh 1,000-card fixtures, 15 visible previews on each page, eight shared
+CPUs, eight Fizzy workers, and one release Rizzy process. Two-second runs at
+eight and 32 clients had zero errors; Rizzy served 4,397 and 4,953 requests/s
+versus Fizzy's 165 and 214. Rust HTML was 90,722 bytes versus 156,477, and
+Rizzy's warm board cache and markup still differ. These figures cover one local
+read, not whole-app speed or maximum scale. Reproduce with
+`python3 bench/board_html_fresh.py --cards 1000 --seconds 2 --concurrency 8,32`.
+
 The [shared-shell all-cards run](results/cards-html-1000-shared-shell-2026-09-27.json)
 used fresh 1,000-card fixtures and checked 15 visible previews on both
 signed-in pages. Eight Fizzy workers and one Rizzy process shared eight CPUs.
