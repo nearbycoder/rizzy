@@ -11,10 +11,12 @@ import urllib.request
 from draft_workflow_parity import request as browser_request
 
 
-def request(target, path, method="GET", payload=None, include_headers=False):
+def request(target, path, method="GET", payload=None, include_headers=False,
+            include_create_headers=False, include_etag_value=False, extra_headers=None):
     scoped = f"/{target['account']}{path}"
     headers = {"Authorization": f"Bearer {target['token']}",
                "Accept": "application/json", "Content-Type": "application/json"}
+    headers.update(extra_headers or {})
     req = urllib.request.Request(
         target["url"] + scoped,
         data=json.dumps(payload).encode() if payload is not None else None,
@@ -31,6 +33,13 @@ def request(target, path, method="GET", payload=None, include_headers=False):
         except json.JSONDecodeError:
             value = None
         result = (response.status, content_type, value)
+        if include_create_headers:
+            etag = response.headers.get("ETag")
+            expected = 'W/"' + hashlib.sha256(raw).hexdigest()[:32] + '"' if raw else None
+            result += ({"has_etag": bool(etag), "body_digest_etag": etag == expected,
+                        "cache_control": response.headers.get("Cache-Control")},)
+        if include_etag_value:
+            result += (response.headers.get("ETag"),)
         if include_headers:
             total = response.headers.get("X-Total-Count")
             result += ({"total": int(total) if total is not None else None,
@@ -97,10 +106,15 @@ def stable_json(value):
 
 def fixture(target):
     name = "Valid route parity"
+    create_headers = {}
 
     def create(path, payload):
-        status, content_type, value = request(target, path, "POST", payload)
+        status, content_type, value, headers = request(
+            target, path, "POST", payload, include_create_headers=True)
         assert status == 201 and content_type == "application/json", (target["name"], path, status, value)
+        normalized_path = re.sub(r"(?<![0-9A-Za-z])[0-9a-z]{25,26}(?![0-9A-Za-z])",
+                                 ":id", path)
+        create_headers.setdefault(normalized_path, []).append(headers)
         return value
 
     status, _, users = request(target, "/users")
@@ -132,10 +146,21 @@ def fixture(target):
     status, _, _ = request(target, f"/cards/{number}/taggings", "POST",
                            {"tag_title": "Route parity tag"})
     assert status == 204, (target["name"], "tagging", status)
+    status, content_type, _, update_headers, update_etag = request(
+        target, f"/boards/{board_id}", "PATCH", {"board": {"name": name}},
+        include_create_headers=True, include_etag_value=True)
+    assert status == 200 and content_type == "application/json", (
+        target["name"], "board update", status, content_type)
+    conditional_status, _, _, conditional_write_headers = request(
+        target, f"/boards/{board_id}", "PATCH", {"board": {"name": name}},
+        include_create_headers=True, extra_headers={"If-None-Match": update_etag})
+    assert conditional_status == 200, (target["name"], "conditional board write", conditional_status)
     return {"name": name, "user_id": user_id, "board_id": board_id,
             "column_id": column_id, "webhook_id": webhook_id,
             "number": number, "card_id": card["id"], "step_id": step["id"],
-            "comment_id": comment["id"], "empty_tags_etag": empty_etag}
+            "comment_id": comment["id"], "empty_tags_etag": empty_etag,
+            "create_headers": create_headers, "update_headers": update_headers,
+            "conditional_write_headers": conditional_write_headers}
 
 
 def semantic(label, value):
@@ -267,6 +292,9 @@ def run(target):
     for label in ("users", "tags"):
         result[f"conditional_{label}"] = conditional_get(target, paths[label])
     result["empty_tags_etag"] = item["empty_tags_etag"]
+    result["create_headers"] = item["create_headers"]
+    result["update_headers"] = item["update_headers"]
+    result["conditional_write_headers"] = item["conditional_write_headers"]
     return result
 
 

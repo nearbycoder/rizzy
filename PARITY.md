@@ -969,7 +969,13 @@ weak ETag for an identical empty tag body, and exercises conditional `304`
 responses on populated user and tag lists. Rizzy adds body-derived ETags to
 successful JSON GETs that do not already have a route-specific validator;
 the pinned source's Rack middleware uses the same SHA-256 prefix and
-cache-control default. The existing board and named-column pagination/ETag
+cache-control default. The suite now also compares body-derived validators and
+private cache control for ten JSON `201` creates, a JSON `200` board update, and
+a repeated `PATCH` with `If-None-Match` that must still return `200`. Rizzy's
+buffered response middleware covers `200` and `201` JSON and HTML bodies on
+all methods, with conditional `304` handling limited to GET and HEAD. Four
+paired reaction Turbo Stream create/delete responses also match Rack's body
+ETag and cache policy. The existing board and named-column pagination/ETag
 checks still pass. Other formats and conditional routes remain to be compared.
 The `route-get-valid-html` suite also uses persisted fixtures and a signed-in
 browser session to compare status, content type, ETag presence, and resource-text

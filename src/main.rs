@@ -320,12 +320,11 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-async fn buffered_get_etag(request: Request, next: Next) -> Response {
+async fn buffered_response_etag(request: Request, next: Next) -> Response {
     let conditional = request.headers().get(header::IF_NONE_MATCH).cloned();
-    let get = request.method() == Method::GET;
+    let conditional_method = matches!(request.method(), &Method::GET | &Method::HEAD);
     let response = next.run(request).await;
-    if !get
-        || response.status() != StatusCode::OK
+    if !matches!(response.status(), StatusCode::OK | StatusCode::CREATED)
         || response.headers().contains_key(header::ETAG)
         || response.headers().contains_key(header::LAST_MODIFIED)
         || !response
@@ -333,7 +332,9 @@ async fn buffered_get_etag(request: Request, next: Next) -> Response {
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| {
-                value.starts_with("application/json") || value.starts_with("text/html")
+                value.starts_with("application/json")
+                    || value.starts_with("text/html")
+                    || value.starts_with("text/vnd.turbo-stream.html")
             })
     {
         return response;
@@ -359,7 +360,7 @@ async fn buffered_get_etag(request: Request, next: Next) -> Response {
             HeaderValue::from_static("max-age=0, private, must-revalidate"),
         );
     }
-    if conditional.as_ref() == Some(&etag) {
+    if conditional_method && parts.status == StatusCode::OK && conditional.as_ref() == Some(&etag) {
         parts.status = StatusCode::NOT_MODIFIED;
         parts.headers.remove(header::CONTENT_TYPE);
         parts.headers.remove(header::CONTENT_LENGTH);
@@ -4771,7 +4772,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn(mark_request_format))
         .layer(middleware::from_fn(html_error_contract))
         .layer(middleware::from_fn(content_security_policy))
-        .layer(middleware::from_fn(buffered_get_etag))
+        .layer(middleware::from_fn(buffered_response_etag))
         .layer(middleware::from_fn(assign_request_id));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
     if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
