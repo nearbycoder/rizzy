@@ -32,8 +32,14 @@ def check(target):
                   b"Home", b"Assigned to me", b"Added by me", b"My Profile"):
         assert label in body, (target["name"], label)
     etag = headers["ETag"]
-    status, _, _ = request({**target,"extra_headers":{"If-None-Match":etag}}, path, accept="text/html")
+    status, not_modified_headers, _ = request({**target,"extra_headers":{"If-None-Match":etag}}, path, accept="text/html")
     assert status == 304, (target["name"], "unchanged menu", status)
+    if target["name"] == "rizzy":
+        nonce = re.search(rb'<script nonce="([^"]+)"', body)
+        assert nonce and f"'nonce-{nonce.group(1).decode()}'" in headers["Content-Security-Policy"], (
+            "menu script CSP", headers)
+        assert "Content-Security-Policy" not in not_modified_headers, (
+            "cached menu CSP was replaced", not_modified_headers)
 
     board_name = f"Menu parity {time.time_ns()}"
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board":{"name":board_name}}, bearer=True)

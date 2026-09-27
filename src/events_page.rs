@@ -48,6 +48,36 @@ pub(super) async fn icon(Path(filename): Path<String>) -> Response {
         .into_response()
 }
 
+pub(super) async fn menu_icon(Path(filename): Path<String>) -> Response {
+    let svg = match filename.as_str() {
+        "add.svg" => include_str!("../static/menu-icons/add.svg"),
+        "board.svg" => include_str!("../static/menu-icons/board.svg"),
+        "person.svg" => include_str!("../static/menu-icons/person.svg"),
+        "tag.svg" => include_str!("../static/menu-icons/tag.svg"),
+        "home.svg" => include_str!("../static/menu-icons/home.svg"),
+        "clipboard.svg" => include_str!("../static/menu-icons/clipboard.svg"),
+        "person-add.svg" => include_str!("../static/menu-icons/person-add.svg"),
+        "settings.svg" => include_str!("../static/menu-icons/settings.svg"),
+        "bell.svg" => include_str!("../static/menu-icons/bell.svg"),
+        "logout.svg" => include_str!("../static/menu-icons/logout.svg"),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("image/svg+xml"),
+            ),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=300"),
+            ),
+        ],
+        svg,
+    )
+        .into_response()
+}
+
 #[derive(Default)]
 struct Params {
     day: Option<String>,
@@ -161,13 +191,14 @@ fn view_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION.get_or_init(|| {
         hash(&format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}",
             include_str!("events_page.rs"),
             include_str!("../static/events.css"),
             include_str!("../static/events.js"),
             include_str!("../assets/timezone_cookie.html"),
             include_str!("../static/home_footer.html"),
-            include_str!("../static/notification_cards.css")
+            include_str!("../static/notification_cards.css"),
+            include_str!("../static/menu_overlay.css")
         ))
     })
 }
@@ -1069,9 +1100,10 @@ pub(super) async fn index(
         include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &p.slug.to_string());
     let account = p.slug;
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}{}</style></head><body data-account=\"{account}\"><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\"><span class=\"brand__mark\" aria-hidden=\"true\"></span>Rizzy<span class=\"brand__chevron\" aria-hidden=\"true\">⌄</span></a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main>{footer}<script>{}</script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}{}{}</style></head><body data-account=\"{account}\"><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\" data-open-menu aria-haspopup=\"dialog\" aria-expanded=\"false\"><span class=\"brand__mark\" aria-hidden=\"true\"></span>Rizzy<span class=\"brand__chevron\" aria-hidden=\"true\">⌄</span></a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><dialog id=\"menu-dialog\" aria-label=\"Rizzy menu\"><turbo-frame id=\"my_menu\"></turbo-frame></dialog><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main>{footer}<script>{}</script></body></html>",
         include_str!("../static/events.css"),
         include_str!("../static/notification_cards.css"),
+        include_str!("../static/menu_overlay.css"),
         p.slug,
         p.slug,
         p.slug,

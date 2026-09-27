@@ -3958,6 +3958,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/service-worker.js", get(pwa::service_worker))
         .route("/assets/pwa/{filename}", get(pwa::asset))
         .route("/assets/events/icons/{filename}", get(events_page::icon))
+        .route("/assets/menu/icons/{filename}", get(events_page::menu_icon))
         .route("/app-icon.png", get(pwa::icon))
         .route("/app-icon-192.png", get(pwa::icon))
         .route("/app-icon-192-maskable.png", get(pwa::icon))
@@ -5423,6 +5424,15 @@ fn dynamic_csp(nonce: &str) -> String {
 async fn content_security_policy(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let config = csp_config();
+    if response.status() == StatusCode::NOT_MODIFIED {
+        response
+            .headers_mut()
+            .remove(header::CONTENT_SECURITY_POLICY);
+        response
+            .headers_mut()
+            .remove(header::CONTENT_SECURITY_POLICY_REPORT_ONLY);
+        return response;
+    }
     if config.disabled {
         response
             .headers_mut()

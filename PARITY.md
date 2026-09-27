@@ -86,8 +86,22 @@ label and empty state, and source-sized header and footer controls. Measured
 grid heights were 477.8 px in Fizzy and 478.9 px in Rizzy; the first card was
 98.86 and 98.89 px tall. The browser rendered a local event time on the first
 visit despite the initial UTC response and reported no page errors. Colors,
-avatar treatment, exact icon artwork, menu behavior, and other screen states
+avatar treatment, exact event icon artwork, and other screen states
 still need parity work. The existing paired Home media and add-card checks pass.
+
+The Home account trigger now opens a nonmodal menu over the page. A fresh
+1280 × 800 Chromium comparison captured [Fizzy's menu](docs/visual-baselines/fizzy-home-menu-1280.png)
+and [Rizzy's menu](docs/visual-baselines/rizzy-home-menu-1280.png). The dialog
+has the source dimensions, search field, quick links, grouped navigation,
+source SVG icons, close control, keyboard jump, and sign-out action. Browser
+checks covered filtering, arrow navigation, `J`, Escape, outside click, direct
+menu close, and direct menu sign-out without page errors. The paired
+`tests/my_menu_parity.py` checks content, conditional caching, board and saved
+view invalidation, and JSON rejection; `tests/home_add_card_parity.py` and
+`tests/csp_configuration_parity.py` still pass. A `304 Not Modified` response
+now leaves the cached page's Content Security Policy nonce intact, which keeps
+its scripts running after revalidation. The menu's colophon, exact vertical
+spacing, and all conditional sections and navigation states remain incomplete.
 
 The Home footer now opens source-shaped Pins and Notifications trays and an
 inline Search bar. The Pins HTML response contains rich card previews and

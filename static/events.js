@@ -65,6 +65,90 @@ document.addEventListener('keydown', event => {
   }
 });
 
+const menuTrigger = document.querySelector('[data-open-menu]');
+const menuDialog = document.getElementById('menu-dialog');
+if (menuTrigger && menuDialog) {
+  const menuFrame = menuDialog.querySelector('#my_menu');
+  let menuLoad = 0;
+  function closeMenu() {
+    if (menuDialog.open) menuDialog.close();
+    menuTrigger.setAttribute('aria-expanded', 'false');
+    menuTrigger.focus();
+  }
+  async function openMenu() {
+    for (const other of document.querySelectorAll('dialog[open]')) if (other !== menuDialog) other.close();
+    document.querySelector('.search__reset')?.click();
+    menuDialog.show();
+    menuTrigger.setAttribute('aria-expanded', 'true');
+    const loadId = ++menuLoad;
+    menuFrame.textContent = 'Loading menu…';
+    try {
+      const response = await fetch(menuTrigger.href, { headers: { Accept: 'text/html' } });
+      if (!response.ok) throw new Error('Could not load menu');
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const loaded = page.getElementById('my_menu');
+      if (!loaded) throw new Error('Menu frame is unavailable');
+      if (loadId !== menuLoad || !menuDialog.open) return;
+      menuFrame.replaceChildren(...loaded.cloneNode(true).childNodes);
+      menuDialog.querySelector('#menu-search')?.focus();
+    } catch {
+      if (loadId === menuLoad) menuFrame.innerHTML = `<a href="${menuTrigger.href}">Open menu</a>`;
+    }
+  }
+  menuTrigger.addEventListener('click', event => {
+    event.preventDefault();
+    if (menuDialog.open) closeMenu(); else openMenu();
+  });
+  menuDialog.addEventListener('close', () => {
+    if (!menuDialog.open) menuTrigger.setAttribute('aria-expanded', 'false');
+  });
+  menuDialog.addEventListener('click', event => {
+    if (event.target.closest('[data-menu-close]')) closeMenu();
+  });
+  menuDialog.addEventListener('input', event => {
+    if (event.target.id !== 'menu-search') return;
+    const query = event.target.value.trim().toLocaleLowerCase();
+    for (const item of menuFrame.querySelectorAll('[data-filter-target="item"]')) {
+      item.hidden = !item.textContent.toLocaleLowerCase().includes(query);
+    }
+    for (const section of menuFrame.querySelectorAll('.nav__section')) {
+      section.hidden = !!query && !section.querySelector('[data-filter-target="item"]:not([hidden])');
+      if (section.classList.contains('nav__section--secret')) {
+        if (query) section.setAttribute('data-is-filtering', ''); else section.removeAttribute('data-is-filtering');
+      }
+    }
+  });
+  menuDialog.addEventListener('submit', async event => {
+    const form = event.target.closest('form[action="/session"]');
+    if (!form) return;
+    event.preventDefault();
+    const response = await fetch('/session', { method: 'DELETE', headers: { Accept: 'application/json' } });
+    if (response.ok) window.location.assign('/session/new');
+  });
+  menuDialog.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); closeMenu(); return; }
+    const items = [...menuFrame.querySelectorAll('.popup__item:not([hidden]) a, .popup__item:not([hidden]) button')]
+      .filter(item => item.getClientRects().length);
+    if (event.key === 'Enter' && event.target.id === 'menu-search' && items.length) {
+      event.preventDefault(); items[0].click(); return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement);
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    items[(current + direction + items.length) % items.length]?.focus();
+  });
+  document.addEventListener('click', event => {
+    if (menuDialog.open && !menuDialog.contains(event.target) && !menuTrigger.contains(event.target)) closeMenu();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.repeat || event.altKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (event.key.toLowerCase() !== 'j') return;
+    event.preventDefault();
+    if (menuDialog.open) closeMenu(); else openMenu();
+  });
+}
+
 const footer = document.getElementById('footer');
 if (footer) {
   const account = document.body.dataset.account;
