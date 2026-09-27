@@ -53,11 +53,11 @@ apps' generated, sanitized, and truncated `X-Request-Id` response headers,
 including a 404, and matches request IDs on attachment, transfer, and deletion
 ledger entries. Background-job request context and untested request paths
 remain open. The MySQL schema now permits the source's 255-character request
-IDs and startup widens older columns; that migration has not yet been run
-against a live MySQL server. The paired check also covers a stored 255-character
-ID, replacement entries, and board deletion. A fresh schema regeneration now
-matches `schema.mysql.sql` exactly; the new `card_bulk_touches` foreign key
-still needs a live MySQL install and upgrade check.
+IDs and startup widens older columns. The paired check also covers a stored
+255-character ID, replacement entries, and board deletion. A fresh schema
+regeneration matches `schema.mysql.sql` exactly. On disposable MySQL 8.4.11,
+`tests/mysql_schema_upgrade.py` verified both the older request ID column
+upgrade and restoration of the `card_bulk_touches` foreign key.
 
 The [post-storage-ledger scoped read run](bench/results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
 measured the new attachment lookup on four JSON read routes using fresh
@@ -288,6 +288,20 @@ The newer [balanced Rust-client repeat](bench/results/scoped-api-rust-client-rep
 `tests/card_edit_html_parity.py` compares the dedicated edit route's Turbo frame, form fields, Lexxy editor, JSON rejection, save, and reloaded title against both apps. Chromium submitted the Rust form and showed the updated card without errors. Fizzy's edit route inserts the editor into the card view and updates its save control via Turbo; Rizzy's route currently renders a standalone editing page with a matching frame and a simpler save flow.
 
 `tests/webhooks_html_parity.py` compares the browser webhook list, new and edit forms, validation, create/update/delete redirects, rendered detail, and JSON collection against Fizzy. Chromium created a webhook and opened its edit form; `tests/webhooks.py` confirmed the JSON API and delivery worker still pass. The Rust pages use simpler styling, and specialized webhook payload formats and broader delivery parity remain outstanding.
+
+`tests/webhook_delinquency_timestamp_parity.py` compares blocked delivery
+failures and deactivation against the pinned Fizzy app. Both preserve the
+webhook's update timestamp after the first failure, retain the first-failure
+time, and advance the webhook timestamp when the tenth failure deactivates it
+after an hour. Rizzy now stores tracker rows separately, exports one even for
+a zero-failure webhook, and restores source tracker rows on account import.
+The pinned Fizzy import probe also accepted a Rizzy account ZIP and restored
+one tracker per webhook.
+`tests/webhook_tracker_migration.py` checks idempotent SQLite backfill from
+legacy webhook columns. A disposable MySQL 8.4.11 server passed partial-schema
+recovery, two-worker delivery, account import, and
+`tests/mysql_webhook_tracker_migration.py`'s legacy backfill and second restart.
+Cross-host delivery ordering and remaining payload variants are still open.
 
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 

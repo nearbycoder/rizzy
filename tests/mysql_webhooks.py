@@ -95,7 +95,7 @@ def main():
                  {"card": {"title": "Webhook event"}}, 201)
             queued = call(base, token, delivery_path)
             assert len(queued) == 1 and queued[0]["state"] == "pending", queued
-            mysql_scalar(url, f"UPDATE webhooks SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE id='{webhook['id']}'")
+            mysql_scalar(url, f"UPDATE webhook_delinquency_trackers SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE webhook_id='{webhook['id']}'")
             stop(process)
             processes.clear()
 
@@ -113,7 +113,7 @@ def main():
             assert delivered[0]["request"]["headers"]["User-Agent"] == "fizzy/1.0.0 Webhook"
             assert "X-Webhook-Signature" not in delivered[0]["request"]["headers"]
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}'") == "1"
-            assert mysql_scalar(url, f"SELECT consecutive_failures_count FROM webhooks WHERE id='{webhook['id']}'") == "10"
+            assert mysql_scalar(url, f"SELECT consecutive_failures_count FROM webhook_delinquency_trackers WHERE webhook_id='{webhook['id']}'") == "10"
             assert call(worker_base, token, path + "/" + webhook["id"])["active"] is False
             assert call(worker_base, token, path + "/" + webhook["id"] + "/activation",
                         "POST", expected=201)["active"] is True

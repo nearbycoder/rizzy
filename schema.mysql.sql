@@ -588,6 +588,16 @@ CREATE TABLE `webhooks` (
   `updated_at` LONGTEXT NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `webhook_delinquency_trackers` (
+  `id` VARCHAR(64),
+  `account_id` VARCHAR(64) NOT NULL,
+  `webhook_id` VARCHAR(64) NOT NULL,
+  `consecutive_failures_count` BIGINT NOT NULL DEFAULT 0,
+  `first_failure_at` LONGTEXT,
+  `created_at` LONGTEXT NOT NULL,
+  `updated_at` LONGTEXT NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `webhook_deliveries` (
   `id` VARCHAR(64),
   `account_id` VARCHAR(64) NOT NULL,
@@ -702,6 +712,8 @@ CREATE UNIQUE INDEX `uniq_user_settings_records_1` ON `user_settings_records` (`
 CREATE INDEX `filters_account_creator` ON `filters` (`account_id`, `creator_id`);
 CREATE UNIQUE INDEX `uniq_filters_1` ON `filters` (`creator_id`, `params_digest`);
 CREATE INDEX `webhooks_board_order` ON `webhooks` (`board_id`, `name`, `id`);
+CREATE INDEX `webhook_delinquency_trackers_account` ON `webhook_delinquency_trackers` (`account_id`);
+CREATE UNIQUE INDEX `uniq_webhook_delinquency_trackers_1` ON `webhook_delinquency_trackers` (`webhook_id`);
 CREATE INDEX `webhook_deliveries_pending` ON `webhook_deliveries` (`state`, `created_at`);
 CREATE INDEX `webhook_deliveries_webhook_recent` ON `webhook_deliveries` (`webhook_id`, `created_at`, `id`);
 ALTER TABLE `users` ADD COLUMN `system_account_key` VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN `role`='system' THEN `account_id` END) STORED;
@@ -825,6 +837,8 @@ ALTER TABLE `closers_filters` ADD CONSTRAINT `fk_closers_filters_0` FOREIGN KEY 
 ALTER TABLE `closers_filters` ADD CONSTRAINT `fk_closers_filters_1` FOREIGN KEY (`filter_id`) REFERENCES `filters` (`id`) ON DELETE CASCADE;
 ALTER TABLE `webhooks` ADD CONSTRAINT `fk_webhooks_0` FOREIGN KEY (`board_id`) REFERENCES `boards` (`id`) ON DELETE CASCADE;
 ALTER TABLE `webhooks` ADD CONSTRAINT `fk_webhooks_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
+ALTER TABLE `webhook_delinquency_trackers` ADD CONSTRAINT `fk_webhook_delinquency_trackers_0` FOREIGN KEY (`webhook_id`) REFERENCES `webhooks` (`id`) ON DELETE CASCADE;
+ALTER TABLE `webhook_delinquency_trackers` ADD CONSTRAINT `fk_webhook_delinquency_trackers_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `webhook_deliveries` ADD CONSTRAINT `fk_webhook_deliveries_0` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE;
 ALTER TABLE `webhook_deliveries` ADD CONSTRAINT `fk_webhook_deliveries_1` FOREIGN KEY (`webhook_id`) REFERENCES `webhooks` (`id`) ON DELETE CASCADE;
 ALTER TABLE `webhook_deliveries` ADD CONSTRAINT `fk_webhook_deliveries_2` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;

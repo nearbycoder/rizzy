@@ -924,6 +924,19 @@ async fn validate_mysql_schema(
     Ok(())
 }
 
+async fn backfill_webhook_trackers(db: &DbPool, mysql: bool) -> sqlx::Result<()> {
+    let insert = if mysql {
+        "INSERT IGNORE"
+    } else {
+        "INSERT OR IGNORE"
+    };
+    let statement = format!(
+        "{insert} INTO webhook_delinquency_trackers(id,account_id,webhook_id,consecutive_failures_count,first_failure_at,created_at,updated_at) SELECT w.id,w.account_id,w.id,w.consecutive_failures_count,w.first_failure_at,w.created_at,w.updated_at FROM webhooks w LEFT JOIN webhook_delinquency_trackers t ON t.webhook_id=w.id WHERE t.id IS NULL"
+    );
+    sqlx::query(&statement).execute(db).await?;
+    Ok(())
+}
+
 async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::error::Error>> {
     let db = AnyPoolOptions::new()
         .max_connections(database_pool_size())
@@ -940,6 +953,7 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     let schema = include_str!("../schema.mysql.sql");
     resume_mysql_schema(&db, schema).await?;
+    backfill_webhook_trackers(&db, true).await?;
     let request_id_capacity: Option<i64> = sqlx::query_scalar(
         "SELECT CAST(character_maximum_length AS SIGNED) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='storage_entries' AND column_name='request_id'",
     )
@@ -1988,18 +2002,32 @@ async fn process_webhook_delivery(app: &App, delivery_id: &str, host: &str) -> R
         .is_some_and(|code| (200..300).contains(&code));
     if succeeded {
         sqlx::query(
-            "UPDATE webhooks SET consecutive_failures_count=0,first_failure_at=NULL WHERE id=?",
+            "UPDATE webhook_delinquency_trackers SET consecutive_failures_count=0,first_failure_at=NULL WHERE webhook_id=?",
         )
         .bind(&webhook_id)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     } else {
-        let threshold = (Utc::now() - chrono::Duration::hours(1))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        sqlx::query("UPDATE webhooks SET active=CASE WHEN consecutive_failures_count+1>=10 AND first_failure_at<? THEN 0 ELSE active END,first_failure_at=CASE WHEN consecutive_failures_count=0 THEN ? ELSE first_failure_at END,consecutive_failures_count=consecutive_failures_count+1,updated_at=? WHERE id=?")
-            .bind(threshold).bind(&completed_at).bind(&completed_at).bind(&webhook_id)
+        sqlx::query("UPDATE webhook_delinquency_trackers SET first_failure_at=CASE WHEN consecutive_failures_count=0 THEN ? ELSE first_failure_at END,consecutive_failures_count=consecutive_failures_count+1,updated_at=? WHERE webhook_id=?")
+            .bind(&completed_at).bind(&completed_at).bind(&webhook_id)
             .execute(&mut *tx).await.map_err(db_err)?;
+        let tracker = sqlx::query("SELECT consecutive_failures_count,first_failure_at FROM webhook_delinquency_trackers WHERE webhook_id=?")
+            .bind(&webhook_id).fetch_one(&mut *tx).await.map_err(db_err)?;
+        let first_failure: Option<String> = tracker.get("first_failure_at");
+        let delinquent = tracker.get::<i64, _>("consecutive_failures_count") >= 10
+            && first_failure
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .is_some_and(|first| first < Utc::now() - chrono::Duration::hours(1));
+        if delinquent {
+            sqlx::query("UPDATE webhooks SET active=0,updated_at=? WHERE id=?")
+                .bind(&completed_at)
+                .bind(&webhook_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        }
     }
     tx.commit().await.map_err(db_err)?;
     Ok(())
@@ -2861,6 +2889,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .execute(&db)
                 .await?;
         }
+        backfill_webhook_trackers(&db, false).await?;
         let comment_columns = sqlx::query("PRAGMA table_info(comments)")
             .fetch_all(&db)
             .await?;
@@ -7584,9 +7613,14 @@ async fn create_webhook(
     let url = validate_webhook_url(&url)?;
     let webhook_id = id();
     let timestamp = now();
+    let mut tx = begin_write(&app).await.map_err(db_err)?;
     sqlx::query("INSERT INTO webhooks(id,account_id,board_id,name,url,signing_secret,subscribed_actions,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
         .bind(&webhook_id).bind(&p.account_id).bind(&board_id).bind(name).bind(url).bind(webhook_secret())
-        .bind(json!(actions).to_string()).bind(&timestamp).bind(&timestamp).execute(&app.db).await.map_err(db_err)?;
+        .bind(json!(actions).to_string()).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query("INSERT INTO webhook_delinquency_trackers(id,account_id,webhook_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+        .bind(id()).bind(&p.account_id).bind(&webhook_id).bind(&timestamp).bind(&timestamp)
+        .execute(&mut *tx).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
     let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
     if form {
         return Ok((

@@ -78,7 +78,7 @@ def main():
             queued, _ = call(port, blocked_path, bearer=owner_token)
             assert len(queued) == 1 and queued[0]["state"] == "pending"
             with sqlite3.connect(database) as db:
-                db.execute("UPDATE webhooks SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE id=?", (blocked["id"],))
+                db.execute("UPDATE webhook_delinquency_trackers SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE webhook_id=?", (blocked["id"],))
             stop(server)
             worker_env = {key: value for key, value in env.items() if key != "RIZZY_DISABLE_WEBHOOK_DELIVERY"}
             port, server = start(worker_env)
@@ -94,7 +94,7 @@ def main():
             deactivated, _ = call(port, path + "/" + blocked["id"], bearer=owner_token)
             assert deactivated["active"] is False
             with sqlite3.connect(database) as db:
-                assert db.execute("SELECT consecutive_failures_count FROM webhooks WHERE id=?", (blocked["id"],)).fetchone()[0] == 10
+                assert db.execute("SELECT consecutive_failures_count FROM webhook_delinquency_trackers WHERE webhook_id=?", (blocked["id"],)).fetchone()[0] == 10
             print("Webhook management and delivery passed: CRUD, subscriptions, queue recovery, private IP protection, and delinquency")
         finally:
             stop(server)

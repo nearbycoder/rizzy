@@ -150,16 +150,32 @@ regenerate it after a SQLite schema change, seed a new SQLite database and run
 `python3 scripts/generate_mysql_schema.py path/to/fresh.sqlite3 schema.mysql.sql`.
 Storage entry request IDs use `VARCHAR(255)` to match the source's request ID
 limit. Startup widens that column on databases created from the older 64-character
-snapshot. This migration still needs a live MySQL verification run.
+snapshot.
 `tests/mysql_schema_snapshot.py` now regenerates the DDL from a fresh SQLite
 database and compares it byte for byte. The snapshot includes the board
-foreign key on `card_bulk_touches`; installing that constraint on an older
-MySQL database still needs a live check.
-The generator preserves the current 64 application tables, ordinary indexes, foreign
-keys, 15 checks, and the partial uniqueness rules through generated columns.
-It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16
-account-routed FULLTEXT search tables and backfills published cards and
-comments. Twenty-four MySQL triggers in
+foreign key on `card_bulk_touches`. `tests/mysql_schema_upgrade.py` passed on
+a disposable MySQL 8.4.11 server after shrinking the request ID column to 64
+characters and dropping that foreign key; restart restored both, preserved the
+account, and accepted a 255-character storage entry ID.
+The generator preserves the current 67 application tables, ordinary indexes,
+foreign keys, 15 checks, and the partial uniqueness rules through generated
+columns. It deliberately excludes FTS5 shadow tables. MySQL setup creates
+another 16 account-routed FULLTEXT search tables and backfills published cards
+and comments.
+Webhook delinquency state now lives in its own account-scoped table. Startup
+backfills existing webhook counters into tracker rows, and new webhooks create
+the row transactionally. Checks for SQLite upgrade, source versus Rust failure
+and deactivation timestamps, and export/import of a zero-failure tracker pass.
+The pinned Fizzy import probe restored that tracker from a Rizzy archive.
+On a disposable MySQL 8.4.11 server, `tests/mysql_schema_resume.py` recovered
+two partial schemas with 67 application tables and 16 search shards;
+`tests/mysql_webhooks.py` passed two-worker blocked delivery;
+`tests/mysql_account_import.py` restored the tracker; and
+`tests/mysql_webhook_tracker_migration.py` backfilled a legacy nine-failure
+webhook and survived a second restart. These are single-host local checks.
+Earlier Rizzy builds advanced the webhook's own update time on each failure;
+the original pre-failure value cannot be reconstructed during backfill.
+Twenty-four MySQL triggers in
 `schema.mysql.triggers.sql` cover the core flow, with an idempotent backfill
 for databases created before the triggers were added. Other SQLite trigger
 behavior still needs native MySQL equivalents or equivalent application code.

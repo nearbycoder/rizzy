@@ -649,6 +649,16 @@ CREATE TABLE IF NOT EXISTS webhooks (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS webhooks_board_order ON webhooks(board_id,name,id DESC);
+CREATE TABLE IF NOT EXISTS webhook_delinquency_trackers (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  webhook_id TEXT NOT NULL UNIQUE REFERENCES webhooks(id) ON DELETE CASCADE,
+  consecutive_failures_count INTEGER NOT NULL DEFAULT 0,
+  first_failure_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS webhook_delinquency_trackers_account ON webhook_delinquency_trackers(account_id);
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

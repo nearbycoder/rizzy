@@ -180,9 +180,15 @@ def main():
                     "SELECT id,account_id,key,created_at,updated_at FROM board_publications WHERE board_id=?",
                     (board["id"],)).fetchone()
             assert publication_record and publication_record[2]
-            mutate(target, f"/boards/{board['id']}/webhooks", payload={
+            webhook = mutate(target, f"/boards/{board['id']}/webhooks", payload={
                 "webhook": {"name": "Transfer hook", "url": "https://example.invalid/rizzy-transfer",
                             "subscribed_actions": []}})
+            with sqlite3.connect(db_path) as db:
+                tracker_record = db.execute(
+                    "SELECT id,account_id,webhook_id,consecutive_failures_count,first_failure_at,created_at,updated_at "
+                    "FROM webhook_delinquency_trackers WHERE webhook_id=?", (webhook["id"],)).fetchone()
+            assert tracker_record and tracker_record[0] != webhook["id"]
+            assert tracker_record[3] == 0 and tracker_record[4] is None
             with sqlite3.connect(db_path) as db:
                 user_before = db.execute("SELECT created_at,updated_at FROM users WHERE id=?",
                                          (owner["id"],)).fetchone()
@@ -223,7 +229,8 @@ def main():
                              f"storage/{image['key']}", f"storage/{embed['key']}"):
                     assert path in names, path
                 for directory in ("tags", "taggings", "assignments", "closures", "card_goldnesses", "card_not_nows",
-                                  "watches", "reactions", "board_publications", "webhooks"):
+                                  "watches", "reactions", "board_publications", "webhooks",
+                                  "webhook_delinquency_trackers"):
                     assert any(name.startswith(f"data/{directory}/") for name in names), directory
                 assert archive.read(f"storage/{image['key']}") == IMAGE
                 assert archive.read(f"storage/{embed['key']}") == IMAGE
@@ -279,6 +286,11 @@ def main():
                 assert (publication_data["account_id"], publication_data["board_id"], publication_data["key"],
                         publication_data["created_at"], publication_data["updated_at"]) == (
                     account_id, board["id"], publication_record[2], publication_record[3], publication_record[4])
+                tracker_data = json.loads(archive.read(
+                    f"data/webhook_delinquency_trackers/{tracker_record[0]}.json"))
+                assert (tracker_data["account_id"], tracker_data["webhook_id"],
+                        tracker_data["consecutive_failures_count"], tracker_data["first_failure_at"],
+                        tracker_data["created_at"], tracker_data["updated_at"]) == tracker_record[1:]
                 spike_data = json.loads(archive.read(f"data/card_activity_spikes/{spike_record[0]}.json"))
                 assert (spike_data["card_id"], spike_data["created_at"], spike_data["updated_at"]) == (
                     card["id"], spike_record[1], spike_record[2])

@@ -26,6 +26,7 @@ FRESH_UPDATE_TABLES = {
     "columns": "columns",
     "board_publications": "board_publications",
     "webhooks": "webhooks",
+    "webhook_delinquency_trackers": "webhook_delinquency_trackers",
     "accesses": "access_records",
     "cards": "cards",
     "comments": "comments",
@@ -131,7 +132,8 @@ def run(archive_path):
                                 "assignments", "taggings", "closures", "card_goldnesses",
                                 "card_not_nows", "card_activity_spikes", "watches", "pins",
                                 "reactions", "mentions", "events", "notifications",
-                                "notification_bundles", "webhooks", "board_publications",
+                                "notification_bundles", "webhooks", "webhook_delinquency_trackers",
+                                "board_publications",
                                 "active_storage_blobs", "active_storage_variant_records",
                                 "active_storage_attachments")}
         blob_metadata = [json.loads(z.read(name)) for name in z.namelist()

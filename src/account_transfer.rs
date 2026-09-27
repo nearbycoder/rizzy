@@ -158,7 +158,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "webhook_delinquency_trackers",
-        query: "SELECT NULL id,account_id,consecutive_failures_count,created_at,first_failure_at,updated_at,id webhook_id FROM webhooks WHERE account_id=? AND consecutive_failures_count>0 ORDER BY id",
+        query: "SELECT id,account_id,consecutive_failures_count,created_at,first_failure_at,updated_at,webhook_id FROM webhook_delinquency_trackers WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },

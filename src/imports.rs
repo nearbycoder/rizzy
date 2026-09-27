@@ -992,14 +992,27 @@ async fn apply_archive(
             .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for tracker in records(&archive, "webhook_delinquency_trackers") {
-        let changed = sqlx::query("UPDATE webhooks SET consecutive_failures_count=?,first_failure_at=? WHERE id=? AND account_id=?")
-            .bind(integer(tracker,"consecutive_failures_count",0))
-            .bind(maybe_field(tracker,"first_failure_at")).bind(field(tracker,"webhook_id")?)
-            .bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
-        if changed.rows_affected() != 1 {
+        let webhook_id = field(tracker, "webhook_id")?;
+        let exists: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM webhooks WHERE id=? AND account_id=?")
+                .bind(webhook_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+        if exists != 1 {
             return Err("Tracker references unknown webhook".into());
         }
+        let tracker_id = maybe_field(tracker, "id").unwrap_or(webhook_id);
+        sqlx::query("INSERT INTO webhook_delinquency_trackers(id,account_id,webhook_id,consecutive_failures_count,first_failure_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+            .bind(tracker_id).bind(account_id).bind(webhook_id)
+            .bind(integer(tracker,"consecutive_failures_count",0))
+            .bind(maybe_field(tracker,"first_failure_at"))
+            .bind(field(tracker,"created_at")?).bind(&imported_at)
+            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
+    sqlx::query("INSERT INTO webhook_delinquency_trackers(id,account_id,webhook_id,created_at,updated_at) SELECT w.id,w.account_id,w.id,w.created_at,w.updated_at FROM webhooks w LEFT JOIN webhook_delinquency_trackers t ON t.webhook_id=w.id WHERE w.account_id=? AND t.id IS NULL")
+        .bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     for event in records(&archive, "events") {
         let eventable_id = field(event, "eventable_id")?;
         let eventable_type = field(event, "eventable_type")?;
