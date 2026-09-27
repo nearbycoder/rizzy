@@ -49,6 +49,7 @@ from join_code_html_parity import check as join_code_check  # noqa: E402
 from users_events_html_parity import check as user_events_check  # noqa: E402
 from route_get_status_parity import run as route_get_run  # noqa: E402
 from route_get_valid_parity import run as route_get_valid_run, run_html as route_get_valid_html_run  # noqa: E402
+from filters_paired_parity import check as filters_browser_check  # noqa: E402
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
 from account_cancellation_mysql_parity import (age_cancellation,  # noqa: E402
@@ -73,6 +74,7 @@ def main():
                                           "step-read", "public-page", "join-code",
                                           "user-events", "route-get", "route-get-contract",
                                           "route-get-html", "route-get-valid", "route-get-valid-html",
+                                          "filters-browser",
                                           "passkeys-html",
                                           "passkeys-flow", "auth-format", "account-cancellation",
                                           "account-cancellation-retention",
@@ -242,6 +244,13 @@ def main():
                     login(target)
                 source_result = route_get_valid_html_run(source)
                 rust_result = route_get_valid_html_run(rust)
+            elif args.suite == "filters-browser":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                    login(target)
+                source_result = filters_browser_check(source)
+                rust_result = filters_browser_check(rust)
             elif args.suite in ("account-cancellation", "account-cancellation-retention",
                                "account-cancellation-concurrent", "account-cancellation-mail",
                                "account-cancellation-mail-concurrent"):
@@ -424,6 +433,8 @@ def main():
             elif args.suite == "route-get-valid-html":
                 print(f"Disposable MySQL populated HTML GET contracts matched pinned Fizzy: "
                       f"{len(source_result)} probes")
+            elif args.suite == "filters-browser":
+                print("Disposable MySQL saved-filter browser lifecycle matched pinned Fizzy")
             elif args.suite == "account-cancellation":
                 print("Disposable MySQL owner cancellation and retained records matched pinned Fizzy")
             elif args.suite == "account-cancellation-retention":

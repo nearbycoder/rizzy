@@ -11913,6 +11913,9 @@ async fn refresh_filter_settings(
     .fetch_optional(&app.db)
     .await
     .map_err(db_err)?;
+    if !wants_turbo_stream(&headers) {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(if let Some(saved_id) = saved_id {
         filter_turbo(format!(
             "<form method=post action=\"/{}/filters/{}\"><input type=hidden name=_method value=delete><button type=submit aria-label=\"Delete custom view\">Delete custom view</button></form>",
@@ -12017,6 +12020,9 @@ async fn create_filter(
         }
     }
     tx.commit().await.map_err(db_err)?;
+    if !wants_turbo_stream(&headers) {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(filter_turbo(format!(
         "<form method=post action=\"/{}/filters/{}\"><input type=hidden name=_method value=delete><button type=submit aria-label=\"Delete custom view\">Delete custom view</button></form>",
         p.slug, saved_id
@@ -12051,6 +12057,9 @@ async fn delete_filter(
     }
     let params = serde_json::from_str(&fields)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
+    if !wants_turbo_stream(&headers) {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(filter_turbo(filter_save_button(p.slug, &params)))
 }
 async fn column_cards(
