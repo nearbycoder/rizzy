@@ -745,3 +745,16 @@ comment counts. Rizzy completed 122.99–124.62 units/s versus Fizzy's
 latency was 487–491 ms versus 1,532–1,555 ms. The artifact records both
 revisions, the release binary hash, CPU, and memory samples. This local API
 comparison does not establish full application parity or multi-host capacity.
+
+`tests/card_move_sequence_parity.py` matches pinned Fizzy for an image-bearing
+card moved from a source board through a middle board to a final board, then
+moved to that same final board again. It compares the two event source and
+destination names and each board's storage-ledger total. The existing paired
+move-access and storage-ledger checks also passed after the Rust move route
+began locking and rechecking the card's actual source board. On MySQL 8.4.11,
+`tests/mysql_same_card_moves.py` forced two app processes to wait on the same
+source board before moving the card to different destinations. Three fresh
+runs passed with two accurate move events and all image bytes on only the
+final board; the four-process cluster and storage materialization tests also
+passed. Other cross-board races, full route parity, and multi-host scale
+remain unverified.

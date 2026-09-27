@@ -13335,17 +13335,70 @@ async fn move_card(
     let destination = query_board
         .or_else(|| string(&body, "board_id"))
         .ok_or_else(|| bad("board_id is required"))?;
-    let old_board = board(&app, &p, &c.get::<String, _>("board_id")).await?;
-    let new_board = board(&app, &p, &destination).await?;
-    if c.get::<String, _>("board_id") != destination {
-        let card_id = c.get::<String, _>("id");
-        let mut tx = app.db.begin().await.map_err(db_err)?;
-        let old_board_id: String = c.get("board_id");
+    let mut old_board_id: String = c.get("board_id");
+    let mut old_board = board(&app, &p, &old_board_id).await?;
+    let mut new_board = board(&app, &p, &destination).await?;
+    let card_id: String = c.get("id");
+    let mut transfer_tx = None;
+    let mut verified = false;
+    for _ in 0..16 {
+        let mut tx = begin_write(&app).await.map_err(db_err)?;
         let mut board_ids = [&old_board_id, &destination];
         board_ids.sort();
         for board_id in board_ids {
             lock_board_for_write(&mut tx, board_id, app.mysql).await?;
         }
+        let card_board_sql = if app.mysql {
+            "SELECT board_id FROM cards WHERE id=? FOR UPDATE"
+        } else {
+            "SELECT board_id FROM cards WHERE id=?"
+        };
+        let actual_board: String = sqlx::query_scalar(card_board_sql)
+            .bind(&card_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(missing)?;
+        if actual_board != old_board_id {
+            tx.rollback().await.map_err(db_err)?;
+            old_board_id = actual_board;
+            old_board = board(&app, &p, &old_board_id).await?;
+            continue;
+        }
+        for board_id in [&old_board_id, &destination] {
+            let accessible: Option<String> =
+                sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+                    .bind(board_id)
+                    .bind(&p.user_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            if accessible.is_none() {
+                return Err(missing());
+            }
+        }
+        verified = true;
+        if old_board_id == destination {
+            tx.rollback().await.map_err(db_err)?;
+            break;
+        }
+        old_board = sqlx::query("SELECT * FROM boards WHERE id=?")
+            .bind(&old_board_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        new_board = sqlx::query("SELECT * FROM boards WHERE id=?")
+            .bind(&destination)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        transfer_tx = Some(tx);
+        break;
+    }
+    if !verified {
+        return Err(err(StatusCode::CONFLICT, "Card moved during write"));
+    }
+    if let Some(mut tx) = transfer_tx {
         storage::record_board_transfer_tx(
             &mut tx,
             app.mysql,

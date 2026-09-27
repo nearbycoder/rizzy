@@ -598,3 +598,17 @@ duplicate-close group. The paired SQLite closure, goldness, and Not Now
 lifecycle checks still passed against pinned Fizzy. This is a same-host
 correctness check for those operations; other races and sustained write scale
 remain unverified.
+
+The card-board transfer now locks both boards in ID order, locks and rechecks
+the card's actual source board, and retries when another move made the first
+snapshot stale. It rechecks source and destination access under those locks,
+uses the verified source for attachment ledger transfers, and treats a card
+already on the destination as a no-op. `tests/mysql_same_card_moves.py` held
+the source board lock until two separate app processes were waiting, then
+sent the image-bearing card to two different destinations. Three fresh
+MySQL 8.4.11 runs passed with correct source names in both move events and
+all image bytes charged only to the final board. The expanded four-process
+cluster test and MySQL storage materialization test also passed. The paired
+SQLite move-access and storage-ledger tests still matched Fizzy, as did a
+new chained/repeated move test. This covers those same-host moves, not every
+concurrent access change or distributed deployment.
