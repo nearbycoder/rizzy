@@ -17,7 +17,7 @@ RIZZY_DEV_MAGIC_LINKS=1 cargo run --release
 
 The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`. Card images and user avatar bytes are stored in `data/storage/files` by default; set `RIZZY_STORAGE_DIR` to move them. User and account exports are stored in `data/exports` by default; set `RIZZY_EXPORT_DIR` for another path. Uploaded account import ZIPs are stored in `data/imports` by default; set `RIZZY_IMPORT_DIR` to move them. Export notifications use `RIZZY_SENDMAIL` and `RIZZY_PUBLIC_URL` when configured.
 
-Install `vipsthumbnail` from libvips to generate JPEG Action Text previews with the same bytes as Fizzy. Without it, Rizzy falls back to its Rust image encoder, which can produce different preview checksums.
+Install the `vips` command from libvips to generate JPEG, PNG, GIF, and WebP Action Text previews with the same bytes as Fizzy in the tested cases. Without it, Rizzy falls back to its Rust image encoder, which can produce different preview checksums and does not preserve animated frames.
 
 User mention pickers, new blob uploads, and account exports issue Rails-compatible signed IDs. Rizzy derives their signing keys from `RIZZY_SECRET_KEY_BASE` when set, or from a persistent per-database secret otherwise. Set `RIZZY_SECRET_KEY_BASE` to a Fizzy instance's `SECRET_KEY_BASE` when signed IDs must verify across the two apps; keep the chosen value stable so existing attachments continue to resolve. Older Rizzy blobs retain their original opaque IDs.
 
@@ -91,6 +91,9 @@ python3 tests/account_export_internal_blobs_paired.py
 python3 tests/account_import.py
 python3 tests/blob_signed_id_reference.py
 python3 tests/account_export_field_inventory.py --image-variant --strict
+python3 tests/account_export_field_inventory.py --image-variant --image-format png --strict
+python3 tests/account_export_field_inventory.py --image-variant --image-format gif --strict
+python3 tests/account_export_field_inventory.py --image-variant --image-format webp --strict
 python3 tests/storage_variant_cleanup.py
 python3 tests/notification_source_migration.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:

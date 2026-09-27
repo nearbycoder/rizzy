@@ -17,8 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 from card_workflow import expect  # noqa: E402
 from card_image_parity import IMAGE  # noqa: E402
+from avatar_parity import PNG  # noqa: E402
 from embed_parity import FILE, upload  # noqa: E402
 from sustained_mixed import SOURCE, prepare_rust, prepare_source, start_server, stop_server  # noqa: E402
+
+GIF = (ROOT / "tests/fixtures/animated.gif").read_bytes()
+WEBP = (ROOT / "tests/fixtures/animated.webp").read_bytes()
 
 
 def signed_user_sgid(user_id, source_env):
@@ -28,7 +32,7 @@ def signed_user_sgid(user_id, source_env):
                           input=user_id, check=True, capture_output=True, text=True).stdout
 
 
-def fixture(target, source_env, include_image=False):
+def fixture(target, source_env, include_image=False, image_format="jpeg"):
     board, _ = expect(target, "/boards", "POST", {"board": {"name": "Export fields"}}, 201)
     card, _ = expect(target, f"/boards/{board['id']}/cards", "POST", {"card": {"title": "Record fields"}}, 201)
     creator_id = card["creator"]["id"]
@@ -38,7 +42,11 @@ def fixture(target, source_env, include_image=False):
     sgid = signed_user_sgid(creator_id, source_env)
     blob = upload(target, FILE, "notes.txt", "text/plain")
     target["blob_id"] = blob["id"]
-    image_blob = upload(target, IMAGE, "moon.jpg", "image/jpeg") if include_image else None
+    images = {"jpeg": (IMAGE, "moon.jpg", "image/jpeg"),
+              "png": (PNG, "avatar.png", "image/png"),
+              "gif": (GIF, "animated.gif", "image/gif"),
+              "webp": (WEBP, "animated.webp", "image/webp")}
+    image_blob = upload(target, *images[image_format]) if include_image else None
     if image_blob:
         target["image_blob_id"] = image_blob["id"]
     description = (f'<p>Hello <action-text-attachment sgid="{sgid}" '
@@ -124,6 +132,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strict", action="store_true", help="fail when exported fields, counts, or checked values differ")
     parser.add_argument("--image-variant", action="store_true", help="also export an image embed and its generated previews")
+    parser.add_argument("--image-format", choices=("jpeg", "png", "gif", "webp"), default="jpeg",
+                        help="image fixture format for --image-variant")
     args = parser.parse_args()
     subprocess.run(["cargo", "build", "--release", "--quiet", "--bin", "rizzy"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="rizzy-account-field-inventory-") as temporary:
@@ -145,7 +155,7 @@ def main():
                 target = {"name": name, "url": url, "account": str(credentials["account"]),
                           "token": credentials["token"]}
                 targets.append(target)
-                fixture(target, source_environment, args.image_variant)
+                fixture(target, source_environment, args.image_variant, args.image_format)
                 if name == "fizzy":
                     drain_source_mention_job(target, source_environment)
                 results[name] = export(target, env)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Compare generated image representations across source and Rust routes."""
 
+import argparse
+import hashlib
 import json
 import os
 import re
@@ -15,15 +17,24 @@ sys.path.insert(0, str(ROOT / "bench"))
 from sustained_mixed import prepare_rust, prepare_source, start_server, stop_server  # noqa: E402
 from card_image_parity import IMAGE, call  # noqa: E402
 from embed_parity import upload  # noqa: E402
+from avatar_parity import PNG  # noqa: E402
+
+IMAGES = {
+    "jpeg": (IMAGE, "moon.jpg", "image/jpeg", b"\xff\xd8", "jpg"),
+    "png": (PNG, "avatar.png", "image/png", b"\x89PNG", "png"),
+    "gif": ((ROOT / "tests/fixtures/animated.gif").read_bytes(), "animated.gif", "image/gif", b"GIF8", "gif"),
+    "webp": ((ROOT / "tests/fixtures/animated.webp").read_bytes(), "animated.webp", "image/webp", b"RIFF", "webp"),
+}
 
 
-def check(target):
+def check(target, image):
+    original, filename, content_type, magic, extension = IMAGES[image]
     prefix = f"/{target['account']}"
     status, _, raw = call(target, prefix + "/boards", "POST", {"board": {"name": "Representation parity"}})
     assert status == 201, (target["name"], status, raw[:150])
     board = json.loads(raw)
     try:
-        blob = upload(target)
+        blob = upload(target, original, filename, content_type)
         markup = f'<action-text-attachment sgid="{blob["attachable_sgid"]}"></action-text-attachment>'
         status, _, raw = call(target, prefix + f"/boards/{board['id']}/cards", "POST",
                               {"card": {"title": "Representation", "description": markup}})
@@ -32,7 +43,7 @@ def check(target):
         variant_times = None
         if target.get("storage"):
             directory = target["storage"] / "variants" / blob["key"]
-            variants = list(directory.glob("*.jpg"))
+            variants = list(directory.glob(f"*.{extension}"))
             assert len(variants) == 2, (target["name"], variants)
             variant_times = {variant.name: variant.stat().st_mtime_ns for variant in variants}
         match = re.search(r'href="([^" ]*/representations/redirect/[^" ]+)"',
@@ -46,14 +57,14 @@ def check(target):
             assert status == 302 and "/rails/active_storage/disk/" in headers["Location"], (
                 target["name"], path, status, headers)
             status, final_headers, content = call(target, headers["Location"], bearer=False)
-            assert status == 200 and content[:2] == b"\xff\xd8" and content != IMAGE, (
+            assert status == 200 and content.startswith(magic) and content != original, (
                 target["name"], status, len(content))
-            assert final_headers.get_content_type() == "image/jpeg"
+            assert final_headers.get_content_type() == content_type
 
         status, headers, content = call(target, proxy)
-        assert status == 200 and content[:2] == b"\xff\xd8" and content != IMAGE, (
+        assert status == 200 and content.startswith(magic) and content != original, (
             target["name"], status, len(content))
-        assert headers.get_content_type() == "image/jpeg"
+        assert headers.get_content_type() == content_type
         assert "public" not in headers["Cache-Control"]
         if variant_times is not None:
             assert {variant.name: variant.stat().st_mtime_ns for variant in variants} == variant_times
@@ -77,7 +88,8 @@ def check(target):
         public_cache = headers["Cache-Control"]
         return {"redirect": 302, "alias": 302, "proxy": 200,
                 "private": 302, "public": 200, "tampered": 404,
-                "private_cache": private_cache, "public_cache": public_cache}
+                "private_cache": private_cache, "public_cache": public_cache,
+                "proxy_checksum": hashlib.md5(content).hexdigest()}
     finally:
         status, _, _ = call(target, prefix + f"/boards/{board['id']}", "DELETE")
         assert status == 204, (target["name"], status)
@@ -86,6 +98,9 @@ def check(target):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--image-format", choices=IMAGES, default="jpeg")
+    args = parser.parse_args()
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="rizzy-representation-") as temporary:
         processes = []
@@ -104,7 +119,7 @@ def main():
                           "token": credentials["token"]}
                 if name == "rizzy":
                     target["storage"] = directory / "storage"
-                results[name] = check(target)
+                results[name] = check(target, args.image_format)
                 print(f"{name}: representation redirect, alias, proxy, access, and tampering passed",
                       flush=True)
         finally:

@@ -1845,21 +1845,33 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     let output = target.clone();
     let persisted_variation = variation.clone();
     tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
-        if variation.operation == "limit" && image_format == image::ImageFormat::Jpeg {
-            let (source_width, source_height) = image::ImageReader::open(&source)
-                .map_err(|error| error.to_string())?
-                .with_guessed_format()
-                .map_err(|error| error.to_string())?
-                .into_dimensions()
-                .map_err(|error| error.to_string())?;
-            let width = variation.width.min(source_width);
-            let height = variation.height.min(source_height);
+        if variation.operation == "limit"
+            && matches!(
+                image_format,
+                image::ImageFormat::Jpeg
+                    | image::ImageFormat::Png
+                    | image::ImageFormat::Gif
+                    | image::ImageFormat::WebP
+            )
+        {
             let temporary = output.with_extension(format!("{}.tmp.{extension}", random_token()));
-            let result = std::process::Command::new("vipsthumbnail")
-                .arg(&source)
-                .arg("-s")
-                .arg(format!("{width}x{height}"))
-                .arg(format!("--output={}", temporary.display()))
+            let source_argument = if matches!(
+                image_format,
+                image::ImageFormat::Gif | image::ImageFormat::WebP
+            ) {
+                format!("{}[n=-1]", source.display())
+            } else {
+                source.display().to_string()
+            };
+            let result = std::process::Command::new("vips")
+                .arg("thumbnail_image")
+                .arg(source_argument)
+                .arg(&temporary)
+                .arg(variation.width.to_string())
+                .arg("--height")
+                .arg(variation.height.to_string())
+                .arg("--size")
+                .arg("down")
                 .output();
             if matches!(result, Ok(ref result) if result.status.success()) {
                 std::fs::rename(&temporary, &output).map_err(|error| error.to_string())?;
@@ -1965,6 +1977,30 @@ fn rich_text_variant_digest_matches_active_storage() {
         rich_text_variation_digest("jpg", 1024, 768),
         "LIHwrDKnUYb2o3ViE1GyFf3u2KM="
     );
+    assert_eq!(
+        rich_text_variation_digest("png", 800, 600),
+        "sTXCDOhTAja1egabPbhk57Bmknk="
+    );
+    assert_eq!(
+        rich_text_variation_digest("png", 1024, 768),
+        "xYwHDalWgkJKHCx/iFVLItrYKVs="
+    );
+    assert_eq!(
+        rich_text_variation_digest("gif", 800, 600),
+        "sgSbEMr4AmMgi7vYqCUl0FYGbUM="
+    );
+    assert_eq!(
+        rich_text_variation_digest("gif", 1024, 768),
+        "Gx9RxwCTekwUv/8TWWggIa3dhJw="
+    );
+    assert_eq!(
+        rich_text_variation_digest("webp", 800, 600),
+        "nQMzcKoeueeKiUDLkd2iCYMRfqQ="
+    );
+    assert_eq!(
+        rich_text_variation_digest("webp", 1024, 768),
+        "Cs6+3rIJB3PFkf2MUJyPdWF7fhM="
+    );
 }
 
 async fn persist_rich_text_variant(
@@ -1979,8 +2015,14 @@ async fn persist_rich_text_variant(
             (800, 600) | (1024, 768)
         )
         || variation.format.is_some()
-        || blob.get::<String, _>("content_type") != "image/jpeg"
     {
+        return Ok(());
+    }
+    let content_type: String = blob.get("content_type");
+    if !matches!(
+        content_type.as_str(),
+        "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+    ) {
         return Ok(());
     }
     let blob_id: String = blob.get("id");
@@ -1990,8 +2032,24 @@ async fn persist_rich_text_variant(
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
-        .filter(|extension| matches!(extension.as_str(), "jpg" | "jpeg"))
-        .unwrap_or_else(|| "jpg".to_owned());
+        .filter(|extension| {
+            matches!(
+                (content_type.as_str(), extension.as_str()),
+                ("image/jpeg", "jpg" | "jpeg")
+                    | ("image/png", "png")
+                    | ("image/gif", "gif")
+                    | ("image/webp", "webp")
+            )
+        })
+        .unwrap_or_else(|| {
+            match content_type.as_str() {
+                "image/png" => "png",
+                "image/gif" => "gif",
+                "image/webp" => "webp",
+                _ => "jpg",
+            }
+            .to_owned()
+        });
     let digest = rich_text_variation_digest(&format, variation.width, variation.height);
     let exists: Option<String> = sqlx::query_scalar(
         "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
@@ -2049,7 +2107,7 @@ async fn persist_rich_text_variant(
         .bind(&account_id)
         .bind(&derived_key)
         .bind(&filename)
-        .bind("image/jpeg")
+        .bind(&content_type)
         .bind(data.len() as i64)
         .bind(checksum)
         .bind(json!({"identified":true,"width":width,"height":height,"analyzed":true}).to_string())

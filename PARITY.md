@@ -54,13 +54,14 @@ IDs. `tests/blob_signed_id_reference.py` verifies a direct upload's blob ID and
 Action Text SGID with Fizzy's verifiers, then embeds the file in Rizzy. Legacy
 opaque blob IDs, import round trips with signed User mentions, and unrepresented
 record groups remain open. `tests/account_export_field_inventory.py
---image-variant --strict` now compares a JPEG embed's two generated previews.
-On that fixture, both archives contain the same blob and attachment counts,
-preview bytes and metadata, and Rails variation digests. Rizzy persists the
-derived blobs and removes them with their original. Its JPEG resizing uses
-`vipsthumbnail` when available; non-JPEG preview formats, broader image sizes,
-and preview performance have not been compared. Source-compatible processing
-across those cases remains open.
+--image-variant --strict` and its `--image-format` option now compare JPEG,
+PNG, animated GIF, and animated WebP embeds. On these four fixtures, both
+archives contain the same blob and attachment counts, preview bytes and
+metadata, and Rails variation digests. Rizzy persists the derived blobs and
+removes them with their original. It uses libvips `thumbnail_image` for these
+formats when available, including every GIF and WebP frame. Other image
+formats, broader image dimensions, and preview processing throughput have not
+been compared.
 
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed
