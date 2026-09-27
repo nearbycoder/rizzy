@@ -70,19 +70,21 @@ def rust_env(directory, host, port, database):
             "RIZZY_DISABLE_PUSH_DELIVERY": "1"}
 
 
-def observed_counts(client, socket, database):
-    statement = ("SELECT (SELECT COUNT(*) FROM cards WHERE board_id=b.id), "
-                 "(SELECT COUNT(*) FROM events WHERE board_id=b.id), "
+def observed_counts(client, socket, database, boards=1):
+    board_names = ("name='Mixed workload'" if boards == 1
+                   else "name LIKE 'Mixed workload %'")
+    board_ids = f"SELECT id FROM boards WHERE {board_names}"
+    statement = ("SELECT (SELECT COUNT(*) FROM cards WHERE board_id IN (" + board_ids + ")), "
+                 "(SELECT COUNT(*) FROM events WHERE board_id IN (" + board_ids + ")), "
                  "(SELECT COUNT(*) FROM comments WHERE card_id IN "
-                 "(SELECT id FROM cards WHERE board_id=b.id)) "
-                 "FROM boards b WHERE b.name='Mixed workload'")
+                 "(SELECT id FROM cards WHERE board_id IN (" + board_ids + ")))")
     actual = [int(value) for value in mysql_query(client, socket, database,
                                                   statement).split("\t")]
     return dict(zip(("cards", "events", "comments"), actual))
 
 
-def verify_counts(client, socket, database, initial_cards, units):
-    actual = observed_counts(client, socket, database)
+def verify_counts(client, socket, database, initial_cards, units, boards=1):
+    actual = observed_counts(client, socket, database, boards)
     expected = [initial_cards + units, initial_cards + 4 * units, 3 * units]
     assert list(actual.values()) == expected, (database, actual, expected)
     return actual
@@ -134,7 +136,17 @@ def run_pair(args, server_cpus, order):
                         target["pids"].append(worker_process.pid)
                 targets[name] = target
                 shapes[name] = preflight(target)
-                boards[name], paths[name], samples[name] = fixture(target, args.cards)
+                if args.boards == 1:
+                    boards[name], paths[name], samples[name] = fixture(target, args.cards)
+                else:
+                    boards[name], paths[name], samples[name] = [], [], []
+                    for index in range(args.boards):
+                        board, path, sample = fixture(
+                            target, args.cards // args.boards,
+                            board_name=f"Mixed workload {index}")
+                        boards[name].append(board)
+                        paths[name].append(path)
+                        samples[name].append(sample)
             if difference := first_difference(shapes["fizzy"], shapes["rizzy"]):
                 raise AssertionError("workflow shapes: " + difference)
             if difference := first_difference(samples["fizzy"], samples["rizzy"]):
@@ -149,19 +161,19 @@ def run_pair(args, server_cpus, order):
                 database = source_dbs[""] if name == "fizzy" else rust_db
                 if sample["errors"]:
                     sample["observed_counts"] = observed_counts(
-                        args.mysql_client, args.mysql_socket, database)
+                        args.mysql_client, args.mysql_socket, database, args.boards)
                     sample["valid_for_throughput_comparison"] = False
                     result["paired_comparable"] = False
                 else:
                     try:
                         sample["verified_counts"] = verify_counts(
                             args.mysql_client, args.mysql_socket, database, args.cards,
-                            sample["units_completed"])
+                            sample["units_completed"], args.boards)
                         sample["valid_for_throughput_comparison"] = True
                     except AssertionError as error:
                         sample["count_verification_error"] = str(error)
                         sample["observed_counts"] = observed_counts(
-                            args.mysql_client, args.mysql_socket, database)
+                            args.mysql_client, args.mysql_socket, database, args.boards)
                         sample["valid_for_throughput_comparison"] = False
                         result["paired_comparable"] = False
                 print(f"{name}: {sample['units_per_second']} units/s, "
@@ -209,6 +221,7 @@ def main():
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--clients", type=int, default=16)
     parser.add_argument("--cards", type=int, default=100)
+    parser.add_argument("--boards", type=int, default=1)
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--server-cpus", type=int, default=4)
     parser.add_argument("--rizzy-processes", type=int, default=1)
@@ -218,9 +231,11 @@ def main():
     parser.add_argument("--mysql-port", type=int, default=33080)
     parser.add_argument("--output")
     args = parser.parse_args()
-    if min(args.seconds, args.clients, args.cards, args.rounds,
+    if min(args.seconds, args.clients, args.cards, args.boards, args.rounds,
            args.server_cpus, args.rizzy_processes) <= 0:
         parser.error("all numeric arguments must be positive")
+    if args.cards % args.boards:
+        parser.error("cards must be divisible by boards")
     available = sorted(os.sched_getaffinity(0))
     if len(available) <= args.server_cpus:
         parser.error("leave at least one CPU for the load generator")
@@ -239,7 +254,8 @@ def main():
                   ["git", "status", "--porcelain"], cwd=ROOT)),
               "rizzy_binary_sha256": binary_sha256,
               "workload": "four JSON reads plus create/edit/comment/close/read per unit",
-              "initial_cards": args.cards, "seconds_per_target": args.seconds,
+              "initial_cards": args.cards, "boards": args.boards,
+              "seconds_per_target": args.seconds,
               "clients": args.clients, "source_puma_workers": args.server_cpus,
               "rizzy_processes": args.rizzy_processes,
               "server_cpus": server_cpus,
