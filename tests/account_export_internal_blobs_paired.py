@@ -68,6 +68,21 @@ def pending_direct_upload(target):
     return json.loads(raw)
 
 
+def inactive_member(target):
+    source = target["name"] == "fizzy"
+    with sqlite3.connect(target["db"]) as db:
+        account_id, created_at = db.execute(
+            "SELECT account_id,created_at FROM users WHERE role='owner' LIMIT 1"
+        ).fetchone()
+        user_id = uuid.uuid4().bytes if source else str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO users(id,account_id,active,created_at,identity_id,name,role,updated_at) "
+            "VALUES(?,?,0,?,NULL,'Former member','member',?)",
+            (user_id, account_id, created_at, created_at),
+        )
+    return public_id(user_id) if source else user_id
+
+
 def archive(target):
     account = target["account"]
     status, _, raw = call(target, f"/{account}/account/exports.json", "POST")
@@ -96,6 +111,7 @@ def check(target):
     pending = pending_direct_upload(target)
     target["ordinary_blob_id"] = ordinary["id"]
     target["pending_blob_id"] = pending["id"]
+    target["inactive_user_id"] = inactive_member(target)
     exported_attachment = attach_internal(target["db"], target["name"], exported["id"], "Export")
     imported_attachment = attach_internal(target["db"], target["name"], imported["id"], "Account::Import")
     with archive(target) as zipped:
@@ -104,12 +120,17 @@ def check(target):
         assert f"storage/{ordinary['key']}" in names, target["name"]
         assert f"data/active_storage_blobs/{pending['id']}.json" in names, target["name"]
         assert f"storage/{pending['key']}" not in names, target["name"]
+        inactive_path = f"data/users/{target['inactive_user_id']}.json"
+        assert inactive_path in names, target["name"]
+        inactive = json.loads(zipped.read(inactive_path))
+        assert inactive["active"] is False and inactive["email_address"] is None, inactive
         for blob, attachment in ((exported, exported_attachment), (imported, imported_attachment)):
             assert f"data/active_storage_blobs/{blob['id']}.json" not in names, target["name"]
             assert f"data/active_storage_attachments/{attachment}.json" not in names, target["name"]
             assert f"storage/{blob['key']}" not in names, target["name"]
     return {"ordinary_blob": True, "ordinary_file": True,
             "pending_blob": True, "pending_file": False,
+            "inactive_member_without_identity": True,
             "excluded_internal_blobs": 2, "excluded_internal_attachments": 2,
             "excluded_internal_files": 2}
 
@@ -136,9 +157,14 @@ def import_source_archive(source, rust, directory):
             "SELECT storage_key,uploaded_at FROM storage_blobs WHERE account_id=? AND id=?",
             (account_id, source["ordinary_blob_id"]),
         ).fetchone()
+        inactive = db.execute(
+            "SELECT active,identity_id FROM users WHERE account_id=? AND id=?",
+            (account_id, source["inactive_user_id"]),
+        ).fetchone()
     assert pending and pending[1] is None, pending
     assert pending[2:] == (pending_metadata["byte_size"], pending_metadata["checksum"]), pending
     assert ordinary and ordinary[1], ordinary
+    assert inactive == (0, None), inactive
     storage = directory / "storage"
     assert not (storage / pending[0]).exists()
     assert (storage / ordinary[0]).read_bytes() == ordinary_bytes
@@ -203,7 +229,7 @@ def main():
                              "db": str(nested_directory / "rizzy.sqlite3")}
             import_source_archive(with_nested_storage_key(targets["fizzy"]),
                                   nested_target, nested_directory)
-            print("Matched Fizzy account ZIP pending/internal blobs and imported nested-key storage")
+            print("Matched Fizzy account ZIP pending/internal blobs, inactive users, and nested storage keys")
         finally:
             for process in reversed(processes):
                 stop_server(process)

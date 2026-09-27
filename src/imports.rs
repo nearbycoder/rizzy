@@ -580,28 +580,33 @@ async fn apply_archive(
         let user_id = field(user, "id")?;
         let role = field(user, "role")?;
         let identity_id = if role == "system" {
-            system_identity.clone()
+            Some(system_identity.clone())
         } else {
-            let email = maybe_field(user, "email_address")
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("missing+{user_id}@rizzy.invalid"));
-            let insert_identity = if app.mysql {
-                "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+            if let Some(email) =
+                maybe_field(user, "email_address").filter(|email| !email.trim().is_empty())
+            {
+                let insert_identity = if app.mysql {
+                    "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+                } else {
+                    "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+                };
+                sqlx::query(insert_identity)
+                    .bind(id())
+                    .bind(email)
+                    .bind(field(user, "created_at")?)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Some(
+                    sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
+                        .bind(email)
+                        .fetch_one(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?,
+                )
             } else {
-                "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
-            };
-            sqlx::query(insert_identity)
-                .bind(id())
-                .bind(&email)
-                .bind(field(user, "created_at")?)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| e.to_string())?;
-            sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
-                .bind(email)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| e.to_string())?
+                None
+            }
         };
         sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,active,verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
             .bind(user_id).bind(account_id).bind(identity_id).bind(field(user,"name")?).bind(role)
