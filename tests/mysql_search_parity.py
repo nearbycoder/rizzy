@@ -74,17 +74,21 @@ def browser_login(target):
         assert response.status == 201
         code = response.headers.get("X-Magic-Link-Code")
     if target["name"] == "fizzy":
-        client = os.environ["RIZZY_TEST_MYSQL_CLIENT"]
-        mysql_env = {**os.environ, "MYSQL_PWD": os.environ["MYSQL_PASSWORD"]}
+        client = target.get("mysql_client") or os.environ["RIZZY_TEST_MYSQL_CLIENT"]
+        mysql_env = {**os.environ,
+                     "MYSQL_PWD": target.get("mysql_password") or os.environ["MYSQL_PASSWORD"],
+                     "LD_LIBRARY_PATH": str(Path(client).resolve().parents[1] / "lib")}
         statement = (
             "SELECT m.code FROM magic_links m JOIN identities i ON i.id=m.identity_id "
             "WHERE i.email_address='" + target["email"].replace("'", "''") + "' "
             "ORDER BY m.created_at DESC LIMIT 1"
         )
         code = subprocess.run(
-            [client, "--no-defaults", "--host=" + os.environ["MYSQL_HOST"],
-             "--port=" + os.environ["MYSQL_PORT"], "--user=" + os.environ["MYSQL_USER"],
-             "--database=fizzy_development", "--skip-column-names", "--execute=" + statement],
+            [client, "--no-defaults", "--host=" + (target.get("mysql_host") or os.environ["MYSQL_HOST"]),
+             "--port=" + str(target.get("mysql_port") or os.environ["MYSQL_PORT"]),
+             "--user=" + (target.get("mysql_user") or os.environ["MYSQL_USER"]),
+             "--database=" + target.get("mysql_database", "fizzy_development"),
+             "--skip-column-names", "--execute=" + statement],
             env=mysql_env, check=True, capture_output=True, text=True,
         ).stdout.strip()
     assert code, target["name"]
@@ -137,6 +141,10 @@ def run(target, tag):
         card("Long winded", f"{filler} needle {filler}")
         comment = api(target, f"/cards/{second['number']}/comments", "POST", {"comment": {"body": "overflowing text issue"}}, 201)
         api(target, f"/cards/{third['number']}/comments", "POST", {"comment": {"body": "I love haggis"}}, 201)
+        shared = card("Shared spotlight", "The spotlight is on this card")
+        api(target, f"/cards/{shared['number']}/comments", "POST",
+            {"comment": {"body": "This comment mentions spotlight too"}}, 201)
+        card("Café résumé", "A naïve approach to co-operating in 東京")
         walk = api(target, f"/cards/{stemmed['number']}/comments", "POST", {"comment": {"body": "Walking swiftly"}}, 201)
         initial = {term: search(target, term) for term in (
             "broken", "overflowing", "haggis", "run", "authenticate", "walk",
@@ -145,7 +153,30 @@ def run(target, tag):
         filtered = {term: filtered_cards(target, term) for term in ("run", "haggis", "missing")}
         browser = {term: browser_results(target, term) for term in (
             "run", "authenticate", "haggis", "overflowing", "needle", "missing",
+            "spotlight", "café", "résumé", "naïve",
         )}
+        assert len(browser["spotlight"]) == 2, target["name"]
+        assert all(hit["title_marks"] == ["spotlight"] for hit in browser["spotlight"]), target["name"]
+        assert len(browser["café"]) == 1, target["name"]
+        assert browser["café"][0]["title_marks"] == ["Café"], target["name"]
+        query_cases = (
+            "spotlight", '"spotlight"', '"shared spotlight"', "shared spotlight",
+            "shared|spotlight", "shared*spotlight", "shared+spotlight",
+            'shared"spotlight"', "spotlight haggis", "spotlight -haggis",
+            "broken", "break", "broke", "layout", "layout broken",
+            "run", "runs", "running", "runner", "walking", "walked", "swiftly",
+            "authenticate", "authentication", "authenticating", "authentic",
+            "cafe", "café", "résumé", "resume", "naïve", "naive", "東京",
+            "needle", "word needle", '"word needle"', "overflowing",
+        )
+        paired_terms = (("layout", "broken"), ("shared", "spotlight"),
+                        ("word", "needle"), ("running", "authentication"),
+                        ("café", "résumé"), ("haggis", "missing"))
+        separators = (" ", "-", "_", "+", "|", '"', " / ", " AND ", " OR ")
+        query_cases += tuple(left + separator + right for left, right in paired_terms
+                             for separator in separators)
+        query_probe = {term: search(target, term) for term in query_cases}
+        assert query_probe["東京"] == [], target["name"]
         api(target, f"/cards/{first['number']}", "PUT", {"card": {"title": "Repaired layout"}})
         api(target, f"/cards/{second['number']}/comments/{comment['id']}", "PUT", {"comment": {"body": "Sprinting text issue"}})
         edited = {term: search(target, term) for term in ("repaired", "sprint", "overflowing")}
@@ -161,6 +192,7 @@ def run(target, tag):
                    api(target, "/search?" + urllib.parse.urlencode({"q": order_term}))]
         assert ordered == ["older", "newer"], (target["name"], ordered)
         return {"initial": initial, "filtered": filtered, "browser": browser,
+                "query_probe": query_probe,
                 "edited": edited, "removed": removed, "latest_activity_order": ordered}
     finally:
         api(target, f"/boards/{board_id}", "DELETE", expected=204)

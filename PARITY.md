@@ -205,11 +205,14 @@ On the MySQL branch, `tests/mysql_search_parity.py` compared the pinned Fizzy
 MySQL adapter with Rizzy on a shared Oracle MySQL 8.4.11 server. Selected JSON
 search results, card text filters, browser hit counts, stemming, edits, and
 deletions matched. The source MySQL search suites passed 37 tests and 146
-assertions. This is evidence for that fixture, not full ActiveSearch parity;
-exact browser highlighting, snippets, Unicode indexing, and search scale remain
-open.
+assertions. A fresh `tests/mysql_search_selfhost.py` run used disposable
+databases for both apps and matched 86 JSON query cases and 10 rendered search
+cases. Its fixture adds accented text, punctuation and quote combinations, and
+a card and comment that both highlight the same title. This is evidence for
+those fixtures, not full ActiveSearch parity; all browser snippets, Unicode
+indexing, and search scale remain open.
 
-The source JSON search applies `Card.latest`, which sorts by last activity. A paired SQLite test now creates two matching cards, comments on the older card, and confirms both apps move it ahead in JSON search. Rizzy's MySQL JSON query previously sorted by creation time; it now uses the same last-activity order, and `tests/mysql_search_parity.py` includes the matching two-card case. That new MySQL case has not been run on a live MySQL server in this change; its runtime result remains to be verified.
+The source JSON search applies `Card.latest`, which sorts by last activity. A paired SQLite test now creates two matching cards, comments on the older card, and confirms both apps move it ahead in JSON search. Rizzy's MySQL JSON query previously sorted by creation time; it now uses the same last-activity order, and `tests/mysql_search_parity.py` includes the matching two-card case. The fresh disposable MySQL comparison ran this case and matched both apps.
 
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process
