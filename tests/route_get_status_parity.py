@@ -4,9 +4,11 @@
 This is a routing/error-contract census, not a functional route parity test.
 """
 
+import hashlib
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -39,9 +41,10 @@ def paths():
     return sorted(found)
 
 
-def run(target):
+def run(target, detailed=False):
     result = {}
-    for path in paths():
+    route_paths = paths()
+    for path in route_paths:
         scoped = f"/{target['account']}{path}" if path != "/" else f"/{target['account']}/"
         request = urllib.request.Request(
             target["url"] + scoped,
@@ -53,6 +56,22 @@ def run(target):
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            response.read()
-            result[path] = (response.status, response.headers.get_content_type())
+            body = response.read()
+            content_type = response.headers.get_content_type()
+            contract = [response.status, content_type]
+            if detailed and 300 <= response.status < 400:
+                location = urllib.parse.urlparse(response.headers.get("Location", ""))
+                account_prefix = f"/{target['account']}/"
+                destination_path = location.path.replace(account_prefix, "/:account/", 1)
+                contract.append((destination_path, location.query))
+            elif detailed and response.status >= 400:
+                if content_type == "application/json":
+                    try:
+                        contract.append(json.loads(body))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        contract.append((len(body), hashlib.sha256(body).hexdigest()))
+                else:
+                    contract.append((len(body), hashlib.sha256(body).hexdigest()))
+            result[path] = tuple(contract)
+    assert len(result) == len(route_paths), (target["name"], len(result), len(route_paths))
     return result

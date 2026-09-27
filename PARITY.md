@@ -925,7 +925,10 @@ the access-check cost or establish whole-app performance or multi-host scale.
 `tests/mysql_pair_selfhost.py route-get` checks the status code and content type
 of 92 distinct pinned Fizzy GET paths against Rizzy, using a JSON request and
 absent resource identifiers on fresh paired MySQL databases. All 92 matched.
-This covers routing and missing-resource behavior only; it does not compare
-response bodies, redirects, valid resources, HTML, permissions, or side effects.
+The `route-get-contract` variant also matches redirect paths and queries,
+semantic JSON error bodies, and the exact hash and length of non-JSON error
+bodies on all 92 paths. This covers routing and missing-resource behavior only;
+it does not compare successful response bodies, valid resources, HTML request
+negotiation, permissions, or side effects.
 The paired `join-code` flow also checks invalid QR signatures and absent account
 prefixes with JSON and SVG Accept headers. Full route parity remains open.

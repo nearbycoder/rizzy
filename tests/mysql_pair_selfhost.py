@@ -49,6 +49,7 @@ from join_code_html_parity import check as join_code_check  # noqa: E402
 from users_events_html_parity import check as user_events_check  # noqa: E402
 from route_get_status_parity import run as route_get_run  # noqa: E402
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
+from auth_format_parity import run as auth_format_run  # noqa: E402
 
 
 def main():
@@ -60,8 +61,9 @@ def main():
                                           "column-turbo", "card-previews", "account-card",
                                           "board-views", "board-settings", "webhooks-html",
                                           "step-read", "public-page", "join-code",
-                                          "user-events", "route-get", "passkeys-html",
-                                          "passkeys-flow"))
+                                          "user-events", "route-get", "route-get-contract",
+                                          "passkeys-html",
+                                          "passkeys-flow", "auth-format"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -190,15 +192,29 @@ def main():
                     target["user_id"] = next(user["id"] for user in users if user["role"] == "owner")
                 source_result = user_events_check(source)
                 rust_result = user_events_check(rust)
-            elif args.suite == "route-get":
-                source_result = route_get_run(source)
-                rust_result = route_get_run(rust)
+            elif args.suite in ("route-get", "route-get-contract"):
+                detailed = args.suite == "route-get-contract"
+                source_result = route_get_run(source, detailed)
+                rust_result = route_get_run(rust, detailed)
             elif args.suite == "passkeys-html":
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
                 source_result = passkeys_html_check(source)
                 rust_result = passkeys_html_check(rust)
+            elif args.suite == "auth-format":
+                for target in (source, rust):
+                    request = urllib.request.Request(
+                        f"{target['url']}/{target['account']}/boards.json",
+                        data=json.dumps({"board": {"name": "Auth format fixture"}}).encode(),
+                        method="POST",
+                        headers={"Authorization": f"Bearer {target['token']}",
+                                 "Accept": "application/json",
+                                 "Content-Type": "application/json"})
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        assert response.status == 201, target["name"]
+                source_result = auth_format_run(source)
+                rust_result = auth_format_run(rust)
             elif args.suite == "passkeys-flow":
                 source_test_env = {**os.environ, "PASSKEY_TARGET": "fizzy",
                                    "FIZZY_URL": source["url"], "FIZZY_EMAIL": source["email"],
@@ -249,7 +265,7 @@ def main():
                 source_result = core_run(source)
                 rust_result = core_run(rust)
             difference = first_difference(source_result, rust_result)
-            if args.suite == "route-get" and difference is not None:
+            if args.suite in ("route-get", "route-get-contract") and difference is not None:
                 for path in source_result.keys() | rust_result.keys():
                     if source_result.get(path) != rust_result.get(path):
                         print(f"{path}: Fizzy={source_result.get(path)} "
@@ -288,11 +304,13 @@ def main():
                 print("Disposable MySQL invite-link browser and QR workflow matched pinned Fizzy")
             elif args.suite == "user-events":
                 print("Disposable MySQL user activity browser workflow matched pinned Fizzy")
-            elif args.suite == "route-get":
+            elif args.suite in ("route-get", "route-get-contract"):
                 print(f"Disposable MySQL GET error contracts matched pinned Fizzy: "
                       f"{len(source_result)} routes")
             elif args.suite == "passkeys-html":
                 print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
+            elif args.suite == "auth-format":
+                print("Disposable MySQL bearer format and permission checks matched pinned Fizzy")
             elif args.suite == "passkeys-flow":
                 print("Disposable MySQL passkey registration, management, and login matched pinned Fizzy")
             elif args.suite in ("card-controls", "card-board", "card-edit",

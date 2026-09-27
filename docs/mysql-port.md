@@ -773,7 +773,12 @@ concurrent creation behavior remain open.
 `tests/mysql_pair_selfhost.py route-get` passed a 92-path paired GET census on
 fresh MySQL databases. It compares JSON-request status and content type with
 missing resource identifiers, including account-scope redirects, lookup order,
-and missing-template errors. The paired `join-code` suite passed invite-link
+and missing-template errors. `route-get-contract` also compares redirect
+destinations, JSON error bodies, and exact non-JSON error body digests for all
+92 paths. The paired `join-code` suite passed invite-link
 browser behavior plus invalid QR signatures and absent-account prefixes for
-JSON and SVG requests. Response bodies, valid-resource routes, and most write
-paths are outside this census.
+JSON and SVG requests. Successful response bodies, valid-resource routes, and
+most write paths are outside this census.
+The disposable paired `auth-format` suite also passed bearer-only format,
+read-token write denial, JSON suffix, and unauthenticated redirect checks on
+fresh MySQL databases.

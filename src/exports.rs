@@ -204,12 +204,14 @@ pub(super) async fn show_user(
     .await
     .map_err(db_err)?;
     if json_request(&headers, &export_id) {
-        return Ok(Json(export_view(
-            &row.ok_or_else(missing)?,
-            &base(&headers),
-            p.slug,
-        ))
-        .into_response());
+        let Some(row) = row else {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
+        };
+        return Ok(Json(export_view(&row, &base(&headers), p.slug)).into_response());
     }
     let completed = row
         .as_ref()
@@ -290,12 +292,14 @@ pub(super) async fn show_account(
     .await
     .map_err(db_err)?;
     if json_request(&headers, &export_id) {
-        return Ok(Json(export_view(
-            &row.ok_or_else(missing)?,
-            &base(&headers),
-            p.slug,
-        ))
-        .into_response());
+        let Some(row) = row else {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
+        };
+        return Ok(Json(export_view(&row, &base(&headers), p.slug)).into_response());
     }
     let completed = row
         .as_ref()

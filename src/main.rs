@@ -226,6 +226,12 @@ impl IntoResponse for ApiError {
             )
                 .into_response();
         }
+        if self.0 == StatusCode::NOT_FOUND && self.1 == "Not found" {
+            return (self.0, Json(json!({"status":404,"error":"Not Found"}))).into_response();
+        }
+        if self.0 == StatusCode::NOT_ACCEPTABLE && self.1 == "Not Acceptable" {
+            return (self.0, Json(json!({"status":406,"error":"Not Acceptable"}))).into_response();
+        }
         (self.0, Json(json!({"message": self.1}))).into_response()
     }
 }
@@ -342,7 +348,10 @@ async fn redirect_tenanted_public_route(
         Ok(0) => next.run(request).await,
         Ok(_) => (
             StatusCode::FOUND,
-            [(header::LOCATION, format!("{}/", base(request.headers())))],
+            [(
+                header::LOCATION,
+                format!("{}/{slug}/", base(request.headers())),
+            )],
             Html(String::new()),
         )
             .into_response(),
@@ -7301,11 +7310,7 @@ async fn join_page(
     let row=sqlx::query("SELECT a.name,j.usage_count,j.usage_limit FROM account_join_codes j JOIN accounts a ON a.id=j.account_id WHERE a.external_account_id=? AND j.code=?")
         .bind(slug).bind(&code).fetch_optional(&app.db).await.map_err(db_err)?;
     let Some(row) = row else {
-        return Ok((
-            StatusCode::NOT_FOUND,
-            Html("<h1>Invite link not found</h1>"),
-        )
-            .into_response());
+        return Ok((StatusCode::NOT_FOUND, Html(String::new())).into_response());
     };
     let name: String = row.get("name");
     if row.get::<i64, _>("usage_count") >= row.get::<i64, _>("usage_limit") {
