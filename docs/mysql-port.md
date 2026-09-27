@@ -136,8 +136,12 @@ concurrent incineration workers.
 The fresh paired MySQL `account-cancellation` suite runs both apps in
 multi-tenant mode and verifies the owner browser action, session-menu
 redirect, initiating owner record, immediate loss of account access, and
-retention of the account, board, and card. It does not compare delayed
-incineration or cancellation mail delivery across the two apps.
+retention of the account, board, and card. Its `account-cancellation-retention`
+variant adds a surviving account, board, and card on both sides, then compares
+day-29 retention and day-31 scoped deletion after Fizzy's due-incineration
+job and Rizzy's startup maintenance. The surviving owner's settings API
+remains accessible. Cross-app file cleanup, mail delivery,
+and concurrent incineration workers remain open.
 `tests/mysql_session_transfer.py` now checks device transfer link creation,
 revocation, QR rendering, redemption by PUT and PATCH, replay rejection,
 four-hour expiry, and simultaneous redemption with exactly one winner.
