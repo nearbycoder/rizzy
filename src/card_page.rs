@@ -156,7 +156,7 @@ pub(super) async fn show(
     let number: i64 = card.get("number");
     let title: String = card.get("title");
     let description: String = card.get("description");
-    let (_, description_html, _) =
+    let (plain_description, description_html, _) =
         storage::render_rich_text(app, &principal.account_id, principal.slug, &description).await?;
     let card_board = board(app, principal, &board_id).await?;
     let board_name: String = card_board.get("name");
@@ -372,7 +372,15 @@ pub(super) async fn show(
     let mut stage_rail =
         String::from("<div class=\"stage-rail\" role=\"radiogroup\" aria-label=\"Card stage\">");
     let mut stage = |name: &str, label: &str, current: bool, id: Option<&str>| {
-        stage_rail.push_str(&format!("<button type=\"button\" role=\"radio\" aria-checked=\"{}\" class=\"stage-rail__option{}\" data-stage=\"{}\"{}>{}</button>",if current {"true"} else {"false"},if current {" is-current"} else {""},name,id.map(|id|format!(" data-column-id=\"{}\"",escape(id))).unwrap_or_default(),escape(label)));
+        let label_html = if name == "done" {
+            format!(
+                "<svg class=\"stage-rail__mobile-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"m23.146 5.4-2.792-2.8a.5.5 0 0 0-.708 0L7.854 14.4a.5.5 0 0 1-.708 0l-2.792-2.8a.5.5 0 0 0-.708 0L.854 14.4a.5.5 0 0 0 0 .707L7.146 21.4a.5.5 0 0 0 .708 0L23.146 6.1a.5.5 0 0 0 0-.7\"/></svg>{}",
+                escape(label)
+            )
+        } else {
+            escape(label)
+        };
+        stage_rail.push_str(&format!("<button type=\"button\" role=\"radio\" aria-checked=\"{}\" class=\"stage-rail__option{}\" data-stage=\"{}\"{}>{label_html}</button>",if current {"true"} else {"false"},if current {" is-current"} else {""},name,id.map(|id|format!(" data-column-id=\"{}\"",escape(id))).unwrap_or_default()));
     };
     stage("not_now", "Not Now", postponed, None);
     stage(
@@ -411,6 +419,15 @@ pub(super) async fn show(
         ("TITLE", escape(&title)),
         ("TITLE_HTML", board_views::public_html_title(&title)),
         ("DESCRIPTION_HTML", description_html),
+        (
+            "DESCRIPTION_CLASS",
+            if plain_description.trim().is_empty() {
+                " is-description-empty"
+            } else {
+                ""
+            }
+            .to_owned(),
+        ),
         ("DESCRIPTION_VALUE", escape(&description)),
         (
             "ASSIGNMENT_META",
