@@ -4,6 +4,10 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 
 `python3 tests/route_coverage.py --strict` now finds all 211 application routes, three Turbo Native routes, nine Active Storage routes, and 14 Action Mailbox routes registered. `tests/action_mailbox_parity.py` compares the pinned production source's default disabled-ingress and gated-conductor responses with Rizzy across all 14 methods, three JSON suffixes, HTML and JSON Accept headers, and anonymous and bearer-token requests. Configured mailbox ingress and development conductor behavior remain open, as does functional parity for the rest of the route inventory.
 
+`tests/http_methods_parity.py` compares 492 paired HEAD and unsupported-method contracts on disposable source and Rust servers. All 92 application GET paths match for authenticated JSON HEAD; their OPTIONS responses match under HTML and JSON Accept headers, with and without a bearer token. Six `.json` paths exercise conflicting Accept headers, and six other unsupported verbs match under authenticated JSON. Two unsupported `.json` writes verify that the error keeps the original HTML Accept preference. Fizzy returns a negotiated 404 for these method misses; Rizzy's router now does the same without Axum's `Allow` header. A separate probe found that unauthenticated `PATCH /boards/new` and authenticated `PATCH /boards/new.json` still differ because the source's dynamic board path takes that method while Axum's static new-board path takes precedence. Other shadowed paths and methods remain unverified.
+
+The paired request-forgery regression now again matches the source's exact static 422 HTML: Rizzy had inserted a random CSP nonce meta tag into that error page. The mounted Action Mailbox test caught the same error-page mutation in its gated conductor POST and passes again after static policy handling.
+
 | Area | Initial implementation | Full parity |
 | --- | --- | --- |
 | Account scoped routing, bearer tokens, identity, user listing and settings | ✓ | No |

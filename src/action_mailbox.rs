@@ -30,7 +30,10 @@ pub(super) async fn rejected_conductor_write(headers: HeaderMap) -> Response {
     {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
+            [
+                (header::CONTENT_TYPE, "text/html; charset=UTF-8"),
+                (header::CONTENT_SECURITY_POLICY, super::STATIC_CSP),
+            ],
             include_str!("../static/422.html"),
         )
             .into_response();

@@ -1,7 +1,9 @@
 use axum::{
     Json, Router, ServiceExt,
     body::{Body, Bytes},
-    extract::{ConnectInfo, FromRequest, OriginalUri, Path, Query, RawQuery, Request, State},
+    extract::{
+        ConnectInfo, Extension, FromRequest, OriginalUri, Path, Query, RawQuery, Request, State,
+    },
     http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -29,7 +31,10 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::lookup_host;
 use tokio::process::Command;
-use tower::{Layer, util::MapRequestLayer};
+use tower::{
+    Layer,
+    util::{MapRequestLayer, MapResponseLayer},
+};
 mod access_tokens_page;
 mod account_cancellation;
 mod account_sequence;
@@ -257,6 +262,8 @@ fn source_json_internal_error() -> Response {
 fn token_denied() -> ApiError {
     err(StatusCode::UNAUTHORIZED, "HTTP Token: Access denied.")
 }
+#[derive(Clone)]
+struct OriginalAccept(Option<HeaderValue>);
 fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Request<B> {
     // This runs outside the router so collection routes such as /boards.json
     // can match /boards. Explicit client configuration paths have their own routes.
@@ -289,10 +296,17 @@ fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Reque
     if let Ok(value) = HeaderValue::from_str(path) {
         request.headers_mut().insert("x-rizzy-original-path", value);
     }
-    // A format suffix takes precedence over a conflicting Accept header.
+    let original_accept = request.headers().get(header::ACCEPT).cloned();
     request
-        .headers_mut()
-        .insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        .extensions_mut()
+        .insert(OriginalAccept(original_accept));
+    // OPTIONS has no matching controller route, so its error format follows
+    // Accept even when the requested path ends in .json.
+    if request.method() != Method::OPTIONS {
+        request
+            .headers_mut()
+            .insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+    }
     *request.uri_mut() = rewritten;
     request
 }
@@ -375,6 +389,9 @@ async fn redirect_tenanted_public_route(
     request: Request,
     next: Next,
 ) -> Response {
+    if request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
     let path = request.uri().path();
     let Some((account, rest)) = path.trim_start_matches('/').split_once('/') else {
         return next.run(request).await;
@@ -484,11 +501,10 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
                 )
                     .into_response();
             }
-            return (
+            return static_error_page(
+                include_str!("../static/422.html"),
                 StatusCode::UNPROCESSABLE_ENTITY,
-                Html(include_str!("../static/422.html")),
-            )
-                .into_response();
+            );
         }
     }
     let mut response = next.run(request).await;
@@ -4764,6 +4780,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             axum::routing::delete(delete_comment_reaction),
         )
         .fallback(static_not_found)
+        .method_not_allowed_fallback(unsupported_method)
         .layer(middleware::from_fn_with_state(
             app.clone(),
             register_pwa_on_pages,
@@ -4791,6 +4808,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("Rizzy listening on http://{bind}");
     let routes = MapRequestLayer::new(rewrite_json_uri).layer(routes);
+    let routes = MapResponseLayer::new(|mut response: Response| {
+        if response.status() == StatusCode::NOT_FOUND {
+            response.headers_mut().remove(header::ALLOW);
+        }
+        response
+    })
+    .layer(routes);
     axum::serve(
         listener,
         routes.into_make_service_with_connect_info::<SocketAddr>(),
@@ -6048,6 +6072,24 @@ async fn static_not_found(headers: HeaderMap, OriginalUri(uri): OriginalUri) -> 
         response
     } else {
         static_error_page(include_str!("../static/404.html"), StatusCode::NOT_FOUND)
+    }
+}
+async fn unsupported_method(
+    headers: HeaderMap,
+    original_accept: Option<Extension<OriginalAccept>>,
+    uri: OriginalUri,
+) -> Response {
+    let accept = match original_accept.as_ref() {
+        Some(Extension(original)) => original.0.as_ref(),
+        None => headers.get(header::ACCEPT),
+    };
+    if accept
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/html"))
+    {
+        static_error_page(include_str!("../static/404.html"), StatusCode::NOT_FOUND)
+    } else {
+        static_not_found(headers, uri).await
     }
 }
 fn client_config_error(status: StatusCode, json: bool) -> Response {
