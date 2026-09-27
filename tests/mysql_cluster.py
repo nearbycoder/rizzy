@@ -618,10 +618,55 @@ def main():
                 status, moved, _ = call(bases[index % 4], account, token, f"/cards/{number}")
                 assert status == 200 and moved["board"]["id"] == board["id"]
 
+            def mixed_triage_move(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/triage", "POST",
+                                {"column_id": column["id"]})
+                return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                            {"board_id": destination["id"]})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                triage_move = list(pool.map(mixed_triage_move, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, triage_move)
+                        if status not in ((204, 404) if item[1] == 0 else (200,))]
+            assert not failures, ("triage/move", failures[:5])
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                assert mysql_scalar(url, "SELECT COUNT(*) FROM cards c LEFT JOIN columns col "
+                                    "ON col.id=c.column_id WHERE c.column_id IS NOT NULL "
+                                    "AND (col.id IS NULL OR col.board_id<>c.board_id)") == "0"
+            for index in (0, 99, 199):
+                number = results[index + 200][1]["number"]
+                status, moved, _ = call(bases[index % 4], account, token, f"/cards/{number}")
+                assert status == 200 and moved["board"]["id"] == destination["id"]
+
+            def mixed_untriage_move(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/triage", "DELETE")
+                return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                            {"board_id": board["id"]})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                untriage_move = list(pool.map(mixed_untriage_move, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, untriage_move)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, ("untriage/move", failures[:5])
+            for index in (0, 99, 199):
+                number = results[index + 200][1]["number"]
+                status, moved, _ = call(bases[index % 4], account, token, f"/cards/{number}")
+                assert status == 200 and moved["board"]["id"] == board["id"]
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion, watch/move and reading/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion, watch/move, reading/move, triage/move, and untriage/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

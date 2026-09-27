@@ -717,3 +717,11 @@ The [fresh signed-in board HTML run](bench/results/board-html-1000-shared-shell-
 The authenticated named-column page now uses the same menu, pins and notification trays, and footer search as the board page. Its grid card styles are scoped to `main` so the shared pin tray keeps the same presentation when opened from a column. A fresh paired `tests/named_column_html_parity.py` run matched the empty, 15-card first, and one-card second page structure; `tests/named_column_show_etag_parity.py` still matched the index/show validators. Chromium loaded the second page automatically, opened the menu and populated pin tray, and found three cards through footer search. The final page had no browser errors or horizontal overflow at 390 pixels: [desktop](docs/visual-baselines/rizzy-named-column-shell-1280.png) and [mobile pin tray](docs/visual-baselines/rizzy-named-column-shell-pin-390.png). The screenshots show Rizzy only; exact card layout and Turbo behavior still differ from Fizzy.
 
 The [fresh named-column HTML run](bench/results/named-column-html-100-shared-shell-2026-09-27.json) used 100 cards per app, 15 visible previews, eight shared CPUs, eight Fizzy workers, one release Rizzy process, and two reversed-order rounds at eight and 32 clients. All eight two-second phases had zero errors. Rizzy served 4,143–4,263 requests/s at eight clients versus Fizzy's 291–408, and 4,916–5,031 at 32 clients versus Fizzy's 379–439. Rust HTML was 59,804 bytes versus Fizzy's 121,093, so this measures different rendering work on one local read path. It does not establish whole-app speed or maximum scale. Reproduce with `python3 bench/named_column_html_fresh.py --cards 100 --seconds 2 --concurrency 8,32 --rounds 2`.
+
+`tests/triage_board_parity.py` now compares Fizzy and Rizzy after a card moves
+between boards: both clear its old column, reject the old board's column with
+404, accept the destination board's column, and untriage it. The paired column
+timestamp test still matches. A fresh four-process MySQL cluster run raced 200
+triages and 200 untriages with moves, observed no HTTP 500s, and checked that
+no card linked to a column on another board. Other cross-board mutations and
+full concurrency parity remain unverified.

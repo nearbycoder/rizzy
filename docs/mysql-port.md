@@ -574,3 +574,15 @@ MySQL cluster runs sent two concurrent toggles per card across four processes
 for 200 cards; every request succeeded and every card retained its tag after
 the pair. The MySQL core flow also passed. This is a same-host correctness
 check, not a tag throughput or maximum-scale result.
+
+Triage and send-back-to-triage now lock and recheck the card's current board
+before writing. Triage verifies the chosen column inside that transaction;
+if a move won the race, the old board's column returns 404 instead of being
+attached to a card on another board. Send-back checks access to the current
+board and records its event there. A fresh four-process cluster run raced 200
+triages and 200 send-backs with card moves and found no HTTP 500s or orphaned
+cross-board column links. The paired SQLite `tests/triage_board_parity.py`
+matched Fizzy's sequential move, invalid old-column, new-column, and
+untriage behavior, and `tests/column_touch_parity.py` still matched the
+timestamp side effects. Concurrent semantics on other mutation paths remain
+open.

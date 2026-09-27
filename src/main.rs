@@ -13158,15 +13158,38 @@ async fn triage_card(
 async fn triage_card_into(app: &App, p: &Principal, number: &str, column: &str) -> Result<()> {
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let col = checked_column(&app, &p, &c.get::<String, _>("board_id"), &column).await?;
+    let card_id: String = c.get("id");
+    let original_board_id: String = c.get("board_id");
+    let column_id = column.trim_end_matches(".json");
     let timestamp = now();
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let (mut tx, board_id) = begin_card_board_write(app, &card_id, &original_board_id).await?;
+    if board_id != original_board_id {
+        tx.rollback().await.map_err(db_err)?;
+        return Err(missing());
+    }
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&board_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
+    let col = sqlx::query("SELECT * FROM columns WHERE id=? AND board_id=? AND account_id=?")
+        .bind(column_id)
+        .bind(&board_id)
+        .bind(&p.account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
     sqlx::query("UPDATE cards SET column_id=?,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
-        .bind(column).bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(column_id).bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
     for table in ["closures", "card_not_nows", "card_activity_spikes"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE card_id=?"))
-            .bind(c.get::<String, _>("id"))
+            .bind(&card_id)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
@@ -13175,10 +13198,10 @@ async fn triage_card_into(app: &App, p: &Principal, number: &str, column: &str) 
     record_event(
         &app,
         &p,
-        &c.get::<String, _>("board_id"),
-        &c.get::<String, _>("id"),
+        &board_id,
+        &card_id,
         "Card",
-        &c.get::<String, _>("id"),
+        &card_id,
         "card_triaged",
         json!({"column":col.get::<String,_>("name")}),
     )
@@ -13187,7 +13210,7 @@ async fn triage_card_into(app: &App, p: &Principal, number: &str, column: &str) 
     system_comment(
         &app,
         &p,
-        &c.get::<String, _>("id"),
+        &card_id,
         &format!(
             "{who} <strong>moved</strong> this to “{}”",
             escape(&col.get::<String, _>("name"))
@@ -13208,14 +13231,26 @@ async fn untriage_card(
 async fn send_card_to_stream(app: &App, p: &Principal, number: &str) -> Result<()> {
     p.write()?;
     let c = card(&app, &p, &number).await?;
+    let card_id: String = c.get("id");
     let timestamp = now();
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let (mut tx, board_id) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+    let accessible: Option<String> = sqlx::query_scalar(
+        "SELECT board_id FROM accesses WHERE board_id=? AND user_id=?",
+    )
+    .bind(&board_id)
+    .bind(&p.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
     sqlx::query("UPDATE cards SET column_id=NULL,closed=0,postponed=0,updated_at=?,last_active_at=? WHERE id=?")
-        .bind(&timestamp).bind(&timestamp).bind(c.get::<String,_>("id")).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
     for table in ["closures", "card_not_nows", "card_activity_spikes"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE card_id=?"))
-            .bind(c.get::<String, _>("id"))
+            .bind(&card_id)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
@@ -13224,10 +13259,10 @@ async fn send_card_to_stream(app: &App, p: &Principal, number: &str) -> Result<(
     record_event(
         &app,
         &p,
-        &c.get::<String, _>("board_id"),
-        &c.get::<String, _>("id"),
+        &board_id,
+        &card_id,
         "Card",
-        &c.get::<String, _>("id"),
+        &card_id,
         "card_sent_back_to_triage",
         json!({}),
     )
@@ -13236,7 +13271,7 @@ async fn send_card_to_stream(app: &App, p: &Principal, number: &str) -> Result<(
     system_comment(
         &app,
         &p,
-        &c.get::<String, _>("id"),
+        &card_id,
         &format!("{who} <strong>moved</strong> this back to “Maybe?”"),
     )
     .await?;
