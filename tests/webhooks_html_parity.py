@@ -29,6 +29,12 @@ def csrf_token(body):
     return match.group(1).decode() if match else None
 
 
+def assert_shell(target, body):
+    for marker in (b'id="global-container"', b'id="header"', b'id="main"',
+                   b'id="footer"', b'href="#main"'):
+        assert marker in body, (target["name"], "webhook page shell", marker)
+
+
 def check(target):
     login(target)
     account = target["account"]
@@ -42,8 +48,10 @@ def check(target):
         assert status == 200 and base.encode() in board_page, (target["name"], "board webhook link", status)
         status, _, page = request(target, base, accept="text/html")
         assert status == 200 and b"Set up a new webhook" in page, (target["name"], "index", status)
+        assert_shell(target, page)
         status, _, page = request(target, base + "/new", accept="text/html")
         assert status == 200 and b"Payload URL" in page and b"Enable all" in page, (target["name"], "new form", status)
+        assert_shell(target, page)
         csrf = csrf_token(page)
 
         status, _, page = request(target, base, "POST", form(**{"webhook[name]":"", "webhook[url]":"invalid-url"}), accept="text/html", csrf=csrf)
@@ -63,10 +71,12 @@ def check(target):
         assert status == 200 and name.encode() in page and detail.encode() in page, (target["name"], "populated index", status)
         status, _, page = request(target, detail, accept="text/html")
         assert status == 200 and name.encode() in page and payload_url.encode() in page, (target["name"], "show", status)
+        assert_shell(target, page)
         assert b"Secret" in page and b"Subscribed to" in page and b"Card added" in page and b"Card moved to" in page
 
         status, _, page = request(target, detail + "/edit", accept="text/html")
         assert status == 200 and b"Save Changes" in page and name.encode() in page, (target["name"], "edit form", status)
+        assert_shell(target, page)
         assert b'name="webhook[url]"' not in page, (target["name"], "url should not be editable")
         csrf = csrf_token(page)
         status, _, page = request(target, detail, "POST", form(**{"_method":"put", "webhook[name]":""}), accept="text/html", csrf=csrf)

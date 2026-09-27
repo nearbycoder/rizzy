@@ -525,7 +525,7 @@ The newer [balanced Rust-client repeat](bench/results/scoped-api-rust-client-rep
 
 `tests/card_edit_html_parity.py` compares the dedicated edit route's Turbo frame, form fields, Lexxy editor, JSON rejection, save, and reloaded title against both apps. Chromium submitted the Rust form and showed the updated card without errors. Fizzy's edit route inserts the editor into the card view and updates its save control via Turbo; Rizzy's route currently renders a standalone editing page with a matching frame and a simpler save flow.
 
-`tests/webhooks_html_parity.py` compares the browser webhook list, new and edit forms, validation, create/update/delete redirects, rendered detail, and JSON collection against Fizzy. Chromium created a webhook and opened its edit form; `tests/webhooks.py` confirmed the JSON API and delivery worker still pass. The Rust pages use simpler styling, and exact payload-byte and broader delivery parity remain outstanding.
+`tests/webhooks_html_parity.py` compares the browser webhook list, new and edit forms, validation, create/update/delete redirects, rendered detail, and JSON collection against Fizzy. It also checks the shared application shell markers on each webhook page. Rizzy now renders the webhook list, new, detail, and edit pages inside its signed-in shell, with the menu, skip link, and footer controls. Chromium created a webhook and opened its edit form; `tests/webhooks.py` confirmed the JSON API and delivery worker still pass. The Rust pages use simpler styling, and exact payload-byte and broader delivery parity remain outstanding.
 
 `tests/webhook_delinquency_timestamp_parity.py` compares blocked delivery
 failures and deactivation against the pinned Fizzy app. Both preserve the

@@ -28,12 +28,16 @@ fn label(action: &str) -> &str {
 
 fn page(account: i64, board_id: &str, title: &str, content: &str) -> Html<String> {
     let base = format!("/{account}/boards/{}", escape(board_id));
-    Html(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></header><main>{content}</main></body></html>",
-        escape(title),
+    signed_in_shell_html(
+        account,
+        title,
+        &format!("<div class=\"webhook-content\">{content}</div>"),
         include_str!("../static/webhooks.css"),
-        escape(title)
-    ))
+        &format!(
+            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></nav>",
+            escape(title)
+        ),
+    )
 }
 
 fn actions(selected: &[String]) -> String {

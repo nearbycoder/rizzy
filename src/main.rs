@@ -1574,17 +1574,25 @@ fn wrap_html(s: &str) -> String {
     format!("<div class=\"action-text-content\">\n  {s}\n</div>\n")
 }
 fn signed_in_frame_page(account: i64, title: &str, frame: String) -> Response {
+    signed_in_shell_html(account, title, &frame, "", "").into_response()
+}
+fn signed_in_shell_html(
+    account: i64,
+    title: &str,
+    content: &str,
+    extra_styles: &str,
+    header_content: &str,
+) -> Html<String> {
     let footer =
         include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &account.to_string());
     Html(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover\"><title>{title} | Rizzy</title><style>:root{{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#101b20;color:#f4f5f6}}body{{margin:0}}#global-container{{min-height:100vh;padding-bottom:50px}}#main{{max-width:960px;margin:0 auto;padding:24px}}.header{{padding:12px 24px;border-bottom:1px solid #304049}}a{{color:#80b7fc}}{styles}{menu_styles}</style></head><body data-account=\"{account}\"><div id=\"global-container\"><header class=\"header\" id=\"header\"><a class=\"header__skip-navigation\" href=\"#main\">Skip to main content</a><a href=\"/{account}/my/menu\" data-open-menu aria-haspopup=\"dialog\" aria-expanded=\"false\">Rizzy</a></header><dialog id=\"menu-dialog\" aria-label=\"Rizzy menu\"><turbo-frame id=\"my_menu\"></turbo-frame></dialog><main id=\"main\">{frame}</main></div>{footer}<script>{script}</script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover\"><title>{title} | Rizzy</title><style>:root{{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#101b20;color:#f4f5f6}}body{{margin:0}}#global-container{{min-height:100vh;padding-bottom:50px}}#main{{max-width:960px;margin:0 auto;padding:24px}}.header{{padding:12px 24px;border-bottom:1px solid #304049}}a{{color:#80b7fc}}{styles}{menu_styles}{extra_styles}</style></head><body data-account=\"{account}\"><div id=\"global-container\"><header class=\"header\" id=\"header\"><a class=\"header__skip-navigation\" href=\"#main\">Skip to main content</a><a href=\"/{account}/my/menu\" data-open-menu aria-haspopup=\"dialog\" aria-expanded=\"false\">Rizzy</a>{header_content}</header><dialog id=\"menu-dialog\" aria-label=\"Rizzy menu\"><turbo-frame id=\"my_menu\"></turbo-frame></dialog><main id=\"main\">{content}</main></div>{footer}<script>{script}</script></body></html>",
         title = escape(title),
         account = account,
         styles = include_str!("../static/shell_footer.css"),
         menu_styles = include_str!("../static/menu_overlay.css"),
         script = include_str!("../static/events.js"),
     ))
-    .into_response()
 }
 fn system_plain_text(s: &str) -> String {
     s.replace("<strong>", "")
