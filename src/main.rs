@@ -13555,6 +13555,16 @@ async fn update_card(
                     c.get::<String, _>("board_id"),
                 )
             };
+            if app.mysql {
+                // A title event needs an account foreign-key lock. Acquire it
+                // before rich-text inserts so card creation (account then
+                // rich text) cannot form the opposite lock order.
+                sqlx::query("SELECT id FROM accounts WHERE id=? FOR SHARE")
+                    .bind(&p.account_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            }
             if let Some(upload) = &input.image {
                 storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
             }
