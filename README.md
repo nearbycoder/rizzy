@@ -53,7 +53,7 @@ For browser push, set `RIZZY_VAPID_PRIVATE_KEY` (or Fizzy's `VAPID_PRIVATE_KEY`)
 - A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
 - An account navigation menu for boards, people, tags, settings, and shortcuts, with conditional ETag responses.
 - A dedicated card edit route with title and Lexxy description fields, alongside the card page's inline editor.
-- A Fizzy-matching service worker script and local offline bundle, plus a Rizzy web app manifest and icons. Automatic service worker registration across all browser pages is still pending.
+- A Fizzy-matching service worker script and local offline bundle, plus a Rizzy web app manifest and icons. Authenticated full HTML pages register the worker; installed-app behavior and source asset preloading remain unverified.
 - SQLite WAL storage with indexes for the board and card lookup paths.
 
 ## Parity still required
@@ -97,6 +97,7 @@ python3 tests/request_forgery_parity.py
 python3 tests/search_engine_indexing_parity.py
 python3 tests/allow_browser_parity.py
 python3 tests/route_get_status_parity.py
+python3 tests/route_get_valid_paired.py
 python3 tests/passkey_csrf_parity.py
 python3 tests/passkey_flow_paired.py
 python3 tests/shadowed_routes_parity.py
