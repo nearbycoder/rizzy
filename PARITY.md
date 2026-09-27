@@ -966,3 +966,16 @@ board-view, and named-column browser suites still pass. These markers
 do not establish equivalent page structure, controls, styling, or interaction.
 The paired `join-code` flow also checks invalid QR signatures and absent account
 prefixes with JSON and SVG Accept headers. Full route parity remains open.
+
+The [128-client](bench/results/mysql-mixed-1000-4boards-4process-c128-15s-2026-09-27.json)
+and [256-client](bench/results/mysql-mixed-1000-4boards-4process-c256-15s-2026-09-27.json)
+MySQL mixed runs used fresh 1,000-card, four-board fixtures, four app CPUs,
+four Rizzy processes, four Fizzy Puma workers, and 15 seconds per target.
+Rizzy completed 4,044 and 4,125 workflow units at 266.29 and 266.39 units/s,
+respectively, with zero HTTP errors and verified final card, event, and comment
+counts. Fizzy returned one HTTP 500 in each run from an ActiveSearch MySQL
+deadlock; its final counts therefore did not pass the workload gate. These
+artifacts show that Rizzy sustained this local workload through 256 concurrent
+clients, but neither run supports a paired speed ratio, a maximum-capacity
+claim, or multi-host scale. The prior 16-client paired MySQL runs remain the
+clean mixed-workload throughput comparison at this fixture size.
