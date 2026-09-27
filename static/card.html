@@ -54,6 +54,44 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 .steps .step__editor button[data-step-cancel]{background:#243b50;border-color:#53718e;color:#e0ecf4}
 .steps .step__editor button[data-step-delete]{margin-left:auto;background:#4e2929;border-color:#994c4c;color:#ffe5e5}
 </style>
+<style>
+#edit-mobile{display:none}
+@media(max-width:639px){
+  main{position:relative;padding:22px 0 90px}
+  main>nav{position:absolute;top:-42px;left:20px;z-index:30;margin:0}
+  main>nav a{display:grid;place-items:center;width:38px;height:38px;font-size:0}
+  main>nav a::before{content:"←";font-size:34px;line-height:1}
+  .card-perma{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));width:100%;max-width:none;min-height:0;margin:0;padding:5px 4px 28px;border-radius:0}
+  .card__header,.card__body,.card__footer{grid-column:1/-1}
+  .card__header{grid-row:1;height:35px}
+  .card__board-label{min-height:35px;padding:4px 12px;font-size:15px}
+  .card__body{grid-row:2;display:flex;flex-direction:column;gap:0;min-height:0;padding:16px 21px 18px}
+  .card__title{margin:0 0 18px;font-size:24px;line-height:1.15}
+  .card__description{font-size:17px;line-height:1.4}
+  .card__content>section[aria-label=Steps]{margin-top:20px}
+  .stage-rail{display:flex;flex-direction:row;flex:0 0 auto;align-items:center;gap:0;width:100%;height:48px;margin-top:18px;padding:0;border:1px solid #87b9fa;border-radius:5px}
+  .stage-rail__option{flex:1;width:auto;min-width:0;padding:9px 3px;text-align:center;font-size:14px;white-space:nowrap}
+  .card__footer{grid-row:3;position:relative;display:block;min-height:150px;padding:0 21px 15px}
+  .card__meta{display:grid;grid-template-columns:75px minmax(0,1fr);grid-template-rows:repeat(3,20px) 30px;grid-template-areas:"text-added text-added" "text-author avatars-author" "text-updated text-updated" "avatars-assignees text-assignees";gap:4px 8px;width:100%;font-size:13px}
+  .card__meta-avatars--author .avatar{width:20px;height:20px}
+  .card__meta-text{white-space:normal}
+  .card__meta-text--assignees{align-self:center}
+  .card__footer>turbo-frame[id^="reacting_card_"]{position:absolute;right:21px;bottom:12px}
+  .card-perma__notch,.card-perma__notch .actions{display:contents}
+  .side-action,#edit-mobile,#closure{position:static;align-self:start;justify-self:center;display:grid;place-items:center;width:50px;height:50px;margin:16px 0 0;padding:0;border-radius:50%;font-size:26px}
+  #gold{grid-column:1;grid-row:4} .side-action--image{grid-column:2;grid-row:4}
+  #edit-mobile{grid-column:3;grid-row:4;border-color:#87b9fa;background:#87b9fa;color:#101b20}
+  #closure{grid-column:4;grid-row:4;border-color:#87b9fa;background:#87b9fa;color:#101b20;font-size:0}
+  #closure::before{content:"✓";font-size:29px}
+  #closure[data-method="DELETE"]::before{content:"↶"}
+  #watch{grid-column:5;grid-row:4} #pin{grid-column:6;grid-row:4}
+  #choose-column{display:none}
+  #column-picker{grid-column:1/-1;grid-row:5}
+  turbo-frame[id^="edit_card_"]{grid-column:1/-1;grid-row:6}
+  #edit:not([open]){display:none}
+  .messages{width:100%;margin:18px auto}
+}
+</style>
 <style>{{SHELL_STYLES}}</style>
 </head>
 <body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}" data-board-id="{{BOARD_ID}}" data-card-revision="{{CARD_REVISION}}">
@@ -66,10 +104,12 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   {{IMAGE_BUTTON}}
   <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
   <div class="card__body"><div class="card__content"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div>{{STEPS}}</div>{{STAGE_RAIL}}</div>
-  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div class="card-perma__notch"><div class="actions">
+  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div class="card-perma__notch">
+  <div class="actions">
     <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
     <button id="watch" class="secondary side-action side-action--watch" type="button" aria-label="{{WATCH_LABEL}}" title="{{WATCH_LABEL}}" data-method="{{WATCH_METHOD}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4"/></svg></button>
     <button id="pin" class="secondary side-action side-action--pin" type="button" aria-label="{{PIN_LABEL}}" title="{{PIN_LABEL}}" data-method="{{PIN_METHOD}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 0-1 7 3 3v2H7v-2l3-3-1-7ZM12 15v6"/></svg></button>
+    <button id="edit-mobile" type="button" aria-label="Edit card" title="Edit card">✎</button>
     <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
     <button id="closure" type="button" data-method="{{CLOSURE_METHOD}}">{{CLOSURE_LABEL}}</button>
   </div></div>
@@ -135,6 +175,7 @@ cardHeader.addEventListener('click',async event=>{const trigger=event.target.clo
 cardHeader.addEventListener('input',event=>{if(event.target.id!=='tag-search')return;const value=event.target.value.toLocaleLowerCase();event.target.closest('.tag-dialog').querySelectorAll('.popup__item[data-filter-target]').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))});
 cardHeader.addEventListener('submit',async event=>{const form=event.target;if(!form.closest('.tag-dialog'))return;event.preventDefault();const button=event.submitter,dialog=form.closest('.tag-dialog'),error=dialog.querySelector('.tag-dialog__error');if(button)button.disabled=true;error.textContent='';try{const body=new URLSearchParams(new FormData(form)),response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body});if(!response.ok)throw Error('Could not update tag');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target')),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!target||!replacement||!frame)throw Error('Tag update missing');replacement.querySelector('.tag-dialog__content')?.append(document.importNode(frame,true));dialog.close();target.replaceWith(document.importNode(replacement,true))}catch(ex){error.textContent=ex.message;if(button)button.disabled=false}});
 const chooseColumn=document.getElementById('choose-column'),columnPicker=document.getElementById('column-picker');
+document.getElementById('edit-mobile').addEventListener('click',()=>{const editor=document.getElementById('edit');editor.open=true;editor.scrollIntoView({block:'start',behavior:'smooth'});editor.querySelector('#title')?.focus()});
 chooseColumn.addEventListener('click',async()=>{if(!columnPicker.hidden){columnPicker.hidden=true;chooseColumn.setAttribute('aria-expanded','false');return}chooseColumn.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/column/edit`,{headers:{Accept:'text/html'}});if(!response.ok)throw Error(`Request failed (${response.status})`);columnPicker.innerHTML=await response.text();columnPicker.hidden=false;chooseColumn.setAttribute('aria-expanded','true')}catch(error){alert(error.message)}finally{chooseColumn.disabled=false}});
 async function chooseStage(button){if(button.disabled||button.getAttribute('aria-checked')==='true')return;const stage=button.dataset.stage;const action=stage==='not_now'?['/not_now','POST']:stage==='maybe'?['/triage','DELETE']:stage==='done'?['/closure','POST']:['/triage','POST'];button.disabled=true;try{await mutation(action[0],action[1],stage==='column'?{column_id:button.dataset.columnId}:undefined);location.reload()}catch(error){button.disabled=false;alert(error.message)}}
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
