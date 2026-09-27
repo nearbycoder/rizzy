@@ -12651,19 +12651,7 @@ async fn set_flag(
 ) -> Result<StatusCode> {
     p.write()?;
     let c = card(app, p, number).await?;
-    // The pinned source's second postpone resumes an already postponed card
-    // before its cached association check, leaving it active.
-    let effective_value = if flag == "postponed" && value == 1 && c.get::<i64, _>("postponed") != 0
-    {
-        0
-    } else {
-        value
-    };
-    if (flag == "golden" && c.get::<i64, _>("golden") == value)
-        || (flag == "closed" && c.get::<i64, _>("closed") == value)
-    {
-        return Ok(StatusCode::NO_CONTENT);
-    }
+    let card_id: String = c.get("id");
     let sql = match (flag, value) {
         ("closed", 1) => {
             "UPDATE cards SET closed=?,postponed=0,updated_at=?,last_active_at=? WHERE id=?"
@@ -12676,10 +12664,46 @@ async fn set_flag(
         ("golden", _) => "UPDATE cards SET golden=?,updated_at=? WHERE id=?",
         _ => return Err(bad("invalid flag")),
     };
-    let timestamp = now();
     let _writer = app.write_lock.lock().await;
-    let mut tx = begin_write(&app).await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let (mut tx, board_id) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&board_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
+    let card_state_sql = if app.mysql {
+        "SELECT closed,postponed,golden FROM cards WHERE id=? FOR UPDATE"
+    } else {
+        "SELECT closed,postponed,golden FROM cards WHERE id=?"
+    };
+    let card_state = sqlx::query(card_state_sql)
+        .bind(&card_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let was_closed = card_state.get::<i64, _>("closed");
+    // The pinned source's second postpone resumes an already postponed card
+    // before its cached association check, leaving it active.
+    let effective_value = if flag == "postponed"
+        && value == 1
+        && card_state.get::<i64, _>("postponed") != 0
+    {
+        0
+    } else {
+        value
+    };
+    if (flag == "golden" && card_state.get::<i64, _>("golden") == value)
+        || (flag == "closed" && was_closed == value)
+    {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let timestamp = now();
     if flag == "golden" {
         sqlx::query(sql)
             .bind(effective_value)
@@ -12764,8 +12788,7 @@ async fn set_flag(
             .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
-    let card_id: String = c.get("id");
-    if flag == "closed" && (c.get::<i64, _>("closed") != value) {
+    if flag == "closed" && was_closed != value {
         let action = if value == 1 {
             "card_closed"
         } else {
@@ -12774,7 +12797,7 @@ async fn set_flag(
         record_event(
             app,
             p,
-            &c.get::<String, _>("board_id"),
+            &board_id,
             &card_id,
             "Card",
             &card_id,
@@ -12796,7 +12819,7 @@ async fn set_flag(
         record_event(
             app,
             p,
-            &c.get::<String, _>("board_id"),
+            &board_id,
             &card_id,
             "Card",
             &card_id,

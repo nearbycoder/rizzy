@@ -725,3 +725,11 @@ timestamp test still matches. A fresh four-process MySQL cluster run raced 200
 triages and 200 untriages with moves, observed no HTTP 500s, and checked that
 no card linked to a column on another board. Other cross-board mutations and
 full concurrency parity remain unverified.
+
+Close, reopen, postpone, gild, and ungild now inspect card state after locking
+its current board and card. The paired closure, goldness, and Not Now lifecycle
+tests still match pinned Fizzy, including repeated requests. A fresh
+four-process MySQL cluster run passed 200 flag/move pairs and 200 simultaneous
+double-close or double-gild pairs, checking final flags, record counts, and
+closure event counts. This verifies those workflows on one host; the other
+write paths and a whole-app throughput or scale advantage remain open.

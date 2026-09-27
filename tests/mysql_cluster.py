@@ -663,10 +663,69 @@ def main():
                 status, moved, _ = call(bases[index % 4], account, token, f"/cards/{number}")
                 assert status == 200 and moved["board"]["id"] == board["id"]
 
+            def mixed_flag_move(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    action = "closure" if index < 67 else ("not_now" if index < 134 else "goldness")
+                    return call(base, account, token, f"/cards/{number}/{action}", "POST")
+                return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                            {"board_id": destination["id"]})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                flag_move = list(pool.map(mixed_flag_move, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, flag_move)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, ("flag/move", failures[:5])
+            for index in range(200):
+                number = results[index + 200][1]["number"]
+                status, shown, _ = call(bases[index % 4], account, token, f"/cards/{number}")
+                assert status == 200 and shown["board"]["id"] == destination["id"]
+                assert (shown["closed"], shown["postponed"], shown["golden"]) == (
+                    index < 67, 67 <= index < 134, index >= 134), (index, shown)
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                for table, indexes, expected in (
+                    ("closures", range(67), 67),
+                    ("card_not_nows", range(67, 134), 67),
+                    ("card_goldnesses", range(134, 200), 66),
+                ):
+                    card_ids = ",".join(f"'{results[index + 200][1]['id']}'"
+                                        for index in indexes)
+                    assert mysql_scalar(url, f"SELECT COUNT(*) FROM {table} WHERE "
+                                             f"card_id IN ({card_ids})") == str(expected)
+
+            def double_flag(item):
+                index, attempt = item
+                number = results[index][1]["number"]
+                action = "closure" if index < 100 else "goldness"
+                return call(bases[(2 * index + attempt) % 4], account, token,
+                            f"/cards/{number}/{action}", "POST")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                doubled = list(pool.map(double_flag, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, doubled)
+                        if status != 204]
+            assert not failures, ("double flag", failures[:5])
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                for table, indexes in (("closures", range(100)),
+                                       ("card_goldnesses", range(100, 200))):
+                    card_ids = ",".join(f"'{results[index][1]['id']}'" for index in indexes)
+                    assert mysql_scalar(url, f"SELECT COUNT(*) FROM {table} WHERE "
+                                             f"card_id IN ({card_ids})") == "100"
+                closed_ids = ",".join(f"'{results[index][1]['id']}'" for index in range(100))
+                assert mysql_scalar(url, "SELECT COUNT(*) FROM events WHERE "
+                                         "action='card_closed' AND "
+                                         f"card_id IN ({closed_ids})") == "100"
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
-            assert int(headers["X-Total-Count"]) == 400, headers
-            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion, watch/move, reading/move, triage/move, and untriage/move races, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            assert int(headers["X-Total-Count"]) == 166, headers
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                assert mysql_scalar(url, "SELECT COUNT(*) FROM cards") == "400"
+            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion, watch/move, reading/move, triage/move, untriage/move, and flag/move races, 200 double close/gold requests, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

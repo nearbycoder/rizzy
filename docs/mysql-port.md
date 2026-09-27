@@ -586,3 +586,15 @@ matched Fizzy's sequential move, invalid old-column, new-column, and
 untriage behavior, and `tests/column_touch_parity.py` still matched the
 timestamp side effects. Concurrent semantics on other mutation paths remain
 open.
+
+Close, reopen, postpone, gild, and ungild now decide from card state read
+under the current board and card locks. This prevents a stale pre-lock state
+from inserting a second closure or goldness row, and rechecks access after a
+board move. A fresh four-process cluster run raced 200 close, postpone, or
+gold actions with moves, then sent two simultaneous close or gild requests to
+each of another 200 cards. It checked all 200 moved cards' final flags, exact
+closure/not-now/goldness row counts, and exactly 100 closure events for the
+duplicate-close group. The paired SQLite closure, goldness, and Not Now
+lifecycle checks still passed against pinned Fizzy. This is a same-host
+correctness check for those operations; other races and sustained write scale
+remain unverified.
