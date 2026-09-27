@@ -39,6 +39,11 @@ from reaction_html_parity import check as reaction_check  # noqa: E402
 from column_turbo_parity import check as column_turbo_check  # noqa: E402
 from card_previews_html_parity import run as card_previews_run  # noqa: E402
 from account_card_create_parity import check as account_card_check  # noqa: E402
+from board_views_parity import run as board_views_run  # noqa: E402
+from board_settings_html_parity import run as board_settings_run  # noqa: E402
+from webhooks_html_parity import check as webhooks_html_check  # noqa: E402
+from step_read_parity import run as step_read_run  # noqa: E402
+from public_page_html_parity import run as public_page_run  # noqa: E402
 
 
 def main():
@@ -47,7 +52,9 @@ def main():
                                           "named-column", "column-cache", "column-show-cache",
                                           "draft", "card-image", "embeds", "card-controls",
                                           "card-board", "card-edit", "assignment", "reaction",
-                                          "column-turbo", "card-previews", "account-card"))
+                                          "column-turbo", "card-previews", "account-card",
+                                          "board-views", "board-settings", "webhooks-html",
+                                          "step-read", "public-page"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -134,6 +141,29 @@ def main():
             elif args.suite == "embeds":
                 source_result = embed_run(source)
                 rust_result = embed_run(rust)
+            elif args.suite == "board-views":
+                source_result = board_views_run(source)
+                rust_result = board_views_run(rust)
+            elif args.suite == "public-page":
+                suffix = uuid.uuid4().hex[:8]
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                source_result = public_page_run(source, suffix)
+                rust_result = public_page_run(rust, suffix)
+            elif args.suite in ("board-settings", "webhooks-html"):
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                check = board_settings_run if args.suite == "board-settings" else webhooks_html_check
+                source_result = check(source)
+                rust_result = check(rust)
+            elif args.suite == "step-read":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                source_result = step_read_run(source)
+                rust_result = step_read_run(rust)
             elif args.suite in ("card-controls", "card-board", "card-edit",
                                  "assignment", "reaction", "column-turbo",
                                  "card-previews", "account-card"):
@@ -183,6 +213,13 @@ def main():
                       f"image removal timestamp changes={source_result['delete_touch']}")
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
+            elif args.suite == "board-views":
+                print(f"Disposable MySQL private and public board views matched pinned Fizzy: "
+                      f"{len(source_result)} comparisons")
+            elif args.suite in ("board-settings", "webhooks-html"):
+                print(f"Disposable MySQL {args.suite} browser workflow matched pinned Fizzy")
+            elif args.suite in ("step-read", "public-page"):
+                print(f"Disposable MySQL {args.suite} workflow matched pinned Fizzy")
             elif args.suite in ("card-controls", "card-board", "card-edit",
                                      "assignment", "reaction", "column-turbo",
                                      "card-previews", "account-card"):

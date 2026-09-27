@@ -32,6 +32,10 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed
 before deployment parity or a greater-scale claim can be made.
+The disposable paired MySQL harness also passed board views, board settings,
+webhook management, step detail/edit, and anonymous public board/card workflows
+against pinned Fizzy. Each covers its named fixture; the full route inventory
+and exact browser rendering remain unverified.
 
 `tests/home_add_card_parity.py` compares the Home add-card action, its selected
 or recently accessed board, draft redirect, conditional refresh after board

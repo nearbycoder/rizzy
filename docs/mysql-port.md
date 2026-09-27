@@ -341,6 +341,17 @@ the source SQLite adapter, and Rizzy's MySQL results match that source set.
 The existing SQLite fixtures also passed after reuse in the MySQL harness.
 These are selected paths, not full browser or cache parity.
 
+Five more disposable paired MySQL workflows now pass: `board-views` checks
+private and public special/named columns and pagination; `board-settings`
+checks browser create, edit, entropy choices, and delete; `webhooks-html`
+checks browser validation and CRUD; `step-read` checks JSON and browser step
+detail/edit; and `public-page` checks anonymous board/card HTML, rich text,
+steps, image bytes, social metadata, and unpublishing. The public card fixture
+checks each step's completion state by content: Fizzy's MySQL association has
+no explicit step ordering, and its two newly created steps can appear in either
+order. These comparisons expand route coverage but do not establish full
+MySQL browser, deployment, or HTML parity.
+
 Remaining database work:
 
 The storage entry and total tables now have a live MySQL 8.4.11 regression in
