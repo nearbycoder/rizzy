@@ -3807,6 +3807,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("Cleaned {count} webhook deliveries");
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("incinerate-due") {
+        account_cancellation::incinerate_due(&app).await?;
+        return Ok(());
+    }
     if env::args().nth(1).as_deref() == Some("inspect-webhook") {
         let delivery_id = env::args()
             .nth(2)

@@ -4,7 +4,9 @@
 import base64
 import hashlib
 import json
+import os
 import re
+import select
 import subprocess
 import time
 import urllib.parse
@@ -151,6 +153,59 @@ def age_cancellation(target, days):
 def source_incineration(source_env):
     subprocess.run(["bin/rails", "runner", "Account::IncinerateDueJob.perform_now"],
                    cwd=SOURCE, env=source_env, capture_output=True, text=True, check=True)
+
+
+def concurrent_rust_incineration(target, rust_env):
+    client = target["mysql_client"]
+    database = target["mysql_database"]
+    holder = subprocess.Popen(
+        [client, "--no-defaults", "--batch", "--skip-column-names", "--unbuffered",
+         f"--socket={target['mysql_socket']}", "-uroot", f"--database={database}"],
+        env={**os.environ,
+             "LD_LIBRARY_PATH": str(Path(client).resolve().parents[1] / "lib")},
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1)
+    workers = []
+    try:
+        holder.stdin.write("START TRANSACTION; SELECT HEX(account_id) FROM account_cancellations FOR UPDATE;\n")
+        holder.stdin.flush()
+        ready, _, _ = select.select([holder.stdout], [], [], 5)
+        assert ready and holder.stdout.readline().strip(), "Could not lock the cancellation row"
+        for _ in range(2):
+            workers.append(subprocess.Popen([RUST, "incinerate-due"], cwd=ROOT,
+                                            env=rust_env, stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE, text=True))
+        waits_sql = ("SELECT COUNT(DISTINCT w.REQUESTING_THREAD_ID) "
+                     "FROM performance_schema.data_lock_waits w "
+                     "JOIN performance_schema.data_locks l "
+                     "ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                     f"WHERE l.OBJECT_SCHEMA='{database}' "
+                     "AND l.OBJECT_NAME='account_cancellations'")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            waiting = int(mysql_query(client, target["mysql_socket"], database, waits_sql))
+            if waiting >= 2:
+                break
+            assert all(worker.poll() is None for worker in workers), (
+                "incineration worker exited before row lock", [worker.poll() for worker in workers])
+            time.sleep(.05)
+        else:
+            raise AssertionError("Both incineration workers did not reach the same row lock")
+        holder.stdin.write("COMMIT;\n")
+        holder.stdin.flush()
+        holder.stdin.close()
+        assert holder.wait(timeout=10) == 0, holder.stderr.read()[-2000:]
+        for worker in workers:
+            stdout, stderr = worker.communicate(timeout=60)
+            assert worker.returncode == 0, (worker.returncode, stdout[-2000:], stderr[-2000:])
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+        holder.wait()
+        for worker in workers:
+            if worker.poll() is None:
+                worker.kill()
+            worker.wait()
 
 
 def source_purge_enqueued_blob(source_env, key):

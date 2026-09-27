@@ -51,7 +51,8 @@ from route_get_status_parity import run as route_get_run  # noqa: E402
 from route_get_valid_parity import run as route_get_valid_run, run_html as route_get_valid_html_run  # noqa: E402
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
-from account_cancellation_mysql_parity import (age_cancellation, retained_counts,  # noqa: E402
+from account_cancellation_mysql_parity import (age_cancellation,  # noqa: E402
+                                               concurrent_rust_incineration, retained_counts,
                                                run as account_cancellation_run, seed_survivor,
                                                survivor_access,
                                                source_incineration, source_purge_enqueued_blob,
@@ -71,7 +72,8 @@ def main():
                                           "route-get-html", "route-get-valid", "route-get-valid-html",
                                           "passkeys-html",
                                           "passkeys-flow", "auth-format", "account-cancellation",
-                                          "account-cancellation-retention"))
+                                          "account-cancellation-retention",
+                                          "account-cancellation-concurrent"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -95,11 +97,13 @@ def main():
             fizzy_dir.mkdir()
             rizzy_dir.mkdir()
             source_settings = source_env(fizzy_dir, 1, host, port, source_dbs)
-            if args.suite in ("account-cancellation", "account-cancellation-retention"):
+            if args.suite in ("account-cancellation", "account-cancellation-retention",
+                              "account-cancellation-concurrent"):
                 source_settings["MULTI_TENANT"] = "true"
             fizzy_env, fizzy_credentials = prepare_source(fizzy_dir, 1, source_settings)
             local_rust_env = rust_env(rizzy_dir, host, port, rust_db)
-            if args.suite in ("account-cancellation", "account-cancellation-retention"):
+            if args.suite in ("account-cancellation", "account-cancellation-retention",
+                              "account-cancellation-concurrent"):
                 local_rust_env["RIZZY_MULTI_TENANT"] = "1"
             local_rust_env["RIZZY_SEED_EMAIL"] = "mysql-pair-owner@example.test"
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
@@ -228,15 +232,16 @@ def main():
                     login(target)
                 source_result = route_get_valid_html_run(source)
                 rust_result = route_get_valid_html_run(rust)
-            elif args.suite in ("account-cancellation", "account-cancellation-retention"):
+            elif args.suite in ("account-cancellation", "account-cancellation-retention",
+                               "account-cancellation-concurrent"):
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
                     login(target)
-                image_fixture = args.suite == "account-cancellation-retention"
+                image_fixture = args.suite != "account-cancellation"
                 source_result = account_cancellation_run(source, image=image_fixture)
                 rust_result = account_cancellation_run(rust, image=image_fixture)
-                if args.suite == "account-cancellation-retention":
+                if image_fixture:
                     source_survivor_token = seed_survivor(source, fizzy_env, image=True)
                     rust_survivor_token = seed_survivor(rust, rizzy_env, image=True)
                     for target in (source, rust):
@@ -256,9 +261,12 @@ def main():
                     for target in (source, rust):
                         age_cancellation(target, 31)
                     source_incineration(fizzy_env)
-                    stop_server(rizzy_process)
-                    rizzy_process, rust["url"] = start_server("rizzy", rizzy_dir, rizzy_env, cpus)
-                    processes.append(rizzy_process)
+                    if args.suite == "account-cancellation-concurrent":
+                        concurrent_rust_incineration(rust, rizzy_env)
+                    else:
+                        stop_server(rizzy_process)
+                        rizzy_process, rust["url"] = start_server("rizzy", rizzy_dir, rizzy_env, cpus)
+                        processes.append(rizzy_process)
                     source_result["day_31"] = wait_for_deletion(source)
                     rust_result["day_31"] = wait_for_deletion(rust)
                     for target, result in ((source, source_result), (rust, rust_result)):
@@ -393,6 +401,8 @@ def main():
                 print("Disposable MySQL owner cancellation and retained records matched pinned Fizzy")
             elif args.suite == "account-cancellation-retention":
                 print("Disposable MySQL cancellation retention, scoped deletion, and queued file cleanup matched pinned Fizzy")
+            elif args.suite == "account-cancellation-concurrent":
+                print("Two concurrent Rizzy MySQL incineration workers preserved paired Fizzy deletion and file outcomes")
             elif args.suite == "passkeys-html":
                 print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
             elif args.suite == "auth-format":

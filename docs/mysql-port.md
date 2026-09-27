@@ -145,8 +145,14 @@ files retain their original bytes at day 29; at day 31 Rizzy removes the
 cancelled account's file during incineration, while Fizzy enqueues an Active
 Storage purge. Performing that serialized queued job removes the source file
 and blob. The surviving file remains intact in both apps. Other attachment
-types, live-worker purge timing, mail delivery, and concurrent incineration
-workers remain open.
+types, live-worker purge timing, and mail delivery remain open. The separate
+`account-cancellation-concurrent` suite runs the same paired fixture but
+starts two independent Rust `incinerate-due` commands at day 31. A MySQL row
+lock holds the cancellation until both workers are confirmed waiting on it;
+after release, both exit successfully and the scoped rows and files reach the
+same final state as one Fizzy due-incineration job. This tests an actual
+two-worker Rust overlap, while concurrent Fizzy jobs and multi-host workers
+remain unverified.
 `tests/mysql_session_transfer.py` now checks device transfer link creation,
 revocation, QR rendering, redemption by PUT and PATCH, replay rejection,
 four-hour expiry, and simultaneous redemption with exactly one winner.
