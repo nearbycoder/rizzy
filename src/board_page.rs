@@ -38,6 +38,32 @@ fn column_color_class(color: &str) -> &'static str {
     }
 }
 
+fn column_color_picker(selected: &str) -> String {
+    let colors = [
+        ("Blue", "var(--color-card-default)"),
+        ("Gray", "var(--color-card-1)"),
+        ("Tan", "var(--color-card-2)"),
+        ("Yellow", "var(--color-card-3)"),
+        ("Lime", "var(--color-card-4)"),
+        ("Aqua", "var(--color-card-5)"),
+        ("Violet", "var(--color-card-6)"),
+        ("Purple", "var(--color-card-7)"),
+        ("Pink", "var(--color-card-8)"),
+    ];
+    let mut html =
+        String::from("<fieldset class=\"color-picker__colors\"><legend>Column color</legend>");
+    for (name, value) in colors {
+        html.push_str(&format!(
+            "<label title=\"{name}\"><input type=\"radio\" name=\"color\" value=\"{}\" {}><span class=\"color-picker__swatch {}\" aria-hidden=\"true\"></span><span class=\"for-screen-reader\">{name}</span></label>",
+            escape(value),
+            if value == selected { "checked" } else { "" },
+            column_color_class(value),
+        ));
+    }
+    html.push_str("</fieldset>");
+    html
+}
+
 async fn filter_form(
     app: &App,
     principal: &Principal,
@@ -308,7 +334,7 @@ fn column_html(
         _ => format!("column_{id}"),
     };
     let mut html = format!(
-        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\" tabindex=\"0\"><header class=\"cards__header\"><button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button></header><div class=\"cards__list\">",
+        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\" tabindex=\"0\"><header class=\"cards__header\">",
         if id == "maybe" {
             "maybe"
         } else if id == "done" {
@@ -327,9 +353,27 @@ fn column_html(
         escape(&dom_id),
         escape(id),
         escape(title),
+    );
+    if !matches!(id, "maybe" | "not-now" | "done") {
+        html.push_str(&format!(
+            "<div class=\"cards__menu\"><button class=\"cards__menu-trigger\" type=\"button\" aria-label=\"Column options\" aria-expanded=\"false\">⋯</button><div class=\"cards__menu-panel\" hidden><button type=\"button\" data-column-action=\"edit\">Edit column</button><button type=\"button\" data-column-action=\"left\">Move to the left</button><button type=\"button\" data-column-action=\"right\">Move to the right</button><button type=\"button\" data-column-action=\"delete\">Delete column</button></div><dialog class=\"column-dialog\"><form class=\"column-form\" data-column-form=\"edit\"><label><span>Column name</span><input name=\"name\" value=\"{}\" placeholder=\"Name this column\" required pattern=\".*\\S.*\" autocomplete=\"off\"></label>{}<div class=\"column-dialog__actions\"><button type=\"button\" data-close-dialog>Cancel</button><button type=\"submit\">Save changes</button></div></form></dialog></div>",
+            escape(title),
+            column_color_picker(color),
+        ));
+    }
+    html.push_str(&format!(
+        "<button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button>",
         if id == "maybe" { "true" } else { "false" },
         escape(title),
-    );
+    ));
+    if !matches!(id, "maybe" | "not-now" | "done") {
+        html.push_str(&format!(
+            "<a class=\"cards__maximize\" href=\"/{account}/boards/{}/columns/{}\" aria-label=\"Maximize column\" title=\"Maximize column\">▦</a>",
+            escape(board_id),
+            escape(id),
+        ));
+    }
+    html.push_str("</header><div class=\"cards__list\">");
     if add_card {
         html.push_str(&format!(
             "<div class=\"board-tools\"><form id=\"add-card\" action=\"/{account}/boards/{}/cards\" method=\"post\"><button class=\"button\" type=\"submit\">Add a card <kbd>C</kbd></button></form>{}</div>",
@@ -657,9 +701,26 @@ pub(super) async fn show(
         ("BOARD_NAME", escape(&board_name)),
         ("HOME_PATH", format!("/{account}/")),
         ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
-        ("SETTINGS_LINK", format!("<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",escape(&board_id),escape(&board_name),escape(&board_name))),
-        ("ADD_COLUMN", "<button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button>".to_owned()),
-        ("FILTER_FORM", filter_form(app, principal, &board_id, &CardQuery::default()).await?),
+        (
+            "SETTINGS_LINK",
+            format!(
+                "<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",
+                escape(&board_id),
+                escape(&board_name),
+                escape(&board_name)
+            ),
+        ),
+        (
+            "ADD_COLUMN",
+            format!(
+                "<div class=\"board-new-column\"><button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button><dialog class=\"column-dialog\" id=\"new-column-dialog\"><form class=\"column-form\" data-column-form=\"new\"><label><span>Column name</span><input name=\"name\" placeholder=\"Name this column\" required pattern=\".*\\S.*\" autocomplete=\"off\"></label>{}<div class=\"column-dialog__actions\"><button type=\"button\" data-close-dialog>Cancel</button><button type=\"submit\">Add column</button></div></form></dialog></div>",
+                column_color_picker("var(--color-card-default)")
+            ),
+        ),
+        (
+            "FILTER_FORM",
+            filter_form(app, principal, &board_id, &CardQuery::default()).await?,
+        ),
         ("COLUMNS", column_markup),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))

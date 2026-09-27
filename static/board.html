@@ -81,6 +81,7 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 .cards .card__assignee-avatar { width:24px;height:24px;margin-left:-8px;border:1px solid var(--card-bg) }
 .filter-more__fields .filter-choices{grid-column:1/-1;display:grid;gap:5px;max-height:180px;overflow:auto;margin:0;padding:7px 9px;border:1px solid #52616a;border-radius:7px}.filter-choices legend{padding:0 4px;color:#dce3e6;font-size:13px}.filter-choice{display:flex!important;align-items:center;gap:8px;padding:3px 0;cursor:pointer}.filter-choice input{width:16px;height:16px;min-height:0;accent-color:#8eb9f2}.filter-choice span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.filter-choices__empty{margin:3px;color:#a8b3b9;font-size:13px}.filter-count{display:grid;place-items:center;position:absolute;top:-4px;right:-5px;min-width:16px;height:16px;border-radius:50%;background:#8eb9f2;color:#0e1a22;font:700 10px/1 system-ui}
 .filter-more__fields{max-height:min(75vh,540px);overflow:auto}
+.cards__header{position:relative}.cards__menu{position:absolute;left:0;top:0;z-index:6}.cards.is-collapsed .cards__menu,.cards.is-collapsed .cards__maximize{display:none}.cards__menu-trigger,.cards__maximize{display:grid;place-items:center;width:36px;height:36px;border:0;background:none;color:#b7c4ca;font-size:22px;text-decoration:none;cursor:pointer}.cards__menu-trigger:hover,.cards__maximize:hover{color:#fff}.cards__maximize{position:absolute;right:0;top:0;font-size:19px}.cards__menu-panel{position:absolute;top:38px;left:0;display:grid;min-width:190px;padding:6px;border:1px solid #65737a;border-radius:9px;background:#20313a;box-shadow:0 9px 24px #0009}.cards__menu-panel[hidden]{display:none}.cards__menu-panel button{border:0;border-radius:5px;background:none;color:#ecf1f3;text-align:left;padding:9px 10px;font-size:14px;white-space:nowrap;cursor:pointer}.cards__menu-panel button:hover,.cards__menu-panel button:focus-visible{background:#3c515c}.cards__menu-panel button:disabled{opacity:.4;cursor:default}.cards__menu-panel button[data-column-action=delete]{color:#ff9b9b}.column-dialog{width:min(420px,calc(100vw - 32px));max-width:none;margin:auto;padding:22px;border:1px solid #71828a;border-radius:12px;background:#20313a;color:#f4f5f6;box-shadow:0 16px 40px #000a}.column-dialog::backdrop{background:#0009}.column-form{display:grid;gap:18px}.column-form>label{display:grid;gap:6px;font-size:14px}.column-form>label input{width:100%;border:1px solid #71828a;border-radius:8px;background:#101b20;color:#fff;padding:10px;font:inherit}.color-picker__colors{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;border:0}.color-picker__colors legend{margin-bottom:7px;font-size:14px}.color-picker__colors label{cursor:pointer}.color-picker__colors input{position:absolute;opacity:0;width:1px;height:1px}.color-picker__swatch{display:block;width:27px;height:27px;border:2px solid transparent;border-radius:50%;background:var(--column-color)}.color-picker__swatch.cards--color-default{--column-color:oklch(74% .1293 256)}.color-picker__colors input:checked+.color-picker__swatch{outline:2px solid #fff;outline-offset:2px}.color-picker__colors input:focus-visible+.color-picker__swatch{box-shadow:0 0 0 4px #8eb9f2}.column-dialog__actions{display:flex;justify-content:flex-end;gap:8px}.column-dialog__actions button{border:1px solid #6b7b83;border-radius:8px;background:#344751;color:#fff;padding:8px 12px;cursor:pointer}.column-dialog__actions button[type=submit]{background:#8eb9f2;color:#091b27;font-weight:700}.board-new-column{position:relative}
 </style>
 </head>
 <body data-account="{{ACCOUNT}}" data-board="{{BOARD_ID}}">
@@ -125,12 +126,50 @@ async function loadUtility(kind,term=''){utilityContent.textContent='Loading…'
 document.querySelectorAll('[data-utility]').forEach(button=>button.addEventListener('click',()=>{const kind=button.dataset.utility;utilityTitle.textContent=kind==='pins'?'Pinned cards':kind==='notifications'?'Notifications':'Search cards';utilitySearch.hidden=kind!=='search';utilityContent.replaceChildren();utility.showModal();if(kind==='search'){utilitySearch.value='';utilitySearch.focus()}else loadUtility(kind)}));
 utility.querySelector('.utility-close').addEventListener('click',()=>utility.close());utility.addEventListener('click',event=>{if(event.target===utility)utility.close()});let utilitySearchTimer;utilitySearch.addEventListener('input',()=>{clearTimeout(utilitySearchTimer);if(utilitySearch.value.trim())utilitySearchTimer=setTimeout(()=>loadUtility('search',utilitySearch.value.trim()),300);else utilityContent.replaceChildren()});
 const filterForm=document.querySelector('.board-filter');let filterTimer;filterForm?.querySelector('input[type=search]')?.addEventListener('input',()=>{clearTimeout(filterTimer);filterTimer=setTimeout(()=>filterForm.requestSubmit(),400)});filterForm?.addEventListener('change',event=>{const field=event.target;if(field.matches('input[name="assignment_status"]')&&field.checked)filterForm.querySelectorAll('input[name="assignee_ids[]"]').forEach(input=>input.checked=false);else if(field.matches('input[name="assignee_ids[]"]')&&field.checked)filterForm.querySelector('input[name="assignment_status"]').checked=false;if(field.matches('select,input[type=checkbox]'))filterForm.requestSubmit()});
-document.getElementById('add-column')?.addEventListener('click',async()=>{
-  const name=prompt('Column name'); if(!name?.trim())return;
-  const account=document.body.dataset.account,board=document.body.dataset.board;
-  const response=await fetch(`/${account}/boards/${board}/columns`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({column:{name:name.trim()}})});
-  if(response.ok)location.reload();else alert('Could not add column');
+const newColumnDialog=document.getElementById('new-column-dialog');
+document.getElementById('add-column')?.addEventListener('click',()=>{newColumnDialog.showModal();newColumnDialog.querySelector('input[name=name]').focus()});
+document.querySelectorAll('.column-dialog [data-close-dialog]').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
+const namedColumns=()=>[...boardColumns.querySelectorAll(':scope > .cards--doing[data-column-id]')];
+function updateMoveButtons(){const columns=namedColumns();columns.forEach((column,index)=>{column.querySelector('[data-column-action=left]').disabled=index===0;column.querySelector('[data-column-action=right]').disabled=index===columns.length-1})}
+function closeColumnMenus(){boardColumns.querySelectorAll('.cards__menu-panel').forEach(panel=>{panel.hidden=true;panel.previousElementSibling.setAttribute('aria-expanded','false')})}
+updateMoveButtons();
+boardColumns.addEventListener('click',async event=>{
+  const trigger=event.target.closest('.cards__menu-trigger');
+  if(trigger){const panel=trigger.nextElementSibling,opening=panel.hidden;closeColumnMenus();panel.hidden=!opening;trigger.setAttribute('aria-expanded',String(opening));return}
+  const action=event.target.closest('[data-column-action]');
+  if(!action||action.disabled)return;
+  const column=action.closest('.cards'),id=column.dataset.columnId,kind=action.dataset.columnAction;
+  closeColumnMenus();
+  if(kind==='edit'){const dialog=column.querySelector('.column-dialog');dialog.showModal();dialog.querySelector('input[name=name]').focus();return}
+  if(kind==='delete'&&!confirm('Are you sure you want to delete this column? This will move the cards back to Maybe.'))return;
+  action.disabled=true;
+  try{
+    const account=document.body.dataset.account,board=document.body.dataset.board;
+    const path=kind==='delete'?`/${account}/boards/${board}/columns/${id}.json`:`/${account}/columns/${id}/${kind}_position.json`;
+    const response=await fetch(path,{method:kind==='delete'?'DELETE':'POST',headers:{Accept:'application/json'}});
+    if(!response.ok)throw Error(`Could not ${kind==='delete'?'delete':'move'} column`);
+    if(kind==='delete'){if(localStorage.getItem(expandedColumnKey)===column.id)localStorage.removeItem(expandedColumnKey);location.reload();return}
+    const columns=namedColumns(),index=columns.indexOf(column),neighbor=columns[index+(kind==='left'?-1:1)];
+    if(neighbor){if(kind==='left')boardColumns.insertBefore(column,neighbor);else neighbor.after(column)}
+    updateMoveButtons();
+  }catch(error){action.disabled=false;alert(error.message)}
 });
+document.addEventListener('click',event=>{if(!event.target.closest('.cards__menu'))closeColumnMenus()});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeColumnMenus()});
+document.querySelectorAll('[data-column-form]').forEach(form=>form.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const nameInput=form.querySelector('input[name=name]'),name=nameInput.value.trim(),color=form.querySelector('input[name=color]:checked').value;
+  if(!name){nameInput.focus();return}
+  const button=form.querySelector('[type=submit]');button.disabled=true;
+  try{
+    const account=document.body.dataset.account,board=document.body.dataset.board,isNew=form.dataset.columnForm==='new';
+    const id=isNew?'':form.closest('.cards').dataset.columnId;
+    const path=isNew?`/${account}/boards/${board}/columns.json`:`/${account}/boards/${board}/columns/${id}.json`;
+    const response=await fetch(path,{method:isNew?'POST':'PATCH',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({column:{name,color}})});
+    if(!response.ok)throw Error(`Could not ${isNew?'add':'update'} column`);
+    location.reload();
+  }catch(error){button.disabled=false;alert(error.message)}
+}));
 document.querySelectorAll('.cards__more').forEach(button=>button.addEventListener('click',async()=>{
   button.disabled=true;
   const page=Number(button.dataset.page);
