@@ -170,13 +170,18 @@ const liveCardEditor=document.getElementById('edit');
 const liveCardComments=document.getElementById('comments');
 let liveCardRevision=document.body.dataset.cardRevision;
 let liveCardRefreshing=false;
-async function refreshLiveCard(force=false){
-  if(liveCardRefreshing||document.visibilityState==='hidden')return;
+let liveCardPendingRevision=null;
+async function refreshLiveCard(force=false,revisionHint=null){
+  if(liveCardRefreshing){liveCardPendingRevision=revisionHint||'*';return}
+  if(document.visibilityState==='hidden')return;
   liveCardRefreshing=true;
   try{
-    const revisionResponse=await fetch(`/${account}/cards/${number}/revision`,{headers:{Accept:'application/json'},cache:'no-store'});
-    if(!revisionResponse.ok)return;
-    const nextRevision=(await revisionResponse.json()).revision;
+    let nextRevision=revisionHint;
+    if(nextRevision===null){
+      const revisionResponse=await fetch(`/${account}/cards/${number}/revision`,{headers:{Accept:'application/json'},cache:'no-store'});
+      if(!revisionResponse.ok)return;
+      nextRevision=(await revisionResponse.json()).revision;
+    }
     if(!force&&nextRevision===liveCardRevision)return;
     const pageResponse=await fetch(`/${account}/cards/${number}`,{headers:{Accept:'text/html'},cache:'no-store'});
     if(!pageResponse.ok)return;
@@ -203,7 +208,14 @@ async function refreshLiveCard(force=false){
       }
     }
     liveCardRevision=nextRevision;
-  }catch(error){console.warn('Could not refresh card',error)}finally{liveCardRefreshing=false}
+  }catch(error){console.warn('Could not refresh card',error)}finally{
+    liveCardRefreshing=false;
+    if(liveCardPendingRevision!==null){
+      const pending=liveCardPendingRevision;
+      liveCardPendingRevision=null;
+      if(pending==='*'||pending!==liveCardRevision)void refreshLiveCard(true);
+    }
+  }
 }
 document.addEventListener('click',event=>{
   const link=event.target.closest('.card__title-link');
@@ -220,7 +232,9 @@ document.addEventListener('keydown',event=>{
   document.querySelector('.card__title-link')?.focus();
   void refreshLiveCard(true);
 },true);
-setInterval(()=>void refreshLiveCard(),1500);
+const liveCardStream='EventSource' in window?new EventSource(`/${account}/cards/${number}/live`):null;
+if(liveCardStream)liveCardStream.onmessage=event=>void refreshLiveCard(false,event.data);
+setInterval(()=>{if(!liveCardStream||liveCardStream.readyState!==EventSource.OPEN)void refreshLiveCard()},1500);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshLiveCard()});
 </script>
 <script>

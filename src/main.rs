@@ -41,6 +41,7 @@ mod board_views;
 mod card_board_page;
 mod card_column_page;
 mod card_controls;
+mod card_live;
 mod card_page;
 mod cards_page;
 mod comment_edit_page;
@@ -4341,7 +4342,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/{account}/cards/{number}/draft", get(show_draft))
         .route("/{account}/cards/{number}/edit", get(edit_card))
-        .route("/{account}/cards/{number}/revision", get(card_revision))
+        .route("/{account}/cards/{number}/revision", get(card_live::current))
+        .route("/{account}/cards/{number}/live", get(card_live::stream))
         .route("/{account}/cards/{number}/column/edit", get(card_column_page::edit))
         .route("/{account}/cards/previews", get(card_previews))
         .route("/{account}/cards/previews.turbo_stream", get(card_previews))
@@ -11747,27 +11749,6 @@ async fn show_card(
             .into_response());
     }
     Ok(Json(card_json(&app, &p, &c, &base(&headers), true).await?).into_response())
-}
-async fn card_revision(
-    State(app): Shared,
-    Path((account, number)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> Result<Json<Value>> {
-    let p = principal(&app, &headers, &account).await?;
-    let c = card(&app, &p, &number).await?;
-    let latest_comment_id: Option<String> =
-        sqlx::query_scalar("SELECT MAX(id) FROM comments WHERE card_id=?")
-            .bind(c.get::<String, _>("id"))
-            .fetch_one(&app.db)
-            .await
-            .map_err(db_err)?;
-    Ok(Json(json!({
-        "revision": format!(
-            "{}:{}",
-            c.get::<String, _>("updated_at"),
-            latest_comment_id.unwrap_or_default()
-        )
-    })))
 }
 async fn edit_card(
     State(app): Shared,

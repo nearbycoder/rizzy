@@ -75,6 +75,7 @@ python3 tests/card_timestamps.py
 python3 tests/email_change.py
 python3 tests/client_settings.py
 python3 tests/cluster_writes.py
+python3 tests/card_live_stream.py
 python3 tests/webhooks.py
 python3 tests/notifications.py
 python3 tests/mentions.py
