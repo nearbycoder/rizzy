@@ -104,17 +104,17 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
     html.push_str(&title);
     html.push_str("</title><style>");
     html.push_str(include_str!("../static/search.css"));
-    html.push_str("</style></head><body><header class=\"header\"><a href=\"/");
+    html.push_str("</style></head><body><header class=\"header header--mobile-actions-stack\" id=\"header\"><a href=\"#main\" class=\"header__skip-navigation btn\">Skip to main content</a><a href=\"/");
     html.push_str(&p.slug.to_string());
-    html.push_str("\">Home</a><h1 class=\"header__title\">");
+    html.push_str("\" class=\"header__back\">Home</a><h1 class=\"header__title\" data-bridge--title-target=\"header\">");
     html.push_str(&title);
     html.push_str(
-        "</h1></header><main class=\"search-perma\"><form class=\"search__form\" action=\"/",
+        "</h1></header><main id=\"main\"><div class=\"search-perma margin-block-start\"><form class=\"search__form flex align-center justify-center gap-half\" data-controller=\"search-form\" data-action=\"search-form:reset-&gt;bar#reset\" data-bar-target=\"form\" data-turbo-action=\"advance\" data-turbo-frame=\"bar_content\" action=\"/",
     );
     html.push_str(&p.slug.to_string());
-    html.push_str("/search\" method=\"get\"><label for=\"q\">Search Rizzy</label><input id=\"q\" name=\"q\" type=\"search\" class=\"search__input\" placeholder=\"Find something…\" value=\"");
+    html.push_str("/search\" method=\"get\"><label class=\"font-weight-black txt-nowrap\" for=\"q\">Search Rizzy</label><input id=\"q\" name=\"q\" type=\"search\" class=\"search__input input\" placeholder=\"Find something…\" autocomplete=\"off\" data-search-form-target=\"searchInput\" data-bar-target=\"searchInput\" data-action=\"keydown.enter-&gt;bar#showModalAndSubmit:prevent keydown.esc-&gt;bar#reset\" value=\"");
     html.push_str(&escape(term.unwrap_or("")));
-    html.push_str("\" autofocus><button type=\"submit\">Search</button></form><turbo-frame id=\"bar_content\">");
+    html.push_str("\" autofocus><button hidden>Search</button><button type=\"button\" class=\"search__reset btn btn--circle borderless\" data-action=\"search-form#clearInput\" aria-label=\"Close search\"><span class=\"icon icon--close\" aria-hidden=\"true\">×</span><span class=\"for-screen-reader\">Close search</span></button></form><turbo-frame id=\"bar_content\">");
 
     if let Some(term) = term {
         if let Some(number) = search_card_number(term) {
@@ -123,15 +123,17 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 html.push_str(&p.slug.to_string());
                 html.push_str("/cards/");
                 html.push_str(&number.to_string());
-                html.push_str("\" method=\"get\"></form><script>document.querySelector('[data-controller=\"auto-submit\"]').requestSubmit()</script></turbo-frame></main></body></html>");
+                html.push_str("\" method=\"get\"></form><script>document.querySelector('[data-controller=\"auto-submit\"]').requestSubmit()</script></turbo-frame></div></main></body></html>");
                 return Ok(Html(html).into_response());
             }
         }
     }
 
-    html.push_str(
-        "<section class=\"search\"><div class=\"search__results\"><ul class=\"search__list\">",
-    );
+    html.push_str("<section class=\"search\"><div class=\"search__results\">");
+    let blank_position = html.len();
+    html.push_str("<ul class=\"search__list\"><div class=\"filtered_search_results display-contents\" data-controller=\"pagination\" data-pagination-paginate-on-intersection-value=\"true\" id=\"filtered_search_results-pagination-list\"><turbo-frame role=\"presentation\" id=\"filtered_search_results-pagination-contents-");
+    html.push_str(&page.to_string());
+    html.push_str("\">");
     let mut found = 0;
     let mut next = false;
     if let Some(term) = term {
@@ -147,7 +149,7 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 let statement = format!(
                     r"SELECT CASE WHEN s.searchable_type='Card' THEN 'card' ELSE 'comment' END kind,
                      CASE WHEN s.searchable_type='Comment' THEN s.searchable_id ELSE NULL END hit_id,
-                     c.number,c.title,c.description,b.name board_name,m.body comment_body
+                     c.number,c.title,c.description,b.name board_name,m.body comment_body,s.created_at hit_at
                      FROM `{table}` s JOIN cards c ON c.id=s.card_id JOIN boards b ON b.id=c.board_id
                      LEFT JOIN comments m ON m.id=s.searchable_id AND s.searchable_type='Comment'
                      WHERE s.account_id=? AND c.status='published'
@@ -184,7 +186,7 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                     WHERE c.account_id=? AND c.status='published'
                       AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
                     ORDER BY hits.hit_at DESC,COALESCE(hits.hit_id,hits.card_id) ASC LIMIT ? OFFSET ?
-                 ) SELECT page_hits.kind,page_hits.hit_id,page_hits.title_hl,page_hits.content_hl,
+                 ) SELECT page_hits.kind,page_hits.hit_id,page_hits.hit_at,page_hits.title_hl,page_hits.content_hl,
                           c.number,c.title,c.description,b.name board_name,m.body comment_body
                    FROM page_hits JOIN cards c ON c.id=page_hits.card_id
                    JOIN boards b ON b.id=c.board_id
@@ -213,6 +215,7 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 let number: i64 = row.get("number");
                 let title: String = row.get("title");
                 let board: String = row.get("board_name");
+                let hit_at: String = row.get("hit_at");
                 let description: String = row.get("description");
                 let comment: Option<String> = row.get("comment_body");
                 let hit_id: Option<String> = row.get("hit_id");
@@ -232,7 +235,7 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                         html.push_str(&escape(&id));
                     }
                 }
-                html.push_str("\"><div><h3 class=\"search__title\"># ");
+                html.push_str("\" data-turbo-frame=\"_top\" data-action=\"bar#reset\"><div><h3 class=\"search__title txt--medium margin-none\"># ");
                 html.push_str(&number.to_string());
                 html.push(' ');
                 if app.mysql {
@@ -263,30 +266,44 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                             .unwrap_or_else(|| excerpt(body)),
                     );
                 }
-                html.push_str("</div></div><div class=\"search__board\">");
+                html.push_str("</div></div><div class=\"search__board overflow-ellipsis translucent txt-ink\">");
                 html.push_str(&escape(&board));
+                if let Ok(date) = chrono::DateTime::parse_from_rfc3339(&hit_at) {
+                    html.push_str(" · <time datetime=\"");
+                    html.push_str(&date.timestamp().to_string());
+                    html.push_str("\" data-local-time-target=\"timeordate\" data-action=\"turbo:morph-element-&gt;local-time#refreshTarget\">&nbsp;</time>");
+                }
                 html.push_str("</div></a></li>");
             }
         }
     }
-    html.push_str("</ul>");
-    if found == 0 && term.is_some() {
-        html.push_str("<div class=\"search__blank-slate blank-slate\">No matches</div>");
-    }
     if next {
         html.push_str("<a id=\"filtered_search_results-pagination-link-");
         html.push_str(&(page + 1).to_string());
-        html.push_str("\" href=\"/");
+        html.push_str("\" class=\"pagination-link pagination-link--active-when-observed\" aria-label=\"Load page ");
+        html.push_str(&(page + 1).to_string());
+        html.push_str("\" data-frame=\"filtered_search_results-pagination-contents-");
+        html.push_str(&(page + 1).to_string());
+        html.push_str("\" data-pagination-target=\"paginationLink\" href=\"/");
         html.push_str(&p.slug.to_string());
-        html.push_str("/search?q=");
+        html.push_str("/search?page=");
+        html.push_str(&(page + 1).to_string());
+        html.push_str("&amp;q=");
         html.push_str(
             &url::form_urlencoded::byte_serialize(term.unwrap_or("").as_bytes())
                 .collect::<String>(),
         );
-        html.push_str("&amp;page=");
-        html.push_str(&(page + 1).to_string());
-        html.push_str("\">More</a>");
+        html.push_str("\">Load more…</a>");
     }
-    html.push_str("</div></section></turbo-frame></main></body></html>");
+    html.push_str("</turbo-frame></div></ul>");
+    if found == 0 && term.is_some() {
+        html.insert_str(
+            blank_position,
+            "<div class=\"search__blank-slate blank-slate\">No matches</div>",
+        );
+    }
+    html.push_str("</div></section></turbo-frame></div></main><script>");
+    html.push_str(include_str!("../static/search.js"));
+    html.push_str("</script></body></html>");
     Ok(Html(html).into_response())
 }

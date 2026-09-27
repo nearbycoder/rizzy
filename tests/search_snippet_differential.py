@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare SQLite search excerpts, number lookup, and tied pagination."""
+"""Compare SQLite search excerpts, form markup, and pagination."""
 import http.cookiejar
 import os
 import random
@@ -127,8 +127,20 @@ def main():
             assert page_titles_by_app["fizzy"] == page_titles_by_app["rizzy"]
             fresh_pages = {}
             for name, target in targets.items():
-                fresh_pages[name] = [titles(html(target, "freshproof", page)) for page in (1, 2)]
+                first_page = html(target, "freshproof", 1)
+                fresh_pages[name] = [titles(first_page), titles(html(target, "freshproof", 2))]
                 assert [len(page) for page in fresh_pages[name]] == [15, 25]
+                for marker in ('data-controller="search-form"', 'data-turbo-action="advance"',
+                               'data-turbo-frame="bar_content"', 'data-search-form-target="searchInput"',
+                               'class="search__reset btn btn--circle borderless"',
+                               'id="filtered_search_results-pagination-list"',
+                               'id="filtered_search_results-pagination-contents-1"',
+                               'id="filtered_search_results-pagination-link-2"',
+                               'data-pagination-target="paginationLink"',
+                               'data-local-time-target="timeordate"',
+                               'data-turbo-frame="_top"'):
+                    assert marker in first_page, (name, marker)
+                assert f'href="/{target["account"]}/search?page=2&amp;q=freshproof"' in first_page
                 first_fresh = api(target, "/cards/136")
                 assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z",
                                     first_fresh["created_at"]), (name, first_fresh["created_at"])

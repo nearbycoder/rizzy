@@ -59,13 +59,13 @@ def main():
                     assert response.status == 200
                     return response.read().decode()
 
-            assert 'header__title">Search</h1>' in browser_search("")
+            assert re.search(r'<h1 class="header__title"[^>]*>Search</h1>', browser_search(""))
             title_html = browser_search("broken")
             assert "Layout is <mark" in title_html and "Look at this mess" in title_html
             comment_html = browser_search("overflowing")
             assert "search__excerpt--comment" in comment_html and "text" in comment_html
             haggis_html = browser_search("haggis")
-            assert haggis_html.count('class="search__title"') == 2
+            assert len(re.findall(r'class="search__title(?:\s|")', haggis_html)) == 2
             assert 'class="circled-text"><span></span>haggis</mark>' in haggis_html
             assert 'data-controller="auto-submit"' in browser_search(str(first["number"]))
             assert 'search__blank-slate' in browser_search("999999")
@@ -80,10 +80,10 @@ def main():
             assert "needle" in long_excerpt
             for i in range(20):
                 call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": f"paginated card {i}"}}, bearer=token, status=201)
-            assert browser_search("paginated").count('class="search__title"') == 15
+            assert len(re.findall(r'class="search__title(?:\s|")', browser_search("paginated"))) == 15
             assert 'id="filtered_search_results-pagination-link-2"' in browser_search("paginated")
-            assert browser_search("paginated", 2).count('class="search__title"') == 5
-            assert browser_search("paginated", "abc").count('class="search__title"') == 15
+            assert len(re.findall(r'class="search__title(?:\s|")', browser_search("paginated", 2))) == 5
+            assert len(re.findall(r'class="search__title(?:\s|")', browser_search("paginated", "abc"))) == 15
 
             call(port, f"/{account}/cards/{first['number']}", "PUT", {"card": {"title": "Repaired layout"}}, bearer=token)
             with sqlite3.connect(Path(temp) / "search.sqlite3") as db:
