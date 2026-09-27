@@ -22,7 +22,9 @@ body { margin: 0 }
 .search__result:hover { background: #f0eee8 }
 .search__title { font-size: 1rem; margin: 0 0 .35rem; text-decoration: underline }
 .search__excerpt { color: #53504a; line-height: 1.5 }
-.search__excerpt--comment { padding-left: 1rem; border-left: 3px solid #dedbd1 }
+.search__excerpt--comment { display: flex; align-items: center; gap: .5rem; margin-left: 1rem; padding: .4rem .6rem; border-radius: .6rem; background: #eeeae3 }
+.search__excerpt--comment .avatar { flex: none; width: 2rem; height: 2rem; margin-left: -1.6rem }
+.search__excerpt--comment .avatar img { display: block; width: 2rem; height: 2rem; border-radius: 50%; object-fit: cover }
 .search__board { color: #79756d; white-space: nowrap }
 .search__blank-slate { text-align: center; padding: 3rem; color: #79756d }
 .circled-text { position: relative; background: #ffe697; font-weight: 700 }

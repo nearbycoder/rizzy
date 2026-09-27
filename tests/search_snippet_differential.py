@@ -154,8 +154,18 @@ def main():
             assert fresh_pages["fizzy"] == fresh_pages["rizzy"]
             comment_pages = {}
             for name, target in targets.items():
-                comment_pages[name] = [re.findall(r"item (\d{3})", re.sub(r"<[^>]+>", "",
-                    html(target, "freshcommentproof", page))) for page in (1, 2)]
+                first_comment_page = html(target, "freshcommentproof", 1)
+                avatar = re.search(
+                    rf'<span class="avatar"[^>]*><img [^>]*src="/{target["account"]}/users/[^"/]+/avatar"[^>]*/?></span>',
+                    first_comment_page,
+                )
+                assert avatar, name
+                avatar_path = re.search(r'src="([^"]+)"', avatar.group()).group(1)
+                with target["opener"].open(target["url"] + avatar_path, timeout=12) as response:
+                    assert response.status == 200 and response.headers.get_content_type().startswith("image/"), name
+                    assert response.read(), name
+                comment_pages[name] = [re.findall(r"item (\d{3})", re.sub(r"<[^>]+>", "", page_html))
+                                       for page_html in (first_comment_page, html(target, "freshcommentproof", 2))]
                 assert [len(page) for page in comment_pages[name]] == [15, 25]
                 with sqlite3.connect(target["db"]) as db:
                     times = [row[0] for row in db.execute(

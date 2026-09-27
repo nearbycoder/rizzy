@@ -404,7 +404,7 @@ def main():
             )
             with urllib.request.urlopen(html_request, timeout=8) as response:
                 html = response.read().decode()
-            assert "authentication" in html and 'class="search__title"' in html, html[:4000]
+            assert "authentication" in html and re.search(r'class="search__title(?:\s|")', html), html[:4000]
             for path, marker in ((f"/cards/{number}", "MySQL card"),
                                  ("/my/menu", "MySQL core")):
                 request = urllib.request.Request(

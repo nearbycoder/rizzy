@@ -149,8 +149,10 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 let statement = format!(
                     r"SELECT CASE WHEN s.searchable_type='Card' THEN 'card' ELSE 'comment' END kind,
                      CASE WHEN s.searchable_type='Comment' THEN s.searchable_id ELSE NULL END hit_id,
-                     c.number,c.title,c.description,b.name board_name,m.body comment_body,s.created_at hit_at
+                     c.number,c.title,c.description,c.creator_id,u.name creator_name,
+                     b.name board_name,m.body comment_body,s.created_at hit_at
                      FROM `{table}` s JOIN cards c ON c.id=s.card_id JOIN boards b ON b.id=c.board_id
+                     JOIN users u ON u.id=c.creator_id
                      LEFT JOIN comments m ON m.id=s.searchable_id AND s.searchable_type='Comment'
                      WHERE s.account_id=? AND c.status='published'
                      AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
@@ -187,9 +189,11 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                       AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
                     ORDER BY hits.hit_at DESC,COALESCE(hits.hit_id,hits.card_id) ASC LIMIT ? OFFSET ?
                  ) SELECT page_hits.kind,page_hits.hit_id,page_hits.hit_at,page_hits.title_hl,page_hits.content_hl,
-                          c.number,c.title,c.description,b.name board_name,m.body comment_body
+                          c.number,c.title,c.description,c.creator_id,u.name creator_name,
+                          b.name board_name,m.body comment_body
                    FROM page_hits JOIN cards c ON c.id=page_hits.card_id
                    JOIN boards b ON b.id=c.board_id
+                   JOIN users u ON u.id=c.creator_id
                    LEFT JOIN comments m ON m.id=page_hits.hit_id
                    ORDER BY page_hits.hit_at DESC,page_hits.sort_id ASC",
             )
@@ -215,6 +219,8 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 let number: i64 = row.get("number");
                 let title: String = row.get("title");
                 let board: String = row.get("board_name");
+                let creator_id: String = row.get("creator_id");
+                let creator_name: String = row.get("creator_name");
                 let hit_at: String = row.get("hit_at");
                 let description: String = row.get("description");
                 let comment: Option<String> = row.get("comment_body");
@@ -255,6 +261,19 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                     html.push_str(" search__excerpt--comment");
                 }
                 html.push_str("\">");
+                if kind == "comment" {
+                    html.push_str("<span class=\"avatar\" aria-hidden=\"false\" aria-label=\"");
+                    html.push_str(&escape(&creator_name));
+                    html.push_str("\"><img src=\"/");
+                    html.push_str(&p.slug.to_string());
+                    html.push_str("/users/");
+                    html.push_str(&escape(&creator_id));
+                    html.push_str(
+                        "/avatar\" aria-hidden=\"true\" width=\"48\" height=\"48\" title=\"",
+                    );
+                    html.push_str(&escape(&creator_name));
+                    html.push_str("\"></span><div>");
+                }
                 let body = comment.as_deref().unwrap_or(&description);
                 if app.mysql {
                     html.push_str(&mysql_excerpt(body, &mysql_stems));
@@ -265,6 +284,9 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                             .and_then(sqlite_highlighted)
                             .unwrap_or_else(|| excerpt(body)),
                     );
+                }
+                if kind == "comment" {
+                    html.push_str("</div>");
                 }
                 html.push_str("</div></div><div class=\"search__board overflow-ellipsis translucent txt-ink\">");
                 html.push_str(&escape(&board));
