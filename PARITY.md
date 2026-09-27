@@ -338,6 +338,16 @@ link difference: Fizzy links to the card's `#comment_...` anchor, while Rizzy
 had linked to the standalone comment URL. Rizzy now uses the event link for
 those three formats, while retaining the standalone URL in generic JSON.
 
+`tests/webhook_cleanup_parity.py` runs Fizzy's `Webhook::Delivery.cleanup` and
+Rizzy's `cleanup-webhook-deliveries` command against separate SQLite fixtures
+with 503 eight-day-old and three recent deliveries. Both delete the 503 old
+rows across the 500-row batch boundary and retain the recent rows. Rizzy now
+has a `(created_at,id)` cleanup index on SQLite and MySQL, and a quarter-hour
+worker with a database claim shared across processes. A disposable MySQL 8.4.11
+run of `tests/mysql_webhook_cleanup.py` passed the same deletion count, chose
+the new index in `EXPLAIN`, and retained it after restart. The automatic
+quarter-hour timing and cleanup contention with live deliveries remain open.
+
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 
 `tests/card_board_html_parity.py` compares the card's board picker choices, frame, conditional response, browser form move, JSON move, and unsupported JSON picker against both apps. Chromium opened the picker from a card and moved that card to another board. `tests/card_move_access_parity.py` now creates equivalent private-board fixtures on live Fizzy and Rizzy: an owner move grants an assignee access and retains their assignment, pin, watch, and notification; a member move without board-admin rights grants no assignee access and removes those inaccessible records. Both apps also move the original card event to the destination and create one board-change event. The fixture inserts users and attached records directly into each database, then exercises the API move and waits for Fizzy's cleanup jobs; it does not cover every notification source or the complete browser interaction. `tests/card_move_access.py` retains the Rust-only regression. The picker page and menu interaction remain visually simpler than Fizzy's.

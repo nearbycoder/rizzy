@@ -72,6 +72,7 @@ mod tagging_page;
 mod timezone;
 mod unsubscribes;
 mod user_page;
+mod webhook_cleanup;
 mod webhook_page;
 
 struct App {
@@ -3492,6 +3493,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         export_notify: tokio::sync::Notify::new(),
         import_notify: tokio::sync::Notify::new(),
     });
+    if env::args().nth(1).as_deref() == Some("cleanup-webhook-deliveries") {
+        let count = webhook_cleanup::cleanup(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Cleaned {count} webhook deliveries");
+        return Ok(());
+    }
     if env::args().nth(1).as_deref() == Some("inspect-webhook") {
         let delivery_id = env::args()
             .nth(2)
@@ -3664,6 +3672,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
+    }
+    if env::var("RIZZY_DISABLE_WEBHOOK_CLEANUP").as_deref() != Ok("1") {
+        tokio::spawn(webhook_cleanup::worker(app.clone()));
     }
     tokio::spawn(exports::worker(app.clone()));
     tokio::spawn(imports::worker(app.clone()));

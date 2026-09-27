@@ -714,6 +714,7 @@ CREATE UNIQUE INDEX `uniq_filters_1` ON `filters` (`creator_id`, `params_digest`
 CREATE INDEX `webhooks_board_order` ON `webhooks` (`board_id`, `name`, `id`);
 CREATE INDEX `webhook_delinquency_trackers_account` ON `webhook_delinquency_trackers` (`account_id`);
 CREATE UNIQUE INDEX `uniq_webhook_delinquency_trackers_1` ON `webhook_delinquency_trackers` (`webhook_id`);
+CREATE INDEX `webhook_deliveries_stale` ON `webhook_deliveries` (`created_at`, `id`);
 CREATE INDEX `webhook_deliveries_pending` ON `webhook_deliveries` (`state`, `created_at`);
 CREATE INDEX `webhook_deliveries_webhook_recent` ON `webhook_deliveries` (`webhook_id`, `created_at`, `id`);
 ALTER TABLE `users` ADD COLUMN `system_account_key` VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN `role`='system' THEN `account_id` END) STORED;

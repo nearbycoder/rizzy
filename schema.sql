@@ -672,6 +672,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 );
 CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_recent ON webhook_deliveries(webhook_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(state,created_at);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_stale ON webhook_deliveries(created_at,id);
 CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;

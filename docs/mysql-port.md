@@ -145,6 +145,14 @@ single-delivery correctness for a local blocked target, not successful
 internet delivery or maximum worker throughput. The MySQL claim path has not
 yet been exercised on MariaDB.
 
+`tests/mysql_webhook_cleanup.py` passed on a disposable MySQL 8.4.11 database:
+503 eight-day-old delivery rows were removed in 500-row batches while three
+recent rows remained, `EXPLAIN` chose the new `(created_at,id)` stale index,
+and a second initialization retained that index. The matching disposable
+Fizzy/Rizzy SQLite test passed. The quarter-hour worker uses a database claim
+to avoid duplicate scheduled cleanup across app processes; its live timing
+and contention with delivery workers have not been load tested.
+
 `schema.mysql.sql` is a snapshot of an initialized Rizzy SQLite database. To
 regenerate it after a SQLite schema change, seed a new SQLite database and run
 `python3 scripts/generate_mysql_schema.py path/to/fresh.sqlite3 schema.mysql.sql`.
