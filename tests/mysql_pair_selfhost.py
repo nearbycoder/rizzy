@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Run paired parity suites on disposable Fizzy and Rizzy MySQL databases."""
+"""Run paired parity suites on disposable Fizzy and Rizzy MySQL databases.
+
+Requires the local MySQL server and its socket-authenticated root account.
+"""
 
 import argparse
 import os
@@ -19,25 +22,30 @@ from sustained_mixed_mysql import (create_databases, drop_databases, rust_env,  
 from mysql_search_parity import browser_login, run as search_run  # noqa: E402
 from parity import run as core_run  # noqa: E402
 from board_filter_html_parity import run as board_filter_run  # noqa: E402
+from cards_html_parity import check as all_cards_check  # noqa: E402
+from named_column_html_parity import run as named_column_run  # noqa: E402
+from column_cards_etag_parity import run as column_cache_run  # noqa: E402
+from named_column_show_etag_parity import run as column_show_cache_run  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("core", "search", "board-filter"))
+    parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
+                                          "named-column", "column-cache", "column-show-cache"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
     host = os.environ.get("MYSQL_HOST", "127.0.0.1")
     port = int(os.environ.get("MYSQL_PORT", "33080"))
     suffix = uuid.uuid4().hex[:12]
-    source_dbs = {role: f"rzsearch_{suffix}_f{label}" for role, label in
+    source_dbs = {role: f"rzpair_{suffix}_f{label}" for role, label in
                   (("", ""), ("CABLE_", "_c"), ("CACHE_", "_k"), ("QUEUE_", "_q"))}
-    rust_db = f"rzsearch_{suffix}_r"
+    rust_db = f"rzpair_{suffix}_r"
     databases = [*source_dbs.values(), rust_db]
     processes = []
     created = False
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
-    with tempfile.TemporaryDirectory(prefix="rizzy-mysql-search-selfhost-") as temp:
+    with tempfile.TemporaryDirectory(prefix="rizzy-mysql-pair-selfhost-") as temp:
         root = Path(temp)
         try:
             created = True
@@ -48,7 +56,7 @@ def main():
             fizzy_env, fizzy_credentials = prepare_source(
                 fizzy_dir, 1, source_env(fizzy_dir, 1, host, port, source_dbs))
             local_rust_env = rust_env(rizzy_dir, host, port, rust_db)
-            local_rust_env["RIZZY_SEED_EMAIL"] = "mysql-search-owner@example.test"
+            local_rust_env["RIZZY_SEED_EMAIL"] = "mysql-pair-owner@example.test"
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
             rizzy_env, rizzy_credentials = prepare_rust(rizzy_dir, local_rust_env)
             cpus = sorted(os.sched_getaffinity(0))[:2]
@@ -76,6 +84,25 @@ def main():
                 browser_login(rust)
                 source_result = board_filter_run(source, signed_in=True)
                 rust_result = board_filter_run(rust, signed_in=True)
+            elif args.suite == "all-cards":
+                browser_login(source)
+                browser_login(rust)
+                source["mysql"] = rust["mysql"] = True
+                source_result = all_cards_check(source, signed_in=True)
+                rust_result = all_cards_check(rust, signed_in=True)
+            elif args.suite == "named-column":
+                browser_login(source)
+                browser_login(rust)
+                source_result = named_column_run(source, signed_in=True)
+                rust_result = named_column_run(rust, signed_in=True)
+            elif args.suite == "column-cache":
+                source_result = column_cache_run(source)
+                rust_result = column_cache_run(rust)
+            elif args.suite == "column-show-cache":
+                browser_login(source)
+                browser_login(rust)
+                source_result = column_show_cache_run(source, signed_in=True)
+                rust_result = column_show_cache_run(rust, signed_in=True)
             else:
                 source_result = core_run(source)
                 rust_result = core_run(rust)
@@ -88,6 +115,14 @@ def main():
             elif args.suite == "board-filter":
                 print(f"Disposable MySQL board filters matched pinned Fizzy: "
                       f"{len(source_result)} browser workflow comparisons")
+            elif args.suite == "all-cards":
+                print("Disposable MySQL all-cards HTML workflow matched pinned Fizzy")
+            elif args.suite == "named-column":
+                print("Disposable MySQL named-column HTML workflow matched pinned Fizzy")
+            elif args.suite == "column-cache":
+                print("Disposable MySQL named-column JSON validators matched pinned Fizzy")
+            elif args.suite == "column-show-cache":
+                print("Disposable MySQL named-column show validators matched pinned Fizzy")
             else:
                 print(f"Disposable MySQL core workflow matched pinned Fizzy: "
                       f"{len(source_result)} comparisons")

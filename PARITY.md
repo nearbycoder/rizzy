@@ -227,6 +227,17 @@ with one completed step, filtered pagination, people filters, and empty results.
 The fixture compares seven workflow summaries and additional per-page
 assertions; exact board markup and other browser flows remain open.
 
+The disposable MySQL harness also passed `all-cards`, `named-column`,
+`column-cache`, and `column-show-cache` against pinned Fizzy. These fixtures
+exercise all-cards HTML filtering and two-page previews, the named-column
+empty and two-page HTML states, JSON page validators after card edits, and
+index/show validators after card triage and column rename. Fizzy's MySQL
+multiword term filter matched more cards than its SQLite counterpart, so the
+all-cards fixture compares the actual source and Rust result sets on each
+backend. The existing SQLite fixtures passed after the harness changes.
+These cases do not establish exact browser markup, interaction, or all-route
+cache invalidation parity.
+
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process
 redemption race, member access changes, reset, and restart after a deleted join

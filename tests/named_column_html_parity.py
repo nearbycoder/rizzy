@@ -19,6 +19,53 @@ from board_special_column_etag_parity import html_request  # noqa: E402
 from draft_workflow_parity import NoRedirect, login  # noqa: E402
 
 
+def run(target, signed_in=False):
+    name = target["name"]
+    if not signed_in:
+        login(target)
+    board, _ = expect(target, "/boards", "POST",
+                      {"board": {"name": "Browser column"}}, 201)
+    column, _ = expect(target, f"/boards/{board['id']}/columns", "POST",
+                       {"column": {"name": "In progress"}}, 201)
+    path = f"/boards/{board['id']}/columns/{column['id']}"
+    frame = f"cards_column_{column['id']}"
+    status, _, empty = html_request(target, path)
+    assert status == 200 and b"No cards here" in empty, (name, status)
+    assert f'<turbo-frame id="{frame}">'.encode() in empty, name
+    assert b'data-drag-drop-item-container' in empty, name
+    if name == "rizzy":
+        assert all(marker in empty for marker in (
+            b'data-open-menu', b'id="menu-dialog"', b'id="footer"',
+            b'id="pin-tray"', b'id="notification-tray"'))
+        assert b'id="utility-panel"' not in empty
+    for index in range(16):
+        card, _ = expect(target, f"/boards/{board['id']}/cards", "POST",
+                         {"card": {"title": f"Browser column card {index:02d}"}}, 201)
+        expect(target, f"/cards/{card['number']}/triage", "POST",
+               {"column_id": column["id"]}, 204)
+    status, first_headers, first = html_request(target, path)
+    assert status == 200 and first.count(b'class="card__title') == 15, (name, status)
+    assert f'<turbo-frame id="{frame}">'.encode() in first, name
+    assert f'id="{frame}-pagination-list"'.encode() in first, name
+    assert f'id="{frame}-pagination-contents-1"'.encode() in first, name
+    assert f'id="{frame}-pagination-link-2"'.encode() in first, name
+    assert re.search(rb'href="[^"]+\?page=2"', first), name
+    assert b'data-drag-drop-item-container' in first, name
+    assert first_headers.get("X-Total-Count") is None, name
+    etag = first_headers.get("ETag")
+    assert etag, name
+    cached_status, cached_headers, cached_body = html_request(target, path, etag)
+    assert cached_status == 304 and not cached_body, (name, cached_status)
+    assert cached_headers.get("X-Total-Count") is None, name
+    status, second_headers, second = html_request(target, path + "?page=2")
+    assert status == 200 and second.count(b'class="card__title') == 1, (name, status)
+    assert f'id="{frame}-pagination-contents-2"'.encode() in second, name
+    assert f'id="{frame}-pagination-link-3"'.encode() not in second, name
+    assert second_headers.get("X-Total-Count") is None, name
+    return {"empty": True, "first": 15, "second": 1,
+            "frame": bool(re.search(rb'<turbo-frame id="cards_column_', first))}
+
+
 def check(name, directory):
     env, credentials = (prepare_source(directory, 2) if name == "fizzy"
                         else prepare_rust(directory))
@@ -32,48 +79,7 @@ def check(name, directory):
                   "db": str(directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3")),
                   "opener": urllib.request.build_opener(
                       urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())}
-        login(target)
-        board, _ = expect(target, "/boards", "POST",
-                          {"board": {"name": "Browser column"}}, 201)
-        column, _ = expect(target, f"/boards/{board['id']}/columns", "POST",
-                           {"column": {"name": "In progress"}}, 201)
-        path = f"/boards/{board['id']}/columns/{column['id']}"
-        frame = f"cards_column_{column['id']}"
-        status, _, empty = html_request(target, path)
-        assert status == 200 and b"No cards here" in empty, (name, status)
-        assert f'<turbo-frame id="{frame}">'.encode() in empty, name
-        assert b'data-drag-drop-item-container' in empty, name
-        if name == "rizzy":
-            assert all(marker in empty for marker in (
-                b'data-open-menu', b'id="menu-dialog"', b'id="footer"',
-                b'id="pin-tray"', b'id="notification-tray"'))
-            assert b'id="utility-panel"' not in empty
-        for index in range(16):
-            card, _ = expect(target, f"/boards/{board['id']}/cards", "POST",
-                             {"card": {"title": f"Browser column card {index:02d}"}}, 201)
-            expect(target, f"/cards/{card['number']}/triage", "POST",
-                   {"column_id": column["id"]}, 204)
-        status, first_headers, first = html_request(target, path)
-        assert status == 200 and first.count(b'class="card__title') == 15, (name, status)
-        assert f'<turbo-frame id="{frame}">'.encode() in first, name
-        assert f'id="{frame}-pagination-list"'.encode() in first, name
-        assert f'id="{frame}-pagination-contents-1"'.encode() in first, name
-        assert f'id="{frame}-pagination-link-2"'.encode() in first, name
-        assert re.search(rb'href="[^"]+\?page=2"', first), name
-        assert b'data-drag-drop-item-container' in first, name
-        assert first_headers.get("X-Total-Count") is None, name
-        etag = first_headers.get("ETag")
-        assert etag, name
-        cached_status, cached_headers, cached_body = html_request(target, path, etag)
-        assert cached_status == 304 and not cached_body, (name, cached_status)
-        assert cached_headers.get("X-Total-Count") is None, name
-        status, second_headers, second = html_request(target, path + "?page=2")
-        assert status == 200 and second.count(b'class="card__title') == 1, (name, status)
-        assert f'id="{frame}-pagination-contents-2"'.encode() in second, name
-        assert f'id="{frame}-pagination-link-3"'.encode() not in second, name
-        assert second_headers.get("X-Total-Count") is None, name
-        return {"empty": True, "first": 15, "second": 1,
-                "frame": bool(re.search(rb'<turbo-frame id="cards_column_', first))}
+        return run(target)
     finally:
         stop_server(process)
 

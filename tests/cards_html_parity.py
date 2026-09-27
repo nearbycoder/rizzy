@@ -11,8 +11,9 @@ import urllib.request
 from draft_workflow_parity import NoRedirect, login, request
 
 
-def check(target):
-    login(target)
+def check(target, signed_in=False):
+    if not signed_in:
+        login(target)
     account = target["account"]
     marker = f"cardshtml{time.time_ns()}"
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board": {"name": marker}}, bearer=True)
@@ -73,7 +74,8 @@ def check(target):
         assert first == list(range(2, 17)), (target["name"], first)
         assert second == [0, 1], (target["name"], second)
         assert f"{marker} completed" in closed and not found(closed)
-        assert term == [5], (target["name"], term)
+        expected_terms = list(range(2, 17)) if target.get("mysql") else [5]
+        assert term == expected_terms, (target["name"], term)
         assert oldest == list(range(15)), (target["name"], oldest)
         assert assigned == [16], (target["name"], assigned)
         assert unassigned == list(range(1, 16)), (target["name"], unassigned)

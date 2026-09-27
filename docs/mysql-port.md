@@ -295,6 +295,16 @@ paired MySQL run and a paired SQLite regression passed, including a two-step
 card with one completed step and the filtered second-page preview fragment.
 Other browser routes and full HTML equivalence remain unverified on MySQL.
 
+The same disposable paired harness now passes `all-cards`, `named-column`,
+`column-cache`, and `column-show-cache` against Fizzy on MySQL. The all-cards
+fixture compares two-page previews, state and people filters, board-choice
+ordering, and JSON pagination; the named-column fixtures compare empty and
+two-page HTML plus conditional JSON and HTML validators after edits. The
+source MySQL adapter matches more cards for the fixture's multiword term than
+the source SQLite adapter, and Rizzy's MySQL results match that source set.
+The existing SQLite fixtures also passed after reuse in the MySQL harness.
+These are selected paths, not full browser or cache parity.
+
 Remaining database work:
 
 The storage entry and total tables now have a live MySQL 8.4.11 regression in
