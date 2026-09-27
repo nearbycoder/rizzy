@@ -83,6 +83,7 @@ python3 tests/user_attachables_migration.py
 python3 tests/search.py
 python3 tests/exports.py
 python3 tests/account_transfer.py
+python3 tests/account_export_internal_blobs_paired.py
 python3 tests/account_import.py
 python3 tests/notification_source_migration.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:

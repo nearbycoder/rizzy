@@ -680,6 +680,7 @@ CREATE UNIQUE INDEX `uniq_storage_blobs_2` ON `storage_blobs` (`signed_id`);
 CREATE UNIQUE INDEX `uniq_storage_blobs_3` ON `storage_blobs` (`storage_key`);
 CREATE UNIQUE INDEX `uniq_storage_variant_records_0` ON `storage_variant_records` (`blob_id`, `variation_digest`);
 CREATE INDEX `storage_attachments_record` ON `storage_attachments` (`record_type`, `record_id`);
+CREATE INDEX `storage_attachments_blob_type` ON `storage_attachments` (`account_id`, `blob_id`, `record_type`);
 CREATE INDEX `storage_entries_user` ON `storage_entries` (`user_id`);
 CREATE INDEX `storage_entries_request` ON `storage_entries` (`request_id`);
 CREATE INDEX `storage_entries_recordable` ON `storage_entries` (`recordable_type`, `recordable_id`);
