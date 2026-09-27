@@ -99,12 +99,12 @@ document.addEventListener('click',event=>{const link=event.target.closest('a[hre
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
 relativeDates();
 const boardColumns=document.querySelector('.card-columns');
-const boardSections=[...boardColumns.querySelectorAll(':scope > .cards')];
+const boardSections=()=>[...boardColumns.querySelectorAll(':scope > .cards')];
 const expandedColumnKey=`rizzy-expanded-column:${document.body.dataset.board}`;
 const desktopColumns=()=>window.matchMedia('(min-width: 640px)').matches;
 function markColumn(column,expanded){column.classList.toggle('is-expanded',expanded);column.classList.toggle('is-collapsed',!expanded);column.querySelector('.cards__toggle')?.setAttribute('aria-expanded',String(expanded))}
 function expandColumn(column,persist=true){
-  for(const item of boardSections){
+  for(const item of boardSections()){
     if(item===column||item.id==='maybe'&&desktopColumns())markColumn(item,true);
     else markColumn(item,false);
   }
@@ -118,7 +118,7 @@ function toggleColumn(column){
     if(localStorage.getItem(expandedColumnKey)===column.id)localStorage.removeItem(expandedColumnKey);
   }else expandColumn(column);
 }
-boardSections.forEach(column=>column.querySelector('.cards__toggle')?.addEventListener('click',()=>toggleColumn(column)));
+boardColumns.addEventListener('click',event=>{const toggle=event.target.closest('.cards__toggle');if(toggle)toggleColumn(toggle.closest('.cards'))});
 document.querySelector('.board-tools__watch-toggle')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const response=await fetch(`/${document.body.dataset.account}/boards/${document.body.dataset.board}/involvement`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({involvement:button.dataset.involvement})});if(!response.ok)throw Error('Could not update watching');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 const utility=document.getElementById('utility-panel'),utilityTitle=document.getElementById('utility-title'),utilitySearch=document.getElementById('utility-search'),utilityContent=document.getElementById('utility-content');
 function utilityList(items,empty){utilityContent.replaceChildren();if(!items.length){const message=document.createElement('p');message.textContent=empty;utilityContent.append(message);return}for(const item of items){const link=document.createElement('a');link.href=item.url;link.textContent=item.title;utilityContent.append(link)}}
@@ -128,7 +128,7 @@ utility.querySelector('.utility-close').addEventListener('click',()=>utility.clo
 const filterForm=document.querySelector('.board-filter');let filterTimer;filterForm?.querySelector('input[type=search]')?.addEventListener('input',()=>{clearTimeout(filterTimer);filterTimer=setTimeout(()=>filterForm.requestSubmit(),400)});filterForm?.addEventListener('change',event=>{const field=event.target;if(field.matches('input[name="assignment_status"]')&&field.checked)filterForm.querySelectorAll('input[name="assignee_ids[]"]').forEach(input=>input.checked=false);else if(field.matches('input[name="assignee_ids[]"]')&&field.checked)filterForm.querySelector('input[name="assignment_status"]').checked=false;if(field.matches('select,input[type=checkbox]'))filterForm.requestSubmit()});
 const newColumnDialog=document.getElementById('new-column-dialog');
 document.getElementById('add-column')?.addEventListener('click',()=>{newColumnDialog.showModal();newColumnDialog.querySelector('input[name=name]').focus()});
-document.querySelectorAll('.column-dialog [data-close-dialog]').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
+document.addEventListener('click',event=>{const button=event.target.closest('.column-dialog [data-close-dialog]');if(button)button.closest('dialog').close()});
 const namedColumns=()=>[...boardColumns.querySelectorAll(':scope > .cards--doing[data-column-id]')];
 function updateMoveButtons(){const columns=namedColumns();columns.forEach((column,index)=>{column.querySelector('[data-column-action=left]').disabled=index===0;column.querySelector('[data-column-action=right]').disabled=index===columns.length-1})}
 function closeColumnMenus(){boardColumns.querySelectorAll('.cards__menu-panel').forEach(panel=>{panel.hidden=true;panel.previousElementSibling.setAttribute('aria-expanded','false')})}
@@ -156,7 +156,8 @@ boardColumns.addEventListener('click',async event=>{
 });
 document.addEventListener('click',event=>{if(!event.target.closest('.cards__menu'))closeColumnMenus()});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeColumnMenus()});
-document.querySelectorAll('[data-column-form]').forEach(form=>form.addEventListener('submit',async event=>{
+document.addEventListener('submit',async event=>{
+  const form=event.target.closest('[data-column-form]');if(!form)return;
   event.preventDefault();
   const nameInput=form.querySelector('input[name=name]'),name=nameInput.value.trim(),color=form.querySelector('input[name=color]:checked').value;
   if(!name){nameInput.focus();return}
@@ -164,13 +165,36 @@ document.querySelectorAll('[data-column-form]').forEach(form=>form.addEventListe
   try{
     const account=document.body.dataset.account,board=document.body.dataset.board,isNew=form.dataset.columnForm==='new';
     const id=isNew?'':form.closest('.cards').dataset.columnId;
-    const path=isNew?`/${account}/boards/${board}/columns.json`:`/${account}/boards/${board}/columns/${id}.json`;
-    const response=await fetch(path,{method:isNew?'POST':'PATCH',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({column:{name,color}})});
+    const path=isNew?`/${account}/boards/${board}/columns`:`/${account}/boards/${board}/columns/${id}`;
+    const response=await fetch(path,{method:isNew?'POST':'PATCH',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/json'},body:JSON.stringify({column:{name,color}})});
     if(!response.ok)throw Error(`Could not ${isNew?'add':'update'} column`);
-    location.reload();
+    const streams=new DOMParser().parseFromString(await response.text(),'text/html').querySelectorAll('turbo-stream');
+    const stream=[...streams].find(item=>item.getAttribute('action')===(isNew?'before':'replace')&&item.getAttribute('target')===(isNew?'closed-cards':`column_${id}`));
+    const replacement=stream?.querySelector('template')?.content.firstElementChild;
+    if(!replacement?.matches('.cards'))throw Error('Column update missing');
+    const next=document.importNode(replacement,true);
+    if(isNew){boardColumns.insertBefore(next,boardColumns.querySelector('#closed-cards'));newColumnDialog.close();form.reset()}
+    else{
+      const current=form.closest('.cards'),expanded=current.classList.contains('is-expanded');
+      const oldList=current.querySelector('.cards__list'),newList=next.querySelector('.cards__list');
+      if(oldList.querySelector('.card')&&current.dataset.count===next.dataset.count){
+        for(const card of oldList.querySelectorAll('.card')){
+          card.className=card.className.replace(/\bcard--color-(?:default|[1-8])\b/g,'').trim();
+          card.classList.add(`card--color-${color==='var(--color-card-default)'?'default':color.match(/color-card-(\d+)/)?.[1]||'default'}`);
+          card.querySelector('.card__column-name')?.replaceChildren(name);
+        }
+        newList.replaceWith(oldList);
+        const oldMore=current.querySelector('.cards__more'),newMore=next.querySelector('.cards__more');
+        if(oldMore){if(newMore)newMore.replaceWith(oldMore);else next.append(oldMore)}
+      }else next.querySelector('.cards__more[data-page="1"]')&&lazyColumns.observe(next.querySelector('.cards__more[data-page="1"]'));
+      markColumn(next,expanded);current.replaceWith(next);
+      next.querySelector('.cards__toggle')?.focus();
+    }
+    updateMoveButtons();
   }catch(error){button.disabled=false;alert(error.message)}
-}));
-document.querySelectorAll('.cards__more').forEach(button=>button.addEventListener('click',async()=>{
+});
+boardColumns.addEventListener('click',async event=>{
+  const button=event.target.closest('.cards__more');if(!button)return;
   button.disabled=true;
   const page=Number(button.dataset.page);
   try {
@@ -182,8 +206,8 @@ document.querySelectorAll('.cards__more').forEach(button=>button.addEventListene
     list.append(fragment);relativeDates();
     if(list.querySelectorAll('.card').length>=Number(column.dataset.count)||loaded<[15,30,50,100][Math.min(page-1,3)])button.remove();else{button.dataset.page=String(page+1);button.textContent='Load more';button.disabled=false}
   }catch(error){button.disabled=false;alert(error.message)}
-}));
-const savedExpandedColumn=boardSections.find(column=>column.id===localStorage.getItem(expandedColumnKey));
+});
+const savedExpandedColumn=boardSections().find(column=>column.id===localStorage.getItem(expandedColumnKey));
 if(savedExpandedColumn)expandColumn(savedExpandedColumn,false);
 const selectedCardKey='rizzy-card-selected';
 function visibleCards(column){return [...column.querySelectorAll('.cards__list .card[data-card-number]')].filter(card=>card.checkVisibility())}
