@@ -866,5 +866,8 @@ source scheduler's next-occurrence behavior.
 `tests/mysql_recurring_auth_cleanup.py` passed on MySQL 8.4.11 with old and
 fresh rows for all four types. Old ZIPs are removed while fresh files remain;
 an eight-day-old failed import and its account are deleted while another
-account survives. This exercises manual execution; live
+account survives. This exercises manual execution on MySQL. The separate
+`tests/recurring_live_clock.py` SQLite check observed all four jobs firing
+at a real clock boundary using controlled local timezones;
+`tests/recurring_startup_slot.py` observed a skipped startup minute. MySQL
 clock-boundary firing and cross-host recovery have not been observed.

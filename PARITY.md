@@ -1002,9 +1002,15 @@ still runs independently of cleanup. The source schedule parses to
 transfers, completed exports, completed imports, ZIP files, and deletion of an
 eight-day-old failed import account while another account survives on disposable
 MySQL 8.4.11. Rust tests cover all clock hours, startup-minute skipping, and a
-concurrent one-winner SQLite slot claim. Live scheduled execution through each
-clock boundary, recovery from a process exit mid-job, and multi-host timing
-remain open.
+concurrent one-winner SQLite slot claim. `tests/recurring_live_clock.py` also
+started three SQLite Rizzy processes with fixed local timezone offsets so the
+four cleanup jobs became due at one real UTC minute. All four removed their
+expired records, retained fresh records, and wrote the expected UTC slot
+claims. `tests/recurring_startup_slot.py` booted inside an export cleanup
+minute and observed no cleanup or claim through that minute. These tests
+observe the worker clock boundary, while production timezone configuration,
+the other recurring jobs' live boundaries, recovery from a process exit
+mid-job, and multi-host timing remain open.
 
 The [128-client](bench/results/mysql-mixed-1000-4boards-4process-c128-15s-2026-09-27.json)
 and [256-client](bench/results/mysql-mixed-1000-4boards-4process-c256-15s-2026-09-27.json)
