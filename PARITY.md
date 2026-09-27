@@ -274,6 +274,16 @@ phase at 251.47 without errors, while Fizzy failed a card PATCH with an
 ActiveSearch MySQL deadlock, so that second pair is invalid for throughput
 comparison. This is a local API workload with partial feature parity, not a
 whole-app, multi-host, or maximum-capacity result.
+The [current one-versus-four Rizzy MySQL run](bench/results/mysql-rizzy-1v4-1000-4boards-c32-30s-2026-09-27.json)
+used the same committed release binary, four app CPUs, 32 clients, 1,000
+cards on four boards, and two reversed-order 30-second rounds. Four processes
+completed 250.72 and 248.86 workflow units/s versus 172.28 and 174.04 for
+one, gains of 45.5% and 43.0%. All phases had zero HTTP errors and exact
+stored counts, with work near even across boards and processes. Four processes
+used about 50 MiB end-of-phase app PSS versus 14–15 MiB for one, and averaged
+1.63–1.65 app CPU cores versus 0.70–0.71. This establishes process scaling
+for this local API workload; it does not establish a maximum capacity or
+multi-host operation.
 The [matched-fixture read-only MySQL comparison](bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 did complete two reversed-order rounds at 8, 32, and 128 clients with zero
 errors, unchanged counts, and matched complete sampled JSON values after

@@ -486,6 +486,16 @@ ActiveSearch MySQL deadlock. The failed phase cannot support a throughput
 ratio. These results measure one local mixed API workflow, not full product
 parity, multi-host scaling, or maximum sustainable capacity.
 
+The [current one-versus-four Rizzy MySQL comparison](../bench/results/mysql-rizzy-1v4-1000-4boards-c32-30s-2026-09-27.json)
+held the same release binary, 1,000-card four-board fixture, four app CPUs,
+32 clients, and two reversed-order 30-second rounds. Four app processes
+completed 250.72 and 248.86 workflow units/s versus 172.28 and 174.04 for
+one, gains of 45.5% and 43.0%, with zero HTTP errors and exact record counts.
+Load was near even across boards and processes. End-of-phase app PSS rose
+from 14–15 MiB to about 50 MiB, and average app CPU use from 0.70–0.71 to
+1.63–1.65 cores. The gain is evidence of one-host process scaling on this
+workload, not a cross-host or maximum-capacity result.
+
 The [matched-fixture MySQL JSON read comparison](../bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 avoids that write-path failure. Fresh 1,000-card databases, the same four
 available app CPUs, two reversed-order rounds, and 15-second phases at 8,
