@@ -264,6 +264,8 @@ fn token_denied() -> ApiError {
 }
 #[derive(Clone)]
 struct OriginalAccept(Option<HeaderValue>);
+#[derive(Clone, Copy)]
+struct ShadowedMethodResponse;
 fn rewrite_json_uri<B>(mut request: axum::http::Request<B>) -> axum::http::Request<B> {
     // This runs outside the router so collection routes such as /boards.json
     // can match /boards. Explicit client configuration paths have their own routes.
@@ -4809,7 +4811,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("Rizzy listening on http://{bind}");
     let routes = MapRequestLayer::new(rewrite_json_uri).layer(routes);
     let routes = MapResponseLayer::new(|mut response: Response| {
-        if response.status() == StatusCode::NOT_FOUND {
+        // Axum adds Allow after a method fallback has returned. Fizzy's routed
+        // error and authentication responses do not advertise the literal
+        // route's methods.
+        if response.status() == StatusCode::NOT_FOUND
+            || response
+                .extensions()
+                .get::<ShadowedMethodResponse>()
+                .is_some()
+        {
             response.headers_mut().remove(header::ALLOW);
         }
         response
@@ -6074,11 +6084,64 @@ async fn static_not_found(headers: HeaderMap, OriginalUri(uri): OriginalUri) -> 
         static_error_page(include_str!("../static/404.html"), StatusCode::NOT_FOUND)
     }
 }
+enum ShadowedDynamicRoute<'a> {
+    Account(&'a str),
+    Identity,
+}
+fn shadowed_dynamic_route<'a>(method: &Method, path: &'a str) -> Option<ShadowedDynamicRoute<'a>> {
+    // Rails considers the request method while choosing between literal and
+    // parameterized paths. Axum gives the literal path precedence for every
+    // method, so these methods must reach the parameterized controller's auth
+    // check before its missing-record response.
+    let path = path.strip_suffix(".json").unwrap_or(path);
+    if path == "/my/access_tokens/new" && *method == Method::DELETE {
+        return Some(ShadowedDynamicRoute::Identity);
+    }
+    let (account, tail) = path.strip_prefix('/')?.split_once('/')?;
+    let matches = match tail {
+        "boards/new" | "cards/previews" => {
+            matches!(*method, Method::PATCH | Method::PUT | Method::DELETE)
+        }
+        "filters/settings_refresh" | "my/access_tokens/new" => *method == Method::DELETE,
+        "users/joins" | "users/verifications" => {
+            matches!(
+                *method,
+                Method::GET | Method::HEAD | Method::PATCH | Method::PUT | Method::DELETE
+            )
+        }
+        _ => false,
+    };
+    matches.then_some(ShadowedDynamicRoute::Account(account))
+}
 async fn unsupported_method(
+    State(app): Shared,
+    method: Method,
     headers: HeaderMap,
     original_accept: Option<Extension<OriginalAccept>>,
     uri: OriginalUri,
 ) -> Response {
+    if let Some(route) = shadowed_dynamic_route(&method, uri.path()) {
+        let auth: Result<()> = match route {
+            ShadowedDynamicRoute::Account(account) => {
+                principal(&app, &headers, account).await.map(|_| ())
+            }
+            ShadowedDynamicRoute::Identity => identity_auth(&app, &headers).await.map(|_| ()),
+        };
+        let mut response = match auth {
+            Ok(_) => static_not_found(headers, uri).await,
+            Err(error) if error.0 == StatusCode::FOUND => {
+                let mut response = error.into_response();
+                response.headers_mut().insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                );
+                response
+            }
+            Err(error) => error.into_response(),
+        };
+        response.extensions_mut().insert(ShadowedMethodResponse);
+        return response;
+    }
     let accept = match original_accept.as_ref() {
         Some(Extension(original)) => original.0.as_ref(),
         None => headers.get(header::ACCEPT),

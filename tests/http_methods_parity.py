@@ -16,12 +16,14 @@ from route_get_status_parity import NoRedirect, paths  # noqa: E402
 from sustained_mixed import prepare_rust, prepare_source, start_server, stop_server  # noqa: E402
 
 
-def probe(target, method, path, accept, bearer):
-    scoped = f"/{target['account']}{path}" if path != "/" else f"/{target['account']}/"
+def probe(target, method, path, accept, bearer, scoped=True):
+    scoped_path = (f"/{target['account']}{path}" if path != "/" else f"/{target['account']}/")
+    if not scoped:
+        scoped_path = path
     headers = {"Accept": accept}
     if bearer:
         headers["Authorization"] = "Bearer " + target["token"]
-    request = urllib.request.Request(target["url"] + scoped, headers=headers, method=method)
+    request = urllib.request.Request(target["url"] + scoped_path, headers=headers, method=method)
     try:
         response = target["opener"].open(request, timeout=10)
     except urllib.error.HTTPError as error:
