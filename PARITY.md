@@ -758,3 +758,13 @@ runs passed with two accurate move events and all image bytes on only the
 final board; the four-process cluster and storage materialization tests also
 passed. Other cross-board races, full route parity, and multi-host scale
 remain unverified.
+
+Pin/unpin writes now lock and recheck the card's current board and the user's
+access before changing a pin. The paired card-control and pin-tray tests still
+match Fizzy's HTML, ETag, Turbo, JSON, and unpin behavior; the paired
+move-access test now also confirms both apps return 404 when a former member
+tries to pin after losing access. `tests/mysql_pin_move.py` forced a member
+pin and an owner move to a private board to wait on the same lock; three
+fresh MySQL runs left no inaccessible pin. The four-process cluster passed
+200 owner pin/move pairs and found 200 retained pins where access persisted.
+This does not establish all concurrent permission behavior or full parity.

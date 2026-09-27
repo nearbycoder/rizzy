@@ -720,12 +720,33 @@ def main():
                                          "action='card_closed' AND "
                                          f"card_id IN ({closed_ids})") == "100"
 
+            def mixed_pin_move(item):
+                index, kind = item
+                number = results[index + 200][1]["number"]
+                base = bases[(2 * index + kind) % 4]
+                if kind == 0:
+                    return call(base, account, token, f"/cards/{number}/pin", "POST")
+                return call(base, account, token, f"/cards/{number}/board", "PATCH",
+                            {"board_id": board["id"]})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+                pin_move = list(pool.map(mixed_pin_move, mixed_items))
+            failures = [(item, status, value)
+                        for item, (status, value, _) in zip(mixed_items, pin_move)
+                        if status != (204 if item[1] == 0 else 200)]
+            assert not failures, ("pin/move", failures[:5])
+            if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
+                card_ids = ",".join(f"'{results[index + 200][1]['id']}'"
+                                    for index in range(200))
+                assert mysql_scalar(url, "SELECT COUNT(*) FROM pins WHERE "
+                                         f"card_id IN ({card_ids})") == "200"
+
             status, cards, headers = call(bases[1], account, token, "/cards")
             assert status == 200 and len(cards) == 15, (status, len(cards))
             assert int(headers["X-Total-Count"]) == 166, headers
             if os.environ.get("RIZZY_TEST_MYSQL_CLIENT"):
                 assert mysql_scalar(url, "SELECT COUNT(*) FROM cards") == "400"
-            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion, watch/move, reading/move, triage/move, untriage/move, and flag/move races, 200 double close/gold requests, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
+            print("MySQL cluster passed: 20 concurrent columns, 20 position swaps, 30 concurrent name/color updates, 400 unique cards, mixed writes including comment CRUD and move, reaction deletion, watch/move, reading/move, triage/move, untriage/move, flag/move, and pin/move races, 200 double close/gold requests, opposite-direction moves, and 200 double assignment and tag toggles across four processes")
         except Exception:
             for index, (_, log) in enumerate(processes):
                 log.flush()

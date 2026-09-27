@@ -124,7 +124,7 @@ def run(target):
         assert move_events == 1, (target["name"], "move event", move_events)
 
     try:
-        assignee, _ = create_user("Parity assignee")
+        assignee, assignee_token = create_user("Parity assignee")
         mover, mover_token = create_user("Parity member")
         source = board("Parity source", True)
         admin_destination = board("Parity admin destination", False)
@@ -154,7 +154,12 @@ def run(target):
             time.sleep(.2)
             member_state = state(member_destination, card_id, event_id, assignee)
         assert member_state == (0, 0, 0, 0, 0), (target["name"], "member state", member_state)
-        return {"admin": admin_state, "member": member_state}
+        pin_status, _, _ = request({**target, "token": assignee_token},
+                                   f"/{account}/cards/{number}/pin", "POST", bearer=True)
+        assert pin_status == 404, (target["name"], "pin after access loss", pin_status)
+        assert state(member_destination, card_id, event_id, assignee) == member_state
+        return {"admin": admin_state, "member": member_state,
+                "pin_after_access_loss": pin_status}
     finally:
         for board_id in created["boards"]:
             request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
@@ -177,7 +182,7 @@ def main():
                   "db": os.environ[f"{name}_DB"], "opener": urllib.request.build_opener(NoRedirect())}
         results[name.lower()] = run(target)
     assert results["fizzy"] == results["rizzy"], results
-    print("Card move access parity matched: admin grants and member cleanup")
+    print("Card move access parity matched: admin grants, member cleanup, and pin rejection after access loss")
 
 
 if __name__ == "__main__":

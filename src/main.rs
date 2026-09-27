@@ -14684,6 +14684,18 @@ async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result
     p.write()?;
     let c = card(app, p, number).await?;
     let card_id: String = c.get("id");
+    let (mut tx, board_id) =
+        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&board_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
     if pinned {
         let statement = if app.mysql {
             "INSERT IGNORE INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)"
@@ -14696,17 +14708,18 @@ async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result
             .bind(&card_id)
             .bind(&p.user_id)
             .bind(now())
-            .execute(&app.db)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
     } else {
         sqlx::query("DELETE FROM pins WHERE card_id=? AND user_id=?")
             .bind(&card_id)
             .bind(&p.user_id)
-            .execute(&app.db)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
     }
+    tx.commit().await.map_err(db_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn list_pins(

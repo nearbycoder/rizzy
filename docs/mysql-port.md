@@ -612,3 +612,14 @@ cluster test and MySQL storage materialization test also passed. The paired
 SQLite move-access and storage-ledger tests still matched Fizzy, as did a
 new chained/repeated move test. This covers those same-host moves, not every
 concurrent access change or distributed deployment.
+
+Pin and unpin now hold the card's current board lock through the access
+check and mutation. This orders a member's pin against a move to a private
+board: either the pin commits first and move cleanup removes it, or the move
+commits first and pin returns 404. `tests/mysql_pin_move.py` forced both
+requests to wait on the source board in separate app processes; three fresh
+MySQL 8.4.11 runs left no inaccessible pin. The expanded four-process cluster
+test also passed 200 owner pin/move pairs and checked all 200 retained pins
+when access persisted. Paired Fizzy/Rizzy pin controls, tray, and access-loss
+checks passed on SQLite. Other access changes and cross-host races remain
+outside these results.
