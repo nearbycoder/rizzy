@@ -50,17 +50,18 @@ def main():
             paths[name] = path
             sample = html(target, path)
             assert b'card-perma' in sample and b'Benchmark card 0' in sample
+            assert b'closure_notice_card_' in sample and b'data-local-time-target="indays"' in sample, name
             assert all(value.encode() in sample for value in (
                 "Review the idea", "Share the update", "Looks useful.", "benchmark-tag",
                 *reaction_contents)), name
             results["sample_parity"][name] = {
-                "steps": 2, "comments": 1, "tag": True,
+                "steps": 2, "comments": 1, "tag": True, "inactivity_notice": True,
                 "card_reactions": 1, "comment_reactions": 1, "html_bytes": len(sample)}
             for _ in range(5):
                 html(target, path)
         assert all(
             results["sample_parity"]["fizzy"][field] == results["sample_parity"]["rizzy"][field]
-            for field in ("steps", "comments", "tag", "card_reactions", "comment_reactions")
+            for field in ("steps", "comments", "tag", "inactivity_notice", "card_reactions", "comment_reactions")
         )
         for concurrency in map(int, args.concurrency.split(",")):
             for name, target in targets.items():

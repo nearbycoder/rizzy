@@ -1,0 +1,97 @@
+{
+  "fixture_cards": 1000,
+  "sample_parity": {
+    "fizzy": {
+      "steps": 2,
+      "comments": 1,
+      "tag": true,
+      "inactivity_notice": true,
+      "card_reactions": 1,
+      "comment_reactions": 1,
+      "html_bytes": 73878
+    },
+    "rizzy": {
+      "steps": 2,
+      "comments": 1,
+      "tag": true,
+      "inactivity_notice": true,
+      "card_reactions": 1,
+      "comment_reactions": 1,
+      "html_bytes": 103645
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 2.02,
+        "requests": 767,
+        "errors": {},
+        "rps": 378.8,
+        "p50_ms": 16.9,
+        "p95_ms": 38.46,
+        "p99_ms": 60.93
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.09,
+        "requests": 999,
+        "errors": {},
+        "rps": 478.9,
+        "p50_ms": 61.15,
+        "p95_ms": 119.65,
+        "p99_ms": 164.91
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 2.0,
+        "requests": 12913,
+        "errors": {},
+        "rps": 6453.1,
+        "p50_ms": 1.19,
+        "p95_ms": 1.73,
+        "p99_ms": 2.06
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.0,
+        "requests": 12738,
+        "errors": {},
+        "rps": 6357.5,
+        "p50_ms": 4.77,
+        "p95_ms": 7.99,
+        "p99_ms": 10.0
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 17.036,
+      "p95_ratio_fizzy_over_rizzy": 22.231
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 13.275,
+      "p95_ratio_fizzy_over_rizzy": 14.975
+    }
+  ],
+  "environment": {
+    "fizzy_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+    "rizzy_sha256": "b775593d89dadf60968f6d007712d04a6e9a71788a0e3f6958a8efa654e66b65",
+    "shared_cpu_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "fizzy_workers": 8,
+    "rizzy_processes": 1
+  }
+}
