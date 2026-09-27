@@ -32,6 +32,7 @@ fn page(account: i64, board_id: &str, title: &str, content: &str) -> Html<String
         account,
         title,
         &format!("<div class=\"webhook-content\">{content}</div>"),
+        "",
         include_str!("../static/webhooks.css"),
         &format!(
             "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></nav>",

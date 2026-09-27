@@ -121,6 +121,7 @@ python3 tests/my_menu_parity.py
 python3 tests/webhooks_html_parity.py
 python3 tests/webhooks_html_paired.py
 python3 tests/card_edit_html_parity.py
+python3 tests/card_edit_html_paired.py
 python3 tests/card_controls_parity.py
 python3 tests/email_change_html_parity.py
 python3 tests/email_confirmation_html_parity.py
