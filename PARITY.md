@@ -945,9 +945,8 @@ code verification, blank-name HTML and JSON validation, account creation,
 and authenticated signup redirects without another identity or link. The
 paired run found that Rizzy's blank-name page omitted Fizzy's `txt-negative`
 error class; the form now uses the source's error markup. This suite does not
-establish full signup parity, including signup rate-limit redirects, tenant
-limit behavior in a fresh single-tenant run, exact page styling, or concurrent
-account creation.
+establish full signup parity, including tenant limit behavior in a fresh
+single-tenant run and exact page styling.
 
 The paired `signup-rate-limit`, `signup-rate-limit-invalid`, and
 `signup-rate-limit-json` suites now exercise eleven requests each on fresh
@@ -963,6 +962,21 @@ separate shared MySQL databases, submits one signup then 23 concurrent signups
 to each pair, and checks that exactly ten magic links were created and 14
 requests were throttled in both. This verifies the tested burst, not every
 rate-limit action or distributed capacity under sustained load.
+
+`signup-completion-cluster` now uses four independent signed-in sessions across
+two Fizzy and two Rizzy processes. The first paired run created all four Fizzy
+accounts but returned two Rizzy database errors because separate processes
+selected the same next account number. Rizzy now uses a transactional
+`account_external_id_sequences` row for seed, signup completion, and import;
+allocation commits before the larger account setup transaction. Three paired
+rounds then created 12 distinct accounts numbered 2–13 on each side, with
+matching owner, board, card, event, and active-watch counts per account.
+`tests/account_sequence_migration.py` passed on both SQLite and MySQL after
+dropping the sequence table from an existing account database, restoring it
+from the highest existing account number, and retaining a higher sequence
+value across another restart. This closes the observed collision and migration
+case. It does not establish sustained signup throughput or every concurrent
+account setup side effect.
 
 `tests/mysql_pair_selfhost.py route-get` checks the status code and content type
 of 92 distinct pinned Fizzy GET paths against Rizzy, using a JSON request and

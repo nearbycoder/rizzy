@@ -16,6 +16,11 @@ CREATE TABLE `accounts` (
   `updated_at` LONGTEXT NOT NULL DEFAULT (''),
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `account_external_id_sequences` (
+  `id` BIGINT,
+  `value` BIGINT NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `account_cancellations` (
   `id` VARCHAR(64),
   `account_id` VARCHAR(64) NOT NULL,

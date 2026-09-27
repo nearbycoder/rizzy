@@ -92,11 +92,9 @@ pub(super) async fn create(
     let system_identity = id();
     let system_id = id();
     let timestamp = now();
-    let slug: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(external_account_id),0)+1 FROM accounts")
-            .fetch_one(&app.db)
-            .await
-            .map_err(db_err)?;
+    let slug = account_sequence::next(&app.db, app.mysql)
+        .await
+        .map_err(db_err)?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query(
         "INSERT INTO accounts(id,external_account_id,name,created_at) VALUES(?,?,'Import',?)",

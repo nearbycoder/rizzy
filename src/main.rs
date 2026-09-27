@@ -32,6 +32,7 @@ use tokio::process::Command;
 use tower::{Layer, util::MapRequestLayer};
 mod access_tokens_page;
 mod account_cancellation;
+mod account_sequence;
 mod account_settings;
 mod account_transfer;
 mod action_mailbox;
@@ -1184,6 +1185,7 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     let schema = include_str!("../schema.mysql.sql");
     resume_mysql_schema(&db, schema).await?;
+    account_sequence::initialize(&db, true).await?;
     backfill_webhook_trackers(&db, true).await?;
     let request_id_capacity: Option<i64> = sqlx::query_scalar(
         "SELECT CAST(character_maximum_length AS SIGNED) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='storage_entries' AND column_name='request_id'",
@@ -3168,6 +3170,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::raw_sql(include_str!("../schema.sql"))
             .execute(&db)
             .await?;
+        account_sequence::initialize(&db, false).await?;
         let bulk_touch_epoch_exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pragma_table_info('cards') WHERE name='bulk_touch_epoch'",
         )
@@ -4797,14 +4800,11 @@ async fn seed(db: &DbPool, mysql: bool) -> std::result::Result<(), Box<dyn std::
     let system_id = id();
     let token_id = id();
     let timestamp = now();
-    let slug: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(external_account_id),0)+1 FROM accounts")
-            .fetch_one(db)
-            .await?;
     let email = env::var("RIZZY_SEED_EMAIL").unwrap_or_else(|_| "owner@example.com".into());
     let name = env::var("RIZZY_SEED_NAME").unwrap_or_else(|_| "Owner".into());
     let account = env::var("RIZZY_SEED_ACCOUNT").unwrap_or_else(|_| "Rizzy".into());
     let token = hex::encode(rand::random::<[u8; 32]>());
+    let slug = account_sequence::next(db, mysql).await?;
     let mut tx = db.begin().await?;
     sqlx::query("INSERT INTO accounts(id,external_account_id,name,created_at) VALUES(?,?,?,?)")
         .bind(&account_id)
@@ -5604,6 +5604,9 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
         });
     }
     let _writer = app.write_lock.lock().await;
+    let slug = account_sequence::next(&app.db, app.mysql)
+        .await
+        .map_err(db_err)?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     if let Some(token) = cookie_value(&headers, "session_token") {
         sqlx::query("UPDATE sessions SET signup_pending=0 WHERE token_hash=? AND identity_id=?")
@@ -5613,11 +5616,6 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
             .await
             .map_err(db_err)?;
     }
-    let slug: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(external_account_id),0)+1 FROM accounts")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(db_err)?;
     let account_id = id();
     let user_id = id();
     let system_identity = id();

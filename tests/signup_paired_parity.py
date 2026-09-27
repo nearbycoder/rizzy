@@ -9,7 +9,7 @@ import threading
 import urllib.parse
 import urllib.request
 
-from draft_workflow_parity import NoRedirect, request
+from draft_workflow_parity import NoRedirect, login, request
 from sustained_mixed_mysql import mysql_query
 
 
@@ -172,3 +172,51 @@ def check_rate_limit_cluster(target, urls):
     return {"created": statuses.count((201, "")),
             "throttled": statuses.count((302, "/signup/new")),
             "identity_delta": after[0] - before[0], "link_delta": after[1] - before[1]}
+
+
+def check_completion_cluster(target, urls):
+    rounds = 3
+    concurrency = 4
+    sessions = []
+    for _ in range(concurrency):
+        isolated = {**target, "opener": urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())}
+        login(isolated)
+        sessions.append(isolated)
+    before = count(target, "accounts")
+    for round_number in range(rounds):
+        barrier = threading.Barrier(concurrency)
+
+        def create(index):
+            isolated = {**sessions[index], "url": urls[index % len(urls)]}
+            barrier.wait(timeout=10)
+            status, headers, raw = request(
+                isolated, "/signup/completion.json", "POST",
+                {"signup": {"full_name": "Concurrent Owner"}})
+            return status, path(headers.get("Location", "")), raw[:100]
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+            outcomes = list(pool.map(create, range(concurrency)))
+        assert all(status == 201 for status, _, _ in outcomes), (
+            target["name"], "concurrent completion", round_number, outcomes)
+    expected = rounds * concurrency
+    assert count(target, "accounts") == before + expected, (target["name"], "account count")
+    slugs = [int(value) for value in mysql_query(
+        target["mysql_client"], target["mysql_socket"], target["mysql_database"],
+        "SELECT external_account_id FROM accounts ORDER BY external_account_id").splitlines()]
+    assert len(slugs) == len(set(slugs)), (target["name"], "duplicate account number", slugs)
+    statement = (
+        "SELECT a.external_account_id,"
+        "(SELECT COUNT(*) FROM users u WHERE u.account_id=a.id AND u.role='owner'),"
+        "(SELECT COUNT(*) FROM boards b WHERE b.account_id=a.id),"
+        "(SELECT COUNT(*) FROM cards c WHERE c.account_id=a.id),"
+        "(SELECT COUNT(*) FROM events e WHERE e.account_id=a.id),"
+        "(SELECT COUNT(*) FROM watches w JOIN cards c ON c.id=w.card_id "
+        "WHERE c.account_id=a.id AND w.watching=1) "
+        "FROM accounts a WHERE a.external_account_id>1 ORDER BY a.external_account_id"
+    )
+    records = [tuple(map(int, line.split("\t"))) for line in mysql_query(
+        target["mysql_client"], target["mysql_socket"], target["mysql_database"],
+        statement).splitlines()]
+    assert len(records) == expected, (target["name"], "account records", records)
+    return {"created": expected, "slugs": slugs, "records": records}

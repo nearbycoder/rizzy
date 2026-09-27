@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS accounts (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS account_external_id_sequences (
+  id INTEGER PRIMARY KEY,
+  value INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS account_cancellations (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
