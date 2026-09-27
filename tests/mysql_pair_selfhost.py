@@ -31,13 +31,17 @@ from named_column_show_etag_parity import run as column_show_cache_run  # noqa: 
 from draft_workflow_parity import NoRedirect, run as draft_run  # noqa: E402
 from card_image_parity import run as card_image_run  # noqa: E402
 from embed_parity import run as embed_run  # noqa: E402
+from card_controls_parity import check as card_controls_check  # noqa: E402
+from card_board_html_parity import check as card_board_check  # noqa: E402
+from card_edit_html_parity import check as card_edit_check  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
                                           "named-column", "column-cache", "column-show-cache",
-                                          "draft", "card-image", "embeds"))
+                                          "draft", "card-image", "embeds", "card-controls",
+                                          "card-board", "card-edit"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -124,6 +128,15 @@ def main():
             elif args.suite == "embeds":
                 source_result = embed_run(source)
                 rust_result = embed_run(rust)
+            elif args.suite in ("card-controls", "card-board", "card-edit"):
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                check = {"card-controls": card_controls_check,
+                         "card-board": card_board_check,
+                         "card-edit": card_edit_check}[args.suite]
+                source_result = check(source)
+                rust_result = check(rust)
             else:
                 source_result = core_run(source)
                 rust_result = core_run(rust)
@@ -151,6 +164,8 @@ def main():
                       f"image removal timestamp changes={source_result['delete_touch']}")
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
+            elif args.suite in ("card-controls", "card-board", "card-edit"):
+                print(f"Disposable MySQL {args.suite} browser workflow matched pinned Fizzy")
             else:
                 print(f"Disposable MySQL core workflow matched pinned Fizzy: "
                       f"{len(source_result)} comparisons")

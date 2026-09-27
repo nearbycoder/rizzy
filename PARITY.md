@@ -238,6 +238,13 @@ backend. The existing SQLite fixtures passed after the harness changes.
 These cases do not establish exact browser markup, interaction, or all-route
 cache invalidation parity.
 
+The same disposable MySQL harness passed `card-controls`, `card-board`, and
+`card-edit` against pinned Fizzy. The fixtures check pin and watch frames,
+conditional ETags, Turbo replacement streams and JSON toggles; the board
+picker, cached response, browser and JSON moves; and the edit form, Lexxy
+editor, JSON rejection, save and reload. They cover selected transitions, not
+the complete card UI, exact markup, or every permission and side effect.
+
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process
 redemption race, member access changes, reset, and restart after a deleted join

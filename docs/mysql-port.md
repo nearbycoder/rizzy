@@ -99,6 +99,11 @@ changes card and board update times but preserves card last-activity time in
 both databases. The embed comparison skips its SQLite-only direct SQL and
 filesystem cleanup assertions on MySQL; selected Rust-only MySQL cleanup is
 covered by the storage materialization test below.
+`tests/mysql_pair_selfhost.py card-controls`, `card-board`, and `card-edit`
+pass on fresh paired MySQL databases. They compare pin and watch HTML frames,
+ETags, Turbo streams and JSON toggles; the board picker and browser/JSON moves;
+and the card edit form, save, and reload. The fixtures check selected behavior
+only; exact presentation, all permissions, and concurrent edits remain open.
 `tests/mysql_account_cancellation.py` checks the single-tenant cancellation
 guard, immediate access loss, day-29 retention, day-31 deletion of all
 account-scoped MySQL rows and dependent comments, file cleanup, and survival
