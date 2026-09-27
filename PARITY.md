@@ -798,3 +798,26 @@ the ordinary 404 responses for all three routes. The 142-comparison paired
 JSON workflow, two-server MySQL draft flow with 32 concurrent publishes,
 fresh MySQL core, and four-process cluster passed after the change. Other
 access revocations and the full draft/browser lifecycle remain open.
+
+JSON card creation and browser draft creation now lock the destination board
+and recheck the creator's access inside the write transaction, before reserving
+an account card number. The paired Fizzy/Rizzy move-access fixture matched 404
+for both board-scoped and account-scoped JSON create attempts after access
+loss. In two fresh MySQL 8.4.11 runs, `tests/mysql_card_creation_access.py`
+forced board-access revocation to queue ahead of a JSON create, then repeated
+it with an authenticated browser draft create. Each late request returned 404
+without inserting a card or advancing the account counter. The SQLite browser
+draft flow, paired 142-comparison API workflow, fresh MySQL core, two-server
+draft suite, and four-process cluster still passed. Revocation paths outside
+this board update and other creation side effects remain open.
+
+The [post-creation-lock mixed API run](bench/results/mixed-create-access-1000-32-30s-2026-09-27.json)
+used fresh 1,000-card SQLite fixtures, 32 clients, eight assigned app CPUs,
+eight Fizzy Puma workers, one release Rizzy process, and two reversed-order
+30-second rounds. Each unit made four JSON reads plus create, edit, comment,
+close, and read writes. Sampled response shape and content matched before load;
+all four phases had zero HTTP errors and verified final card, event, and comment
+counts. Rizzy completed 108.48–123.69 units/s versus Fizzy's 27.00–28.99,
+about 4.0–4.3 times as many on this workload. Both apps were slower in the
+second round; this run does not isolate the access-check cost or establish
+whole-app performance or multi-host scale.

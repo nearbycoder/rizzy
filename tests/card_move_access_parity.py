@@ -175,6 +175,15 @@ def run(target):
             status, _, _ = request({**target, "token": assignee_token},
                                    f"/{account}{suffix}", method, payload, bearer=True)
             assert status == 404, (target["name"], label, status)
+        for label, path, payload in (
+            ("board card create", f"/{account}/boards/{member_destination}/cards",
+             {"card": {"title": "No access"}}),
+            ("account card create", f"/{account}/cards",
+             {"board_id": member_destination, "card": {"title": "No access"}}),
+        ):
+            status, _, _ = request({**target, "token": assignee_token}, path, "POST",
+                                   payload, bearer=True)
+            assert status == 404, (target["name"], label, status)
         assert state(member_destination, card_id, event_id, assignee) == member_state
         return {"admin": admin_state, "member": member_state,
                 "pin_after_access_loss": pin_status,

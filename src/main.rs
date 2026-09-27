@@ -163,6 +163,38 @@ async fn begin_accessible_card_board_write<'a>(
     }
     Ok((tx, current_board))
 }
+async fn begin_accessible_board_write<'a>(
+    app: &'a App,
+    p: &Principal,
+    board_id: &str,
+) -> Result<sqlx::Transaction<'a, Db>> {
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    let board_sql = if app.mysql {
+        "SELECT id FROM boards WHERE id=? AND account_id=? FOR UPDATE"
+    } else {
+        "SELECT id FROM boards WHERE id=? AND account_id=?"
+    };
+    let board: Option<String> = sqlx::query_scalar(board_sql)
+        .bind(board_id)
+        .bind(&p.account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if board.is_none() {
+        return Err(missing());
+    }
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(board_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
+    Ok(tx)
+}
 struct NotificationHtmlCacheEntry {
     version: (i64, Option<String>, i64),
     html: String,
@@ -11900,8 +11932,7 @@ async fn create_card(
     let last_active_at =
         timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
     let writer = app.write_lock.lock().await;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+    let mut tx = begin_accessible_board_write(&app, &p, &board_id).await?;
     let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
     sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
@@ -12010,7 +12041,7 @@ async fn create_or_resume_draft(
     force_new: bool,
 ) -> Result<Response> {
     let _guard = app.write_lock.lock().await;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = begin_accessible_board_write(app, p, board_id).await?;
     let existing: Option<i64> = if force_new {
         None
     } else {
@@ -12711,14 +12742,12 @@ async fn set_flag(
     let was_closed = card_state.get::<i64, _>("closed");
     // The pinned source's second postpone resumes an already postponed card
     // before its cached association check, leaving it active.
-    let effective_value = if flag == "postponed"
-        && value == 1
-        && card_state.get::<i64, _>("postponed") != 0
-    {
-        0
-    } else {
-        value
-    };
+    let effective_value =
+        if flag == "postponed" && value == 1 && card_state.get::<i64, _>("postponed") != 0 {
+            0
+        } else {
+            value
+        };
     if (flag == "golden" && card_state.get::<i64, _>("golden") == value)
         || (flag == "closed" && was_closed == value)
     {
@@ -13280,14 +13309,13 @@ async fn send_card_to_stream(app: &App, p: &Principal, number: &str) -> Result<(
     let timestamp = now();
     let (mut tx, board_id) =
         begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
-    let accessible: Option<String> = sqlx::query_scalar(
-        "SELECT board_id FROM accesses WHERE board_id=? AND user_id=?",
-    )
-    .bind(&board_id)
-    .bind(&p.user_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_err)?;
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&board_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
     if accessible.is_none() {
         return Err(missing());
     }

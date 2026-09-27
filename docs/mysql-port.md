@@ -654,3 +654,14 @@ Fizzy's ordinary 404 responses, while the 142-comparison API workflow,
 two-process draft flow with 32 concurrent publishes, MySQL core, and fresh
 four-process cluster passed. Other concurrent card lifecycle combinations
 and access revocations remain open.
+
+Card and draft creation now lock the destination board and check the creator's
+current access before reserving a card number. In two fresh MySQL 8.4.11 runs,
+`tests/mysql_card_creation_access.py` queued an owner board update that revoked
+a member ahead of the member's JSON create, then repeated the ordering for a
+session-authenticated browser draft create. Both late requests returned 404;
+the board card count and account number counter stayed unchanged. The paired
+SQLite fixture matched Fizzy's 404 response for board-scoped and account-
+scoped creation after access loss. The existing two-server draft and fresh
+four-process cluster suites passed. Other revocation paths and wider
+concurrent creation behavior remain open.
