@@ -48,7 +48,7 @@ from public_page_html_parity import run as public_page_run  # noqa: E402
 from join_code_html_parity import check as join_code_check  # noqa: E402
 from users_events_html_parity import check as user_events_check  # noqa: E402
 from route_get_status_parity import run as route_get_run  # noqa: E402
-from route_get_valid_parity import run as route_get_valid_run  # noqa: E402
+from route_get_valid_parity import run as route_get_valid_run, run_html as route_get_valid_html_run  # noqa: E402
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
 
@@ -63,7 +63,7 @@ def main():
                                           "board-views", "board-settings", "webhooks-html",
                                           "step-read", "public-page", "join-code",
                                           "user-events", "route-get", "route-get-contract",
-                                          "route-get-html", "route-get-valid",
+                                          "route-get-html", "route-get-valid", "route-get-valid-html",
                                           "passkeys-html",
                                           "passkeys-flow", "auth-format"))
     args = parser.parse_args()
@@ -208,6 +208,13 @@ def main():
             elif args.suite == "route-get-valid":
                 source_result = route_get_valid_run(source)
                 rust_result = route_get_valid_run(rust)
+            elif args.suite == "route-get-valid-html":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                    login(target)
+                source_result = route_get_valid_html_run(source)
+                rust_result = route_get_valid_html_run(rust)
             elif args.suite == "passkeys-html":
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
@@ -277,7 +284,7 @@ def main():
                 source_result = core_run(source)
                 rust_result = core_run(rust)
             difference = first_difference(source_result, rust_result)
-            if args.suite in ("route-get", "route-get-contract", "route-get-html", "route-get-valid") and difference is not None:
+            if args.suite in ("route-get", "route-get-contract", "route-get-html", "route-get-valid", "route-get-valid-html") and difference is not None:
                 for path in source_result.keys() | rust_result.keys():
                     if source_result.get(path) != rust_result.get(path):
                         print(f"{path}: Fizzy={source_result.get(path)} "
@@ -322,6 +329,9 @@ def main():
             elif args.suite == "route-get-valid":
                 print(f"Disposable MySQL populated GET response contracts matched pinned Fizzy: "
                       f"{len(source_result)} routes")
+            elif args.suite == "route-get-valid-html":
+                print(f"Disposable MySQL populated HTML GET contracts matched pinned Fizzy: "
+                      f"{len(source_result)} probes")
             elif args.suite == "passkeys-html":
                 print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
             elif args.suite == "auth-format":

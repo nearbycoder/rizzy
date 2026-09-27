@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Probe successful GET routes with equivalent persisted fixtures on paired servers."""
+"""Probe GET contracts with equivalent persisted fixtures on paired servers."""
 
+import hashlib
 import json
 import time
 import urllib.error
 import urllib.request
+
+from draft_workflow_parity import request as browser_request
 
 
 def request(target, path, method="GET", payload=None):
@@ -37,7 +40,7 @@ def shape(value):
     return type(value).__name__
 
 
-def run(target):
+def fixture(target):
     name = "Valid route parity " + str(time.time_ns())
 
     def create(path, payload):
@@ -60,7 +63,18 @@ def run(target):
     number = card["number"]
     step = create(f"/cards/{number}/steps", {"step": {"content": "First step"}})
     comment = create(f"/cards/{number}/comments", {"comment": {"body": "First comment"}})
-    reaction = create(f"/cards/{number}/reactions", {"reaction": {"content": "👍"}})
+    create(f"/cards/{number}/reactions", {"reaction": {"content": "👍"}})
+    return {"name": name, "user_id": user_id, "board_id": board_id,
+            "column_id": column_id, "webhook_id": webhook_id,
+            "number": number, "step_id": step["id"],
+            "comment_id": comment["id"]}
+
+
+def run(target):
+    item = fixture(target)
+    user_id, board_id, column_id = (item[key] for key in ("user_id", "board_id", "column_id"))
+    webhook_id, number, step_id, comment_id = (
+        item[key] for key in ("webhook_id", "number", "step_id", "comment_id"))
     paths = {
         "user": f"/users/{user_id}",
         "user_events": f"/users/{user_id}/events",
@@ -75,11 +89,11 @@ def run(target):
         "webhook_deliveries": f"/boards/{board_id}/webhooks/{webhook_id}/deliveries",
         "card": f"/cards/{number}",
         "card_steps": f"/cards/{number}/steps",
-        "step": f"/cards/{number}/steps/{step['id']}",
+        "step": f"/cards/{number}/steps/{step_id}",
         "card_comments": f"/cards/{number}/comments",
-        "comment": f"/cards/{number}/comments/{comment['id']}",
+        "comment": f"/cards/{number}/comments/{comment_id}",
         "card_reactions": f"/cards/{number}/reactions",
-        "comment_reactions": f"/cards/{number}/comments/{comment['id']}/reactions",
+        "comment_reactions": f"/cards/{number}/comments/{comment_id}/reactions",
     }
     result = {}
     for label, path in paths.items():
@@ -87,5 +101,45 @@ def run(target):
         if label != "user_events":
             assert status == 200, (target["name"], label, status, value)
         result[label] = (status, content_type, shape(value))
-    assert reaction["id"]
+    return result
+
+
+def run_html(target):
+    item = fixture(target)
+    board_id, column_id, webhook_id, number, step_id, comment_id = (
+        item[key] for key in ("board_id", "column_id", "webhook_id", "number", "step_id", "comment_id"))
+    paths = {
+        "board": (f"/boards/{board_id}", item["name"]),
+        "board_edit": (f"/boards/{board_id}/edit", item["name"]),
+        "board_stream": (f"/boards/{board_id}/columns/stream", "Valid route card"),
+        "column": (f"/boards/{board_id}/columns/{column_id}", "Doing"),
+        "webhooks": (f"/boards/{board_id}/webhooks", "Parity"),
+        "webhook": (f"/boards/{board_id}/webhooks/{webhook_id}", "Parity"),
+        "webhook_edit": (f"/boards/{board_id}/webhooks/{webhook_id}/edit", "Parity"),
+        "card": (f"/cards/{number}", "Valid route card"),
+        "card_edit": (f"/cards/{number}/edit", "Valid route card"),
+        "steps": (f"/cards/{number}/steps", "First step"),
+        "step": (f"/cards/{number}/steps/{step_id}", "First step"),
+        "step_edit": (f"/cards/{number}/steps/{step_id}/edit", "First step"),
+        "comments": (f"/cards/{number}/comments", "First comment"),
+        "comment": (f"/cards/{number}/comments/{comment_id}", "First comment"),
+        "comment_edit": (f"/cards/{number}/comments/{comment_id}/edit", "First comment"),
+    }
+    result = {}
+    for label, (path, marker) in paths.items():
+        status, headers, body = browser_request(
+            target, f"/{target['account']}{path}", accept="text/html")
+        content_type = headers.get_content_type()
+        detail = (marker.encode() in body) if status == 200 else (
+            len(body), hashlib.sha256(body).hexdigest())
+        result[label] = (status, content_type, detail)
+        if status == 200:
+            assert marker.encode() in body, (target["name"], label, marker, body[:300])
+    steps_path = f"/{target['account']}/cards/{number}/steps"
+    status, headers, _ = browser_request(target, steps_path, accept="application/json", bearer=True)
+    assert status == 200 and headers.get("ETag"), (target["name"], "steps validator", status)
+    status, headers, _ = browser_request(
+        {**target, "extra_headers": {"If-None-Match": headers["ETag"]}},
+        steps_path, accept="text/html")
+    result["steps_conditional_html"] = (status, headers.get_content_type())
     return result

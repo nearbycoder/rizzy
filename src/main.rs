@@ -13833,6 +13833,9 @@ async fn list_steps(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let c = card(&app, &p, &number).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let card_id: String = c.get("id");
     let rows = sqlx::query("SELECT * FROM steps WHERE card_id=? ORDER BY created_at,id")
         .bind(&card_id)

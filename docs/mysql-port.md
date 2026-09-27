@@ -785,6 +785,12 @@ and reaction fixtures to match status, content type, and JSON shape for 18
 populated GET paths. It exposed a user-activity JSON request that returned
 HTML 200 in Rizzy; the handler now matches Fizzy's JSON 406. Full body value
 and browser HTML parity for these paths remain open.
+The `route-get-valid-html` suite matches status, content type, and resource
+text on 15 populated signed-in HTML GET paths, plus one conditional steps
+request. It exposed an HTML card-steps index returning JSON 200 in Rust;
+Rizzy now matches Fizzy's HTML 406. The paired `step-read` and populated JSON
+GET suites passed after the change. Full markup and interaction parity remain
+unverified by this probe.
 The disposable paired `auth-format` suite also passed bearer-only format,
 read-token write denial, JSON suffix, and unauthenticated redirect checks on
 fresh MySQL databases.
