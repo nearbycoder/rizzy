@@ -1441,6 +1441,19 @@ fn search_content(mut text: String) -> String {
 fn wrap_html(s: &str) -> String {
     format!("<div class=\"action-text-content\">\n  {s}\n</div>\n")
 }
+fn signed_in_frame_page(account: i64, title: &str, frame: String) -> Response {
+    let footer =
+        include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &account.to_string());
+    Html(format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover\"><title>{title} | Rizzy</title><style>:root{{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#101b20;color:#f4f5f6}}body{{margin:0}}#global-container{{min-height:100vh;padding-bottom:50px}}#main{{max-width:960px;margin:0 auto;padding:24px}}.header{{padding:12px 24px;border-bottom:1px solid #304049}}a{{color:#80b7fc}}{styles}{menu_styles}</style></head><body data-account=\"{account}\"><div id=\"global-container\"><header class=\"header\" id=\"header\"><a class=\"header__skip-navigation\" href=\"#main\">Skip to main content</a><a href=\"/{account}/my/menu\" data-open-menu aria-haspopup=\"dialog\" aria-expanded=\"false\">Rizzy</a></header><dialog id=\"menu-dialog\" aria-label=\"Rizzy menu\"><turbo-frame id=\"my_menu\"></turbo-frame></dialog><main id=\"main\">{frame}</main></div>{footer}<script>{script}</script></body></html>",
+        title = escape(title),
+        account = account,
+        styles = include_str!("../static/shell_footer.css"),
+        menu_styles = include_str!("../static/menu_overlay.css"),
+        script = include_str!("../static/events.js"),
+    ))
+    .into_response()
+}
 fn system_plain_text(s: &str) -> String {
     s.replace("<strong>", "")
         .replace("</strong>", "")
@@ -14529,10 +14542,8 @@ async fn show_comment(
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
     if !headers.contains_key("x-rizzy-json-request") {
-        return Ok(
-            Html(comment_edit_page::rendered_comment_frame(&app, &p, &c, &r).await?)
-                .into_response(),
-        );
+        let frame = comment_edit_page::rendered_comment_frame(&app, &p, &c, &r).await?;
+        return Ok(signed_in_frame_page(p.slug, "Comment", frame));
     }
     Ok(Json(comment_json(&app, &p, &c, &r, &base(&headers)).await?).into_response())
 }
@@ -15353,7 +15364,8 @@ async fn list_card_reactions(
     if h.contains_key("x-rizzy-json-request") {
         Ok(Json(reactions_for(&app, &p, &c, None, &base(&h)).await?).into_response())
     } else {
-        Ok(Html(reaction_page::reactions_html(&app, &p, &c, None).await?).into_response())
+        let frame = reaction_page::reactions_html(&app, &p, &c, None).await?;
+        Ok(signed_in_frame_page(p.slug, "Reactions", frame))
     }
 }
 async fn create_card_reaction(
@@ -15385,10 +15397,8 @@ async fn list_comment_reactions(
     if h.contains_key("x-rizzy-json-request") {
         Ok(Json(reactions_for(&app, &p, &c, Some(&comment), &base(&h)).await?).into_response())
     } else {
-        Ok(
-            Html(reaction_page::reactions_html(&app, &p, &c, Some(&comment)).await?)
-                .into_response(),
-        )
+        let frame = reaction_page::reactions_html(&app, &p, &c, Some(&comment)).await?;
+        Ok(signed_in_frame_page(p.slug, "Reactions", frame))
     }
 }
 async fn create_comment_reaction(

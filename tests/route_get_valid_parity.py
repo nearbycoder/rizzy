@@ -314,10 +314,12 @@ def run_html(target):
         detail = ((marker.encode() in body) if marker else bool(body)) if status == 200 else (
             len(body), hashlib.sha256(body).hexdigest())
         result[label] = (status, content_type, detail, bool(headers.get("ETag")))
-        # These three Rust routes still return a fragment where Fizzy renders
-        # the full layout. Their validators cannot share the same lifecycle yet.
-        if status == 200 and headers.get("ETag") and label not in {
-            "card_reactions", "comment_reactions", "comment"}:
+        if status == 200 and label in {"card_reactions", "comment_reactions", "comment"}:
+            result[f"{label}_layout"] = (
+                body.lstrip().lower().startswith(b"<!doctype html"),
+                b"<head>" in body, b'id="global-container"' in body,
+                b'<main id="main">' in body, b'id="footer"' in body)
+        if status == 200 and headers.get("ETag"):
             conditional_status, conditional_headers, conditional_body = browser_request(
                 {**target, "extra_headers": {"If-None-Match": headers["ETag"]}},
                 f"/{target['account']}{path}", accept="text/html")

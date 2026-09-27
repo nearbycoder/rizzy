@@ -974,14 +974,15 @@ checks still pass. Other formats and conditional routes remain to be compared.
 The `route-get-valid-html` suite also uses persisted fixtures and a signed-in
 browser session to compare status, content type, ETag presence, and resource-text
 markers on 30 populated browser GET paths. For non-200 responses it also compares
-body length and digest. The suite makes conditional requests for 22 HTML
+body length and digest. The suite makes conditional requests for 25 HTML
 pages and the steps index. Rizzy now hashes the final HTML bytes after CSP nonce
 insertion, supplies Rack-style weak ETags and cache control on buffered HTML
 GETs without a route-specific validator, and emits the source's CSP nonce meta
-tag on full pages. The 53 paired probes pass. Three HTML fragment routes
-(card reactions, comment reactions, and comment detail) still return a stable
-Rizzy body where Fizzy renders a changing full layout, so their conditional
-validator behavior remains open.
+tag on full pages. Card reactions, comment reactions, and comment detail now
+wrap their existing Turbo frames in a signed-in full page on direct HTML GETs,
+matching the source's document, main, and footer structure and changing CSP
+nonce validator behavior. The 59 paired probes and MySQL reaction workflow pass.
+The shared page content, styling, and controls still need exact parity work.
 It found that Rizzy returned JSON 200 for a browser request to the card steps
 index where Fizzy returns HTML 406; the handler now matches Fizzy. It also
 found and fixed the same format mismatch on board-access listings and
