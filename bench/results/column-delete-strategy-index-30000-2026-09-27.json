@@ -1,0 +1,91 @@
+{
+  "cards": 30000,
+  "trials": 7,
+  "rizzy_revision": "854b5dc763688071c551c453752652851d644d5a",
+  "rizzy_binary_sha256": "d0501cde8a6a1d32125a1bfd8e313a716b4f096f2ae24db196e47eeebf6510fd",
+  "note": "Direct SQLite transaction probe; dropping update triggers is an unattainable upper-bound comparison, not an application implementation.",
+  "samples_ms": {
+    "split": [
+      58.7,
+      62.714,
+      60.08,
+      65.369,
+      73.649,
+      68.7,
+      60.05
+    ],
+    "disjoint": [
+      57.523,
+      59.696,
+      60.728,
+      60.323,
+      74.054,
+      62.502,
+      58.463
+    ],
+    "single": [
+      78.699,
+      82.829,
+      86.094,
+      78.573,
+      80.078,
+      93.893,
+      79.411
+    ],
+    "split_without_update_triggers": [
+      43.488,
+      45.755,
+      48.792,
+      45.935,
+      45.757,
+      49.552,
+      43.638
+    ],
+    "split_epoch": [
+      54.898,
+      63.845,
+      59.591,
+      57.67,
+      55.625,
+      59.235,
+      55.207
+    ],
+    "split_epoch_touch": [
+      55.987,
+      61.862,
+      62.999,
+      58.621,
+      61.539,
+      64.578,
+      55.417
+    ],
+    "split_nonnull_index": [
+      43.461,
+      49.263,
+      47.158,
+      43.644,
+      49.251,
+      49.887,
+      41.514
+    ],
+    "split_epoch_nonnull_index": [
+      40.269,
+      41.952,
+      38.9,
+      44.184,
+      47.572,
+      45.635,
+      39.837
+    ]
+  },
+  "median_ms": {
+    "split": 62.714,
+    "disjoint": 60.323,
+    "single": 80.078,
+    "split_without_update_triggers": 45.757,
+    "split_epoch": 57.67,
+    "split_epoch_touch": 61.539,
+    "split_nonnull_index": 47.158,
+    "split_epoch_nonnull_index": 41.952
+  }
+}
