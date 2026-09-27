@@ -938,6 +938,17 @@ than its second, so this local result is variable. The artifact records the
 committed Rizzy revision and exact release-binary hash. It does not isolate
 the access-check cost or establish whole-app performance or multi-host scale.
 
+`tests/mysql_pair_selfhost.py signup-browser` now compares multi-tenant browser
+signup on disposable Fizzy and Rizzy MySQL databases. It checks the signup
+page, invalid email with no new records, identity and magic-link creation,
+code verification, blank-name HTML and JSON validation, account creation,
+and authenticated signup redirects without another identity or link. The
+paired run found that Rizzy's blank-name page omitted Fizzy's `txt-negative`
+error class; the form now uses the source's error markup. This suite does not
+establish full signup parity, including signup rate-limit redirects, tenant
+limit behavior in a fresh single-tenant run, exact page styling, or concurrent
+account creation.
+
 `tests/mysql_pair_selfhost.py route-get` checks the status code and content type
 of 92 distinct pinned Fizzy GET paths against Rizzy, using a JSON request and
 absent resource identifiers on fresh paired MySQL databases. All 92 matched.

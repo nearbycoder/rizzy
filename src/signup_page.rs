@@ -19,7 +19,7 @@ pub(super) fn new() -> Html<String> {
 }
 
 pub(super) fn completion(error: Option<&str>) -> Html<String> {
-    let error = error.map(|value|format!("<div class=\"error\"><p>Your changes couldn't be saved:</p><ul><li>{}</li></ul></div>",escape(value))).unwrap_or_default();
+    let error = error.map(|value|format!("<div class=\"margin-block-half txt-negative txt-small error\" style=\"text-align: left;\"><p class=\"margin-block-none font-weight-bold\">Your changes couldn't be saved:</p><ul class=\"margin-block-none\"><li>{}</li></ul></div>",escape(value))).unwrap_or_default();
     page(
         "Complete your sign-up",
         &format!(
