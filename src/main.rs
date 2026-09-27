@@ -130,26 +130,53 @@ async fn begin_card_board_write<'a>(
     card_id: &str,
     board_id: &str,
 ) -> Result<(sqlx::Transaction<'a, Db>, String)> {
+    let (tx, current_board, _) =
+        begin_card_board_write_with_snapshot(app, card_id, board_id, false).await?;
+    Ok((tx, current_board))
+}
+async fn begin_card_board_write_with_snapshot<'a>(
+    app: &'a App,
+    card_id: &str,
+    board_id: &str,
+    snapshot: bool,
+) -> Result<(sqlx::Transaction<'a, Db>, String, Option<DbRow>)> {
     let mut current_board = board_id.to_owned();
     for _ in 0..16 {
         let mut tx = begin_write(app).await.map_err(db_err)?;
         lock_board_for_write(&mut tx, &current_board, app.mysql).await?;
+        let mut current = None;
         if app.mysql {
             // Callers can hold a stale card snapshot after a move. Acquire the
             // board lock first, then lock and recheck the card before writing.
-            let actual_board: String =
-                sqlx::query_scalar("SELECT board_id FROM cards WHERE id=? FOR UPDATE")
+            let actual_board: String = if snapshot {
+                let row = sqlx::query("SELECT board_id,title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=? FOR UPDATE")
                     .bind(card_id)
                     .fetch_one(&mut *tx)
                     .await
                     .map_err(db_err)?;
+                let board = row.get("board_id");
+                current = Some(row);
+                board
+            } else {
+                sqlx::query_scalar("SELECT board_id FROM cards WHERE id=? FOR UPDATE")
+                    .bind(card_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?
+            };
             if actual_board != current_board {
                 tx.rollback().await.map_err(db_err)?;
                 current_board = actual_board;
                 continue;
             }
+        } else if snapshot {
+            current = Some(sqlx::query("SELECT board_id,title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=?")
+                .bind(card_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?);
         }
-        return Ok((tx, current_board));
+        return Ok((tx, current_board, current));
     }
     Err(err(StatusCode::CONFLICT, "Card moved during write"))
 }
@@ -171,6 +198,26 @@ async fn begin_accessible_card_board_write<'a>(
         return Err(missing());
     }
     Ok((tx, current_board))
+}
+async fn begin_accessible_card_board_write_snapshot<'a>(
+    app: &'a App,
+    p: &Principal,
+    card_id: &str,
+    board_id: &str,
+) -> Result<(sqlx::Transaction<'a, Db>, String, DbRow)> {
+    let (mut tx, current_board, current) =
+        begin_card_board_write_with_snapshot(app, card_id, board_id, true).await?;
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&current_board)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
+    Ok((tx, current_board, current.expect("snapshot requested")))
 }
 async fn begin_accessible_board_write<'a>(
     app: &'a App,
@@ -13529,21 +13576,23 @@ async fn update_card(
             let _writer = app.write_lock.lock().await;
             // Reserve the SQLite writer before reading attachment state in this transaction.
             // A deferred WAL read cannot be promoted after another process commits a write.
-            let (mut tx, current_board_id) = if c.get::<String, _>("status") == "published" {
+            let (mut tx, current_board_id, locked_card) = if c.get::<String, _>("status") == "published" {
                 // A move can invalidate the snapshot above. Lock the current board and
                 // card together so the UPDATE triggers never reach a different board
                 // while this transaction holds the card row.
-                begin_accessible_card_board_write(
+                let (tx, board_id, current) = begin_accessible_card_board_write_snapshot(
                     &app,
                     &p,
                     &c.get::<String, _>("id"),
                     &c.get::<String, _>("board_id"),
                 )
-                .await?
+                .await?;
+                (tx, board_id, Some(current))
             } else {
                 (
                     begin_write(&app).await.map_err(db_err)?,
                     c.get::<String, _>("board_id"),
+                    None,
                 )
             };
             if app.mysql {
@@ -13559,16 +13608,20 @@ async fn update_card(
             // The first card read authorizes this request, but can be stale by the
             // time a concurrent edit releases the row lock. Resolve absent fields
             // against the locked row on every attempt, including deadlock retries.
-            let current_sql = if app.mysql {
-                "SELECT title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=? FOR UPDATE"
+            let current = if let Some(current) = locked_card {
+                current
             } else {
-                "SELECT title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=?"
+                let current_sql = if app.mysql {
+                    "SELECT title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=? FOR UPDATE"
+                } else {
+                    "SELECT title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=?"
+                };
+                sqlx::query(current_sql)
+                    .bind(c.get::<String, _>("id"))
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?
             };
-            let current = sqlx::query(current_sql)
-                .bind(c.get::<String, _>("id"))
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(db_err)?;
             let old_title: String = current.get("title");
             let status: String = current.get("status");
             let mut title = requested_title.clone().unwrap_or_else(|| old_title.clone());
