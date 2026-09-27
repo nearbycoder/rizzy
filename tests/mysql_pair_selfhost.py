@@ -30,7 +30,7 @@ from named_column_html_parity import run as named_column_run  # noqa: E402
 from column_cards_etag_parity import run as column_cache_run  # noqa: E402
 from named_column_show_etag_parity import run as column_show_cache_run  # noqa: E402
 from draft_workflow_parity import NoRedirect, login, run as draft_run  # noqa: E402
-from card_image_parity import run as card_image_run  # noqa: E402
+from card_image_parity import IMAGE, run as card_image_run  # noqa: E402
 from embed_parity import run as embed_run  # noqa: E402
 from card_controls_parity import check as card_controls_check  # noqa: E402
 from card_board_html_parity import check as card_board_check  # noqa: E402
@@ -54,7 +54,8 @@ from auth_format_parity import run as auth_format_run  # noqa: E402
 from account_cancellation_mysql_parity import (age_cancellation, retained_counts,  # noqa: E402
                                                run as account_cancellation_run, seed_survivor,
                                                survivor_access,
-                                               source_incineration, wait_for_deletion)
+                                               source_incineration, source_purge_enqueued_blob,
+                                               wait_for_deletion)
 
 
 def main():
@@ -82,6 +83,7 @@ def main():
     rust_db = f"rzpair_{suffix}_r"
     databases = [*source_dbs.values(), rust_db]
     processes = []
+    source = rust = None
     created = False
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="rizzy-mysql-pair-selfhost-") as temp:
@@ -109,12 +111,14 @@ def main():
             processes.append(rizzy_process)
             source = {"name": "fizzy", "url": fizzy_url,
                       "account": str(fizzy_credentials["account"]),
+                      "storage_dir": ROOT / "upstream/storage/production/files",
                       "token": fizzy_credentials["token"], "email": "owner@example.com",
                       "mysql_client": client, "mysql_database": source_dbs[""],
                       "mysql_host": host, "mysql_port": port, "mysql_user": "rizzy",
                       "mysql_password": "rizzy", "mysql_socket": socket}
             rust = {"name": "rizzy", "url": rizzy_url,
                     "account": str(rizzy_credentials["account"]),
+                    "storage_dir": rizzy_dir / "storage",
                     "token": rizzy_credentials["token"],
                     "email": local_rust_env["RIZZY_SEED_EMAIL"],
                     "mysql_client": client, "mysql_database": rust_db,
@@ -229,11 +233,12 @@ def main():
                     target["opener"] = urllib.request.build_opener(
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
                     login(target)
-                source_result = account_cancellation_run(source)
-                rust_result = account_cancellation_run(rust)
+                image_fixture = args.suite == "account-cancellation-retention"
+                source_result = account_cancellation_run(source, image=image_fixture)
+                rust_result = account_cancellation_run(rust, image=image_fixture)
                 if args.suite == "account-cancellation-retention":
-                    source_survivor_token = seed_survivor(source, fizzy_env)
-                    rust_survivor_token = seed_survivor(rust, rizzy_env)
+                    source_survivor_token = seed_survivor(source, fizzy_env, image=True)
+                    rust_survivor_token = seed_survivor(rust, rizzy_env, image=True)
                     for target in (source, rust):
                         age_cancellation(target, 29)
                     source_incineration(fizzy_env)
@@ -244,6 +249,10 @@ def main():
                     rust_result["day_29"] = retained_counts(rust)
                     for target, result in ((source, source_result), (rust, rust_result)):
                         assert result["day_29"] == (1, 1, 1, 1, 1, 1), (target["name"], result)
+                        result["day_29_files"] = (
+                            target["cancelled_image_path"].read_bytes() == IMAGE,
+                            target["survivor_image_path"].read_bytes() == IMAGE)
+                        assert result["day_29_files"] == (True, True), (target["name"], result)
                     for target in (source, rust):
                         age_cancellation(target, 31)
                     source_incineration(fizzy_env)
@@ -254,6 +263,13 @@ def main():
                     rust_result["day_31"] = wait_for_deletion(rust)
                     for target, result in ((source, source_result), (rust, rust_result)):
                         assert result["day_31"] == (0, 1, 0, 0, 1, 1), (target["name"], result)
+                    assert source["cancelled_image_path"].exists(), "Fizzy purge ran before queued job"
+                    source_purge_enqueued_blob(fizzy_env, source["cancelled_image_key"])
+                    for target, result in ((source, source_result), (rust, rust_result)):
+                        result["day_31_files"] = (
+                            target["cancelled_image_path"].exists(),
+                            target["survivor_image_path"].read_bytes() == IMAGE)
+                        assert result["day_31_files"] == (False, True), (target["name"], result)
                     source_result["survivor_access"] = survivor_access(source, source_survivor_token)
                     rust_result["survivor_access"] = survivor_access(rust, rust_survivor_token)
             elif args.suite == "passkeys-html":
@@ -376,7 +392,7 @@ def main():
             elif args.suite == "account-cancellation":
                 print("Disposable MySQL owner cancellation and retained records matched pinned Fizzy")
             elif args.suite == "account-cancellation-retention":
-                print("Disposable MySQL cancellation day-29 retention and day-31 scoped deletion matched pinned Fizzy")
+                print("Disposable MySQL cancellation retention, scoped deletion, and queued file cleanup matched pinned Fizzy")
             elif args.suite == "passkeys-html":
                 print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
             elif args.suite == "auth-format":
@@ -399,6 +415,9 @@ def main():
         finally:
             for process in processes:
                 stop_server(process)
+            if source is not None:
+                for path in source.get("uploaded_files", []):
+                    path.unlink(missing_ok=True)
             if created:
                 drop_databases(client, socket, databases)
 

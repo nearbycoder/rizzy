@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Compare owner cancellation and retained records on fresh paired MySQL databases."""
 
+import base64
+import hashlib
 import json
 import re
 import subprocess
@@ -8,13 +10,41 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+from card_image_parity import IMAGE, call
 from draft_workflow_parity import NoRedirect, request
 from sustained_mixed import ROOT, RUST, SOURCE
 from sustained_mixed_mysql import mysql_query
 
 
-def run(target):
+def upload_card_image(target, card_number):
+    account = target["account"]
+    blob = {"filename": "moon.jpg", "byte_size": len(IMAGE),
+            "checksum": base64.b64encode(hashlib.md5(IMAGE).digest()).decode(),
+            "content_type": "image/jpeg"}
+    status, _, raw = call(target, f"/{account}/rails/active_storage/direct_uploads",
+                          "POST", {"blob": blob})
+    assert status == 200, (target["name"], "direct upload", status, raw[:200])
+    upload = json.loads(raw)
+    key = upload["key"]
+    path = Path(target["storage_dir"])
+    if target["name"] == "fizzy":
+        path = path / key[:2] / key[2:4]
+    path /= key
+    target.setdefault("uploaded_files", []).append(path)
+    status, _, raw = call(target, upload["direct_upload"]["url"], "PUT", IMAGE,
+                          bearer=False, headers=upload["direct_upload"]["headers"])
+    assert status == 204, (target["name"], "upload bytes", status, raw[:200])
+    status, _, raw = call(target, f"/{account}/cards/{card_number}.json", "PATCH",
+                          {"card": {"image": upload["signed_id"]}})
+    assert status == 200 and json.loads(raw)["image_url"], (
+        target["name"], "attach image", status, raw[:200])
+    assert path.read_bytes() == IMAGE, (target["name"], "stored bytes", path)
+    return key, path
+
+
+def run(target, *, image=False):
     account = target["account"]
     status, _, raw = request(target, f"/{account}/users", bearer=True)
     assert status == 200, (target["name"], "users", status)
@@ -27,6 +57,9 @@ def run(target):
     status, _, raw = request(target, f"/{account}/boards/{board_id}/cards", "POST",
                              {"card": {"title": "Cancellation card"}}, bearer=True)
     assert status == 201, (target["name"], "card", status)
+    if image:
+        target["cancelled_image_key"], target["cancelled_image_path"] = upload_card_image(
+            target, json.loads(raw)["number"])
 
     status, _, page = request(target, f"/{account}/account/settings", accept="text/html")
     assert status == 200 and b"Delete my account" in page, (target["name"], "settings", status)
@@ -69,7 +102,7 @@ def run(target):
             "menu": (menu_status, menu_has_account), "settings_after": settings_status}
 
 
-def seed_survivor(target, app_env):
+def seed_survivor(target, app_env, *, image=False):
     email = "survivor@example.test"
     if target["name"] == "fizzy":
         script = '''require "json"
@@ -89,7 +122,7 @@ def seed_survivor(target, app_env):
         credentials = {"account": int(re.search(r"Account: (\d+)", output).group(1)),
                        "token": re.search(r"Bearer token: (\w+)", output).group(1)}
     assert int(credentials["account"]) == 2, (target["name"], credentials["account"])
-    survivor = {**target, "token": credentials["token"],
+    survivor = {**target, "account": "2", "token": credentials["token"],
                 "opener": urllib.request.build_opener(NoRedirect())}
     status, _, raw = request(survivor, "/2/boards", "POST",
                              {"board": {"name": "Surviving board"}}, bearer=True)
@@ -98,6 +131,9 @@ def seed_survivor(target, app_env):
     status, _, raw = request(survivor, f"/2/boards/{board_id}/cards", "POST",
                              {"card": {"title": "Surviving card"}}, bearer=True)
     assert status == 201, (target["name"], "survivor card", status, raw[:200])
+    if image:
+        target["survivor_image_key"], target["survivor_image_path"] = upload_card_image(
+            survivor, json.loads(raw)["number"])
     return credentials["token"]
 
 
@@ -115,6 +151,24 @@ def age_cancellation(target, days):
 def source_incineration(source_env):
     subprocess.run(["bin/rails", "runner", "Account::IncinerateDueJob.perform_now"],
                    cwd=SOURCE, env=source_env, capture_output=True, text=True, check=True)
+
+
+def source_purge_enqueued_blob(source_env, key):
+    script = '''blob = ActiveStorage::Blob.find_by!(key: ENV.fetch("RIZZY_TEST_BLOB_KEY"))
+      queued = SolidQueue::Job.where(class_name: "ActiveStorage::PurgeJob", finished_at: nil).select do |record|
+        payload = record.arguments
+        payload.fetch("arguments").first.fetch("_aj_globalid") == blob.to_global_id.to_s
+      end
+      raise "Expected one queued purge for cancelled card image, got #{queued.length}" unless queued.one?
+      ActiveJob::Base.deserialize(queued.first.arguments).perform_now
+      raise "Blob remained after purge" if ActiveStorage::Blob.exists?(blob.id)
+      puts "purged"
+    '''
+    completed = subprocess.run(["bin/rails", "runner", script], cwd=SOURCE,
+                               env={**source_env, "RIZZY_TEST_BLOB_KEY": key},
+                               capture_output=True, text=True)
+    assert completed.returncode == 0 and completed.stdout.strip().endswith("purged"), (
+        completed.stdout[-2000:], completed.stderr[:2000])
 
 
 def retained_counts(target):

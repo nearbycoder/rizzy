@@ -140,8 +140,13 @@ retention of the account, board, and card. Its `account-cancellation-retention`
 variant adds a surviving account, board, and card on both sides, then compares
 day-29 retention and day-31 scoped deletion after Fizzy's due-incineration
 job and Rizzy's startup maintenance. The surviving owner's settings API
-remains accessible. Cross-app file cleanup, mail delivery,
-and concurrent incineration workers remain open.
+remains accessible. Both accounts also upload and attach a card image. Both
+files retain their original bytes at day 29; at day 31 Rizzy removes the
+cancelled account's file during incineration, while Fizzy enqueues an Active
+Storage purge. Performing that serialized queued job removes the source file
+and blob. The surviving file remains intact in both apps. Other attachment
+types, live-worker purge timing, mail delivery, and concurrent incineration
+workers remain open.
 `tests/mysql_session_transfer.py` now checks device transfer link creation,
 revocation, QR rendering, redemption by PUT and PATCH, replay rejection,
 four-hour expiry, and simultaneous redemption with exactly one winner.
