@@ -5,11 +5,13 @@ Requires the local MySQL server and its socket-authenticated root account.
 """
 
 import argparse
+import http.cookiejar
 import os
 import subprocess
 import sys
 import tempfile
 import uuid
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,12 +28,16 @@ from cards_html_parity import check as all_cards_check  # noqa: E402
 from named_column_html_parity import run as named_column_run  # noqa: E402
 from column_cards_etag_parity import run as column_cache_run  # noqa: E402
 from named_column_show_etag_parity import run as column_show_cache_run  # noqa: E402
+from draft_workflow_parity import NoRedirect, run as draft_run  # noqa: E402
+from card_image_parity import run as card_image_run  # noqa: E402
+from embed_parity import run as embed_run  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
-                                          "named-column", "column-cache", "column-show-cache"))
+                                          "named-column", "column-cache", "column-show-cache",
+                                          "draft", "card-image", "embeds"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -73,7 +79,10 @@ def main():
             rust = {"name": "rizzy", "url": rizzy_url,
                     "account": str(rizzy_credentials["account"]),
                     "token": rizzy_credentials["token"],
-                    "email": local_rust_env["RIZZY_SEED_EMAIL"]}
+                    "email": local_rust_env["RIZZY_SEED_EMAIL"],
+                    "mysql_client": client, "mysql_database": rust_db,
+                    "mysql_host": host, "mysql_port": port, "mysql_user": "rizzy",
+                    "mysql_password": "rizzy"}
             if args.suite == "search":
                 browser_login(source)
                 browser_login(rust)
@@ -103,6 +112,18 @@ def main():
                 browser_login(rust)
                 source_result = column_show_cache_run(source, signed_in=True)
                 rust_result = column_show_cache_run(rust, signed_in=True)
+            elif args.suite == "draft":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                source_result = draft_run(source)
+                rust_result = draft_run(rust)
+            elif args.suite == "card-image":
+                source_result = card_image_run(source)
+                rust_result = card_image_run(rust)
+            elif args.suite == "embeds":
+                source_result = embed_run(source)
+                rust_result = embed_run(rust)
             else:
                 source_result = core_run(source)
                 rust_result = core_run(rust)
@@ -123,6 +144,13 @@ def main():
                 print("Disposable MySQL named-column JSON validators matched pinned Fizzy")
             elif args.suite == "column-show-cache":
                 print("Disposable MySQL named-column show validators matched pinned Fizzy")
+            elif args.suite == "draft":
+                print("Disposable MySQL draft browser workflow matched pinned Fizzy")
+            elif args.suite == "card-image":
+                print("Disposable MySQL card image workflow matched pinned Fizzy; "
+                      f"image removal timestamp changes={source_result['delete_touch']}")
+            elif args.suite == "embeds":
+                print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
             else:
                 print(f"Disposable MySQL core workflow matched pinned Fizzy: "
                       f"{len(source_result)} comparisons")

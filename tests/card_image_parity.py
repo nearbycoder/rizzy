@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -92,12 +93,30 @@ def run(target):
         status, headers, _ = call(target, image_path, bearer=False)
         assert status == 302 and "/rails/active_storage/" in headers["Location"], (status, headers)
         def times():
+            if target.get("mysql_database"):
+                client = target["mysql_client"]
+                statement = (
+                    "SELECT c.updated_at,c.last_active_at,b.updated_at FROM cards c "
+                    "JOIN boards b ON b.id=c.board_id WHERE c.number=" + str(int(number))
+                )
+                mysql_env = {**os.environ, "MYSQL_PWD": target["mysql_password"],
+                             "LD_LIBRARY_PATH": str(Path(client).resolve().parents[1] / "lib")}
+                output = subprocess.run(
+                    [client, "--no-defaults", "--host=" + target["mysql_host"],
+                     "--port=" + str(target["mysql_port"]), "--user=" + target["mysql_user"],
+                     "--database=" + target["mysql_database"], "--batch", "--skip-column-names",
+                     "--execute=" + statement], env=mysql_env, check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+                values = tuple(output.split("\t"))
+                assert len(values) == 3, (target["name"], values)
+                return values
             with sqlite3.connect(target["db"]) as database:
                 return database.execute(
                     "SELECT c.updated_at,c.last_active_at,b.updated_at FROM cards c "
                     "JOIN boards b ON b.id=c.board_id WHERE c.number=?", (number,)
                 ).fetchone()
-        before_delete = times() if target.get("db") else None
+        before_delete = times() if target.get("db") or target.get("mysql_database") else None
         if before_delete:
             time.sleep(.05)
         status, _, raw = call(target, prefix + f"/cards/{number}/image.json", "DELETE")

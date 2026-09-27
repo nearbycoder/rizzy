@@ -82,8 +82,23 @@ boards and verifies each published card. Four fresh-database runs passed. The
 pinned Fizzy draft and publish controller suites passed 5 tests and 36
 assertions on SQLite. This verifies
 cross-process state sharing and distinct-board concurrent publication on the
-tested MySQL setup; same-board concurrent publication and the complete browser
-interface remain open.
+tested MySQL setup. The same-board Rust cluster race is checked separately
+below; paired source behavior for concurrent publication and the complete
+browser interface remain open.
+`tests/mysql_pair_selfhost.py draft` now boots disposable Fizzy and Rizzy MySQL
+apps and matches the 11-summary browser draft workflow, including magic-link
+sign-in, draft resumption, publication, search and activity side effects, and
+add-another redirects. The same fixture still passes against both SQLite apps.
+This paired run checks one owner and board per app, not concurrent publication
+or full browser presentation.
+`tests/mysql_pair_selfhost.py card-image` and `embeds` also pass on disposable
+Fizzy and Rizzy MySQL databases. They compare direct uploads, image assignment
+and removal, blob access, byte retrieval, preview content types, image and file
+embeds, and normalized rendered Action Text. The image test checks that removal
+changes card and board update times but preserves card last-activity time in
+both databases. The embed comparison skips its SQLite-only direct SQL and
+filesystem cleanup assertions on MySQL; selected Rust-only MySQL cleanup is
+covered by the storage materialization test below.
 `tests/mysql_account_cancellation.py` checks the single-tenant cancellation
 guard, immediate access loss, day-29 retention, day-31 deletion of all
 account-scoped MySQL rows and dependent comments, file cleanup, and survival

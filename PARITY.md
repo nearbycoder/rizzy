@@ -707,10 +707,24 @@ Steps now store their own update times. `tests/step_record_migration.py` checks 
 between two Rust app processes for edit and publication. It also checks 32
 concurrent publishes on separate boards, with published cards visible from the
 other process. The pinned source draft and publish controller suites passed 5
-tests and 36 assertions. Same-board publication races and the full browser
-interaction surface remain unverified on MySQL.
+tests and 36 assertions. `tests/mysql_pair_selfhost.py draft` now runs the
+browser draft flow on fresh Fizzy and Rizzy MySQL databases and matched all 11
+workflow summaries, including magic-link sign-in, draft resumption, Lexxy
+markup, publication, search indexing, activity, and add-another redirects. A
+fresh paired SQLite regression also passed after making this comparison
+reusable. The separate Rust cluster fixture covers same-board publication;
+source comparison for concurrent publication and the full browser interaction
+surface remain open.
 
 `tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. `tests/embed_parity.py` compares uploaded image and plain-file embeds in card descriptions and comments, placeholder handling, attachment status, normalized rendered HTML, private/public blob access, download disposition, preview generation, and cleanup after card, comment, and board deletion. Fizzy's signed URL and representation token formats are not reproduced; image preview bytes also differ from its libvips encoding. The signup Playground renders its source-hosted video and image attachments. General remote embeds, other media forms, and exact browser upload presentation remain incomplete.
+
+Fresh `tests/mysql_pair_selfhost.py card-image` and `embeds` runs now matched
+the pinned Fizzy app on disposable MySQL databases. The image test also read
+both databases around removal: card and board update times changed while the
+card's last-activity time did not, matching Fizzy. The embed fixture checked
+upload and preview bytes, permissions, and normalized Action Text HTML. Its
+direct SQL and filesystem cleanup assertions were skipped on MySQL; the
+separate Rust-only MySQL storage test covers selected cleanup cases.
 
 `tests/card_update_multipart.py` exercises the pinned CardsController's multipart image update path with a session cookie on published and draft cards, including a browser-style POST with `_method=patch`. It checks both pages' file forms and the remove-image control after upload. Rizzy streams uploaded bytes to storage while computing the checksum, attaches the blob in the card transaction, and emits the three source Turbo Stream targets; the draft response omits reactions. The pinned source CardsController suite passed 31 tests and 170 assertions, including these update cases. Chromium selected `moon.jpg` on a published card and confirmed the POST, reloaded image, and loaded bytes. On a draft, it confirmed autosave PATCH before image POST, a persisted unsaved title, the loaded image, and successful removal without browser errors. Rizzy's multipart card route has a 64 MiB request limit, and its Turbo replacement markup uses the Rust card presentation rather than Fizzy's exact partials. Other upload limits, validation responses, and browser interactions still need comparison.
 
