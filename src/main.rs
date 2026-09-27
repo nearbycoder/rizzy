@@ -320,7 +320,7 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-async fn json_etag(request: Request, next: Next) -> Response {
+async fn buffered_get_etag(request: Request, next: Next) -> Response {
     let conditional = request.headers().get(header::IF_NONE_MATCH).cloned();
     let get = request.method() == Method::GET;
     let response = next.run(request).await;
@@ -332,13 +332,19 @@ async fn json_etag(request: Request, next: Next) -> Response {
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("application/json"))
+            .is_some_and(|value| {
+                value.starts_with("application/json") || value.starts_with("text/html")
+            })
     {
         return response;
     }
     let (mut parts, body) = response.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Could not render JSON").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Could not render response",
+        )
+            .into_response();
     };
     if bytes.is_empty() {
         return Response::from_parts(parts, Body::from(bytes));
@@ -4750,9 +4756,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn(block_search_engine_indexing))
         .layer(middleware::from_fn(prevent_request_forgery))
         .layer(middleware::from_fn(mark_request_format))
-        .layer(middleware::from_fn(json_etag))
         .layer(middleware::from_fn(html_error_contract))
         .layer(middleware::from_fn(content_security_policy))
+        .layer(middleware::from_fn(buffered_get_etag))
         .layer(middleware::from_fn(assign_request_id));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
     if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
@@ -5767,7 +5773,13 @@ async fn content_security_policy(request: Request, next: Next) -> Response {
         let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
             return (StatusCode::INTERNAL_SERVER_ERROR, "Could not render page").into_response();
         };
-        if let Ok(html) = String::from_utf8(bytes.to_vec()) {
+        if let Ok(mut html) = String::from_utf8(bytes.to_vec()) {
+            if let Some(head_end) = html.find("</head>") {
+                html.insert_str(
+                    head_end,
+                    &format!("<meta name=\"csp-nonce\" content=\"{nonce}\">"),
+                );
+            }
             static SCRIPT_TAG: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
             let pattern = SCRIPT_TAG.get_or_init(|| {
                 regex::Regex::new(r"(?i)<script\b([^>]*)>").expect("script tag pattern")
