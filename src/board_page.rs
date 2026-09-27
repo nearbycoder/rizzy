@@ -308,7 +308,7 @@ fn column_html(
         _ => format!("column_{id}"),
     };
     let mut html = format!(
-        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button></header><div class=\"cards__list\">",
+        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\" tabindex=\"0\"><header class=\"cards__header\"><button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button></header><div class=\"cards__list\">",
         if id == "maybe" {
             "maybe"
         } else if id == "done" {

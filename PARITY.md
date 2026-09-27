@@ -111,9 +111,15 @@ follow the same link. In disposable browsers, Fizzy returned to Home, a
 filtered board, and a filtered one-board all-cards view; Rizzy matched those
 links and labels. A direct Rust card visit after account settings kept the
 board fallback despite an older saved filtered URL. `tests/home_add_card_parity.py`
-now also checks that both `/1` and `/1/` render Home in both apps. Board card
-selection, focus restoration after return, and navigation through Turbo
-transitions are still incomplete.
+now also checks that both `/1` and `/1/` render Home in both apps. Board
+columns can now receive focus, select their first card, move selection with
+Up and Down, and open the selected card with Enter. A browser check of the
+three cases in Fizzy's `board_keyboard_focus_test.rb` confirmed that Escape
+returns focus to the opened card in named and Maybe columns; moving that card
+to a collapsed column while its detail page is open leaves the previously
+expanded column alone and selects no card on return. A fresh paired
+`tests/board_filter_html_parity.py` run still passed. Navigation through Turbo
+transitions and other board keyboard shortcuts remain incomplete.
 
 The Home footer now opens source-shaped Pins and Notifications trays and an
 inline Search bar. The Pins HTML response contains rich card previews and

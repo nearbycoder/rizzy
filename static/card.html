@@ -92,6 +92,12 @@ if(backLink){
     else if(path===root)backLink.querySelector('strong').textContent='Back to Home';
     else if(path===cards)backLink.querySelector('strong').textContent='Back to all boards';
   }
+  backLink.addEventListener('click',event=>{
+    if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+    let selected;
+    try{selected=JSON.parse(sessionStorage.getItem('rizzy-card-selected')||'null')}catch{}
+    if(selected?.url===backLink.href&&selected.number===number)sessionStorage.setItem('rizzy-card-return',JSON.stringify({url:backLink.href,number,expiresAt:Date.now()+15000}));
+  });
   document.addEventListener('keydown',event=>{
     if(!['Escape','ArrowLeft'].includes(event.key)||event.repeat||event.altKey||event.ctrlKey||event.metaKey||document.querySelector('dialog[open]')||event.target.closest('input,textarea,lexxy-editor,[contenteditable="true"]'))return;
     event.preventDefault();backLink.click();

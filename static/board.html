@@ -97,7 +97,27 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 document.addEventListener('click',event=>{const link=event.target.closest('a[href]');if(!link)return;const destination=new URL(link.href);if(destination.origin!==location.origin||!new RegExp(`^/${document.body.dataset.account}/cards/\\d+$`).test(destination.pathname))return;sessionStorage.setItem('rizzy-card-referrer',JSON.stringify({url:location.href,label:document.title.replace(/ \| Rizzy$/,'')}))});
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
 relativeDates();
-document.querySelectorAll('.cards__toggle').forEach(toggle=>toggle.addEventListener('click',()=>{const column=toggle.closest('.cards');if(column.classList.contains('is-expanded'))return;document.querySelectorAll('.card-columns>.cards').forEach(item=>{const expanded=item===column;item.classList.toggle('is-expanded',expanded);item.classList.toggle('is-collapsed',!expanded);item.querySelector('.cards__toggle')?.setAttribute('aria-expanded',String(expanded))});column.querySelector('.cards__more[data-page="1"]')?.click()}));
+const boardColumns=document.querySelector('.card-columns');
+const boardSections=[...boardColumns.querySelectorAll(':scope > .cards')];
+const expandedColumnKey=`rizzy-expanded-column:${document.body.dataset.board}`;
+const desktopColumns=()=>window.matchMedia('(min-width: 640px)').matches;
+function markColumn(column,expanded){column.classList.toggle('is-expanded',expanded);column.classList.toggle('is-collapsed',!expanded);column.querySelector('.cards__toggle')?.setAttribute('aria-expanded',String(expanded))}
+function expandColumn(column,persist=true){
+  for(const item of boardSections){
+    if(item===column||item.id==='maybe'&&desktopColumns())markColumn(item,true);
+    else markColumn(item,false);
+  }
+  column.querySelector('.cards__more[data-page="1"]')?.click();
+  if(persist){if(column.id==='maybe')localStorage.removeItem(expandedColumnKey);else localStorage.setItem(expandedColumnKey,column.id)}
+}
+function toggleColumn(column){
+  if(column.id==='maybe'&&desktopColumns())return;
+  if(column.classList.contains('is-expanded')){
+    markColumn(column,false);
+    if(localStorage.getItem(expandedColumnKey)===column.id)localStorage.removeItem(expandedColumnKey);
+  }else expandColumn(column);
+}
+boardSections.forEach(column=>column.querySelector('.cards__toggle')?.addEventListener('click',()=>toggleColumn(column)));
 document.querySelector('.board-tools__watch-toggle')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const response=await fetch(`/${document.body.dataset.account}/boards/${document.body.dataset.board}/involvement`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({involvement:button.dataset.involvement})});if(!response.ok)throw Error('Could not update watching');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 const utility=document.getElementById('utility-panel'),utilityTitle=document.getElementById('utility-title'),utilitySearch=document.getElementById('utility-search'),utilityContent=document.getElementById('utility-content');
 function utilityList(items,empty){utilityContent.replaceChildren();if(!items.length){const message=document.createElement('p');message.textContent=empty;utilityContent.append(message);return}for(const item of items){const link=document.createElement('a');link.href=item.url;link.textContent=item.title;utilityContent.append(link)}}
@@ -124,9 +144,68 @@ document.querySelectorAll('.cards__more').forEach(button=>button.addEventListene
     if(list.querySelectorAll('.card').length>=Number(column.dataset.count)||loaded<[15,30,50,100][Math.min(page-1,3)])button.remove();else{button.dataset.page=String(page+1);button.textContent='Load more';button.disabled=false}
   }catch(error){button.disabled=false;alert(error.message)}
 }));
+const savedExpandedColumn=boardSections.find(column=>column.id===localStorage.getItem(expandedColumnKey));
+if(savedExpandedColumn)expandColumn(savedExpandedColumn,false);
+const selectedCardKey='rizzy-card-selected';
+function visibleCards(column){return [...column.querySelectorAll('.cards__list .card[data-card-number]')].filter(card=>card.checkVisibility())}
+function selectCard(card){
+  const column=card.closest('.cards');
+  column.querySelectorAll('.card[aria-selected]').forEach(item=>item.removeAttribute('aria-selected'));
+  card.setAttribute('aria-selected','true');
+  card.focus({preventScroll:true});
+  card.scrollIntoView({block:'nearest',inline:'nearest'});
+  sessionStorage.setItem(selectedCardKey,JSON.stringify({url:location.href,number:card.dataset.cardNumber}));
+}
+function focusFirstCard(column){
+  const first=visibleCards(column)[0];
+  if(first){selectCard(first);return}
+  const observer=new MutationObserver(()=>{
+    if(document.activeElement!==column){observer.disconnect();return}
+    const loaded=visibleCards(column)[0];
+    if(loaded){observer.disconnect();selectCard(loaded)}
+  });
+  observer.observe(column.querySelector('.cards__list'),{childList:true});
+  setTimeout(()=>observer.disconnect(),5000);
+}
+boardColumns.addEventListener('focusin',event=>{
+  const column=event.target.closest('.cards');
+  if(!column)return;
+  if(event.target===column){
+    if(column.classList.contains('is-collapsed'))expandColumn(column);
+    focusFirstCard(column);
+  }else if(event.target.matches('.card[data-card-number]'))selectCard(event.target);
+});
+boardColumns.addEventListener('click',event=>{
+  const link=event.target.closest('.card__link,a.card[href]');
+  const card=link?.closest('.card[data-card-number]');
+  if(card)selectCard(card);
+});
+boardColumns.addEventListener('keydown',event=>{
+  const card=event.target.closest('.card[data-card-number]');
+  if(!card||event.altKey||event.ctrlKey||event.metaKey)return;
+  if(event.key==='Enter'&&event.target===card){event.preventDefault();card.querySelector('.card__link')?.click();return}
+  if(!['ArrowDown','ArrowUp'].includes(event.key)||event.target!==card)return;
+  const cards=visibleCards(card.closest('.cards')),index=cards.indexOf(card),next=cards[index+(event.key==='ArrowDown'?1:-1)];
+  if(next){event.preventDefault();selectCard(next)}
+});
+let cardReturn;
+try{cardReturn=JSON.parse(sessionStorage.getItem('rizzy-card-return')||'null')}catch{}
+sessionStorage.removeItem('rizzy-card-return');
+if(cardReturn?.url===location.href&&cardReturn.expiresAt>Date.now()){
+  const restore=()=>{
+    const card=[...boardColumns.querySelectorAll('.cards.is-expanded .card[data-card-number],.cards--grid .card[data-card-number]')].find(item=>item.dataset.cardNumber===String(cardReturn.number)&&item.checkVisibility());
+    if(card){selectCard(card);return true}
+    return false;
+  };
+  if(!restore()){
+    const observer=new MutationObserver(()=>{if(restore())observer.disconnect()});
+    observer.observe(boardColumns,{subtree:true,childList:true});
+    setTimeout(()=>observer.disconnect(),5000);
+  }
+}
 const lazyColumns=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){lazyColumns.unobserve(entry.target);entry.target.click()}});
 document.querySelectorAll('.cards__more[data-page="1"]').forEach(button=>lazyColumns.observe(button));
-const boardColumns=document.querySelector('.card-columns');let draggedCard=null;
+let draggedCard=null;
 boardColumns?.addEventListener('dragstart',event=>{
   const card=event.target.closest('.card[data-card-number]');if(!card)return;
   draggedCard=card.dataset.cardNumber;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',draggedCard);
