@@ -70,6 +70,11 @@ variant records across the 43 writes, including warmups. Rizzy's median was
 44.1 ms and p95 48.1 ms versus Fizzy's 52.2 ms and 69.6 ms on the same four
 server CPUs. This measures synchronous JPEG embed writes only; concurrent
 uploads, the other formats, and maximum sustainable throughput remain open.
+`tests/storage_variant_concurrency.py` also passed ten fresh runs with eight
+simultaneous image embeds routed across two Rizzy processes. Each run kept one
+pair of derived variants and removed their records and files only after the
+last attached card was deleted. This verifies that race and cleanup path on
+SQLite; it is not a concurrent throughput or MySQL scale measurement.
 
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed

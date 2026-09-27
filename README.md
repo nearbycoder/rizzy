@@ -95,6 +95,7 @@ python3 tests/account_export_field_inventory.py --image-variant --image-format p
 python3 tests/account_export_field_inventory.py --image-variant --image-format gif --strict
 python3 tests/account_export_field_inventory.py --image-variant --image-format webp --strict
 python3 tests/storage_variant_cleanup.py
+python3 tests/storage_variant_concurrency.py
 python3 tests/notification_source_migration.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:
 python3 tests/parity.py
