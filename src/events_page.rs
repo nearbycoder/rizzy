@@ -1173,6 +1173,9 @@ pub(super) async fn user_events(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let user = active_user(&app, &p, &user_id).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let mut params = resolved_params(&app, &p, raw.clone()).await?;
     params.filter_id = None;
     params.boards.clear();

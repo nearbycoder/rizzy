@@ -779,7 +779,12 @@ destinations, JSON error bodies, and exact non-JSON error body digests for all
 including static 404 pages and empty 406 responses. The paired `join-code` suite passed invite-link
 browser behavior plus invalid QR signatures and absent-account prefixes for
 JSON and SVG requests. Successful response bodies, valid-resource routes, and
-most write paths are outside these censuses.
+most write paths are outside these censuses. The separate `route-get-valid`
+suite uses equivalent persisted board, column, webhook, card, step, comment,
+and reaction fixtures to match status, content type, and JSON shape for 18
+populated GET paths. It exposed a user-activity JSON request that returned
+HTML 200 in Rizzy; the handler now matches Fizzy's JSON 406. Full body value
+and browser HTML parity for these paths remain open.
 The disposable paired `auth-format` suite also passed bearer-only format,
 read-token write denial, JSON suffix, and unauthenticated redirect checks on
 fresh MySQL databases.

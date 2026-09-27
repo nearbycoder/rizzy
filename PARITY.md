@@ -930,7 +930,12 @@ semantic JSON error bodies, and the exact hash and length of non-JSON error
 bodies on all 92 paths. The `route-get-html` variant now matches the same
 status, content-type, redirect, and error-body contract for signed-in HTML
 requests on all 92 paths. These checks cover routing and missing-resource
-behavior only; they do not compare successful response bodies, valid resources,
-complete permissions, or side effects.
+behavior only. The paired `route-get-valid` suite now creates a board, column,
+webhook, card, step, comment, and reaction in each fresh MySQL database, then
+matches status, content type, and JSON shape for 18 populated GET paths. It
+found and closed a user-activity format mismatch: a JSON request for an
+existing user now returns Fizzy's 406 response. The suite does not compare
+full response values or HTML, and most valid-resource routes, complete
+permissions, and side effects remain open.
 The paired `join-code` flow also checks invalid QR signatures and absent account
 prefixes with JSON and SVG Accept headers. Full route parity remains open.
