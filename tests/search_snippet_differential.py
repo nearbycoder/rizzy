@@ -76,6 +76,11 @@ def setup(name, directory, cpus):
         for index in range(40):
             expect(target, f"/boards/{board['id']}/cards", "POST",
                    {"card": {"title": f"freshproof item {index:03d}"}}, 201)
+        for index in range(40):
+            comment, _ = expect(target, "/cards/1/comments", "POST", {
+                "comment": {"body": f"freshcommentproof item {index:03d}"}}, 201)
+            assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z",
+                                comment["created_at"]), (name, comment["created_at"])
         return process, target
     except Exception:
         suite.stop_server(process)
@@ -135,7 +140,21 @@ def main():
                     assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", time)
                                for time in times), times
             assert fresh_pages["fizzy"] == fresh_pages["rizzy"]
-            print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups, 110 equal-time hits, and 40 rapidly created hits also matched")
+            comment_pages = {}
+            for name, target in targets.items():
+                comment_pages[name] = [re.findall(r"item (\d{3})", re.sub(r"<[^>]+>", "",
+                    html(target, "freshcommentproof", page))) for page in (1, 2)]
+                assert [len(page) for page in comment_pages[name]] == [15, 25]
+                with sqlite3.connect(target["db"]) as db:
+                    times = [row[0] for row in db.execute(
+                        "SELECT m.created_at FROM comments m JOIN cards c ON c.id=m.card_id "
+                        "WHERE c.number=1 ORDER BY m.rowid")]
+                assert len(times) == len(set(times)) == 40, (name, times)
+                if name == "rizzy":
+                    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", time)
+                               for time in times), times
+            assert comment_pages["fizzy"] == comment_pages["rizzy"]
+            print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups, 110 equal-time hits, and rapid card/comment ordering also matched")
         finally:
             for process in reversed(processes):
                 suite.stop_server(process)

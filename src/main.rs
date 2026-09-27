@@ -13838,7 +13838,7 @@ async fn comment_json(
     let card_id: String = card.get("id");
     let number: i64 = card.get("number");
     let body: String = r.get("body");
-    let created: String = r.get("created_at");
+    let created = json_millisecond_time(r.get::<String, _>("created_at"));
     let updated = r
         .get::<Option<String>, _>("updated_at")
         .unwrap_or_else(|| created.clone());
@@ -13939,9 +13939,10 @@ async fn create_comment(
         storage::render_rich_text(&app, &p.account_id, p.slug, &content).await?;
     let search_text = search_content(plain_body);
     let id = id();
-    let timestamp = now();
-    let created_at =
-        timestamp_param(comment_input, "created_at")?.unwrap_or_else(|| timestamp.clone());
+    let clock = Utc::now();
+    let timestamp = clock.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let created_at = timestamp_param(comment_input, "created_at")?
+        .unwrap_or_else(|| clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
     let _writer = app.write_lock.lock().await;
     let (mut tx, board_id) = begin_card_board_write(
         &app,
