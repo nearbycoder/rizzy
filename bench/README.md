@@ -1,5 +1,15 @@
 # Comparative load runs
 
+The [JPEG Action Text write diagnostic](results/image-embed-write-jpeg-40-2026-09-27.json)
+timed 40 alternating single-client card updates after each app had uploaded
+the same image bytes to distinct cards. Both generated 86 variant records
+including warmups. Rizzy's median and p95 were 44.1 and 48.1 ms versus
+Fizzy's 52.2 and 69.6 ms on four shared server CPUs. Upload creation and
+file transfer were outside the timed section. This is a latency check for
+one media write path, not a concurrent throughput or full-app scale result.
+Reproduce with `python3 bench/image_embed_write.py --samples 40 --warmup 3
+--image-format jpeg`.
+
 The [current MySQL mixed-write run at 16 clients](results/mysql-mixed-etag-1000-4boards-c16-15s-2026-09-27.json)
 used fresh 1,000-card, four-board fixtures, four app CPUs, four processes or
 workers per target, and two reversed-order 15-second rounds. One paired phase

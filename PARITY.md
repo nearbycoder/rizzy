@@ -63,6 +63,14 @@ formats when available, including every GIF and WebP frame. Other image
 formats, broader image dimensions, and preview processing throughput have not
 been compared.
 
+The [JPEG embed write run](bench/results/image-embed-write-jpeg-40-2026-09-27.json)
+timed 40 alternating, single-client card updates after preparing distinct
+uploaded images and cards on fresh paired SQLite apps. Both ended with 86
+variant records across the 43 writes, including warmups. Rizzy's median was
+44.1 ms and p95 48.1 ms versus Fizzy's 52.2 ms and 69.6 ms on the same four
+server CPUs. This measures synchronous JPEG embed writes only; concurrent
+uploads, the other formats, and maximum sustainable throughput remain open.
+
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed
 before deployment parity or a greater-scale claim can be made.
