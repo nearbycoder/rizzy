@@ -21,6 +21,10 @@ pub(super) async fn new(
             ("NUMBER", number),
             ("TAGS", tags),
             ("PICKER", frame),
+            (
+                "TAG_PICKER_SCRIPT",
+                include_str!("../static/tag_picker_keyboard.js").into(),
+            ),
         ]),
     );
     let etag = format!("W/\"{}\"", hex::encode(Sha256::digest(page.as_bytes())));
@@ -62,13 +66,13 @@ pub(super) async fn picker(app: &App, p: &Principal, card: &DbRow) -> Result<Str
             .append_pair("tag_title", &title)
             .finish();
         options.push_str(&format!(
-            "<li class=\"popup__item\" data-filter-target=\"item\" aria-checked=\"{selected}\"><form method=\"post\" action=\"/{account}/cards/{number}/taggings?{query}\"><button class=\"popup__btn btn\" type=\"submit\">#{title}<span class=\"checked\" aria-hidden=\"true\">{}</span></button></form></li>",
+            "<li class=\"popup__item\" data-filter-target=\"item\" data-navigable-list-target=\"item\" aria-checked=\"{selected}\"><form method=\"post\" action=\"/{account}/cards/{number}/taggings?{query}\"><button class=\"popup__btn btn\" type=\"submit\">#{title}<span class=\"checked\" aria-hidden=\"true\">{}</span></button></form></li>",
             if selected { "✓" } else { "" },
             title = escape(&title)
         ));
     }
     Ok(format!(
-        "<turbo-frame id=\"tagging_card_{}\"><div class=\"tag-picker\"><strong class=\"popup__title\">Tag this…</strong><form id=\"tags_form_card_{}\" action=\"/{account}/cards/{number}/taggings\" method=\"post\"><input id=\"tag-search\" type=\"search\" name=\"tag_title\" placeholder=\"{placeholder}\" aria-label=\"Tag name or filter\" autocomplete=\"off\" autofocus></form><ul class=\"popup__list\">{options}<li class=\"popup__item\"><button type=\"submit\" form=\"tags_form_card_{}\">Create tag</button></li></ul></div></turbo-frame>",
+        "<turbo-frame id=\"tagging_card_{}\"><div class=\"tag-picker\"><strong class=\"popup__title\">Tag this…</strong><form id=\"tags_form_card_{}\" action=\"/{account}/cards/{number}/taggings\" method=\"post\"><input id=\"tag-search\" type=\"text\" name=\"tag_title\" placeholder=\"{placeholder}\" aria-label=\"Tag name or filter\" autocomplete=\"off\" autofocus></form><ul class=\"popup__list\">{options}<li class=\"popup__item\" data-navigable-list-target=\"item\"><button type=\"submit\" form=\"tags_form_card_{}\">Create tag</button></li></ul></div></turbo-frame>",
         escape(&card_id),
         escape(&card_id),
         escape(&card_id)

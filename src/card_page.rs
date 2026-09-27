@@ -528,6 +528,10 @@ pub(super) async fn show(
     );
     values.insert("SHELL_SCRIPT", include_str!("../static/events.js").into());
     values.insert(
+        "TAG_PICKER_SCRIPT",
+        include_str!("../static/tag_picker_keyboard.js").into(),
+    );
+    values.insert(
         "CARD_EDIT_DRAFT_SCRIPT",
         include_str!("../static/card_edit_draft.js").into(),
     );
