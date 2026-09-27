@@ -62,6 +62,12 @@ removes them with their original. It uses libvips `thumbnail_image` for these
 formats when available, including every GIF and WebP frame. Other image
 formats, broader image dimensions, and preview processing throughput have not
 been compared.
+The strict export fixture now also covers SVG and BMP embeds. Both apps exported
+the same blob metadata and attachment records for each, with no derived
+variants. The paired MySQL embed flow compares their file-attachment markup,
+downloaded bytes, and MIME types: SVG is served as
+`application/octet-stream`, and BMP as `image/bmp`. TIFF, AVIF, HEIC, HEIF,
+and other media remain unverified.
 
 The [JPEG embed write run](bench/results/image-embed-write-jpeg-40-2026-09-27.json)
 timed 40 alternating, single-client card updates after preparing distinct

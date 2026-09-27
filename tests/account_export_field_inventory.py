@@ -23,6 +23,8 @@ from sustained_mixed import SOURCE, prepare_rust, prepare_source, start_server, 
 
 GIF = (ROOT / "tests/fixtures/animated.gif").read_bytes()
 WEBP = (ROOT / "tests/fixtures/animated.webp").read_bytes()
+SVG = (ROOT / "upstream/test/fixtures/files/avatar.svg").read_bytes()
+BMP = (ROOT / "tests/fixtures/tiny.bmp").read_bytes()
 
 
 def signed_user_sgid(user_id, source_env):
@@ -45,7 +47,9 @@ def fixture(target, source_env, include_image=False, image_format="jpeg"):
     images = {"jpeg": (IMAGE, "moon.jpg", "image/jpeg"),
               "png": (PNG, "avatar.png", "image/png"),
               "gif": (GIF, "animated.gif", "image/gif"),
-              "webp": (WEBP, "animated.webp", "image/webp")}
+              "webp": (WEBP, "animated.webp", "image/webp"),
+              "svg": (SVG, "avatar.svg", "image/svg+xml"),
+              "bmp": (BMP, "tiny.bmp", "image/bmp")}
     image_blob = upload(target, *images[image_format]) if include_image else None
     if image_blob:
         target["image_blob_id"] = image_blob["id"]
@@ -131,8 +135,8 @@ def verify_rust_user_sgids(users, source_env):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strict", action="store_true", help="fail when exported fields, counts, or checked values differ")
-    parser.add_argument("--image-variant", action="store_true", help="also export an image embed and its generated previews")
-    parser.add_argument("--image-format", choices=("jpeg", "png", "gif", "webp"), default="jpeg",
+    parser.add_argument("--image-variant", action="store_true", help="also export an image embed and any generated previews")
+    parser.add_argument("--image-format", choices=("jpeg", "png", "gif", "webp", "svg", "bmp"), default="jpeg",
                         help="image fixture format for --image-variant")
     args = parser.parse_args()
     subprocess.run(["cargo", "build", "--release", "--quiet", "--bin", "rizzy"], cwd=ROOT, check=True)
@@ -192,6 +196,8 @@ def main():
                 for name, result in results.items()}
             variant_digests = {name: sorted(variant["variation_digest"] for variant in result[6])
                                for name, result in results.items()}
+            if args.image_format in ("svg", "bmp") and args.image_variant:
+                assert not variant_digests["fizzy"] and not variant_digests["rizzy"], variant_digests
             if blob_values["fizzy"] != blob_values["rizzy"]:
                 differences.setdefault("active_storage_blobs", {})["values"] = blob_values
             if attachment_values["fizzy"] != attachment_values["rizzy"]:

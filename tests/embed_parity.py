@@ -12,9 +12,10 @@ import urllib.request
 from pathlib import Path
 
 from card_image_parity import IMAGE, call
-from avatar_parity import PNG
+from avatar_parity import PNG, SVG
 
 FILE = b"hello text\n"
+BMP = (Path(__file__).resolve().parents[1] / "tests/fixtures/tiny.bmp").read_bytes()
 
 
 def request(target, path, method="GET", payload=None, *, bearer=True):
@@ -109,6 +110,30 @@ def run(target):
         assert status == 201, (status, file_card)
         results["file"] = (file_card["description"], file_card["has_attachments"],
                            normalized(file_card["description_html"], target, file_blob))
+        for label, content, filename, content_type in (
+            ("svg", SVG, "avatar.svg", "image/svg+xml"),
+            ("bmp", BMP, "tiny.bmp", "image/bmp"),
+        ):
+            nonvariable_blob = upload(target, content, filename, content_type)
+            markup = (f'<p><action-text-attachment sgid="{nonvariable_blob["attachable_sgid"]}">'
+                      '</action-text-attachment></p>')
+            status, _, nonvariable_card = request(
+                target, f"/boards/{board['id']}/cards", "POST",
+                {"card": {"title": f"{label.upper()} embed", "description": markup}})
+            assert status == 201, (status, nonvariable_card)
+            assert "attachment--file" in nonvariable_card["description_html"]
+            assert "/representations/" not in nonvariable_card["description_html"]
+            results[label] = (nonvariable_card["description"], nonvariable_card["has_attachments"],
+                              normalized(nonvariable_card["description_html"], target, nonvariable_blob))
+            path = (f"/{target['account']}/rails/active_storage/blobs/redirect/"
+                    f"{nonvariable_blob['signed_id']}/{filename}")
+            status, headers, _ = call(target, path)
+            assert status == 302, status
+            with urllib.request.urlopen(urllib.parse.urljoin(target["url"], headers["Location"]), timeout=10) as response:
+                assert response.read() == content
+                downloaded_type = response.headers.get_content_type()
+                assert downloaded_type == ("application/octet-stream" if label == "svg" else "image/bmp")
+                results[f"{label}_download_type"] = downloaded_type
         png_blob = upload(target, PNG, "avatar.png", "image/png")
         png_markup = f'<p><action-text-attachment sgid="{png_blob["attachable_sgid"]}"></action-text-attachment></p>'
         status, _, png_card = request(target, f"/boards/{board['id']}/cards", "POST",
