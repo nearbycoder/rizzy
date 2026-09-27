@@ -67,6 +67,7 @@ def main():
                       for method, path in unsupported]
             cases += [(method, path + ".json", "text/html", True)
                       for method, path in unsupported[:2]]
+            cases.append(("GET", "/my/passkey_challenge", "text/html", False))
             for method, path, accept, bearer in cases:
                 source = probe(targets["fizzy"], method, path, accept, bearer)
                 rust = probe(targets["rizzy"], method, path, accept, bearer)

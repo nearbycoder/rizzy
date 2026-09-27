@@ -229,7 +229,14 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         if self.0 == StatusCode::FOUND {
-            return (StatusCode::FOUND, [(header::LOCATION, self.1)]).into_response();
+            return (
+                StatusCode::FOUND,
+                [
+                    (header::LOCATION, self.1),
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8".into()),
+                ],
+            )
+                .into_response();
         }
         if self.0 == StatusCode::UNAUTHORIZED && self.1 == "HTTP Token: Access denied." {
             return (
@@ -407,13 +414,27 @@ async fn redirect_tenanted_public_route(
         || rest == "/signup"
         || rest.starts_with("/signup/")
         || (rest == "/my/identity" && !request.headers().contains_key("x-rizzy-original-path"))
-        || rest == "/my/passkey_challenge"
+        || (rest == "/my/passkey_challenge" && request.method() == Method::POST)
         || rest == "/account/imports/new"
         || (rest == "/account/imports" && request.method() == Method::POST)
         || rest == "/manifest"
         || rest == "/service-worker";
     if !disallowed {
         return next.run(request).await;
+    }
+    // These controllers authenticate before their account-scope callback.
+    // A signed-out request therefore goes to sign-in even when it carries an
+    // account prefix that an authenticated request must not use.
+    let requires_auth = rest == "/session/menu"
+        || rest == "/signup/completion/new"
+        || (rest == "/signup/completion" && request.method() == Method::POST)
+        || rest == "/my/identity"
+        || rest == "/account/imports/new"
+        || (rest == "/account/imports" && request.method() == Method::POST);
+    if requires_auth {
+        if let Err(error) = identity_auth(&app, request.headers()).await {
+            return error.into_response();
+        }
     }
     let exists =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
@@ -11973,6 +11994,7 @@ async fn card_previews(
     RawQuery(raw): RawQuery,
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
     let accepts_stream = headers
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok())
@@ -11980,7 +12002,6 @@ async fn card_previews(
     if !uri.path().ends_with(".turbo_stream") && !accepts_stream {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
     let target = raw
         .as_deref()
         .and_then(|raw| {

@@ -6,7 +6,10 @@ This is a routing/error-contract census, not a functional route parity test.
 
 import hashlib
 import json
+import os
 import re
+import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,3 +77,40 @@ def run(target, detailed=False, accept="application/json"):
             result[path] = tuple(contract)
     assert len(result) == len(route_paths), (target["name"], len(result), len(route_paths))
     return result
+
+
+def main():
+    sys.path.insert(0, str(ROOT / "bench"))
+    from sustained_mixed import prepare_rust, prepare_source, start_server, stop_server
+
+    with tempfile.TemporaryDirectory(prefix="rizzy-get-route-parity-") as temporary:
+        processes = []
+        targets = {}
+        try:
+            for name in ("fizzy", "rizzy"):
+                directory = Path(temporary) / name
+                directory.mkdir()
+                env, credentials = (prepare_source(directory, 2) if name == "fizzy"
+                                    else prepare_rust(directory))
+                process, url = start_server(name, directory, env,
+                                            sorted(os.sched_getaffinity(0))[:2])
+                processes.append(process)
+                targets[name] = {"name": name, "url": url,
+                                 "account": str(credentials["account"]),
+                                 "token": credentials["token"], "opener": OPENER}
+            count = 0
+            for accept in ("application/json", "text/html"):
+                source = run(targets["fizzy"], detailed=True, accept=accept)
+                rust = run(targets["rizzy"], detailed=True, accept=accept)
+                differences = {path: (source[path], rust[path]) for path in source
+                               if source[path] != rust[path]}
+                assert not differences, (accept, differences)
+                count += len(source)
+        finally:
+            for process in reversed(processes):
+                stop_server(process)
+    print(f"Matched pinned Fizzy GET status, format, redirect, and error contracts in {count} cases")
+
+
+if __name__ == "__main__":
+    main()

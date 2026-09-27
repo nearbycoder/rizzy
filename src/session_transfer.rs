@@ -93,11 +93,10 @@ pub(super) async fn qr_code(
         if headers.contains_key("x-rizzy-json-request") {
             source_json_internal_error()
         } else {
-            (
+            static_error_page(
+                include_str!("../static/500.html"),
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Html(include_str!("../static/500.html")),
             )
-                .into_response()
         }
     };
     let Some((payload, signature)) = token.rsplit_once("--") else {
