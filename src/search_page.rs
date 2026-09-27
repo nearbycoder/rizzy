@@ -89,6 +89,12 @@ fn mysql_excerpt(value: &str, stems: &[String]) -> String {
     result
 }
 
+fn footer(slug: i64) -> String {
+    format!(
+        "<footer id=\"footer\" class=\"search-footer\"><a href=\"/{slug}/my/pins\">Pinned</a><a href=\"/{slug}/search\" aria-current=\"page\">Search</a><a href=\"/{slug}/notifications\">Notifications</a></footer>"
+    )
+}
+
 pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Result<Response> {
     let term = query
         .q
@@ -106,7 +112,9 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
     html.push_str(include_str!("../static/search.css"));
     html.push_str("</style></head><body><header class=\"header header--mobile-actions-stack\" id=\"header\"><a href=\"#main\" class=\"header__skip-navigation btn\">Skip to main content</a><a href=\"/");
     html.push_str(&p.slug.to_string());
-    html.push_str("\" class=\"header__back\">Home</a><h1 class=\"header__title\" data-bridge--title-target=\"header\">");
+    html.push_str("/my/menu\" class=\"header__brand\" aria-label=\"Rizzy menu\"><span class=\"header__brand-mark\" aria-hidden=\"true\"></span>Rizzy<span class=\"header__brand-chevron\" aria-hidden=\"true\">⌄</span></a><a href=\"/");
+    html.push_str(&p.slug.to_string());
+    html.push_str("\" class=\"header__back\">Back to Home</a><h1 class=\"header__title\" data-bridge--title-target=\"header\">");
     html.push_str(&title);
     html.push_str(
         "</h1></header><main id=\"main\"><div class=\"search-perma margin-block-start\"><form class=\"search__form flex align-center justify-center gap-half\" data-controller=\"search-form\" data-action=\"search-form:reset-&gt;bar#reset\" data-bar-target=\"form\" data-turbo-action=\"advance\" data-turbo-frame=\"bar_content\" action=\"/",
@@ -123,7 +131,9 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 html.push_str(&p.slug.to_string());
                 html.push_str("/cards/");
                 html.push_str(&number.to_string());
-                html.push_str("\" method=\"get\"></form><script>document.querySelector('[data-controller=\"auto-submit\"]').requestSubmit()</script></turbo-frame></div></main></body></html>");
+                html.push_str("\" method=\"get\"></form><script>document.querySelector('[data-controller=\"auto-submit\"]').requestSubmit()</script></turbo-frame></div></main>");
+                html.push_str(&footer(p.slug));
+                html.push_str("</body></html>");
                 return Ok(Html(html).into_response());
             }
         }
@@ -324,7 +334,9 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
             "<div class=\"search__blank-slate blank-slate\">No matches</div>",
         );
     }
-    html.push_str("</div></section></turbo-frame></div></main><script>");
+    html.push_str("</div></section></turbo-frame></div></main>");
+    html.push_str(&footer(p.slug));
+    html.push_str("<script>");
     html.push_str(include_str!("../static/search.js"));
     html.push_str("</script></body></html>");
     Ok(Html(html).into_response())

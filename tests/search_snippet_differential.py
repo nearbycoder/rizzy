@@ -139,7 +139,7 @@ def main():
                                'id="filtered_search_results-pagination-link-2"',
                                'data-pagination-target="paginationLink"',
                                'data-local-time-target="timeordate"',
-                               'data-turbo-frame="_top"'):
+                               'data-turbo-frame="_top"', 'id="footer"'):
                     assert marker in first_page, (name, marker)
                 assert f'href="/{target["account"]}/search?page=2&amp;q=freshproof"' in first_page
                 first_fresh = api(target, "/cards/136")
