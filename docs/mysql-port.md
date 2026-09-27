@@ -472,6 +472,20 @@ had the same outcome: one clean pair at 139.10 versus 24.08 workflows/s and
 one Fizzy ActiveSearch deadlock. A clean two-round comparison of this larger
 fixture remains unverified.
 
+The paired MySQL harness now supports `--boards 4` and verifies aggregate
+card, event, and comment counts across the boards. The [current 16-client
+comparison](../bench/results/mysql-mixed-1000-4boards-4process-c16-30s-2026-09-27.json)
+used 1,000 initial cards, four Fizzy workers or four Rizzy processes, four app
+CPUs, the same MySQL server, and two reversed-order 30-second rounds. All four
+phases passed sampled-response and final-count gates with zero HTTP errors.
+Rizzy handled 251.94 and 225.40 workflow units/s versus Fizzy's 23.07 and
+24.49. The [32-client extension](../bench/results/mysql-mixed-1000-4boards-4process-c32-30s-2026-09-27.json)
+had one clean pair at 252.31 versus 26.87; Rizzy's other phase completed at
+251.47 without errors, but Fizzy's card PATCH returned 500 from an
+ActiveSearch MySQL deadlock. The failed phase cannot support a throughput
+ratio. These results measure one local mixed API workflow, not full product
+parity, multi-host scaling, or maximum sustainable capacity.
+
 The [matched-fixture MySQL JSON read comparison](../bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 avoids that write-path failure. Fresh 1,000-card databases, the same four
 available app CPUs, two reversed-order rounds, and 15-second phases at 8,

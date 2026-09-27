@@ -259,6 +259,21 @@ Fizzy ActiveSearch deadlock phase.
 The [eight-client repeat](bench/results/mysql-mixed-1000-c8-30s-2026-09-26.json)
 again had one clean pair, 139.10 versus 24.08 workflows/s, and one source
 ActiveSearch deadlock; the larger fixture still lacks a clean two-round pair.
+The new four-board option for `bench/sustained_mixed_mysql.py` distributes the
+same 1,000 cards and mixed JSON workflow over four boards. A [current
+16-client comparison](bench/results/mysql-mixed-1000-4boards-4process-c16-30s-2026-09-27.json)
+used four Fizzy Puma workers or four Rizzy processes on the same four app CPUs
+and MySQL server, in two reversed-order 30-second rounds. Sampled responses
+matched before load; all four phases had zero HTTP errors and exact final
+card, event, and comment counts. Rizzy completed 251.94 and 225.40 workflow
+units/s versus Fizzy's 23.07 and 24.49, paired gains of 10.9 and 9.2 times.
+Work was near evenly distributed across boards and Rizzy processes. The
+[32-client extension](bench/results/mysql-mixed-1000-4boards-4process-c32-30s-2026-09-27.json)
+had one clean pair at 252.31 versus 26.87 units/s; Rizzy completed its other
+phase at 251.47 without errors, while Fizzy failed a card PATCH with an
+ActiveSearch MySQL deadlock, so that second pair is invalid for throughput
+comparison. This is a local API workload with partial feature parity, not a
+whole-app, multi-host, or maximum-capacity result.
 The [matched-fixture read-only MySQL comparison](bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 did complete two reversed-order rounds at 8, 32, and 128 clients with zero
 errors, unchanged counts, and matched complete sampled JSON values after
