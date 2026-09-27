@@ -16,6 +16,17 @@ media semantics, not identical HTML or all interactions; these short local
 read runs do not establish whole-app speed or maximum capacity. Reproduce
 with `python3 bench/home_media_html.py`.
 
+The [source-structure Home repeat](results/home-media-html-layout-98-2026-09-26.json)
+used the same harness after Rizzy gained Fizzy's event container classes,
+action icons, related-card hover attributes, nested avatar and description
+row, and conditional excerpt markup. Rizzy's sampled page grew from 87,740 to
+145,888 bytes; Fizzy's was 216,774 bytes. Both samples still showed the same
+100 events and selected media counts. In two reversed-order five-second rounds,
+Rizzy handled 7,370–7,842 requests/s at eight clients and 6,894–7,504 at 32,
+versus Fizzy's 316–410 and 411, with zero HTTP errors. Its warm Home cache
+remains active, and the page and application are still not one-for-one; these
+numbers remain scoped read diagnostics.
+
 The [post-storage-ledger scoped read run](results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
 used fresh 100-card SQLite fixtures, four assigned app CPUs, four Fizzy Puma
 workers, one Rust process, and a Rust load client. Two reversed-order

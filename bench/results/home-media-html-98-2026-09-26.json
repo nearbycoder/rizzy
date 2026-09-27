@@ -161,5 +161,6 @@
       "server_cpu_core_average": 3.8,
       "server_pss_mib_end": 1244.3
     }
-  ]
+  ],
+  "rizzy_build_worktree_dirty": false
 }

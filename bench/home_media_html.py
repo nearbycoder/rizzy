@@ -38,6 +38,12 @@ def revision(path):
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=path, text=True).strip()
 
 
+def build_worktree_dirty():
+    return bool(subprocess.check_output(
+        ["git", "status", "--short", "--", "src", "static", "assets", "Cargo.toml", "Cargo.lock"],
+        cwd=ROOT, text=True).strip())
+
+
 def add_media(target, board):
     image = upload(target)
     background = upload(target, filename="background.jpg")
@@ -92,6 +98,7 @@ def main():
     assert len(cpus) >= 8
     server_cpus, client_cpus = cpus[:4], cpus[4:12]
     results = {"source_revision": revision(SOURCE), "rizzy_revision": revision(ROOT),
+               "rizzy_build_worktree_dirty": build_worktree_dirty(),
                "rizzy_binary_sha256": hashlib.sha256(Path(RUST).read_bytes()).hexdigest(),
                "server_cpus": server_cpus, "client_cpus": client_cpus,
                "fizzy_workers": 4, "rizzy_processes": 1, "plain_cards": args.cards,

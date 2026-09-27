@@ -66,6 +66,28 @@ class PreviewFeatures(HTMLParser):
                 self.action = None
 
 
+class EventLayout(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.current = None
+        self.events = {}
+
+    def handle_starttag(self, tag, attributes):
+        attrs = dict(attributes)
+        classes = set(attrs.get("class", "").split())
+        if tag == "a" and "event" in classes:
+            action = next(name[7:] for name in classes if name.startswith("event--"))
+            self.current = action
+            self.events[action] = {"root_classes": classes, "root_attributes": attrs,
+                                   "nested_classes": set()}
+        elif self.current:
+            self.events[self.current]["nested_classes"].update(classes)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.current:
+            self.current = None
+
+
 def response(target_item, path, method="GET", payload=None):
     status, _, raw = call(target_item, f"/{target_item['account']}{path}", method, payload)
     assert status in (200, 201), (target_item["name"], path, status, raw[:200])
@@ -93,7 +115,28 @@ def check(item):
     assert status == 200, (item["name"], status)
     parsed = PreviewFeatures()
     parsed.feed(body.decode())
+    layout = EventLayout()
+    layout.feed(body.decode())
     features = {name: parsed.events[name] for name in ("card_published", "comment_created")}
+    for action in features:
+        root = layout.events[action]
+        assert {"center-block", "flex", "flex-column", "full-width", "align-start",
+                "justify-start", "position-relative"} <= root["root_classes"], (item["name"], action, root)
+        assert root["root_attributes"].get("data-turbo-frame") == "_top", (item["name"], action, root)
+        assert root["root_attributes"].get("data-related-element-target") == "related", (item["name"], action, root)
+        assert root["root_attributes"].get("data-related-element-group-value"), (item["name"], action, root)
+        assert {"card__header", "card__board", "overflow-ellipsis", "event__content",
+                "avatar", "event__title", "txt-tight-lines", "event_attachments"} <= root["nested_classes"], (
+                    item["name"], action, root)
+    assert "icon--comment" in layout.events["comment_created"]["nested_classes"], item["name"]
+    assert "event__icon" not in layout.events["card_published"]["nested_classes"], item["name"]
+    if item["name"] == "rizzy":
+        for icon_name in ("assigned", "minus", "comment", "rename", "move", "person"):
+            status, headers, icon = call(item, f"/assets/events/icons/{icon_name}.svg", bearer=False)
+            original = (Path(__file__).resolve().parents[1] / "upstream" / "app" /
+                        "assets" / "images" / f"{icon_name}.svg").read_bytes()
+            assert status == 200 and headers["Content-Type"] == "image/svg+xml" and icon == original, (
+                item["name"], icon_name, status)
     assert len(features["card_published"]["backgrounds"]) == 1, (item["name"], features)
     assert len(features["comment_created"]["backgrounds"]) == 1, (item["name"], features)
     assert len(features["card_published"]["images"]) == 2, (item["name"], features)

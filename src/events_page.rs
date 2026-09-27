@@ -21,6 +21,32 @@ use super::{
 
 const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card_closed','card_reopened','card_collection_changed','card_board_changed','card_postponed','card_auto_postponed','card_triaged','card_sent_back_to_triage','comment_created')";
 
+pub(super) async fn icon(Path(filename): Path<String>) -> Response {
+    let svg = match filename.as_str() {
+        "assigned.svg" => include_str!("../static/event-icons/assigned.svg"),
+        "minus.svg" => include_str!("../static/event-icons/minus.svg"),
+        "comment.svg" => include_str!("../static/event-icons/comment.svg"),
+        "rename.svg" => include_str!("../static/event-icons/rename.svg"),
+        "move.svg" => include_str!("../static/event-icons/move.svg"),
+        "person.svg" => include_str!("../static/event-icons/person.svg"),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("image/svg+xml"),
+            ),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=300"),
+            ),
+        ],
+        svg,
+    )
+        .into_response()
+}
+
 #[derive(Default)]
 struct Params {
     day: Option<String>,
@@ -681,12 +707,14 @@ fn render_event(
     let attachment_html = if attachments.is_empty() {
         String::new()
     } else {
-        format!("<span class=\"event_attachments\">{attachments}</span>")
+        format!(
+            "<span class=\"event_attachments margin-block-half flex align-center gap-half\">{attachments}</span>"
+        )
     };
     let background = media
         .backgrounds
         .get(&card_id)
-        .map(|url| format!("<div class=\"card__background\"><img src=\"{}\" width=\"120\" height=\"120\" alt=\"\"></div>", escape(url)))
+        .map(|url| format!("<div class=\"card__background\"><img src=\"{}\" width=\"120\" height=\"120\" aria-hidden=\"true\" alt=\"\"></div>", escape(url)))
         .unwrap_or_default();
     let comment_fragment = if action == "comment_created" {
         format!(
@@ -696,8 +724,30 @@ fn render_event(
     } else {
         String::new()
     };
+    let icon = match action.as_str() {
+        "card_closed" | "card_published" | "card_reopened" => String::new(),
+        _ => {
+            let name = match action.as_str() {
+                "card_assigned" => "assigned",
+                "card_unassigned" => "minus",
+                "comment_created" => "comment",
+                "card_title_changed" => "rename",
+                "card_board_changed"
+                | "card_triaged"
+                | "card_postponed"
+                | "card_auto_postponed" => "move",
+                _ => "person",
+            };
+            format!("<span class=\"icon icon--{name} event__icon\" aria-hidden=\"true\"></span>")
+        }
+    };
+    let excerpt_html = if matches!(action.as_str(), "card_published" | "comment_created") {
+        format!("<span class=\"txt-break overflow-line-clamp txt-tight-lines\">{body}</span>")
+    } else {
+        String::new()
+    };
     format!(
-        "<a id=\"timelined_event_{}\" class=\"event event--{}{}\" href=\"/{account}/cards/{number}{comment_fragment}\" data-card-id=\"{}\" style=\"--card-color:{color}\"><div class=\"card__header\"><h4 class=\"card__board\"><span class=\"card__id\"><span class=\"for-screen-reader\">Card number </span>{number}</span><span class=\"card__board-name\">{}</span></h4></div><div class=\"event__content\"><img class=\"event__avatar\" src=\"/{account}/users/{}/avatar\" alt=\"\" title=\"{}\" width=\"48\" height=\"48\"><div class=\"event__copy\"><strong class=\"event__title\">{description}</strong><span class=\"event__excerpt\">{body}</span>{attachment_html}</div></div>{background}</a>",
+        "<a id=\"timelined_event_{}\" class=\"event event--{}{} center-block flex flex-column full-width align-start justify-start position-relative\" href=\"/{account}/cards/{number}{comment_fragment}\" style=\"--card-color: {color};\" data-turbo-frame=\"_top\" data-related-element-target=\"related\" data-related-element-group-value=\"{}\" data-action=\"mouseover->related-element#highlight mouseout->related-element#unhighlight\"><div class=\"card__header\"><h4 class=\"card__board\"><span class=\"card__id\"><span class=\"for-screen-reader\">Card number</span>{number}</span><span class=\"card__board-name\"><span class=\"overflow-ellipsis\">{}</span></span></h4>{icon}</div><div class=\"event__content\"><div class=\"flex align-start gap\"><div class=\"avatar txt-x-small\"><img src=\"/{account}/users/{}/avatar\" aria-hidden=\"true\" title=\"{}\" width=\"48\" height=\"48\"></div><div class=\"flex flex-column min-width txt-small align-start txt-align-start\" style=\"color: color-mix(in srgb, var(--card-color) 40%, var(--color-ink));\"><strong class=\"event__title txt-break overflow-line-clamp txt-tight-lines\">{description}</strong>{excerpt_html}{attachment_html}</div></div></div>{background}</a>",
         escape(&id),
         escape(&action),
         if event.get::<i64, _>("golden") != 0 {

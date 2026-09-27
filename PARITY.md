@@ -53,6 +53,17 @@ Rizzy handled 6,375–7,786 requests/s versus Fizzy's 315–392, with zero
 errors, but its warm-cached HTML was 87,740 bytes versus 216,774 bytes.
 The differing markup and incomplete interactions preclude a one-for-one
 performance claim.
+The event renderer now follows Fizzy's event wrapper classes, related-card
+hover attributes, action-specific icon mapping, nested avatar and description
+row, and excerpt-only-for-publish-or-comment layout. The six source SVG icons
+are served as local assets. The paired media test checks the markup and icon
+bytes against the pinned source; 14 event sentences and the Home add-card flow
+still pass. Chromium showed populated Added and Updated columns, the comment
+icon and media previews, and no page errors. The
+[post-layout Home run](bench/results/home-media-html-layout-98-2026-09-26.json)
+found 145,888-byte Rizzy HTML versus 216,774-byte Fizzy HTML and 6,894–7,842
+versus 316–411 requests/s over the two short concurrency levels. Other source
+layout details, media forms, and browser interactions remain incomplete.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.
