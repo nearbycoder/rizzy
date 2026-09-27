@@ -4,6 +4,7 @@ import http.cookiejar
 import os
 import random
 import re
+import sqlite3
 import sys
 import tempfile
 import urllib.parse
@@ -72,6 +73,9 @@ def setup(name, directory, cpus):
                 "title": f"tieproof item {index:03d}",
                 "created_at": "2026-01-01T00:00:00.000Z",
             }}, 201)
+        for index in range(40):
+            expect(target, f"/boards/{board['id']}/cards", "POST",
+                   {"card": {"title": f"freshproof item {index:03d}"}}, 201)
         return process, target
     except Exception:
         suite.stop_server(process)
@@ -116,7 +120,22 @@ def main():
                 assert len(all_titles) == len(set(all_titles)) == 110, (name, len(all_titles))
                 page_titles_by_app[name] = all_titles
             assert page_titles_by_app["fizzy"] == page_titles_by_app["rizzy"]
-            print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups and 110 equal-time hits also matched")
+            fresh_pages = {}
+            for name, target in targets.items():
+                fresh_pages[name] = [titles(html(target, "freshproof", page)) for page in (1, 2)]
+                assert [len(page) for page in fresh_pages[name]] == [15, 25]
+                first_fresh = api(target, "/cards/136")
+                assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z",
+                                    first_fresh["created_at"]), (name, first_fresh["created_at"])
+                with sqlite3.connect(target["db"]) as db:
+                    times = [row[0] for row in db.execute(
+                        "SELECT created_at FROM cards WHERE title LIKE 'freshproof%' ORDER BY number")]
+                assert len(times) == len(set(times)) == 40, (name, times)
+                if name == "rizzy":
+                    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", time)
+                               for time in times), times
+            assert fresh_pages["fizzy"] == fresh_pages["rizzy"]
+            print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups, 110 equal-time hits, and 40 rapidly created hits also matched")
         finally:
             for process in reversed(processes):
                 suite.stop_server(process)

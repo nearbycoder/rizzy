@@ -681,6 +681,18 @@ fn missing() -> ApiError {
 fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
+fn json_millisecond_time(mut raw: String) -> String {
+    if raw.len() == 27
+        && raw.is_ascii()
+        && raw.as_bytes()[19] == b'.'
+        && raw.as_bytes()[20..26].iter().all(u8::is_ascii_digit)
+        && raw.ends_with('Z')
+    {
+        raw.truncate(23);
+        raw.push('Z');
+    }
+    raw
+}
 fn id() -> String {
     let mut n = uuid::Uuid::now_v7().as_u128();
     let mut chars = [b'0'; 25];
@@ -2682,7 +2694,8 @@ async fn card_json(
     let number: i64 = r.get("number");
     let tags: Vec<String> = sqlx::query_scalar("SELECT t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title").bind(&id).fetch_all(&app.db).await.map_err(db_err)?;
     let b = board(app, p, &board_id).await?;
-    let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":description_plain,"description_html":description_html,"image_url":null,"has_attachments":has_attachments,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
+    let created_at = json_millisecond_time(r.get::<String, _>("created_at"));
+    let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":description_plain,"description_html":description_html,"image_url":null,"has_attachments":has_attachments,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":r.get::<String,_>("last_active_at"),"created_at":created_at,"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
     out["image_url"] = storage::image_url_for_card(app, p, &id).await?;
     let assigned = sqlx::query(
         "SELECT assignee_id FROM assignments WHERE card_id=? ORDER BY created_at,id LIMIT 6",
@@ -11843,8 +11856,10 @@ async fn create_card(
     let search_text = search_content(plain_description);
     let event_id = id();
     let id = id();
-    let timestamp = now();
-    let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| timestamp.clone());
+    let clock = Utc::now();
+    let timestamp = clock.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let created_at = timestamp_param(v, "created_at")?
+        .unwrap_or_else(|| clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
     let last_active_at =
         timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
     let writer = app.write_lock.lock().await;
