@@ -3,7 +3,9 @@
 
 import hashlib
 import json
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from draft_workflow_parity import request as browser_request
@@ -37,6 +39,25 @@ def shape(value):
     if isinstance(value, list):
         return [shape(value[0])] if value else []
     return type(value).__name__
+
+
+def stable_json(value):
+    """Keep response values that can be compared across separately seeded apps."""
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key in ("id", "signing_secret") or key.endswith(("_id", "_at")):
+                continue
+            if (key == "url" or key.endswith("_url")) and key != "payload_url" and isinstance(item, str):
+                parsed = urllib.parse.urlsplit(item)
+                path = re.sub(r"(?<![0-9A-Za-z])[0-9a-z]{25,26}(?![0-9A-Za-z])", ":id", parsed.path)
+                result[key] = path + (("?" + parsed.query) if parsed.query else "")
+            else:
+                result[key] = stable_json(item)
+        return result
+    if isinstance(value, list):
+        return [stable_json(item) for item in value]
+    return value
 
 
 def fixture(target):
@@ -82,8 +103,7 @@ def semantic(label, value):
     if label == "user":
         return {"role": value["role"], "active": value.get("active")}
     if label == "board":
-        return {key: value.get(key) for key in
-                ("name", "all_access", "auto_postpone_period_in_days")}
+        return stable_json(value)
     if label == "board_accesses":
         return {"all_access": value["all_access"],
                 "users": [(user["role"], user["has_access"], user["involvement"])
@@ -102,10 +122,7 @@ def semantic(label, value):
     if label == "webhook_deliveries":
         return value
     if label == "card":
-        return {"title": value["title"], "description": value["description"],
-                "status": value["status"], "board": value["board"]["name"],
-                "closed": value["closed"], "postponed": value["postponed"],
-                "golden": value["golden"]}
+        return stable_json(value)
     if label == "card_steps":
         return [(step["content"], step["completed"]) for step in value]
     if label == "step":
@@ -164,7 +181,10 @@ def run(target):
         status, content_type, value = request(target, path)
         if label not in ("user_events", "pin", "watch", "previews"):
             assert status == 200, (target["name"], label, status, value)
-        result[label] = (status, content_type, shape(value), semantic(label, value))
+        if label == "webhook":
+            assert len(value["signing_secret"]) == 24, (target["name"], label, value)
+        deep = stable_json(value) if status == 200 and value is not None else None
+        result[label] = [status, content_type, shape(value), semantic(label, value), deep]
     values = {label: contract[3] for label, contract in result.items()}
     expected = {
         "board": ("name", item["name"]),
@@ -182,7 +202,7 @@ def run(target):
     assert values["closed"] == ["Closed route card"], (target["name"], values["closed"])
     assert values["column_cards"] == ["Named column card"], (target["name"], values["column_cards"])
     assert "Valid route card" in values["board_stream"], (target["name"], values["board_stream"])
-    assert values["card"]["board"] == item["name"], (target["name"], values["card"])
+    assert values["card"]["board"]["name"] == item["name"], (target["name"], values["card"])
     assert ("First step", False) in values["card_steps"], (target["name"], values["card_steps"])
     assert values["comment"] == "First comment", (target["name"], values["comment"])
     assert "First comment" in values["card_comments"], (target["name"], values["card_comments"])

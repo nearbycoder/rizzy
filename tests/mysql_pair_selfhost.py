@@ -112,7 +112,9 @@ def main():
                               "account-cancellation-concurrent", "account-cancellation-mail",
                               "account-cancellation-mail-concurrent"):
                 local_rust_env["RIZZY_MULTI_TENANT"] = "1"
-            local_rust_env["RIZZY_SEED_EMAIL"] = "mysql-pair-owner@example.test"
+            local_rust_env["RIZZY_SEED_EMAIL"] = (
+                "owner@example.com" if args.suite == "route-get-valid"
+                else "mysql-pair-owner@example.test")
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
             rizzy_env, rizzy_credentials = prepare_rust(rizzy_dir, local_rust_env)
             cpus = sorted(os.sched_getaffinity(0))[:2]
@@ -417,7 +419,7 @@ def main():
                 print(f"Disposable MySQL GET error contracts matched pinned Fizzy: "
                       f"{len(source_result)} routes")
             elif args.suite == "route-get-valid":
-                print(f"Disposable MySQL populated GET status, shape, and values matched pinned Fizzy: "
+                print(f"Disposable MySQL populated GET status, shape, normalized URLs, and stable values matched pinned Fizzy: "
                       f"{len(source_result)} routes")
             elif args.suite == "route-get-valid-html":
                 print(f"Disposable MySQL populated HTML GET contracts matched pinned Fizzy: "

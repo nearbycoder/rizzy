@@ -948,10 +948,14 @@ behavior only. The paired `route-get-valid` suite now creates a board, column,
 webhook, card, step, comment, and reaction in each fresh MySQL database, then
 matches status, content type, JSON shape, and selected stable values for 25
 GET paths with valid fixture resources. The fixture also includes a postponed
-and a closed card.
-The stable values include board and card index titles, the populated Not Now
-and Closed column titles, board and column names, column-card placement, card
-title and board relationship, webhook destination, step and comment text,
+and a closed card. With the same owner email seeded in both databases, the
+suite now recursively compares values in the successful JSON bodies except
+generated IDs, timestamps, and signing secrets; in-app URL paths are compared
+after normalizing generated IDs. It also checks that the generated webhook
+secret has the source length. The stable values include board and card index
+titles, the populated Not Now and Closed column titles, board and column
+names, column-card placement, card title and board relationship, webhook
+destination, step and comment text,
 reaction content, and empty delivery lists. The pin, watch, and preview GET
 paths add paired format-contract checks for a real card or account. It
 found and closed a user-activity format mismatch: a JSON request for an

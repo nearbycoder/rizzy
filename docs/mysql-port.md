@@ -832,9 +832,13 @@ most write paths are outside these censuses. The separate `route-get-valid`
 suite uses equivalent persisted board, column, webhook, card, step, comment,
 and reaction fixtures to match status, content type, and JSON shape for 25
 GET paths with valid fixture resources. Postponed and closed cards give the
-special board-column JSON lists real content. Selected stable values include
-board and card index titles, special-column titles, board/column placement,
-text, reactions, and webhook destination. It exposed a user-activity JSON
+special board-column JSON lists real content. The source and Rust owner use
+the same fixture email, and the suite compares every non-generated JSON value
+recursively, plus in-app URL paths after normalizing generated IDs. It omits
+generated IDs, timestamps, and signing-secret bytes while checking the
+secret's length. Selected stable values include board and card index titles,
+special-column titles, board/column placement, text, reactions, and webhook
+destination. It exposed a user-activity JSON
 request that returned HTML 200 in Rizzy; the handler now matches Fizzy's JSON
 406. Full body value and browser HTML parity for these paths remain open.
 The `route-get-valid-html` suite matches status, content type, and resource
