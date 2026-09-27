@@ -1,5 +1,21 @@
 # Comparative load runs
 
+The [Home media HTML run](results/home-media-html-98-2026-09-26.json)
+uses fresh 98-card boards plus one image-rich card and one comment containing
+a file and remote video. Before timing, both pages showed 100 events, three
+columns, and matching image, background, file, and video counts. Four Fizzy
+Puma workers and one Rizzy process shared four assigned server CPUs; the
+Python clients used separate CPUs. Two reversed-order five-second rounds at
+8 and 32 clients served 7,049–7,786 and 6,375–7,199 Rizzy requests/s,
+respectively, versus 315–371 and 324–392 for Fizzy. All eight phases had zero
+HTTP errors; Rizzy p95 was 1.77–1.96 ms at eight clients and 8.21–9.23 ms at
+32, versus 38.03–54.56 and 145.19–172.13 ms for Fizzy. Rizzy's warm
+per-user Home cache was active, and its 87,740-byte HTML page remained much
+smaller than Fizzy's 216,774-byte page. The check covers event and selected
+media semantics, not identical HTML or all interactions; these short local
+read runs do not establish whole-app speed or maximum capacity. Reproduce
+with `python3 bench/home_media_html.py`.
+
 The [post-storage-ledger scoped read run](results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
 used fresh 100-card SQLite fixtures, four assigned app CPUs, four Fizzy Puma
 workers, one Rust process, and a Rust load client. Two reversed-order

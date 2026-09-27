@@ -46,6 +46,13 @@ The Home ETag now includes the compiled event renderer and its embedded assets,
 so a browser revalidates after a CSS or template change; this was verified by
 reloading the same session across a rebuilt Rizzy process. The complete source
 event layout and other media formats remain to be matched.
+The [paired Home media load run](bench/results/home-media-html-98-2026-09-26.json)
+checked 100 visible events and matching media counts on fresh fixtures, then
+measured two reversed-order five-second rounds at eight and 32 clients.
+Rizzy handled 6,375–7,786 requests/s versus Fizzy's 315–392, with zero
+errors, but its warm-cached HTML was 87,740 bytes versus 216,774 bytes.
+The differing markup and incomplete interactions preclude a one-for-one
+performance claim.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.
