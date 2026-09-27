@@ -4997,25 +4997,79 @@ async fn auth_attempt(
 ) -> Result<()> {
     let cutoff = (Utc::now() - chrono::Duration::minutes(window_minutes))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM authentication_attempts WHERE bucket=? AND created_at>=?",
-    )
-    .bind(bucket)
-    .bind(&cutoff)
-    .fetch_one(&app.db)
-    .await
-    .map_err(db_err)?;
-    if count >= limit {
-        return Err(err(StatusCode::TOO_MANY_REQUESTS, message));
-    }
-    sqlx::query("INSERT INTO authentication_attempts(id,bucket,created_at) VALUES(?,?,?)")
-        .bind(id())
+    if app.mysql {
+        let mut connection = app.db.acquire().await.map_err(db_err)?;
+        let digest = hash(bucket);
+        let lock_name = format!("rizzy_auth:{}", &digest[..48]);
+        let acquired: Option<i64> = sqlx::query_scalar("SELECT GET_LOCK(?,30)")
+            .bind(&lock_name)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(db_err)?;
+        if acquired != Some(1) {
+            return Err(err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Authentication rate limiter unavailable",
+            ));
+        }
+        let outcome: Result<()> = async {
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM authentication_attempts WHERE bucket=? AND created_at>=?",
+            )
+            .bind(bucket)
+            .bind(&cutoff)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(db_err)?;
+            if count >= limit {
+                return Err(err(StatusCode::TOO_MANY_REQUESTS, message));
+            }
+            sqlx::query("INSERT INTO authentication_attempts(id,bucket,created_at) VALUES(?,?,?)")
+                .bind(id())
+                .bind(bucket)
+                .bind(now())
+                .execute(&mut *connection)
+                .await
+                .map_err(db_err)?;
+            Ok(())
+        }
+        .await;
+        let released: std::result::Result<Option<i64>, sqlx::Error> =
+            sqlx::query_scalar("SELECT RELEASE_LOCK(?)")
+                .bind(&lock_name)
+                .fetch_one(&mut *connection)
+                .await;
+        if !matches!(released, Ok(Some(1))) {
+            connection.close_on_drop();
+            return Err(err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Authentication rate limiter unavailable",
+            ));
+        }
+        outcome
+    } else {
+        let mut tx = begin_write(app).await.map_err(db_err)?;
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM authentication_attempts WHERE bucket=? AND created_at>=?",
+        )
         .bind(bucket)
-        .bind(now())
-        .execute(&app.db)
+        .bind(&cutoff)
+        .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;
-    Ok(())
+        if count >= limit {
+            return Err(err(StatusCode::TOO_MANY_REQUESTS, message));
+        }
+        sqlx::query("INSERT INTO authentication_attempts(id,bucket,created_at) VALUES(?,?,?)")
+            .bind(id())
+            .bind(bucket)
+            .bind(now())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(())
+    }
 }
 fn dev_magic_links() -> bool {
     env::var("RIZZY_DEV_MAGIC_LINKS").as_deref() == Ok("1")
@@ -5148,7 +5202,18 @@ async fn new_signup(State(app): Shared, headers: HeaderMap) -> Result<Response> 
     if accounts > 0 && env::var("RIZZY_MULTI_TENANT").as_deref() != Ok("1") {
         return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
     }
-    Ok(signup_page::new().into_response())
+    let rate_limited = cookie_value(&headers, "signup_rate_limit_alert").as_deref() == Some("1");
+    let mut response = signup_page::new(rate_limited).into_response();
+    if rate_limited {
+        set_cookie(
+            response.headers_mut(),
+            "signup_rate_limit_alert",
+            "",
+            0,
+            secure_request(&headers),
+        );
+    }
+    Ok(response)
 }
 async fn new_signup_completion(State(app): Shared, headers: HeaderMap) -> Result<Response> {
     if headers.contains_key("x-rizzy-json-request") {
@@ -5163,6 +5228,36 @@ async fn request_signup(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response> {
+    let secure = secure_request(&headers);
+    let signup_attempt = {
+        let _guard = app.auth_lock.lock().await;
+        auth_attempt(
+            &app,
+            &format!("signup:{}", peer.ip()),
+            10,
+            3,
+            "Try again later.",
+        )
+        .await
+    };
+    match signup_attempt {
+        Ok(()) => {}
+        Err(ApiError(StatusCode::TOO_MANY_REQUESTS, message, _))
+            if message == "Try again later." =>
+        {
+            let mut response =
+                (StatusCode::FOUND, [(header::LOCATION, "/signup/new")]).into_response();
+            set_cookie(
+                response.headers_mut(),
+                "signup_rate_limit_alert",
+                "1",
+                60,
+                secure,
+            );
+            return Ok(response);
+        }
+        Err(error) => return Err(error),
+    }
     if identity_auth(&app, &headers).await.is_ok() {
         return Ok((
             StatusCode::FOUND,
@@ -5211,18 +5306,16 @@ async fn request_magic_link_inner(
 ) -> Result<Response> {
     let email = required(&body, "email_address")?.trim().to_lowercase();
     let guard = app.auth_lock.lock().await;
-    auth_attempt(
-        app,
-        &format!(
-            "{}:{}",
-            if forced_signup { "signup" } else { "request" },
-            peer.ip()
-        ),
-        10,
-        3,
-        "Try again later.",
-    )
-    .await?;
+    if !forced_signup {
+        auth_attempt(
+            app,
+            &format!("request:{}", peer.ip()),
+            10,
+            3,
+            "Try again later.",
+        )
+        .await?;
+    }
     let existing: Option<String> =
         sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
             .bind(&email)

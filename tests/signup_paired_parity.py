@@ -2,8 +2,10 @@
 """Compare multi-tenant browser signup on disposable Fizzy and Rizzy MySQL databases."""
 
 import http.cookiejar
+import concurrent.futures
 import json
 import re
+import threading
 import urllib.parse
 import urllib.request
 
@@ -98,3 +100,75 @@ def check(target):
             "account_created": 302, "authenticated_redirect": 302,
             "authenticated_post": 302, "blank_json_name": 422,
             "account_count_delta": 1}
+
+
+def check_rate_limit(target, invalid=False, json_format=False):
+    target["opener"] = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+    status, _, page = request(target, "/signup/new", accept="text/html")
+    assert status == 200, (target["name"], "rate-limit signup page", status)
+    token = re.search(rb'<meta name="csrf-token" content="([^"]+)"', page)
+    csrf = token.group(1).decode() if token else None
+    email = "invalid" if invalid else "rate-limited@example.test"
+    body = {"signup": {"email_address": email}} if json_format else urllib.parse.urlencode(
+        {"signup[email_address]": email}).encode()
+    before = (count(target, "identities"), count(target, "magic_links"))
+    outcomes = []
+    for number in range(11):
+        status, headers, _ = request(target, "/signup", "POST", body,
+                                     accept="application/json" if json_format else "text/html",
+                                     csrf=csrf)
+        outcomes.append((status, path(headers.get("Location", ""))))
+        if number < 10:
+            expected = (422, "") if invalid else (
+                (201, "") if json_format else (302, "/session/magic_link"))
+            assert outcomes[-1] == expected, (
+                target["name"], number, outcomes[-1])
+    assert outcomes[-1] == (302, "/signup/new"), (
+        target["name"], "rate limit", outcomes[-1])
+    after = (count(target, "identities"), count(target, "magic_links"))
+    assert (after[0] - before[0], after[1] - before[1]) == (
+        (0, 0) if invalid else (1, 10)), (target["name"], "rate-limit records", before, after)
+    status, _, page = request(target, "/signup/new", accept="text/html")
+    assert status == 200, (target["name"], "rate-limit landing", status)
+    alert_visible = b"Try again later." in page
+    assert alert_visible, (target["name"], "rate-limit flash missing")
+    status, _, page = request(target, "/signup/new", accept="text/html")
+    assert status == 200, (target["name"], "rate-limit second landing", status)
+    alert_cleared = b"Try again later." not in page
+    assert alert_cleared, (target["name"], "rate-limit flash persisted")
+    return {"outcomes": outcomes, "identity_delta": after[0] - before[0],
+            "link_delta": after[1] - before[1],
+            "alert_visible": alert_visible, "alert_cleared": alert_cleared}
+
+
+def check_rate_limit_cluster(target, urls):
+    email = "cluster-rate-limited@example.test"
+    before = (count(target, "identities"), count(target, "magic_links"))
+
+    def submit(url):
+        isolated = {**target, "url": url,
+                    "opener": urllib.request.build_opener(NoRedirect())}
+        status, headers, raw = request(isolated, "/signup", "POST",
+                                       {"signup": {"email_address": email}})
+        return status, path(headers.get("Location", "")), raw[:100]
+
+    first = submit(urls[0])
+    assert first[:2] == (201, ""), (target["name"], "first cluster signup", first)
+    barrier = threading.Barrier(23)
+
+    def concurrent_submit(index):
+        barrier.wait(timeout=10)
+        return submit(urls[index % len(urls)])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=23) as pool:
+        results = list(pool.map(concurrent_submit, range(23)))
+    statuses = sorted((status, redirect) for status, redirect, _ in [first, *results])
+    assert set(statuses) <= {(201, ""), (302, "/signup/new")}, (
+        target["name"], "cluster response", results)
+    after = (count(target, "identities"), count(target, "magic_links"))
+    assert (after[0] - before[0], after[1] - before[1]) == (1, 10), (
+        target["name"], "cluster records", before, after, statuses)
+    return {"created": statuses.count((201, "")),
+            "throttled": statuses.count((302, "/signup/new")),
+            "identity_delta": after[0] - before[0], "link_delta": after[1] - before[1]}

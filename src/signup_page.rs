@@ -11,10 +11,17 @@ fn page(title: &str, content: &str) -> Html<String> {
     ))
 }
 
-pub(super) fn new() -> Html<String> {
+pub(super) fn new(rate_limited: bool) -> Html<String> {
+    let alert = if rate_limited {
+        "<turbo-frame id=\"flash\"><div class=\"flash\"><div class=\"flash__inner shadow\">Try again later.</div></div></turbo-frame>"
+    } else {
+        "<turbo-frame id=\"flash\"></turbo-frame>"
+    };
     page(
         "Sign up",
-        "<form method=\"post\" action=\"/signup\"><input type=\"email\" name=\"signup[email_address]\" autocomplete=\"username\" placeholder=\"Enter your email address…\" required autofocus><p>Enter your email to create an account.</p><button id=\"log_in\" type=\"submit\">Let’s go →</button></form>",
+        &format!(
+            "{alert}<form method=\"post\" action=\"/signup\"><input type=\"email\" name=\"signup[email_address]\" autocomplete=\"username\" placeholder=\"Enter your email address…\" required autofocus><p>Enter your email to create an account.</p><button id=\"log_in\" type=\"submit\">Let’s go →</button></form>"
+        ),
     )
 }
 

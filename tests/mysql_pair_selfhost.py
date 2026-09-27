@@ -50,7 +50,9 @@ from users_events_html_parity import check as user_events_check  # noqa: E402
 from route_get_status_parity import run as route_get_run  # noqa: E402
 from route_get_valid_parity import run as route_get_valid_run, run_html as route_get_valid_html_run  # noqa: E402
 from filters_paired_parity import check as filters_browser_check  # noqa: E402
-from signup_paired_parity import check as signup_browser_check  # noqa: E402
+from signup_paired_parity import (check as signup_browser_check,  # noqa: E402
+                                  check_rate_limit as signup_rate_limit_check,
+                                  check_rate_limit_cluster as signup_rate_limit_cluster_check)
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
 from account_cancellation_mysql_parity import (age_cancellation,  # noqa: E402
@@ -75,7 +77,9 @@ def main():
                                           "step-read", "public-page", "join-code",
                                           "user-events", "route-get", "route-get-contract",
                                           "route-get-html", "route-get-valid", "route-get-valid-html",
-                                          "filters-browser", "signup-browser",
+                                          "filters-browser", "signup-browser", "signup-rate-limit",
+                                          "signup-rate-limit-invalid", "signup-rate-limit-json",
+                                          "signup-rate-limit-cluster",
                                           "passkeys-html",
                                           "passkeys-flow", "auth-format", "account-cancellation",
                                           "account-cancellation-retention",
@@ -105,13 +109,13 @@ def main():
             fizzy_dir.mkdir()
             rizzy_dir.mkdir()
             source_settings = source_env(fizzy_dir, 1, host, port, source_dbs)
-            if args.suite in ("signup-browser", "account-cancellation", "account-cancellation-retention",
+            if args.suite in ("signup-browser", "signup-rate-limit", "signup-rate-limit-invalid", "signup-rate-limit-json", "signup-rate-limit-cluster", "account-cancellation", "account-cancellation-retention",
                               "account-cancellation-concurrent", "account-cancellation-mail",
                               "account-cancellation-mail-concurrent"):
                 source_settings["MULTI_TENANT"] = "true"
             fizzy_env, fizzy_credentials = prepare_source(fizzy_dir, 1, source_settings)
             local_rust_env = rust_env(rizzy_dir, host, port, rust_db)
-            if args.suite in ("signup-browser", "account-cancellation", "account-cancellation-retention",
+            if args.suite in ("signup-browser", "signup-rate-limit", "signup-rate-limit-invalid", "signup-rate-limit-json", "signup-rate-limit-cluster", "account-cancellation", "account-cancellation-retention",
                               "account-cancellation-concurrent", "account-cancellation-mail",
                               "account-cancellation-mail-concurrent"):
                 local_rust_env["RIZZY_MULTI_TENANT"] = "1"
@@ -255,6 +259,30 @@ def main():
             elif args.suite == "signup-browser":
                 source_result = signup_browser_check(source)
                 rust_result = signup_browser_check(rust)
+            elif args.suite in ("signup-rate-limit", "signup-rate-limit-invalid",
+                                "signup-rate-limit-json"):
+                invalid = args.suite == "signup-rate-limit-invalid"
+                json_format = args.suite == "signup-rate-limit-json"
+                source_result = signup_rate_limit_check(source, invalid=invalid,
+                                                        json_format=json_format)
+                rust_result = signup_rate_limit_check(rust, invalid=invalid,
+                                                      json_format=json_format)
+            elif args.suite == "signup-rate-limit-cluster":
+                fizzy_second = root / "fizzy-second"
+                rust_second = root / "rizzy-second"
+                fizzy_second.mkdir()
+                rust_second.mkdir()
+                second_fizzy_env = {**fizzy_env, "PIDFILE": str(fizzy_second / "puma.pid")}
+                process, fizzy_second_url = start_server(
+                    "fizzy", fizzy_second, second_fizzy_env, cpus)
+                processes.append(process)
+                process, rust_second_url = start_server(
+                    "rizzy", rust_second, rizzy_env, cpus)
+                processes.append(process)
+                source_result = signup_rate_limit_cluster_check(
+                    source, [fizzy_url, fizzy_second_url])
+                rust_result = signup_rate_limit_cluster_check(
+                    rust, [rizzy_url, rust_second_url])
             elif args.suite in ("account-cancellation", "account-cancellation-retention",
                                "account-cancellation-concurrent", "account-cancellation-mail",
                                "account-cancellation-mail-concurrent"):
@@ -441,6 +469,11 @@ def main():
                 print("Disposable MySQL saved-filter browser lifecycle matched pinned Fizzy")
             elif args.suite == "signup-browser":
                 print("Disposable MySQL multi-tenant browser signup matched pinned Fizzy")
+            elif args.suite in ("signup-rate-limit", "signup-rate-limit-invalid",
+                                "signup-rate-limit-json"):
+                print(f"Disposable MySQL {args.suite} matched pinned Fizzy")
+            elif args.suite == "signup-rate-limit-cluster":
+                print("Two-process MySQL signup burst matched pinned Fizzy and honored the shared limit")
             elif args.suite == "account-cancellation":
                 print("Disposable MySQL owner cancellation and retained records matched pinned Fizzy")
             elif args.suite == "account-cancellation-retention":

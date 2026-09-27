@@ -949,6 +949,21 @@ establish full signup parity, including signup rate-limit redirects, tenant
 limit behavior in a fresh single-tenant run, exact page styling, or concurrent
 account creation.
 
+The paired `signup-rate-limit`, `signup-rate-limit-invalid`, and
+`signup-rate-limit-json` suites now exercise eleven requests each on fresh
+disposable MySQL databases. Fizzy and Rizzy both handle the first ten requests
+in the relevant format, redirect the eleventh to `/signup/new`, create no
+identity or magic link for the excess request, and display "Try again later."
+once on the redirected page. Invalid emails count toward the source's limit,
+so Rizzy now checks the signup limit before validation. The MySQL attempt
+counter now holds a per-bucket database advisory lock across count and insert;
+SQLite begins an immediate write transaction for the same operation. The
+`signup-rate-limit-cluster` suite starts two Fizzy and two Rizzy processes on
+separate shared MySQL databases, submits one signup then 23 concurrent signups
+to each pair, and checks that exactly ten magic links were created and 14
+requests were throttled in both. This verifies the tested burst, not every
+rate-limit action or distributed capacity under sustained load.
+
 `tests/mysql_pair_selfhost.py route-get` checks the status code and content type
 of 92 distinct pinned Fizzy GET paths against Rizzy, using a JSON request and
 absent resource identifiers on fresh paired MySQL databases. All 92 matched.
