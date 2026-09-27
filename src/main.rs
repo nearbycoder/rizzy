@@ -12941,12 +12941,11 @@ async fn set_card_reading(
     p.write()?;
     let card = card(app, p, number).await?;
     let card_id: String = card.get("id");
-    let board_id: String = card.get("board_id");
     let timestamp = now();
     let cutoff = (Utc::now() - chrono::Duration::minutes(5))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+    let (mut tx, board_id) =
+        begin_card_board_write(app, &card_id, &card.get::<String, _>("board_id")).await?;
     let notification_id: Option<String> = sqlx::query_scalar(
         "SELECT id FROM notifications WHERE card_id=? AND user_id=? AND account_id=?",
     )

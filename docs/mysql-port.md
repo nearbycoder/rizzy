@@ -513,6 +513,13 @@ the same cards across four processes; with `RIZZY_TEST_MYSQL_CLIENT` configured,
 it checked representative persisted watch states after the race. Other
 cross-board write paths still need the same stale-board audit.
 
+Card read and unread mutations now also recheck the card's current board under
+the board-first lock before touching that board's access timestamp. A fresh
+four-process MySQL cluster run passed 200 card-reading requests racing with
+moves of those cards to another board, alongside the existing mixed phases.
+The check found no HTTP failures and verified representative destination
+boards; it does not cover every notification or access transition.
+
 Assignments now have a stored `updated_at` on both databases. MySQL startup
 adds and backfills that column on existing databases before installing the
 legacy-insert trigger; a four-row upgrade, fresh schema, direct legacy insert,
