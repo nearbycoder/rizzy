@@ -122,6 +122,7 @@ async fn record_attachment_change_tx(
 
 pub(super) async fn record_board_transfer_tx(
     tx: &mut sqlx::Transaction<'_, Db>,
+    mysql: bool,
     account_id: &str,
     card_id: &str,
     old_board_id: &str,
@@ -129,7 +130,15 @@ pub(super) async fn record_board_transfer_tx(
     user_id: &str,
     request_id: &str,
 ) -> Result<()> {
-    let rows = sqlx::query("SELECT a.record_type,a.record_id,SUM(b.byte_size) AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id=?) OR (a.record_type='Comment' AND a.record_id IN (SELECT id FROM comments WHERE card_id=?))) GROUP BY a.record_type,a.record_id")
+    let sum = if mysql {
+        "CAST(SUM(b.byte_size) AS SIGNED)"
+    } else {
+        "SUM(b.byte_size)"
+    };
+    let query = format!(
+        "SELECT a.record_type,a.record_id,{sum} AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id=?) OR (a.record_type='Comment' AND a.record_id IN (SELECT id FROM comments WHERE card_id=?))) GROUP BY a.record_type,a.record_id"
+    );
+    let rows = sqlx::query(&query)
         .bind(account_id)
         .bind(card_id)
         .bind(card_id)

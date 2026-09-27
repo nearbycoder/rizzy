@@ -166,6 +166,12 @@ attachments and adds only the missing byte delta; `materialize-storage` drains
 pending totals. Account import now writes per-board reconciliation entries from
 its restored attachments and materializes the account total before completion;
 `tests/account_import.py` checks those values against the ZIP.
+`tests/mysql_storage_materialization.py` now checks the same storage ledger on
+a fresh MySQL 8.4.11 database, including Card and Comment transfer entries,
+two concurrent totals workers, missing-entry reconciliation, 16 concurrent
+embed writes, and file cleanup. A MySQL `SUM(byte_size)` decimal mapping caused
+the initial image-bearing board move to return 500; casting it to a signed
+integer fixed the route. A fresh paired SQLite ledger run still matched Fizzy.
 `tests/storage_embed_update_parity.py` compares both apps through empty, null,
 plain-text, and replacement updates of card and board embeds; card detail,
 list, activity, and ledger states match in that fixture. Fizzy retains an embed
@@ -173,8 +179,8 @@ when rich text becomes empty or null and detaches it on a nonempty edit without
 the embed. `tests/embed_parity.py` also matches rendered Action Text after
 Rizzy began using blob analysis metadata, rather than locally detected image
 dimensions, for the immediate HTML response. Periodic reconciliation, other
-Action Text transitions, and MySQL execution of these
-new paths remain open. `tests/storage_request_id_parity.py` now checks both
+Action Text transitions, and the remaining MySQL rich-text paths remain open.
+`tests/storage_request_id_parity.py` now checks both
 apps' generated, sanitized, and truncated `X-Request-Id` response headers,
 including a 404, and matches request IDs on attachment, transfer, and deletion
 ledger entries. Background-job request context and untested request paths

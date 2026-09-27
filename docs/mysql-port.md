@@ -279,10 +279,19 @@ search throughput.
 
 Remaining database work:
 
-The new storage entry and total tables are included in the generated MySQL
-schema, but their recording, reconciliation, and materialization paths have
-only been exercised on SQLite. They need a live MySQL install and concurrent
-write check before this part of the port is considered verified.
+The storage entry and total tables now have a live MySQL 8.4.11 regression in
+`tests/mysql_storage_materialization.py`. A fresh database checks card image,
+card embed, and comment embed recording; Card and Comment transfer entries;
+two concurrent materialization commands and no-op replay; a deleted ledger
+entry repaired by reconciliation; account and board totals; and attachment
+file cleanup. Eight clients also attach 16 card embeds concurrently on one
+board before two workers materialize its total. The first run exposed MySQL's
+decimal result type for `SUM(byte_size)` in the card-transfer path, which SQLx
+`Any` could not map; Rizzy now casts that sum to a signed integer on MySQL.
+The existing SQLite source-versus-Rust ledger comparison and SQLite
+materialization suite still pass. Larger attachment datasets, sustained
+concurrent writes, scheduled-worker behavior, and MySQL upgrade paths remain
+unverified.
 
 1. Replace the remaining SQLite startup migrations and `PRAGMA` queries with
    versioned MySQL migrations, including upgrades beyond the first backfill.

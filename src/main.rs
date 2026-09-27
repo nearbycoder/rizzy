@@ -13291,6 +13291,7 @@ async fn move_card(
         }
         storage::record_board_transfer_tx(
             &mut tx,
+            app.mysql,
             &p.account_id,
             &card_id,
             &old_board_id,
