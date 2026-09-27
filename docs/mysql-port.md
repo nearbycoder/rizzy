@@ -72,8 +72,13 @@ SQLite's `DELETE RETURNING`. Five repeated MySQL runs passed after clearing the
 dedicated test database's authentication-attempt history between runs; the
 SQLite passkey flow still passes. The pinned
 Fizzy MySQL passkey controller and library suites passed 19 tests and 64
-assertions. This checks one synthetic authenticator and one local origin; real
-browser devices, multiple credentials, and deployment origins remain.
+assertions. Fresh paired `tests/mysql_pair_selfhost.py passkeys-flow` runs now
+exercise registration, naming, signed login, replay, bad signatures, and
+deletion on both apps through account-scoped management routes. The paired
+`passkeys-html` suite checks those route links, unscoped redirect, and
+missing-passkey responses. This checks one synthetic authenticator and one
+local origin; real browser devices, multiple credentials, and deployment
+origins remain.
 `tests/mysql_draft_cluster.py` runs the existing browser draft parity flow on
 MySQL, then creates a draft on one Rizzy process, edits it on a second, publishes
 it on the first, and verifies the card and publication event from the second.

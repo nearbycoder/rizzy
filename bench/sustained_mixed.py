@@ -90,13 +90,15 @@ def start_server(name, directory, env, cpus):
     cwd = SOURCE if name == "fizzy" else ROOT
     local_env = {**env, "PORT": str(port)} if name == "fizzy" else {
         **env, "RIZZY_BIND": address}
+    url = "http://" + address
+    if name == "rizzy":
+        local_env.setdefault("RIZZY_PASSKEY_ORIGIN", f"http://localhost:{port}")
     log_path = directory / f"{name}.log"
     with log_path.open("w") as log:
         process = subprocess.Popen(command, cwd=cwd, env=local_env,
                                    stdout=log, stderr=subprocess.STDOUT,
                                    start_new_session=True,
                                    preexec_fn=lambda: os.sched_setaffinity(0, cpus))
-    url = "http://" + address
     for _ in range(200):
         if process.poll() is not None:
             raise RuntimeError(f"{name} exited: {log_path.read_text()[-2000:]}")

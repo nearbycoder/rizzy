@@ -4115,15 +4115,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/session/passkey", post(passkeys::sign_in))
         .route("/session/menu", get(account_cancellation::menu))
         .route("/my/passkey_challenge", post(passkeys::challenge))
-        .route("/my/passkeys", get(passkeys::index).post(passkeys::register))
-        .route("/{account}/my/passkeys", get(passkeys::index_scoped))
-        .route("/my/passkeys/{id}/edit", get(passkeys::edit))
+        .route("/my/passkeys", get(passkeys::unscoped_redirect).post(passkeys::unscoped_redirect))
+        .route("/{account}/my/passkeys", get(passkeys::index_scoped).post(passkeys::register_scoped))
+        .route("/my/passkeys/{id}/edit", get(passkeys::unscoped_redirect))
+        .route("/{account}/my/passkeys/{id}/edit", get(passkeys::edit_scoped))
         .route(
             "/my/passkeys/{id}",
-            axum::routing::put(passkeys::update)
-                .patch(passkeys::update)
-                .post(passkeys::form_update_or_delete)
-                .delete(passkeys::destroy),
+            axum::routing::put(passkeys::unscoped_redirect)
+                .patch(passkeys::unscoped_redirect)
+                .post(passkeys::unscoped_redirect)
+                .delete(passkeys::unscoped_redirect),
+        )
+        .route(
+            "/{account}/my/passkeys/{id}",
+            axum::routing::put(passkeys::update_scoped)
+                .patch(passkeys::update_scoped)
+                .post(passkeys::form_update_or_delete_scoped)
+                .delete(passkeys::destroy_scoped),
         )
         .route(
             "/session/transfers/{token}",

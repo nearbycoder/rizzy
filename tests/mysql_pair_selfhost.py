@@ -48,6 +48,7 @@ from public_page_html_parity import run as public_page_run  # noqa: E402
 from join_code_html_parity import check as join_code_check  # noqa: E402
 from users_events_html_parity import check as user_events_check  # noqa: E402
 from route_get_status_parity import run as route_get_run  # noqa: E402
+from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 
 
 def main():
@@ -59,7 +60,8 @@ def main():
                                           "column-turbo", "card-previews", "account-card",
                                           "board-views", "board-settings", "webhooks-html",
                                           "step-read", "public-page", "join-code",
-                                          "user-events", "route-get"))
+                                          "user-events", "route-get", "passkeys-html",
+                                          "passkeys-flow"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -191,6 +193,36 @@ def main():
             elif args.suite == "route-get":
                 source_result = route_get_run(source)
                 rust_result = route_get_run(rust)
+            elif args.suite == "passkeys-html":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                source_result = passkeys_html_check(source)
+                rust_result = passkeys_html_check(rust)
+            elif args.suite == "passkeys-flow":
+                source_test_env = {**os.environ, "PASSKEY_TARGET": "fizzy",
+                                   "FIZZY_URL": source["url"], "FIZZY_EMAIL": source["email"],
+                                   "FIZZY_ACCOUNT": source["account"],
+                                   "FIZZY_MYSQL_DATABASE": source_dbs[""],
+                                   "FIZZY_MYSQL_CLIENT": client,
+                                   "FIZZY_MYSQL_HOST": host,
+                                   "FIZZY_MYSQL_PORT": str(port)}
+                rust_test_env = {**os.environ, "PASSKEY_TARGET": "rizzy",
+                                 "RIZZY_URL": rust["url"].replace("127.0.0.1", "localhost"),
+                                 "RIZZY_EMAIL": rust["email"],
+                                 "RIZZY_ACCOUNT": rust["account"],
+                                 "RIZZY_TEST_MYSQL_URL": local_rust_env["RIZZY_DATABASE_URL"],
+                                 "RIZZY_TEST_MYSQL_CLIENT": client}
+                source_flow = subprocess.run(
+                    ["python3", "tests/passkey_parity.py"], cwd=ROOT,
+                    env=source_test_env, capture_output=True, text=True)
+                assert source_flow.returncode == 0, source_flow.stdout + source_flow.stderr
+                source_result = source_flow.stdout.strip()
+                rust_flow = subprocess.run(
+                    ["python3", "tests/passkey_parity.py"], cwd=ROOT,
+                    env=rust_test_env, capture_output=True, text=True)
+                assert rust_flow.returncode == 0, rust_flow.stdout + rust_flow.stderr
+                rust_result = rust_flow.stdout.strip()
             elif args.suite in ("card-controls", "card-board", "card-edit",
                                  "assignment", "reaction", "column-turbo",
                                  "card-previews", "account-card"):
@@ -259,6 +291,10 @@ def main():
             elif args.suite == "route-get":
                 print(f"Disposable MySQL GET error contracts matched pinned Fizzy: "
                       f"{len(source_result)} routes")
+            elif args.suite == "passkeys-html":
+                print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
+            elif args.suite == "passkeys-flow":
+                print("Disposable MySQL passkey registration, management, and login matched pinned Fizzy")
             elif args.suite in ("card-controls", "card-board", "card-edit",
                                      "assignment", "reaction", "column-turbo",
                                      "card-previews", "account-card"):

@@ -81,8 +81,8 @@ pub(super) async fn show(
             String::new()
         };
         format!(
-            "<section class=\"profile-card\"><h2>Devices</h2><p><a class=\"button button--secondary\" href=\"/my/passkeys\">Manage passkeys</a></p><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
-            principal.slug
+            "<section class=\"profile-card\"><h2>Devices</h2><p><a class=\"button button--secondary\" href=\"/{}/my/passkeys\">Manage passkeys</a></p><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
+            principal.slug, principal.slug
         )
     } else {
         String::new()

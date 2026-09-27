@@ -6,6 +6,7 @@ Each run seeds a fresh account and keeps its records for inspection.
 """
 
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -39,8 +40,9 @@ def main():
                "RIZZY_DEV_MAGIC_LINKS": "1",
                "RIZZY_DISABLE_WEBHOOK_DELIVERY": "1",
                "RIZZY_DISABLE_PUSH_DELIVERY": "1"}
-        subprocess.run([BINARY, "seed"], cwd=ROOT, env=env,
-                       check=True, capture_output=True, text=True)
+        seeded = subprocess.run([BINARY, "seed"], cwd=ROOT, env=env,
+                                check=True, capture_output=True, text=True)
+        account = re.search(r"Account: (\d+)", seeded.stdout).group(1)
         from mysql_core import mysql_scalar
         mysql_scalar(url, "DELETE FROM authentication_attempts")
         log_path = Path(temp) / "server.log"
@@ -61,7 +63,8 @@ def main():
                 raise RuntimeError("Rizzy did not start: " + log_path.read_text()[-3000:])
             result = subprocess.run(
                 ["python3", "tests/passkey_parity.py"], cwd=ROOT,
-                env={**env, "RIZZY_URL": base, "RIZZY_EMAIL": email, "PASSKEY_RACE": "1"},
+                env={**env, "RIZZY_URL": base, "RIZZY_EMAIL": email,
+                     "RIZZY_ACCOUNT": account, "PASSKEY_RACE": "1"},
                 capture_output=True, text=True,
             )
             if result.returncode:
