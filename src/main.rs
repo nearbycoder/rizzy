@@ -1145,6 +1145,19 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
             .await?;
         tx.commit().await?;
     }
+    let rich_text_backfilled: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='rich_text_records_backfill_v1')",
+    )
+    .fetch_one(&db)
+    .await?;
+    if rich_text_backfilled == 0 {
+        rich_text_records::backfill(&db, true).await?;
+        sqlx::query(
+            "INSERT INTO app_secrets(name,value) VALUES('rich_text_records_backfill_v1','done')",
+        )
+        .execute(&db)
+        .await?;
+    }
     let missing_join_codes = sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
         .fetch_all(&db)
         .await?;
@@ -3646,7 +3659,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .execute(&db)
         .await?;
-        rich_text_records::backfill(&db).await?;
+        rich_text_records::backfill(&db, false).await?;
         let missing_join_codes=sqlx::query("SELECT a.id FROM accounts a WHERE NOT EXISTS(SELECT 1 FROM account_join_codes j WHERE j.account_id=a.id)")
         .fetch_all(&db).await?;
         for account in missing_join_codes {

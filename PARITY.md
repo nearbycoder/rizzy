@@ -251,6 +251,13 @@ run passed form creation, left/right reordering, rename, deletion redirect,
 and unsupported-format side effects; stream action sequences matched after
 per-app generated IDs were excluded. The SQLite column fixture still passes.
 These are selected paths, not complete interaction or permission parity.
+The paired `card-previews` run matched the 15-card first and two-card second
+Turbo preview pages after new cards arrived; `account-card` matched JSON
+creation and the browser draft redirect. A legacy MySQL database with board,
+card, and comment text but no Action Text identity rows now backfills those
+three rows on startup. `tests/mysql_rich_text_backfill.py` checks the result and
+repeat initialization, and the paired MySQL embed flow still passes. This is
+upgrade coverage for those record types, not full archive or attachment parity.
 
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process

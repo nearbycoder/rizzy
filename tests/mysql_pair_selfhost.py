@@ -37,6 +37,8 @@ from card_edit_html_parity import check as card_edit_check  # noqa: E402
 from assignment_html_parity import check as assignment_check  # noqa: E402
 from reaction_html_parity import check as reaction_check  # noqa: E402
 from column_turbo_parity import check as column_turbo_check  # noqa: E402
+from card_previews_html_parity import run as card_previews_run  # noqa: E402
+from account_card_create_parity import check as account_card_check  # noqa: E402
 
 
 def main():
@@ -45,7 +47,7 @@ def main():
                                           "named-column", "column-cache", "column-show-cache",
                                           "draft", "card-image", "embeds", "card-controls",
                                           "card-board", "card-edit", "assignment", "reaction",
-                                          "column-turbo"))
+                                          "column-turbo", "card-previews", "account-card"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -133,7 +135,8 @@ def main():
                 source_result = embed_run(source)
                 rust_result = embed_run(rust)
             elif args.suite in ("card-controls", "card-board", "card-edit",
-                                 "assignment", "reaction", "column-turbo"):
+                                 "assignment", "reaction", "column-turbo",
+                                 "card-previews", "account-card"):
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
@@ -148,7 +151,9 @@ def main():
                              "card-board": card_board_check,
                              "card-edit": card_edit_check,
                              "assignment": assignment_check,
-                             "reaction": reaction_check}[args.suite]
+                             "reaction": reaction_check,
+                             "card-previews": card_previews_run,
+                             "account-card": account_card_check}[args.suite]
                     source_result = check(source)
                     rust_result = check(rust)
             else:
@@ -179,7 +184,8 @@ def main():
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
             elif args.suite in ("card-controls", "card-board", "card-edit",
-                                     "assignment", "reaction", "column-turbo"):
+                                     "assignment", "reaction", "column-turbo",
+                                     "card-previews", "account-card"):
                 print(f"Disposable MySQL {args.suite} browser workflow matched pinned Fizzy")
             else:
                 print(f"Disposable MySQL core workflow matched pinned Fizzy: "

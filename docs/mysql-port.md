@@ -112,6 +112,14 @@ format effects. It compares stream action order after excluding generated
 column IDs; each app's fixture still checks its stream targets. The SQLite
 column Turbo fixture passed after the harness refactor. Other multiuser and
 concurrent column operations remain to be compared.
+Fresh paired `card-previews` and `account-card` runs matched pinned Fizzy's
+preview pagination after card insertion and JSON/browser account card creation.
+`tests/mysql_rich_text_backfill.py` now verifies a one-time MySQL startup
+backfill for older board, card, and comment text lacking Action Text record
+identities; a second initialization keeps exactly those three rows. The
+backfill uses set-based inserts and a schema-initialization marker. The paired
+MySQL rich-text embed flow passed after this migration change. Other upgrade
+states and Action Text transitions remain open.
 `tests/mysql_account_cancellation.py` checks the single-tenant cancellation
 guard, immediate access loss, day-29 retention, day-31 deletion of all
 account-scoped MySQL rows and dependent comments, file cleanup, and survival

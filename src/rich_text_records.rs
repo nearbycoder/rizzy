@@ -142,7 +142,17 @@ pub(super) async fn migrate(db: &DbPool) -> std::result::Result<(), sqlx::Error>
     Ok(())
 }
 
-pub(super) async fn backfill(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn backfill(db: &DbPool, mysql: bool) -> std::result::Result<(), sqlx::Error> {
+    if mysql {
+        for statement in [
+            "INSERT IGNORE INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) SELECT CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),c.account_id,'Card',c.id,'description',c.created_at,c.updated_at FROM cards c WHERE c.description<>'' AND NOT EXISTS(SELECT 1 FROM rich_text_records r WHERE r.record_type='Card' AND r.record_id=c.id AND r.name='description')",
+            "INSERT IGNORE INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) SELECT CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),c.account_id,'Comment',m.id,'body',m.created_at,COALESCE(m.updated_at,m.created_at) FROM comments m JOIN cards c ON c.id=m.card_id WHERE m.body<>'' AND NOT EXISTS(SELECT 1 FROM rich_text_records r WHERE r.record_type='Comment' AND r.record_id=m.id AND r.name='body')",
+            "INSERT IGNORE INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) SELECT CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),b.account_id,'Board',b.id,'description',b.created_at,b.updated_at FROM boards b WHERE b.public_description<>'' AND NOT EXISTS(SELECT 1 FROM rich_text_records r WHERE r.record_type='Board' AND r.record_id=b.id AND r.name='description')",
+        ] {
+            sqlx::query(statement).execute(db).await?;
+        }
+        return Ok(());
+    }
     let sources = [
         (
             "Card",
