@@ -2,6 +2,7 @@
 """Compare source and Rust webhook bodies without making outbound requests."""
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,18 @@ HOOKS = {
     "campfire": "https://example.invalid/rooms/123/456-room-name/messages",
     "basecamp": "https://example.invalid/123/integrations/webhook/buckets/456/chats/789/lines",
 }
+
+
+def stable(value):
+    if isinstance(value, dict):
+        return {key: "<generated>" if key in {
+            "id", "created_at", "updated_at", "last_active_at"
+        } else stable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [stable(item) for item in value]
+    if isinstance(value, str):
+        return re.sub(r"/(boards|users)/[^/]+", r"/\1/<generated>", value)
+    return value
 
 
 def api(target, path, method="GET", payload=None, expected=200):
@@ -68,6 +81,10 @@ def wire(target, ids):
             ruby = ('require "json"; d = Webhook::Delivery.find(' + json.dumps(delivery_id)
                     + '); puts JSON.generate({body: d.send(:payload), '
                     'content_type: d.send(:content_type)})')
+            if name == "generic":
+                result["generic_warm"] = json.loads(source_runner(target, ruby))
+                ruby = ruby.replace('d = Webhook::Delivery.find(',
+                                    'Rails.cache.clear; d = Webhook::Delivery.find(')
             result[name] = json.loads(source_runner(target, ruby))
         else:
             output = subprocess.run([str(RUST), "inspect-webhook", delivery_id], cwd=ROOT,
@@ -105,14 +122,16 @@ def main():
                 assert source[name] == rust[name], (name, source[name], rust[name])
             source_generic = json.loads(source["generic"]["body"])
             rust_generic = json.loads(rust["generic"]["body"])
+            warm_source_generic = json.loads(source["generic_warm"]["body"])
+            assert warm_source_generic["eventable"]["url"].startswith(
+                targets["fizzy"]["url"] + "/"), warm_source_generic["eventable"]["url"]
+            assert source_generic["eventable"]["url"].startswith(PUBLIC_URL + "/")
             assert source["generic"]["content_type"] == rust["generic"]["content_type"]
             assert shape(source_generic) == shape(rust_generic), (
                 shape(source_generic), shape(rust_generic))
-            assert source_generic["action"] == rust_generic["action"] == "card_published"
-            assert source_generic["eventable"]["title"] == rust_generic["eventable"]["title"] == TITLE
-            assert source_generic["board"]["name"] == rust_generic["board"]["name"]
-            assert source_generic["creator"]["name"] == rust_generic["creator"]["name"]
-            print("PASS exact Slack, Campfire, and Basecamp payload parity; generic content parity")
+            assert stable(source_generic) == stable(rust_generic), (
+                stable(source_generic), stable(rust_generic))
+            print("PASS exact Slack, Campfire, and Basecamp payload parity; full stable generic JSON parity")
         finally:
             for process in processes:
                 stop_server(process)

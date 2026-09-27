@@ -321,11 +321,15 @@ for generic, Campfire, and Basecamp hooks. `tests/webhook_wire_payload_parity.py
 creates equivalent published-card deliveries in disposable production Fizzy
 and Rizzy databases and compares the complete Slack, Campfire, and Basecamp
 content types and body bytes. It found and closed the source JSON serializer's
-`\u0026` and `\u003c` escaping difference. Generic JSON has matching structure
-and selected title, board, creator, and action values in that fixture; its
-complete values and bytes, Slack worker delivery, and external success and TLS paths
-remain open. The read-only `inspect-webhook` command exposes a queued Rust
-delivery body and content type for this diagnostic check without sending it.
+`\u0026` and `\u003c` escaping difference. The same test now compares the full
+generic JSON structure and every stable value after masking generated IDs,
+timestamps, and board/user IDs embedded in links. It clears Fizzy's JSON cache
+before rendering: a warm cache from the API request otherwise retains that
+request's local host in source webhook links instead of the configured public
+host. Cache-dependent generic output, exact JSON bytes, Slack worker delivery,
+and external success and TLS paths remain open. The read-only
+`inspect-webhook` command exposes a queued Rust delivery body and content type
+for this diagnostic check without sending it.
 
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 
