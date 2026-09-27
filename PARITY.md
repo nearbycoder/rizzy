@@ -75,9 +75,19 @@ hour row and the page had no console errors. The
 [post-grid Home run](bench/results/home-media-html-day-grid-98-2026-09-26.json)
 showed 148,727-byte Rust versus 216,774-byte source HTML and 6,500–7,679
 versus 308–403 requests/s across 8 and 32 clients, with zero HTTP errors.
-Remaining header/menu behavior, exact event dimensions, and many visual
-details still differ. Browser timezone preference persistence
+Remaining header/menu behavior and many visual details still differ. Browser timezone preference persistence
 and changes during a live session remain to be compared end to end.
+
+A fresh three-card 1280 × 800 Chromium comparison captured
+[Fizzy Home](docs/visual-baselines/fizzy-home-1280.png) and
+[Rizzy Home](docs/visual-baselines/rizzy-home-1280.png). Rizzy now uses the
+source desktop font scale, event spacing and text dimensions, centered time
+label and empty state, and source-sized header and footer controls. Measured
+grid heights were 477.8 px in Fizzy and 478.9 px in Rizzy; the first card was
+98.86 and 98.89 px tall. The browser rendered a local event time on the first
+visit despite the initial UTC response and reported no page errors. Colors,
+avatar treatment, exact icon artwork, menu behavior, and other screen states
+still need parity work. The existing paired Home media and add-card checks pass.
 
 The Home footer now opens source-shaped Pins and Notifications trays and an
 inline Search bar. The Pins HTML response contains rich card previews and

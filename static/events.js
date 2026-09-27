@@ -1,4 +1,15 @@
 const activity = document.getElementById('activity');
+const eventTime = new Intl.DateTimeFormat('en-US', { timeStyle: 'short' });
+const eventTimeTitle = new Intl.DateTimeFormat('en-US', { timeStyle: 'short', dateStyle: 'short' });
+function localizeEventTimes(root) {
+  for (const element of root.querySelectorAll('.event__timestamp[datetime]')) {
+    const date = new Date(element.getAttribute('datetime'));
+    if (Number.isNaN(date.getTime())) continue;
+    element.textContent = eventTime.format(date);
+    element.title = eventTimeTitle.format(date);
+  }
+}
+if (activity) localizeEventTimes(activity);
 if (activity && 'IntersectionObserver' in window) {
   const observer = new IntersectionObserver(async entries => {
     for (const entry of entries) {
@@ -13,6 +24,7 @@ if (activity && 'IntersectionObserver' in window) {
         const frame = fragment.querySelector(`turbo-frame[id="${link.dataset.frame}"]`);
         if (!frame) throw new Error('Activity page was unavailable');
         link.closest('turbo-frame').after(frame);
+        localizeEventTimes(frame);
         link.remove();
         const next = frame.querySelector('.day-timeline-pagination-link');
         if (next) observer.observe(next);
