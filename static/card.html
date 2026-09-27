@@ -78,6 +78,7 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 <dialog class="utility-panel" id="utility-panel"><button type="button" class="utility-close" aria-label="Close">×</button><h2 id="utility-title"></h2><input type="search" class="utility-search" id="utility-search" placeholder="Search all cards" aria-label="Search all cards" hidden><div class="utility-content" id="utility-content"></div></dialog>
 <script>
 const account=document.body.dataset.account,number=document.body.dataset.number;
+const cardRoot=document.getElementById('card');
 const backLink=document.getElementById('card-back-link');
 if(backLink){
   let remembered,referrer;
@@ -117,7 +118,7 @@ action(document.getElementById('closure'),'/closure','{{CLOSURE_METHOD}}');
 action(document.getElementById('watch'),'/watch','{{WATCH_METHOD}}');
 action(document.getElementById('pin'),'/pin','{{PIN_METHOD}}');
 action(document.getElementById('gold'),'/goldness','{{GOLD_METHOD}}');
-document.getElementById('remove-image')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/image`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not remove image');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
+cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#remove-image');if(!button)return;button.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/image`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not remove image');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 const cardHeader=document.querySelector('.card__header');
 cardHeader.addEventListener('click',async event=>{const trigger=event.target.closest('[data-tag-picker-url]');if(trigger){const dialog=trigger.closest('.card__tags').querySelector('.tag-dialog'),content=dialog.querySelector('.tag-dialog__content'),error=dialog.querySelector('.tag-dialog__error');error.textContent='';dialog.showModal();if(content.firstElementChild){content.querySelector('#tag-search')?.focus();return}content.textContent='Loading…';try{const response=await fetch(trigger.dataset.tagPickerUrl,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load tag picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!frame)throw Error('Tag picker missing');content.replaceChildren(document.importNode(frame,true));content.querySelector('#tag-search')?.focus()}catch(ex){content.textContent='';error.textContent=ex.message}return}const close=event.target.closest('.tag-dialog__close');if(close)close.closest('dialog').close()});
 cardHeader.addEventListener('input',event=>{if(event.target.id!=='tag-search')return;const value=event.target.value.toLocaleLowerCase();event.target.closest('.tag-dialog').querySelectorAll('.popup__item[data-filter-target]').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))});
@@ -127,8 +128,9 @@ chooseColumn.addEventListener('click',async()=>{if(!columnPicker.hidden){columnP
 async function chooseStage(button){if(button.disabled||button.getAttribute('aria-checked')==='true')return;const stage=button.dataset.stage;const action=stage==='not_now'?['/not_now','POST']:stage==='maybe'?['/triage','DELETE']:stage==='done'?['/closure','POST']:['/triage','POST'];button.disabled=true;try{await mutation(action[0],action[1],stage==='column'?{column_id:button.dataset.columnId}:undefined);location.reload()}catch(error){button.disabled=false;alert(error.message)}}
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 document.querySelector('.stage-rail').addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
-document.querySelectorAll('[data-step-id]').forEach(checkbox=>checkbox.addEventListener('change',async()=>{checkbox.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${checkbox.dataset.stepId}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{completed:checkbox.checked}})});if(!response.ok)throw Error('Could not update step');checkbox.closest('li').classList.toggle('is-completed',checkbox.checked)}catch(error){checkbox.checked=!checkbox.checked;alert(error.message)}finally{checkbox.disabled=false}}));
-document.getElementById('step-form').addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('new-step'),content=input.value.trim();if(!content)return;input.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not add step');location.reload()}catch(error){input.disabled=false;alert(error.message)}});
+const stepRoot=document.querySelector('.card__content');
+stepRoot.addEventListener('change',async event=>{const checkbox=event.target.closest('input[data-step-id]');if(!checkbox)return;checkbox.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${checkbox.dataset.stepId}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{completed:checkbox.checked}})});if(!response.ok)throw Error('Could not update step');checkbox.closest('li').classList.toggle('is-completed',checkbox.checked)}catch(error){checkbox.checked=!checkbox.checked;alert(error.message)}finally{checkbox.disabled=false}});
+stepRoot.addEventListener('submit',async event=>{if(event.target.id!=='step-form')return;event.preventDefault();const input=event.target.querySelector('#new-step'),content=input.value.trim();if(!content)return;input.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not add step');location.reload()}catch(error){input.disabled=false;alert(error.message)}});
 document.getElementById('edit-form').addEventListener('submit',async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;const error=document.getElementById('edit-error');error.textContent='';try{await mutation('','PATCH',{card:{title:document.getElementById('title').value,description:document.getElementById('description').value}});location.reload()}catch(ex){error.textContent=ex.message;button.disabled=false}});
 const commentList=document.getElementById('comments');
 const commentTimezone=document.querySelector('meta[name="timezone"]')?.content;
@@ -189,6 +191,21 @@ async function refreshLiveCard(force=false,revisionHint=null){
     const nextTitle=nextPage.querySelector('.card__title');
     const nextDescription=nextPage.querySelector('.card__description');
     if(!nextTitle||!nextDescription)return;
+    const nextCard=nextPage.getElementById('card');
+    if(nextCard){
+      cardRoot.classList.toggle('has-image',nextCard.classList.contains('has-image'));
+      const image=cardRoot.querySelector(':scope > .card-perma__image'),updatedImage=nextCard.querySelector(':scope > .card-perma__image');
+      if(image&&!updatedImage)image.remove();
+      else if(!image&&updatedImage)cardRoot.querySelector('#gold').before(document.importNode(updatedImage,true));
+      else if(image&&updatedImage&&image.getAttribute('src')!==updatedImage.getAttribute('src'))image.replaceWith(document.importNode(updatedImage,true));
+      const imageControl=cardRoot.querySelector(':scope > #remove-image, :scope > #image-upload-form');
+      const updatedControl=nextCard.querySelector(':scope > #remove-image, :scope > #image-upload-form');
+      const selectedFile=imageControl?.querySelector('input[type=file]')?.files?.length;
+      if(!selectedFile&&imageControl?.outerHTML!==updatedControl?.outerHTML){
+        imageControl?.remove();
+        if(updatedControl)cardRoot.querySelector('.card__header').before(document.importNode(updatedControl,true));
+      }
+    }
     if(!liveCardEditor.open){
       document.querySelector('.card__title').innerHTML=nextTitle.innerHTML;
       document.querySelector('.card__description').innerHTML=nextDescription.innerHTML;
@@ -210,6 +227,16 @@ async function refreshLiveCard(force=false,revisionHint=null){
     else if(!status&&nextStatus)document.querySelector('.card__header').append(document.importNode(nextStatus,true));
     const stageRail=document.querySelector('.stage-rail'),nextStageRail=nextPage.querySelector('.stage-rail');
     if(stageRail&&nextStageRail)stageRail.innerHTML=nextStageRail.innerHTML;
+    const stepSection=stepRoot.querySelector('section[aria-label="Steps"]'),nextStepSection=nextPage.querySelector('.card__content > section[aria-label="Steps"]');
+    if(stepSection&&nextStepSection&&stepSection.innerHTML!==nextStepSection.innerHTML){
+      const draft=stepSection.querySelector('#new-step'),draftValue=draft?.value||'';
+      const draftFocused=document.activeElement===draft,focusedStep=document.activeElement?.dataset?.stepId;
+      const cursorStart=draftFocused?draft.selectionStart:null,cursorEnd=draftFocused?draft.selectionEnd:null;
+      stepSection.innerHTML=nextStepSection.innerHTML;
+      const replacement=stepSection.querySelector('#new-step');
+      if(replacement){replacement.value=draftValue;if(draftFocused){replacement.focus();replacement.setSelectionRange(cursorStart,cursorEnd)}}
+      if(focusedStep)stepSection.querySelector(`input[data-step-id="${CSS.escape(focusedStep)}"]`)?.focus();
+    }
     for(const [selector,preserve] of [
       ['.card__board-label',null],
       ['.card__header .card__tags','dialog[open]'],
@@ -270,8 +297,7 @@ setInterval(()=>{if(!liveCardStream||liveCardStream.readyState!==EventSource.OPE
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshLiveCard()});
 </script>
 <script>
-const imageForm=document.getElementById('image-upload-form');
-document.getElementById('image-upload')?.addEventListener('change',event=>{if(event.currentTarget.files?.length)imageForm.requestSubmit()});
-imageForm?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('image-upload');if(!input.files?.length)return;const data=new FormData(imageForm);input.disabled=true;try{const response=await fetch(imageForm.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:data});if(!response.ok)throw Error('Could not attach image');location.reload()}catch(error){input.disabled=false;alert(error.message||String(error))}});
+cardRoot.addEventListener('change',event=>{if(event.target.id==='image-upload'&&event.target.files?.length)event.target.closest('form').requestSubmit()});
+cardRoot.addEventListener('submit',async event=>{const imageForm=event.target;if(imageForm.id!=='image-upload-form')return;event.preventDefault();const input=imageForm.querySelector('#image-upload');if(!input.files?.length)return;const data=new FormData(imageForm);input.disabled=true;try{const response=await fetch(imageForm.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:data});if(!response.ok)throw Error('Could not attach image');location.reload()}catch(error){input.disabled=false;alert(error.message||String(error))}});
 </script>
 </body></html>

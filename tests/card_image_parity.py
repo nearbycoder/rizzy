@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import sqlite3
 import time
 import urllib.error
 import urllib.parse
@@ -90,8 +91,19 @@ def run(target):
         assert status == 201, status
         status, headers, _ = call(target, image_path, bearer=False)
         assert status == 302 and "/rails/active_storage/" in headers["Location"], (status, headers)
+        def times():
+            with sqlite3.connect(target["db"]) as database:
+                return database.execute(
+                    "SELECT c.updated_at,c.last_active_at,b.updated_at FROM cards c "
+                    "JOIN boards b ON b.id=c.board_id WHERE c.number=?", (number,)
+                ).fetchone()
+        before_delete = times() if target.get("db") else None
+        if before_delete:
+            time.sleep(.05)
         status, _, raw = call(target, prefix + f"/cards/{number}/image.json", "DELETE")
         assert status == 204 and raw == b"", (status, raw[:150])
+        after_delete = times() if before_delete else None
+        delete_touch = tuple(before != after for before, after in zip(before_delete, after_delete)) if before_delete else None
         status, _, raw = call(target, prefix + f"/cards/{number}.json")
         assert status == 200 and json.loads(raw)["image_url"] is None, raw[:150]
         status, _, raw = call(target, prefix + "/rails/active_storage/direct_uploads", "POST", {"blob": blob})
@@ -105,7 +117,7 @@ def run(target):
         assert status == 201 and json.loads(raw)["image_url"], (status, raw[:150])
         return {"direct_upload": 200, "upload": 204, "attach": 200, "private_denial": 302,
                 "authorized_redirect": 302, "public_redirect": 302, "delete": 204,
-                "create_with_image": 201}
+                "create_with_image": 201, "delete_touch": delete_touch}
     finally:
         status, _, _ = call(target, prefix + f"/boards/{board['id']}", "DELETE")
         assert status == 204, status
@@ -116,7 +128,7 @@ def main():
     results = {}
     for name in names:
         target = {"url": os.environ[f"{name}_URL"], "account": os.environ[f"{name}_ACCOUNT"],
-                  "token": os.environ[f"{name}_TOKEN"]}
+                  "token": os.environ[f"{name}_TOKEN"], "db": os.environ.get(f"{name}_DB")}
         results[name] = run(target)
     if len(results) == 2:
         assert results["FIZZY"] == results["RIZZY"], results

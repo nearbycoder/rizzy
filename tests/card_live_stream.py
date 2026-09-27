@@ -24,7 +24,7 @@ def api(url, token, path, method="GET", payload=None):
         method=method,
     )
     with urllib.request.urlopen(request, timeout=10) as response:
-        return json.load(response)
+        return None if response.status == 204 else json.load(response)
 
 
 def subscribe(url, path, session):
@@ -95,7 +95,26 @@ def main():
                         break
                 else:
                     raise AssertionError("Viewer missed the external card revision")
-            print("Live card stream passed: three viewers, two cards, external writer")
+            step = api(second, token, path + "/steps", "POST",
+                       {"step": {"content": "External step"}})
+            for method, payload in (("PATCH", {"step": {"completed": True}}),
+                                    ("DELETE", None)):
+                expected = revision(path)
+                for _, response in streams[:2]:
+                    for _ in range(3):
+                        if event(response) == expected:
+                            break
+                    else:
+                        raise AssertionError("Viewer missed an external step revision")
+                api(second, token, path + "/steps/" + step["id"], method, payload)
+            expected = revision(path)
+            for _, response in streams[:2]:
+                for _ in range(3):
+                    if event(response) == expected:
+                        break
+                else:
+                    raise AssertionError("Viewer missed the deleted step revision")
+            print("Live card stream passed: three viewers, two cards, external writer and step changes")
         finally:
             for connection, _ in streams:
                 connection.close()

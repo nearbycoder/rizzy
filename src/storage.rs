@@ -2260,7 +2260,13 @@ pub(super) async fn delete_image(
     p.write()?;
     let card = card(&app, &p, &number).await?;
     let card_id: String = card.get("id");
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let (mut tx, _) =
+        begin_card_board_write(&app, &card_id, &card.get::<String, _>("board_id")).await?;
+    let attached: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE record_type='Card' AND name='image' AND record_id=?")
+        .bind(&card_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
     let keys = purge_card_images_tx(
         &mut tx,
         &p.account_id,
@@ -2270,6 +2276,14 @@ pub(super) async fn delete_image(
         Some(&p.request_id),
     )
     .await?;
+    if attached != 0 {
+        sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+            .bind(now())
+            .bind(&card_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     remove_files(keys).await;
     if headers.contains_key("x-rizzy-json-request") {
