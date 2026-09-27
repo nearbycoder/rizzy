@@ -65,7 +65,8 @@ def setup(name, directory, cpus):
             if index % 3 == 0:
                 description += "word " * 20
             expect(target, f"/boards/{board['id']}/cards", "POST",
-                   {"card": {"title": title, "description": description}}, 201)
+                   {"card": {"title": title, "description": description,
+                             "created_at": f"2026-01-02T00:00:{index:02d}.000Z"}}, 201)
         for index in range(110):
             expect(target, f"/boards/{board['id']}/cards", "POST", {"card": {
                 "title": f"tieproof item {index:03d}",
@@ -106,15 +107,15 @@ def main():
                     hits = api(target, path)
                     assert len(hits) == 1 and hits[0]["number"] == number, (name, term, hits)
                     assert f"/cards/{number}" in html(target, term), (name, term)
-            page_counts = {}
+            page_titles_by_app = {}
             for name, target in targets.items():
                 all_titles = []
                 for page in range(1, 5):
                     page_titles = titles(html(target, "tieproof", page))
                     all_titles.extend(re.sub(r"^# \d+ ", "", title) for title in page_titles)
                 assert len(all_titles) == len(set(all_titles)) == 110, (name, len(all_titles))
-                page_counts[name] = sorted(all_titles)
-            assert page_counts["fizzy"] == page_counts["rizzy"]
+                page_titles_by_app[name] = all_titles
+            assert page_titles_by_app["fizzy"] == page_titles_by_app["rizzy"]
             print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups and 110 equal-time hits also matched")
         finally:
             for process in reversed(processes):

@@ -183,13 +183,13 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                      FROM hits JOIN cards c ON c.id=hits.card_id
                     WHERE c.account_id=? AND c.status='published'
                       AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
-                    ORDER BY hits.hit_at DESC,COALESCE(hits.hit_id,hits.card_id) DESC LIMIT ? OFFSET ?
+                    ORDER BY hits.hit_at DESC,COALESCE(hits.hit_id,hits.card_id) ASC LIMIT ? OFFSET ?
                  ) SELECT page_hits.kind,page_hits.hit_id,page_hits.title_hl,page_hits.content_hl,
                           c.number,c.title,c.description,b.name board_name,m.body comment_body
                    FROM page_hits JOIN cards c ON c.id=page_hits.card_id
                    JOIN boards b ON b.id=c.board_id
                    LEFT JOIN comments m ON m.id=page_hits.hit_id
-                   ORDER BY page_hits.hit_at DESC,page_hits.sort_id DESC",
+                   ORDER BY page_hits.hit_at DESC,page_hits.sort_id ASC",
             )
             .bind(&search)
             .bind(&search)
