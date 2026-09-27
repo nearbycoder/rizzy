@@ -244,6 +244,20 @@ cloned from API-created records directly in each database; fixture insertion
 and card-creation side effects were outside the timed request. The larger
 results identify a remaining Rizzy write bottleneck, not greater scale.
 
+The [SQLite one-pass trial](results/column-delete-sqlite-single-pass-2026-09-27.json)
+combined unlinking and timestamp updates in a single `UPDATE`, matching the
+approach used by Rizzy's MySQL adapter. The column lifecycle parity test passed,
+but three fresh paired trials measured 24.8 ms median for Rizzy versus 14.9 ms
+for Fizzy at 10,000 cards, and 94.0 versus 32.9 ms at 30,000. This was worse
+than the earlier SQLite split-update results, so the one-pass change was
+reverted. The wide ordered column index includes `column_id`; assigning that
+field on every row is a likely cause, but this trial does not isolate its cost.
+A [same-day split-update recheck](results/column-delete-sqlite-split-recheck-2026-09-27.json)
+measured Rizzy medians of 22.2 and 74.8 ms at 10,000 and 30,000 cards,
+versus 24.8 and 94.0 ms for the one-pass trial. Its artifact records the
+release binary SHA-256 and Git revision; both trials used three fresh paired
+fixtures per size and the same two CPUs. The large delete still trails Fizzy.
+
 The [index trade-off probe](results/column-index-tradeoff-2026-09-26.json)
 uses `column_index_tradeoff.py` on three disposable copies of one 30,000-card
 Rizzy fixture. The current wide column index gave 0.019 ms median first-page

@@ -6,6 +6,7 @@ outside the timed request; only the authenticated DELETE is measured.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -16,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from card_workflow import expect
-from sustained_mixed import ROOT, prepare_rust, prepare_source, start_server, stop_server
+from sustained_mixed import ROOT, RUST, prepare_rust, prepare_source, start_server, stop_server
 
 
 def fixture(target, size, trial):
@@ -122,7 +123,12 @@ def main():
                                  "token": credentials["token"],
                                  "database": directory / ("db.sqlite3" if name == "fizzy"
                                                           else "rizzy.sqlite3")}
+            with RUST.open("rb") as binary:
+                binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
             result = {"source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+                      "rizzy_revision": subprocess.check_output(
+                          ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+                      "rizzy_binary_sha256": binary_sha256,
                       "cpus": cpus, "workers": {"fizzy": 2, "rizzy": 1},
                       "trials": args.trials, "sizes": {}}
             for size in args.sizes:
