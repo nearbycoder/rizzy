@@ -14560,21 +14560,27 @@ async fn toggle_tag(
         url::form_urlencoded::parse(&body)
             .find(|(key, _)| key == "tag_title")
             .map(|(_, value)| value.into_owned())
-            .ok_or_else(|| bad("tag_title is required"))?
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "tag_title is required"))?
     } else {
         let json: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
-        required(&json, "tag_title")?
+        string(&json, "tag_title")
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "tag_title is required"))?
     };
+    if tag_title.trim().is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "tag_title is required"));
+    }
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let title = tag_title
-        .trim()
-        .trim_start_matches('#')
-        .trim()
+    // Fizzy strips outer whitespace, removes exactly one leading hash, then
+    // normalizes the stored title to lowercase. Spaces after the hash remain.
+    let stripped = tag_title.trim();
+    let title = stripped
+        .strip_prefix('#')
+        .unwrap_or(stripped)
         .to_lowercase();
-    if title.is_empty() {
-        return Err(bad("tag_title is required"));
+    if title.starts_with('#') {
+        return Err(bad("Tag title cannot start with #"));
     }
     let card_id: String = c.get("id");
     let (mut tx, _) =
