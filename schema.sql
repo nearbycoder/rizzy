@@ -445,11 +445,15 @@ CREATE TABLE IF NOT EXISTS tags (
   account_id TEXT NOT NULL REFERENCES accounts(id),
   title TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(account_id,title)
 );
 CREATE TABLE IF NOT EXISTS taggings (
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  id TEXT,
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(card_id,tag_id)
 );
 CREATE TABLE IF NOT EXISTS assignments (

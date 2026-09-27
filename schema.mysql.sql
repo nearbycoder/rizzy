@@ -404,11 +404,15 @@ CREATE TABLE `tags` (
   `account_id` VARCHAR(64) NOT NULL,
   `title` VARCHAR(255) NOT NULL,
   `created_at` LONGTEXT NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `taggings` (
   `card_id` VARCHAR(64) NOT NULL,
   `tag_id` VARCHAR(64) NOT NULL,
+  `id` VARCHAR(64) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL,
   PRIMARY KEY (`card_id`, `tag_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `assignments` (

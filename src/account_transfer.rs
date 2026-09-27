@@ -32,7 +32,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "tags",
-        query: "SELECT id,account_id,created_at,title,created_at updated_at FROM tags WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,created_at,title,COALESCE(NULLIF(updated_at,''),created_at) updated_at FROM tags WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
@@ -98,7 +98,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "taggings",
-        query: "SELECT NULL id,c.account_id,t.card_id,c.created_at,t.tag_id,c.created_at updated_at FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=? ORDER BY t.card_id,t.tag_id",
+        query: "SELECT t.id,c.account_id,t.card_id,t.created_at,t.tag_id,t.updated_at FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=? ORDER BY t.card_id,t.tag_id",
         booleans: &[],
         json_fields: &[],
     },

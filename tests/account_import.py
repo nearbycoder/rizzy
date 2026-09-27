@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "target/debug/rizzy"
 FRESH_UPDATE_TABLES = {
     "user_settings": "user_settings_records",
+    "tags": "tags",
+    "taggings": "taggings",
     "boards": "boards",
     "columns": "columns",
     "board_publications": "board_publications",

@@ -142,6 +142,10 @@ def main():
             comment = api(target, f"/cards/{card['number']}/comments", "POST",
                           {"comment": {"body": "An observation"}}, 201)
             mutate(target, f"/cards/{card['number']}/taggings", payload={"tag_title": "#transfer"})
+            with sqlite3.connect(db_path) as db:
+                tag_record = db.execute("SELECT id,title,created_at,updated_at FROM tags WHERE title='transfer'").fetchone()
+                tagging_record = db.execute("SELECT id,card_id,tag_id,created_at,updated_at FROM taggings WHERE card_id=?", (card["id"],)).fetchone()
+            assert tag_record and tagging_record and tagging_record[2] == tag_record[0]
             mutate(target, f"/cards/{card['number']}/assignments", payload={"assignee_id": owner["id"]})
             mutate(target, f"/cards/{card['number']}/goldness")
             with sqlite3.connect(db_path) as db:
@@ -251,6 +255,11 @@ def main():
                 step_data = json.loads(archive.read(f"data/steps/{step['id']}.json"))
                 assert (step_data["content"], step_data["completed"], step_data["created_at"],
                         step_data["updated_at"]) == ("First step revised", True, *step_times)
+                tag_data = json.loads(archive.read(f"data/tags/{tag_record[0]}.json"))
+                assert (tag_data["title"], tag_data["created_at"], tag_data["updated_at"]) == tag_record[1:]
+                tagging_data = json.loads(archive.read(f"data/taggings/{tagging_record[0]}.json"))
+                assert (tagging_data["card_id"], tagging_data["tag_id"], tagging_data["created_at"],
+                        tagging_data["updated_at"]) == tagging_record[1:]
                 assignment_data = json.loads(archive.read(f"data/assignments/{assignment_record[0]}.json"))
                 assert (assignment_data["card_id"], assignment_data["assignee_id"],
                         assignment_data["assigner_id"], assignment_data["created_at"],

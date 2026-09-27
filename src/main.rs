@@ -1300,6 +1300,68 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
             .execute(&db)
             .await?;
     }
+    let tag_updated_at_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='tags' AND column_name='updated_at'",
+    )
+    .fetch_one(&db)
+    .await?;
+    if tag_updated_at_exists == 0 {
+        sqlx::query("ALTER TABLE tags ADD COLUMN updated_at VARCHAR(40) NOT NULL DEFAULT ''")
+            .execute(&db)
+            .await?;
+    }
+    let tag_records_backfilled: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='tag_records_v1')")
+            .fetch_one(&db)
+            .await?;
+    for (name, definition) in [
+        ("id", "VARCHAR(64) NOT NULL DEFAULT ''"),
+        ("created_at", "VARCHAR(40) NOT NULL DEFAULT ''"),
+        ("updated_at", "VARCHAR(40) NOT NULL DEFAULT ''"),
+    ] {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='taggings' AND column_name=?",
+        )
+        .bind(name)
+        .fetch_one(&db)
+        .await?;
+        if exists == 0 {
+            sqlx::query(&format!(
+                "ALTER TABLE taggings ADD COLUMN `{name}` {definition}"
+            ))
+            .execute(&db)
+            .await?;
+        }
+    }
+    if tag_records_backfilled == 0 {
+        sqlx::query("UPDATE tags SET updated_at=created_at WHERE updated_at=''")
+            .execute(&db)
+            .await?;
+        sqlx::query(
+            "UPDATE taggings SET id=CONCAT('0',SUBSTRING(REPLACE(UUID(),'-',''),1,24)) WHERE id=''",
+        )
+        .execute(&db)
+        .await?;
+        sqlx::query("UPDATE taggings t LEFT JOIN cards c ON c.id=t.card_id SET t.created_at=COALESCE(c.created_at,?) WHERE t.created_at=''")
+            .bind(now()).execute(&db).await?;
+        sqlx::query("UPDATE taggings SET updated_at=created_at WHERE updated_at=''")
+            .execute(&db)
+            .await?;
+    }
+    let tagging_id_index_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='taggings' AND index_name='taggings_id'",
+    )
+    .fetch_one(&db)
+    .await?;
+    if tagging_id_index_exists == 0 {
+        sqlx::query("CREATE UNIQUE INDEX taggings_id ON taggings(id)")
+            .execute(&db)
+            .await?;
+    }
+    if tag_records_backfilled == 0 {
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('tag_records_v1','done') ON DUPLICATE KEY UPDATE value='done'")
+            .execute(&db).await?;
+    }
     validate_mysql_schema(&db, schema).await?;
     mysql_search::setup(&db).await?;
     let bulk_touch_triggers_installed: i64 = sqlx::query_scalar(
@@ -3804,6 +3866,62 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .bind(now())
                 .execute(&db)
                 .await?;
+        }
+        if !tag_columns
+            .iter()
+            .any(|r| r.get::<String, _>("name") == "updated_at")
+        {
+            sqlx::query("ALTER TABLE tags ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+                .execute(&db)
+                .await?;
+        }
+        let tag_records_backfilled: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='tag_records_v1')",
+        )
+        .fetch_one(&db)
+        .await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS tags_updated_at_insert AFTER INSERT ON tags WHEN NEW.updated_at='' BEGIN UPDATE tags SET updated_at=NEW.created_at WHERE id=NEW.id; END")
+            .execute(&db).await?;
+        let tagging_columns = sqlx::query("PRAGMA table_info(taggings)")
+            .fetch_all(&db)
+            .await?;
+        for (name, definition) in [
+            ("id", "TEXT"),
+            ("created_at", "TEXT NOT NULL DEFAULT ''"),
+            ("updated_at", "TEXT NOT NULL DEFAULT ''"),
+        ] {
+            if !tagging_columns
+                .iter()
+                .any(|r| r.get::<String, _>("name") == name)
+            {
+                sqlx::query(&format!(
+                    "ALTER TABLE taggings ADD COLUMN {name} {definition}"
+                ))
+                .execute(&db)
+                .await?;
+            }
+        }
+        if tag_records_backfilled == 0 {
+            sqlx::query("UPDATE tags SET updated_at=created_at WHERE updated_at=''")
+                .execute(&db)
+                .await?;
+            sqlx::query(
+                "UPDATE taggings SET id='0'||substr(lower(hex(randomblob(16))),1,24) WHERE id IS NULL",
+            ).execute(&db).await?;
+            sqlx::query("UPDATE taggings SET created_at=COALESCE((SELECT created_at FROM cards WHERE id=taggings.card_id),?) WHERE created_at=''")
+                .bind(now()).execute(&db).await?;
+            sqlx::query("UPDATE taggings SET updated_at=created_at WHERE updated_at=''")
+                .execute(&db)
+                .await?;
+        }
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS taggings_id ON taggings(id)")
+            .execute(&db)
+            .await?;
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS taggings_record_insert AFTER INSERT ON taggings WHEN NEW.id IS NULL OR NEW.created_at='' OR NEW.updated_at='' BEGIN UPDATE taggings SET id=COALESCE(NEW.id,'0'||substr(lower(hex(randomblob(16))),1,24)),created_at=CASE WHEN NEW.created_at='' THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE NEW.created_at END,updated_at=CASE WHEN NEW.updated_at='' THEN CASE WHEN NEW.created_at='' THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE NEW.created_at END ELSE NEW.updated_at END WHERE card_id=NEW.card_id AND tag_id=NEW.tag_id; END")
+            .execute(&db).await?;
+        if tag_records_backfilled == 0 {
+            sqlx::query("INSERT INTO app_secrets(name,value) VALUES('tag_records_v1','done') ON CONFLICT(name) DO UPDATE SET value='done'")
+                .execute(&db).await?;
         }
         let board_columns = sqlx::query("PRAGMA table_info(boards)")
             .fetch_all(&db)
@@ -14399,16 +14517,18 @@ async fn toggle_tag(
         begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
             .await?;
     let tag_id = id();
+    let tag_created_at = now();
     let insert = if app.mysql {
-        "INSERT IGNORE INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)"
+        "INSERT IGNORE INTO tags(id,account_id,title,created_at,updated_at) VALUES(?,?,?,?,?)"
     } else {
-        "INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?) ON CONFLICT(account_id,title) DO NOTHING"
+        "INSERT INTO tags(id,account_id,title,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,title) DO NOTHING"
     };
     sqlx::query(insert)
         .bind(&tag_id)
         .bind(&p.account_id)
         .bind(&title)
-        .bind(now())
+        .bind(&tag_created_at)
+        .bind(&tag_created_at)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
@@ -14426,12 +14546,18 @@ async fn toggle_tag(
             .await
             .map_err(db_err)?;
     if exists == 0 {
-        sqlx::query("INSERT INTO taggings(card_id,tag_id) VALUES(?,?)")
-            .bind(&card_id)
-            .bind(&tag_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        let timestamp = now();
+        sqlx::query(
+            "INSERT INTO taggings(id,card_id,tag_id,created_at,updated_at) VALUES(?,?,?,?,?)",
+        )
+        .bind(id())
+        .bind(&card_id)
+        .bind(&tag_id)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
     } else {
         sqlx::query("DELETE FROM taggings WHERE card_id=? AND tag_id=?")
             .bind(&card_id)

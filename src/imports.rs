@@ -706,14 +706,17 @@ async fn apply_archive(
         .map_err(|e| e.to_string())?;
     }
     for tag in records(&archive, "tags") {
-        sqlx::query("INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)")
-            .bind(field(tag, "id")?)
-            .bind(account_id)
-            .bind(field(tag, "title")?)
-            .bind(field(tag, "created_at")?)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO tags(id,account_id,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+        )
+        .bind(field(tag, "id")?)
+        .bind(account_id)
+        .bind(field(tag, "title")?)
+        .bind(field(tag, "created_at")?)
+        .bind(&imported_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     for board in records(&archive, "boards") {
         sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
@@ -872,12 +875,17 @@ async fn apply_archive(
             .bind(field(assignment,"created_at")?).bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for tagging in records(&archive, "taggings") {
-        sqlx::query("INSERT INTO taggings(card_id,tag_id) VALUES(?,?)")
-            .bind(field(tagging, "card_id")?)
-            .bind(field(tagging, "tag_id")?)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO taggings(id,card_id,tag_id,created_at,updated_at) VALUES(?,?,?,?,?)",
+        )
+        .bind(field(tagging, "id")?)
+        .bind(field(tagging, "card_id")?)
+        .bind(field(tagging, "tag_id")?)
+        .bind(field(tagging, "created_at")?)
+        .bind(&imported_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     for closure in records(&archive, "closures") {
         let card_id = field(closure, "card_id")?;
