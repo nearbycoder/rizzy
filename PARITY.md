@@ -732,7 +732,7 @@ The board HTML now switches to a filtered grid when Fizzy's filter-active condit
 
 `tests/session_html.py` checks the local browser form flow from email entry through a development magic code to the board landing page. The same flow was exercised in Chromium without console errors. JSON session requests remain supported. The sign-in pages still have simplified styling, including the passkey control.
 
-`tests/signup_html.py` checks the browser signup route, sign-in page link, email form, magic-code redirect, completion form validation, account creation, and landing redirect on a fresh Rust database. The pinned source's targeted signup, completion, and magic-link controller tests passed (23 runs, 94 assertions); the live production source remains in single-tenant mode, so this browser flow has not yet been compared end to end against a multi-tenant Fizzy server. A rollback-only source signup probe established the initial data counts: one Playground board, 11 published cards, 11 publication events, 11 creator watches, and one board access. Rizzy now seeds those records, and the test matches every starter card's title and plain text against the source. Chromium followed email, code, and name entry to Playground and rendered the orientation video card. `tests/auth.py` also checks that an authenticated identity can create another account through completion, as the source controller permits. The signup layout and rendered starter card HTML remain simpler than Fizzy's; other source signup side effects have not been exhaustively compared.
+`tests/signup_html.py` checks the browser signup route, sign-in page link, email form, magic-code redirect, completion form validation, account creation, and landing redirect on a fresh Rust database. The pinned source's targeted signup, completion, and magic-link controller tests passed (23 runs, 94 assertions); the disposable multi-tenant source and Rust flow is compared in `tests/mysql_pair_selfhost.py signup-browser` below. A rollback-only source signup probe established the initial data counts: one Playground board, 11 published cards, 11 publication events, 11 creator watches, and one board access. Rizzy now seeds those records, and the test matches every starter card's title and plain text against the source. Chromium followed email, code, and name entry to Playground and rendered the orientation video card. `tests/auth.py` also checks that an authenticated identity can create another account through completion, as the source controller permits. Starter card HTML and other source signup side effects have not been exhaustively compared.
 
 `tests/json_suffix_parity.py` compares selected collection and item `.json` URLs, a configuration route, pagination links, token denial, and board creation/deletion with an HTML Accept header. `tests/column_position_parity.py` compares left and right column moves, no-op boundary moves, and an unknown ID using disposable boards. Board columns now show add and edit dialogs with Fizzy's nine named colors, an options menu with left/right moves and delete confirmation, and a maximize link. Chromium added a Lime column, moved Beta left while preserving its expanded state, renamed and recolored it, canceled and then confirmed deletion, and saw its card return to Maybe. The JSON column order matched the browser after the move. A fresh paired run of `tests/column_position_parity.py` and `tests/board_filter_html_parity.py` passed. Add and edit now apply the Rust Turbo Stream response in place; a fresh Chromium session kept its loaded cards, expanded column, and page session while adding, moving, and renaming columns. Keyboard selection and focus restoration still worked after a column replacement. After a reload, the same order and colors came from the server. The paired `tests/column_turbo_parity.py` still passes. Delete follows Fizzy's redirect by reloading the board. The menu presentation and some morph details remain different; format handling beyond the tested paths remains incomplete.
 
@@ -946,7 +946,19 @@ and authenticated signup redirects without another identity or link. The
 paired run found that Rizzy's blank-name page omitted Fizzy's `txt-negative`
 error class; the form now uses the source's error markup. This suite does not
 establish full signup parity, including tenant limit behavior in a fresh
-single-tenant run and exact page styling.
+single-tenant run and every completion-page state.
+
+The signup form now uses a source-shaped public shell, centered panel, input,
+button, and responsive light/dark styling. Browser comparison at 1280 × 633
+and 390 × 844 is preserved in [desktop source](docs/visual-baselines/fizzy-signup-desktop.png),
+[desktop Rust](docs/visual-baselines/rizzy-signup-desktop.png),
+[mobile source](docs/visual-baselines/fizzy-signup-mobile.png), and
+[mobile Rust](docs/visual-baselines/rizzy-signup-mobile.png). At the mobile
+viewport the heading begins at the same vertical pixel; the input and button
+are within two pixels of the source positions. Rizzy uses its own logo and an
+independent-implementation footer rather than claiming Fizzy's branding or
+37signals support. The completion form, flash animation, and full light-theme
+geometry still need visual comparison.
 
 The paired `signup-rate-limit`, `signup-rate-limit-invalid`, and
 `signup-rate-limit-json` suites now exercise eleven requests each on fresh
