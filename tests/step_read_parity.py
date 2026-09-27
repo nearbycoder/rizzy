@@ -32,6 +32,9 @@ def run(target):
         assert value == {"id": step["id"], "content": "First <task> & check", "completed": False}
         checked(target, path + "/edit.json", expected=406)
 
+        card_page = checked(target, f"/cards/{number}", accept="text/html", bearer=False).decode()
+        assert re.search(rf'<a\b[^>]*href="/{target["account"]}{re.escape(path)}/edit"[^>]*>First &lt;task&gt; &amp; check</a>', card_page), card_page[:500]
+
         show = checked(target, path, accept="text/html", bearer=False).decode()
         edit = checked(target, path + "/edit", accept="text/html", bearer=False).decode()
         assert f'id="step_{step["id"]}"' in show and "First &lt;task&gt; &amp; check" in show
@@ -49,7 +52,7 @@ def run(target):
         edit = checked(target, path + "/edit", accept="text/html", bearer=False).decode()
         assert 'value="Revised task"' in edit and re.search(r'type="checkbox"[^>]*checked', edit)
         checked(target, f"/cards/{number}/steps/missing-step.json", expected=404)
-        return {"detail_json": True, "edit_json_406": True, "show_html": True,
+        return {"detail_json": True, "edit_json_406": True, "card_edit_link": True, "show_html": True,
                 "edit_html": True, "edited_value": True, "missing_404": True}
     finally:
         checked(target, f"/boards/{board['id']}", "DELETE", expected=204)

@@ -156,7 +156,11 @@ pub(super) async fn show(
             ""
         };
         step_html.push_str(&format!(
-                "<li><label><input type=\"checkbox\" data-step-id=\"{}\"{checked}><span>{}</span></label></li>",
+                "<li class=\"step\" data-step-id=\"{}\"><label class=\"step__checkbox\"><input type=\"checkbox\" data-step-id=\"{}\" aria-label=\"Toggle step completion\"{checked}></label><a class=\"step__content\" data-step-edit href=\"/{}/cards/{}/steps/{}/edit\">{}</a></li>",
+                escape(&id),
+                escape(&id),
+                principal.slug,
+                number,
                 escape(&id),
                 escape(&content)
             ));

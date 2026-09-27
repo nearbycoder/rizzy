@@ -43,6 +43,18 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 .card__assignees-trigger{display:flex;align-items:center;text-decoration:none}.card__assignees-trigger .avatar+.avatar{margin-left:-8px}.card__assign-add{display:grid;place-items:center;width:30px;height:30px;border:1px solid #6b87a1;border-radius:50%;background:#192d3d;color:#d4e7f5;font-size:21px;line-height:1}.card__assignees-trigger:hover .card__assign-add,.card__assignees-trigger:focus-visible .card__assign-add{background:#42617b}.card__assignees[hidden]{display:none}
 @media(max-width:850px){.card__footer{grid-template-columns:1fr;grid-template-areas:"meta" "reactions" "actions"}.card__meta{width:100%;grid-template-columns:30px auto minmax(0,1fr) auto}.card__footer>.actions{justify-self:start}}
 </style>
+<style>
+.steps .step{display:flex;align-items:center;gap:8px;min-height:27px}
+.steps .step__checkbox{display:flex;align-items:center;flex:none}
+.steps .step__content{color:inherit;text-decoration:none;overflow-wrap:anywhere}
+.steps .step__content:hover{text-decoration:underline}
+.steps .step__checkbox:has(input:checked)+.step__content{text-decoration:line-through;opacity:.7}
+.steps .step__editor{display:flex;align-items:center;gap:8px;width:100%}
+.steps .step__editor input[type=text]{flex:1;min-width:0;width:auto;margin:0;padding:3px 6px;border-radius:3px}
+.steps .step__editor button{padding:3px 8px;font-size:13px}
+.steps .step__editor button[data-step-cancel]{background:#243b50;border-color:#53718e;color:#e0ecf4}
+.steps .step__editor button[data-step-delete]{margin-left:auto;background:#4e2929;border-color:#994c4c;color:#ffe5e5}
+</style>
 </head>
 <body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}" data-board-id="{{BOARD_ID}}" data-card-revision="{{CARD_REVISION}}">
 <a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header>
@@ -129,7 +141,33 @@ async function chooseStage(button){if(button.disabled||button.getAttribute('aria
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 document.querySelector('.stage-rail').addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 const stepRoot=document.querySelector('.card__content');
+const stepEdits=new Map();
+function closeStepEditor(li){const id=li.dataset.stepId,original=stepEdits.get(id);if(original)li.replaceWith(original);stepEdits.delete(id);void refreshLiveCard(true)}
+stepRoot.addEventListener('click',async event=>{
+  const link=event.target.closest('a[data-step-edit]');
+  if(link){
+    event.preventDefault();
+    const li=link.closest('li[data-step-id]'),id=li.dataset.stepId;
+    if(stepEdits.has(id))return;
+    stepEdits.set(id,li.cloneNode(true));
+    const form=document.createElement('form');form.className='step__editor';form.dataset.stepEditForm='';
+    const check=document.createElement('input');check.type='checkbox';check.disabled=true;check.checked=li.querySelector('input[type=checkbox]').checked;
+    const input=document.createElement('input');input.type='text';input.name='content';input.required=true;input.autocomplete='off';input.setAttribute('aria-label','Step content');input.value=link.textContent;
+    const save=document.createElement('button');save.type='submit';save.textContent='Save';save.setAttribute('aria-label','Save changes');
+    const cancel=document.createElement('button');cancel.type='button';cancel.dataset.stepCancel='';cancel.textContent='Cancel';cancel.setAttribute('aria-label','Cancel changes');
+    const remove=document.createElement('button');remove.type='button';remove.dataset.stepDelete='';remove.textContent='Delete';remove.setAttribute('aria-label','Delete this step');
+    form.append(check,input,save,cancel,remove);li.replaceChildren(form);input.focus();input.select();return;
+  }
+  const cancel=event.target.closest('[data-step-cancel]');
+  if(cancel){closeStepEditor(cancel.closest('li[data-step-id]'));return}
+  const remove=event.target.closest('[data-step-delete]');
+  if(!remove)return;
+  const li=remove.closest('li[data-step-id]'),id=li.dataset.stepId;remove.disabled=true;
+  try{const response=await fetch(`/${account}/cards/${number}/steps/${id}`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not delete step');stepEdits.delete(id);li.remove();void refreshLiveCard(true)}catch(error){remove.disabled=false;alert(error.message)}
+});
+stepRoot.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.target.closest('[data-step-edit-form]')){event.preventDefault();closeStepEditor(event.target.closest('li[data-step-id]'))}});
 stepRoot.addEventListener('change',async event=>{const checkbox=event.target.closest('input[data-step-id]');if(!checkbox)return;checkbox.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${checkbox.dataset.stepId}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{completed:checkbox.checked}})});if(!response.ok)throw Error('Could not update step');checkbox.closest('li').classList.toggle('is-completed',checkbox.checked)}catch(error){checkbox.checked=!checkbox.checked;alert(error.message)}finally{checkbox.disabled=false}});
+stepRoot.addEventListener('submit',async event=>{if(!event.target.matches('[data-step-edit-form]'))return;event.preventDefault();const form=event.target,li=form.closest('li[data-step-id]'),id=li.dataset.stepId,content=form.elements.content.value.trim();if(!content)return;const save=form.querySelector('button[type=submit]');save.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${id}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not save step');closeStepEditor(li)}catch(error){save.disabled=false;alert(error.message)}});
 stepRoot.addEventListener('submit',async event=>{if(event.target.id!=='step-form')return;event.preventDefault();const input=event.target.querySelector('#new-step'),content=input.value.trim();if(!content)return;input.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not add step');location.reload()}catch(error){input.disabled=false;alert(error.message)}});
 document.getElementById('edit-form').addEventListener('submit',async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;const error=document.getElementById('edit-error');error.textContent='';try{await mutation('','PATCH',{card:{title:document.getElementById('title').value,description:document.getElementById('description').value}});location.reload()}catch(ex){error.textContent=ex.message;button.disabled=false}});
 const commentList=document.getElementById('comments');
@@ -232,9 +270,19 @@ async function refreshLiveCard(force=false,revisionHint=null){
       const draft=stepSection.querySelector('#new-step'),draftValue=draft?.value||'';
       const draftFocused=document.activeElement===draft,focusedStep=document.activeElement?.dataset?.stepId;
       const cursorStart=draftFocused?draft.selectionStart:null,cursorEnd=draftFocused?draft.selectionEnd:null;
+      const editFocus=document.activeElement?.closest('[data-step-edit-form]')?document.activeElement:null;
+      const editCursorStart=editFocus?.tagName==='INPUT'&&editFocus.type==='text'?editFocus.selectionStart:null;
+      const editCursorEnd=editCursorStart===null?null:editFocus.selectionEnd;
+      const openEdits=[...stepSection.querySelectorAll('li[data-step-id]')].filter(li=>li.querySelector('[data-step-edit-form]'));
       stepSection.innerHTML=nextStepSection.innerHTML;
+      for(const editor of openEdits){
+        const replacement=stepSection.querySelector(`li[data-step-id="${CSS.escape(editor.dataset.stepId)}"]`);
+        if(replacement)replacement.replaceWith(editor);
+        else stepSection.querySelector('#new-step').closest('li').before(editor);
+      }
       const replacement=stepSection.querySelector('#new-step');
       if(replacement){replacement.value=draftValue;if(draftFocused){replacement.focus();replacement.setSelectionRange(cursorStart,cursorEnd)}}
+      if(editFocus){editFocus.focus();if(editCursorStart!==null)editFocus.setSelectionRange(editCursorStart,editCursorEnd)}
       if(focusedStep)stepSection.querySelector(`input[data-step-id="${CSS.escape(focusedStep)}"]`)?.focus();
     }
     for(const [selector,preserve] of [
