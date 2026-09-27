@@ -327,7 +327,7 @@ def main():
                 print(f"Disposable MySQL GET error contracts matched pinned Fizzy: "
                       f"{len(source_result)} routes")
             elif args.suite == "route-get-valid":
-                print(f"Disposable MySQL populated GET response contracts matched pinned Fizzy: "
+                print(f"Disposable MySQL populated GET status, shape, and values matched pinned Fizzy: "
                       f"{len(source_result)} routes")
             elif args.suite == "route-get-valid-html":
                 print(f"Disposable MySQL populated HTML GET contracts matched pinned Fizzy: "

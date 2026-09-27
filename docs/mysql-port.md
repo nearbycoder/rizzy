@@ -782,7 +782,9 @@ JSON and SVG requests. Successful response bodies, valid-resource routes, and
 most write paths are outside these censuses. The separate `route-get-valid`
 suite uses equivalent persisted board, column, webhook, card, step, comment,
 and reaction fixtures to match status, content type, and JSON shape for 18
-populated GET paths. It exposed a user-activity JSON request that returned
+populated GET paths. It now also compares selected stable values and asserts
+the created records' board/column placement, titles, text, reactions, and
+webhook destination. It exposed a user-activity JSON request that returned
 HTML 200 in Rizzy; the handler now matches Fizzy's JSON 406. Full body value
 and browser HTML parity for these paths remain open.
 The `route-get-valid-html` suite matches status, content type, and resource

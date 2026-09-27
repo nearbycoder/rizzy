@@ -3,7 +3,6 @@
 
 import hashlib
 import json
-import time
 import urllib.error
 import urllib.request
 
@@ -41,7 +40,7 @@ def shape(value):
 
 
 def fixture(target):
-    name = "Valid route parity " + str(time.time_ns())
+    name = "Valid route parity"
 
     def create(path, payload):
         status, content_type, value = request(target, path, "POST", payload)
@@ -71,6 +70,49 @@ def fixture(target):
             "column_id": column_id, "webhook_id": webhook_id,
             "number": number, "card_id": card["id"], "step_id": step["id"],
             "comment_id": comment["id"]}
+
+
+def semantic(label, value):
+    if label == "user":
+        return {"role": value["role"], "active": value.get("active")}
+    if label == "board":
+        return {key: value.get(key) for key in
+                ("name", "all_access", "auto_postpone_period_in_days")}
+    if label == "board_accesses":
+        return {"all_access": value["all_access"],
+                "users": [(user["role"], user["has_access"], user["involvement"])
+                          for user in value["users"]]}
+    if label == "board_columns":
+        return [(column["name"], column.get("color")) for column in value]
+    if label == "column":
+        return {"name": value["name"], "color": value.get("color")}
+    if label in ("column_cards", "board_stream"):
+        return [card["title"] for card in value]
+    if label == "board_webhooks":
+        return [webhook["name"] for webhook in value]
+    if label == "webhook":
+        return {key: value.get(key) for key in
+                ("name", "payload_url", "subscribed_actions")}
+    if label == "webhook_deliveries":
+        return value
+    if label == "card":
+        return {"title": value["title"], "description": value["description"],
+                "status": value["status"], "board": value["board"]["name"],
+                "closed": value["closed"], "postponed": value["postponed"],
+                "golden": value["golden"]}
+    if label == "card_steps":
+        return [(step["content"], step["completed"]) for step in value]
+    if label == "step":
+        return (value["content"], value["completed"])
+    if label == "card_comments":
+        return [comment["body"]["plain_text"] for comment in value]
+    if label == "comment":
+        return value["body"]["plain_text"]
+    if label in ("card_reactions", "comment_reactions"):
+        return [reaction["content"] for reaction in value]
+    if label == "user_events":
+        return value
+    raise AssertionError(label)
 
 
 def run(target):
@@ -103,7 +145,27 @@ def run(target):
         status, content_type, value = request(target, path)
         if label != "user_events":
             assert status == 200, (target["name"], label, status, value)
-        result[label] = (status, content_type, shape(value))
+        result[label] = (status, content_type, shape(value), semantic(label, value))
+    values = {label: contract[3] for label, contract in result.items()}
+    expected = {
+        "board": ("name", item["name"]),
+        "column": ("name", "Doing"),
+        "webhook": ("payload_url", "https://example.invalid/rizzy-parity"),
+        "card": ("title", "Valid route card"),
+        "step": (0, "First step"),
+    }
+    for label, (field, wanted) in expected.items():
+        assert values[label][field] == wanted, (target["name"], label, values[label])
+    assert values["board_columns"][0][0] == "Doing", (target["name"], values["board_columns"])
+    assert values["column_cards"] == ["Named column card"], (target["name"], values["column_cards"])
+    assert "Valid route card" in values["board_stream"], (target["name"], values["board_stream"])
+    assert values["card"]["board"] == item["name"], (target["name"], values["card"])
+    assert ("First step", False) in values["card_steps"], (target["name"], values["card_steps"])
+    assert values["comment"] == "First comment", (target["name"], values["comment"])
+    assert "First comment" in values["card_comments"], (target["name"], values["card_comments"])
+    assert "👍" in values["card_reactions"], (target["name"], values["card_reactions"])
+    assert values["webhook_deliveries"] == [], (target["name"], values["webhook_deliveries"])
+    assert values["comment_reactions"] == [], (target["name"], values["comment_reactions"])
     return result
 
 

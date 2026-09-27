@@ -932,7 +932,10 @@ status, content-type, redirect, and error-body contract for signed-in HTML
 requests on all 92 paths. These checks cover routing and missing-resource
 behavior only. The paired `route-get-valid` suite now creates a board, column,
 webhook, card, step, comment, and reaction in each fresh MySQL database, then
-matches status, content type, and JSON shape for 18 populated GET paths. It
+matches status, content type, JSON shape, and selected stable values for 18
+populated GET paths. The stable values include board and column names,
+column-card placement, card title and board relationship, webhook destination,
+step and comment text, reaction content, and empty delivery lists. It
 found and closed a user-activity format mismatch: a JSON request for an
 existing user now returns Fizzy's 406 response. The suite does not compare
 full response values or HTML, and most valid-resource routes, complete
