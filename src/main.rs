@@ -13455,15 +13455,38 @@ async fn list_steps(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let c = card(&app, &p, &number).await?;
+    let card_id: String = c.get("id");
     let rows = sqlx::query("SELECT * FROM steps WHERE card_id=? ORDER BY created_at,id")
-        .bind(c.get::<String, _>("id"))
+        .bind(&card_id)
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(Json(json!(rows.iter().map(|r|json!({"id":r.get::<String,_>("id"),"content":r.get::<String,_>("content"),"completed":r.get::<i64,_>("completed")!=0})).collect::<Vec<_>>())))
+    let mut digest = Sha256::new();
+    digest.update(card_id.as_bytes());
+    for row in &rows {
+        for field in ["id", "updated_at", "content"] {
+            digest.update([0]);
+            digest.update(row.get::<String, _>(field).as_bytes());
+        }
+        digest.update([row.get::<i64, _>("completed") as u8]);
+    }
+    let etag = format!("W/\"{}\"", hex::encode(&digest.finalize()[..16]));
+    if etag_matches(&headers, &etag) {
+        return Ok(with_card_page_headers(
+            StatusCode::NOT_MODIFIED.into_response(),
+            &etag,
+        ));
+    }
+    let items = rows.iter().map(step_value).collect::<Vec<_>>();
+    let mut response = with_card_page_headers(Json(items).into_response(), &etag);
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    Ok(response)
 }
 async fn step_row(app: &App, card_id: &str, step: &str) -> Result<DbRow> {
     sqlx::query("SELECT * FROM steps WHERE id=? AND card_id=?")
