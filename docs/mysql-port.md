@@ -836,17 +836,24 @@ browser behavior plus invalid QR signatures and absent-account prefixes for
 JSON and SVG requests. Successful response bodies, valid-resource routes, and
 most write paths are outside these censuses. The separate `route-get-valid`
 suite uses equivalent persisted board, column, webhook, card, step, comment,
-and reaction fixtures to match status, content type, and JSON shape for 25
-GET paths with valid fixture resources. Postponed and closed cards give the
+and reaction fixtures to match status, content type, and JSON shape for 30
+GET paths with valid fixture resources. A populated tag, activity feed, and
+search result extend those fixtures. Postponed and closed cards give the
 special board-column JSON lists real content. The source and Rust owner use
 the same fixture email, and the suite compares every non-generated JSON value
-recursively, plus in-app URL paths after normalizing generated IDs. It omits
+recursively, plus in-app URL paths and query strings after normalizing generated IDs. It omits
 generated IDs, timestamps, and signing-secret bytes while checking the
 secret's length. Selected stable values include board and card index titles,
 special-column titles, board/column placement, text, reactions, and webhook
 destination. It exposed a user-activity JSON
 request that returned HTML 200 in Rizzy; the handler now matches Fizzy's JSON
 406. Full body value and browser HTML parity for these paths remain open.
+The suite also compares count and pagination-link headers plus ETag presence,
+matches the exact weak ETag for identical empty tag JSON, and confirms
+conditional `304` responses on populated user and tag lists. Rizzy now uses
+the source Rack middleware's SHA-256 body-prefix ETag for successful JSON GETs
+that do not already have a route-specific validator. Other conditional paths
+and non-JSON formats still need comparison.
 The `route-get-valid-html` suite matches status, content type, and resource
 text on 30 populated signed-in HTML GET paths, plus one conditional steps
 request; non-200 bodies are compared by length and digest. It exposed browser

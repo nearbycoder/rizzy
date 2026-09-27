@@ -320,6 +320,48 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
+async fn json_etag(request: Request, next: Next) -> Response {
+    let conditional = request.headers().get(header::IF_NONE_MATCH).cloned();
+    let get = request.method() == Method::GET;
+    let response = next.run(request).await;
+    if !get
+        || response.status() != StatusCode::OK
+        || response.headers().contains_key(header::ETAG)
+        || response.headers().contains_key(header::LAST_MODIFIED)
+        || !response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("application/json"))
+    {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Could not render JSON").into_response();
+    };
+    if bytes.is_empty() {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    // Rack::ETag hashes the emitted body and uses the first 32 hex digits.
+    let etag = format!("W/\"{}\"", hex::encode(&Sha256::digest(&bytes)[..16]));
+    let etag = HeaderValue::from_str(&etag).expect("hex ETag");
+    parts.headers.insert(header::ETAG, etag.clone());
+    if !parts.headers.contains_key(header::CACHE_CONTROL) {
+        parts.headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("max-age=0, private, must-revalidate"),
+        );
+    }
+    if conditional.as_ref() == Some(&etag) {
+        parts.status = StatusCode::NOT_MODIFIED;
+        parts.headers.remove(header::CONTENT_TYPE);
+        parts.headers.remove(header::CONTENT_LENGTH);
+        return Response::from_parts(parts, Body::empty());
+    }
+    Response::from_parts(parts, Body::from(bytes))
+}
+
 async fn redirect_tenanted_public_route(
     State(app): Shared,
     request: Request,
@@ -4708,6 +4750,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn(block_search_engine_indexing))
         .layer(middleware::from_fn(prevent_request_forgery))
         .layer(middleware::from_fn(mark_request_format))
+        .layer(middleware::from_fn(json_etag))
         .layer(middleware::from_fn(html_error_contract))
         .layer(middleware::from_fn(content_security_policy))
         .layer(middleware::from_fn(assign_request_id));

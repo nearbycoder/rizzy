@@ -420,7 +420,7 @@ def main():
                       f"{len(source_result)} routes")
             elif args.suite == "route-get-valid":
                 print(f"Disposable MySQL populated GET status, shape, normalized URLs, and stable values matched pinned Fizzy: "
-                      f"{len(source_result)} routes")
+                      f"{len(source_result)} probes")
             elif args.suite == "route-get-valid-html":
                 print(f"Disposable MySQL populated HTML GET contracts matched pinned Fizzy: "
                       f"{len(source_result)} probes")

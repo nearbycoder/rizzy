@@ -611,6 +611,8 @@ The [matched column-delete benchmark](bench/results/column-delete-sqlite-guard-s
 
 The [30,000-card index trade-off probe](bench/results/column-index-tradeoff-2026-09-26.json) tested disposable copies of the same Rizzy database. Its current wide column index gave a 0.019 ms median first-page read and 0.255 ms count, but clearing 10,000 column links took 35.4 ms. A narrow board/column index reduced that update to 19.2 ms while raising the read to 2.37 ms and count to 1.95 ms. This direct-SQL probe explains the read/write trade-off and supports retaining the current index while read parity and throughput are still under development; it does not establish application-wide performance.
 
+A later [SQLite epoch-trigger trial](bench/results/column-delete-sqlite-epoch-probe-2026-09-27.json) skipped the per-row bulk-guard lookup during deletion and passed the paired lifecycle and normal column-touch checks. On three fresh 30,000-card trials, median delete latency was 66.6 ms for Rizzy versus 35.5 ms for Fizzy. The change was reverted because it remained slower and required a trigger migration; the committed delete path still uses the split updates and bulk guard.
+
 The [expanded probe](bench/results/column-index-tradeoff-maybe-pair-2026-09-26.json) included the untriaged Maybe column. Excluding null column IDs from the wide index cut the unlink step to 20.6 ms but raised a Maybe first-page read from 0.022 to 2.411 ms. A second compact Maybe index restored the read to 0.027 ms but brought unlink back to 32.6 ms and raised the Maybe count from 0.275 to 2.054 ms. These are direct SQLite measurements on three disposable copies, not end-to-end HTTP results. The existing index remains until a layout improves the write without sacrificing common column reads.
 
 `tests/named_column_html_parity.py` compares the empty named-column HTML state and a 16-card, two-page fixture against live Fizzy. Rizzy now renders the authenticated page header, column Turbo frame and drag container, rich draggable previews, empty placeholder, and geared automatic-pagination frames and link. Both apps showed 15 cards on page one and one on page two; unlike JSON, neither HTML response sent an `X-Total-Count` header. Chromium loaded all 16 Rust previews automatically, found no page errors, navigated back to the board, and searched from the bottom utility bar. The 1280-pixel [Fizzy](docs/visual-baselines/fizzy-named-column-1280.png) and [Rizzy](docs/visual-baselines/rizzy-named-column-1280.png) screenshots are visual references, not pixel parity. The source application shell, exact card styling, drag behavior, and additional page states still need comparison.
@@ -946,12 +948,12 @@ status, content-type, redirect, and error-body contract for signed-in HTML
 requests on all 92 paths. These checks cover routing and missing-resource
 behavior only. The paired `route-get-valid` suite now creates a board, column,
 webhook, card, step, comment, and reaction in each fresh MySQL database, then
-matches status, content type, JSON shape, and selected stable values for 25
+matches status, content type, JSON shape, and selected stable values for 30
 GET paths with valid fixture resources. The fixture also includes a postponed
-and a closed card. With the same owner email seeded in both databases, the
+and a closed card, a populated tag, and activity and search results. With the same owner email seeded in both databases, the
 suite now recursively compares values in the successful JSON bodies except
 generated IDs, timestamps, and signing secrets; in-app URL paths are compared
-after normalizing generated IDs. It also checks that the generated webhook
+after normalizing generated IDs in paths and query strings. It also checks that the generated webhook
 secret has the source length. The stable values include board and card index
 titles, the populated Not Now and Closed column titles, board and column
 names, column-card placement, card title and board relationship, webhook
@@ -961,7 +963,14 @@ paths add paired format-contract checks for a real card or account. It
 found and closed a user-activity format mismatch: a JSON request for an
 existing user now returns Fizzy's 406 response. The suite does not compare
 full response values or HTML, and most valid-resource routes, complete
-permissions, and side effects remain open.
+permissions, and side effects remain open. The suite now compares total-count,
+next-link, and ETag presence on the 30 responses, confirms the exact Rack-style
+weak ETag for an identical empty tag body, and exercises conditional `304`
+responses on populated user and tag lists. Rizzy adds body-derived ETags to
+successful JSON GETs that do not already have a route-specific validator;
+the pinned source's Rack middleware uses the same SHA-256 prefix and
+cache-control default. The existing board and named-column pagination/ETag
+checks still pass. Other formats and conditional routes remain to be compared.
 The `route-get-valid-html` suite also uses persisted fixtures and a signed-in
 browser session to compare status, content type, and resource-text markers on
 30 populated browser GET paths, plus a conditional request for the steps index.

@@ -11,7 +11,7 @@ import urllib.request
 from draft_workflow_parity import request as browser_request
 
 
-def request(target, path, method="GET", payload=None):
+def request(target, path, method="GET", payload=None, include_headers=False):
     scoped = f"/{target['account']}{path}"
     headers = {"Authorization": f"Bearer {target['token']}",
                "Accept": "application/json", "Content-Type": "application/json"}
@@ -30,7 +30,40 @@ def request(target, path, method="GET", payload=None):
             value = json.loads(raw) if raw and content_type == "application/json" else None
         except json.JSONDecodeError:
             value = None
-        return response.status, content_type, value
+        result = (response.status, content_type, value)
+        if include_headers:
+            total = response.headers.get("X-Total-Count")
+            result += ({"total": int(total) if total is not None else None,
+                        "has_link": "Link" in response.headers,
+                        "has_etag": "ETag" in response.headers},)
+        return result
+
+
+def conditional_get(target, path):
+    url = f"{target['url']}/{target['account']}{path}"
+    headers = {"Authorization": f"Bearer {target['token']}",
+               "Accept": "application/json"}
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as response:
+        etag = response.headers.get("ETag")
+        assert response.status == 200 and etag, (target["name"], path, response.status)
+    try:
+        response = urllib.request.urlopen(
+            urllib.request.Request(url, headers={**headers, "If-None-Match": etag}), timeout=15)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        return (response.status, len(response.read()),
+                response.headers.get("Content-Type"), response.headers.get("ETag") == etag)
+
+
+def empty_tags_etag(target):
+    request = urllib.request.Request(
+        f"{target['url']}/{target['account']}/tags",
+        headers={"Authorization": f"Bearer {target['token']}",
+                 "Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        assert json.load(response) == [], target["name"]
+        return response.headers["ETag"]
 
 
 def shape(value):
@@ -50,8 +83,10 @@ def stable_json(value):
                 continue
             if (key == "url" or key.endswith("_url")) and key != "payload_url" and isinstance(item, str):
                 parsed = urllib.parse.urlsplit(item)
-                path = re.sub(r"(?<![0-9A-Za-z])[0-9a-z]{25,26}(?![0-9A-Za-z])", ":id", parsed.path)
-                result[key] = path + (("?" + parsed.query) if parsed.query else "")
+                path_and_query = parsed.path + (("?" + parsed.query) if parsed.query else "")
+                result[key] = re.sub(
+                    r"(?<![0-9A-Za-z])[0-9a-z]{25,26}(?![0-9A-Za-z])", ":id",
+                    path_and_query)
             else:
                 result[key] = stable_json(item)
         return result
@@ -70,6 +105,7 @@ def fixture(target):
 
     status, _, users = request(target, "/users")
     assert status == 200 and users, (target["name"], "users", status)
+    empty_etag = empty_tags_etag(target)
     user_id = next(user["id"] for user in users if user["role"] == "owner")
     board = create("/boards", {"board": {"name": name}})
     board_id = board["id"]
@@ -93,10 +129,13 @@ def fixture(target):
     step = create(f"/cards/{number}/steps", {"step": {"content": "First step"}})
     comment = create(f"/cards/{number}/comments", {"comment": {"body": "First comment"}})
     create(f"/cards/{number}/reactions", {"reaction": {"content": "👍"}})
+    status, _, _ = request(target, f"/cards/{number}/taggings", "POST",
+                           {"tag_title": "Route parity tag"})
+    assert status == 204, (target["name"], "tagging", status)
     return {"name": name, "user_id": user_id, "board_id": board_id,
             "column_id": column_id, "webhook_id": webhook_id,
             "number": number, "card_id": card["id"], "step_id": step["id"],
-            "comment_id": comment["id"]}
+            "comment_id": comment["id"], "empty_tags_etag": empty_etag}
 
 
 def semantic(label, value):
@@ -122,6 +161,8 @@ def semantic(label, value):
     if label == "webhook_deliveries":
         return value
     if label == "card":
+        return stable_json(value)
+    if label in ("activities", "search", "users", "tags", "notifications"):
         return stable_json(value)
     if label == "card_steps":
         return [(step["content"], step["completed"]) for step in value]
@@ -151,6 +192,9 @@ def run(target):
         item[key] for key in ("webhook_id", "number", "step_id", "comment_id"))
     paths = {
         "boards_index": "/boards",
+        "users": "/users",
+        "tags": "/tags",
+        "notifications": "/notifications",
         "cards_index": "/cards",
         "not_now": f"/boards/{board_id}/columns/not_now",
         "closed": f"/boards/{board_id}/columns/closed",
@@ -169,6 +213,8 @@ def run(target):
         "webhook": f"/boards/{board_id}/webhooks/{webhook_id}",
         "webhook_deliveries": f"/boards/{board_id}/webhooks/{webhook_id}/deliveries",
         "card": f"/cards/{number}",
+        "activities": f"/activities?board_ids%5B%5D={board_id}",
+        "search": "/search?q=Valid%20route",
         "card_steps": f"/cards/{number}/steps",
         "step": f"/cards/{number}/steps/{step_id}",
         "card_comments": f"/cards/{number}/comments",
@@ -178,13 +224,15 @@ def run(target):
     }
     result = {}
     for label, path in paths.items():
-        status, content_type, value = request(target, path)
+        status, content_type, value, pagination = request(
+            target, path, include_headers=True)
         if label not in ("user_events", "pin", "watch", "previews"):
             assert status == 200, (target["name"], label, status, value)
         if label == "webhook":
             assert len(value["signing_secret"]) == 24, (target["name"], label, value)
         deep = stable_json(value) if status == 200 and value is not None else None
-        result[label] = [status, content_type, shape(value), semantic(label, value), deep]
+        result[label] = [status, content_type, shape(value), semantic(label, value), deep,
+                         pagination]
     values = {label: contract[3] for label, contract in result.items()}
     expected = {
         "board": ("name", item["name"]),
@@ -197,18 +245,28 @@ def run(target):
         assert values[label][field] == wanted, (target["name"], label, values[label])
     assert values["board_columns"][0][0] == "Doing", (target["name"], values["board_columns"])
     assert item["name"] in values["boards_index"], (target["name"], values["boards_index"])
+    assert any(user["role"] == "owner" for user in values["users"]), (
+        target["name"], values["users"])
+    assert [tag["title"] for tag in values["tags"]] == ["route parity tag"], (
+        target["name"], values["tags"])
     assert "Valid route card" in values["cards_index"], (target["name"], values["cards_index"])
     assert values["not_now"] == ["Postponed route card"], (target["name"], values["not_now"])
     assert values["closed"] == ["Closed route card"], (target["name"], values["closed"])
     assert values["column_cards"] == ["Named column card"], (target["name"], values["column_cards"])
     assert "Valid route card" in values["board_stream"], (target["name"], values["board_stream"])
     assert values["card"]["board"]["name"] == item["name"], (target["name"], values["card"])
+    assert values["activities"], (target["name"], values["activities"])
+    assert any(card["title"] == "Valid route card" for card in values["search"]), (
+        target["name"], values["search"])
     assert ("First step", False) in values["card_steps"], (target["name"], values["card_steps"])
     assert values["comment"] == "First comment", (target["name"], values["comment"])
     assert "First comment" in values["card_comments"], (target["name"], values["card_comments"])
     assert "👍" in values["card_reactions"], (target["name"], values["card_reactions"])
     assert values["webhook_deliveries"] == [], (target["name"], values["webhook_deliveries"])
     assert values["comment_reactions"] == [], (target["name"], values["comment_reactions"])
+    for label in ("users", "tags"):
+        result[f"conditional_{label}"] = conditional_get(target, paths[label])
+    result["empty_tags_etag"] = item["empty_tags_etag"]
     return result
 
 
