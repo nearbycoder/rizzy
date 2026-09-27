@@ -90,9 +90,7 @@ fn mysql_excerpt(value: &str, stems: &[String]) -> String {
 }
 
 fn footer(slug: i64) -> String {
-    format!(
-        "<footer id=\"footer\" class=\"search-footer\"><a href=\"/{slug}/my/pins\">Pinned</a><a href=\"/{slug}/search\" aria-current=\"page\">Search</a><a href=\"/{slug}/notifications\">Notifications</a></footer>"
-    )
+    include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &slug.to_string())
 }
 
 pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Result<Response> {
@@ -110,14 +108,19 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
     html.push_str(&title);
     html.push_str("</title><style>");
     html.push_str(include_str!("../static/search.css"));
-    html.push_str("</style></head><body><header class=\"header header--mobile-actions-stack\" id=\"header\"><a href=\"#main\" class=\"header__skip-navigation btn\">Skip to main content</a><a href=\"/");
+    html.push_str(include_str!("../static/shell_footer.css"));
+    html.push_str(include_str!("../static/notification_cards.css"));
+    html.push_str(include_str!("../static/menu_overlay.css"));
+    html.push_str("</style></head><body data-account=\"");
     html.push_str(&p.slug.to_string());
-    html.push_str("/my/menu\" class=\"header__brand\" aria-label=\"Rizzy menu\"><span class=\"header__brand-mark\" aria-hidden=\"true\"></span>Rizzy<span class=\"header__brand-chevron\" aria-hidden=\"true\">⌄</span></a><a href=\"/");
+    html.push_str("\"><header class=\"header header--mobile-actions-stack\" id=\"header\"><a href=\"#main\" class=\"header__skip-navigation btn\">Skip to main content</a><a href=\"/");
+    html.push_str(&p.slug.to_string());
+    html.push_str("/my/menu\" class=\"header__brand\" data-open-menu aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-label=\"Rizzy menu\"><span class=\"header__brand-mark\" aria-hidden=\"true\"></span>Rizzy<span class=\"header__brand-chevron\" aria-hidden=\"true\">⌄</span></a><a href=\"/");
     html.push_str(&p.slug.to_string());
     html.push_str("\" class=\"header__back\">Back to Home</a><h1 class=\"header__title\" data-bridge--title-target=\"header\">");
     html.push_str(&title);
     html.push_str(
-        "</h1></header><main id=\"main\"><div class=\"search-perma margin-block-start\"><form class=\"search__form flex align-center justify-center gap-half\" data-controller=\"search-form\" data-action=\"search-form:reset-&gt;bar#reset\" data-bar-target=\"form\" data-turbo-action=\"advance\" data-turbo-frame=\"bar_content\" action=\"/",
+        "</h1></header><dialog id=\"menu-dialog\" aria-label=\"Rizzy menu\"><turbo-frame id=\"my_menu\"></turbo-frame></dialog><main id=\"main\"><div class=\"search-perma margin-block-start\"><form class=\"search__form flex align-center justify-center gap-half\" data-controller=\"search-form\" data-action=\"search-form:reset-&gt;bar#reset\" data-bar-target=\"form\" data-turbo-action=\"advance\" data-turbo-frame=\"bar_content\" action=\"/",
     );
     html.push_str(&p.slug.to_string());
     html.push_str("/search\" method=\"get\"><label class=\"font-weight-black txt-nowrap\" for=\"q\">Search Rizzy</label><input id=\"q\" name=\"q\" type=\"search\" class=\"search__input input\" placeholder=\"Find something…\" autocomplete=\"off\" data-search-form-target=\"searchInput\" data-bar-target=\"searchInput\" data-action=\"keydown.enter-&gt;bar#showModalAndSubmit:prevent keydown.esc-&gt;bar#reset\" value=\"");
@@ -133,7 +136,9 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 html.push_str(&number.to_string());
                 html.push_str("\" method=\"get\"></form><script>document.querySelector('[data-controller=\"auto-submit\"]').requestSubmit()</script></turbo-frame></div></main>");
                 html.push_str(&footer(p.slug));
-                html.push_str("</body></html>");
+                html.push_str("<script>");
+                html.push_str(include_str!("../static/events.js"));
+                html.push_str("</script></body></html>");
                 return Ok(Html(html).into_response());
             }
         }
@@ -338,6 +343,7 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
     html.push_str(&footer(p.slug));
     html.push_str("<script>");
     html.push_str(include_str!("../static/search.js"));
+    html.push_str(include_str!("../static/events.js"));
     html.push_str("</script></body></html>");
     Ok(Html(html).into_response())
 }

@@ -1,4 +1,4 @@
-:root { font: 19px/1.375 "Adwaita Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color: #eef1f2; background: #0c1b20 }
+:root { font: 19px/1.375 "Adwaita Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; color: #eef1f2; background: #0c1b20; --color-canvas: #0c1b20; --color-ink: #eef1f2 }
 * { box-sizing: border-box }
 body { min-height: 100vh; margin: 0; padding-bottom: 50px }
 a { color: inherit }
@@ -14,14 +14,14 @@ button, input { font: inherit }
 .header__title { grid-column: 2; grid-row: 2; margin: 0; font-size: clamp(25px,2.5vw,32px); letter-spacing: -.04em; text-align: center }
 .search-perma { margin: 0 auto }
 .search__form { display: flex; align-items: center; justify-content: center; gap: 12px; max-width: 1028px; margin: 20px auto 22px; padding: 0 12px }
-.search__form > label { display: none }
+.search-perma .search__form > label { display: none }
 .search__input { flex: 1; min-width: 0; height: 50px; padding: 8px 15px; border: 1px solid #7dbbff; border-radius: 10px; background: #0c1b20; color: #eef1f2; outline: none }
 .search__input:focus { border-width: 2px; padding-left: 14px }
 .search__input::-webkit-search-cancel-button { display: none }
 .search__form button[hidden] { display: none }
 .search__reset { width: 30px; height: 40px; flex: none; border: 0; background: transparent; color: #eef1f2; font-size: 28px; cursor: pointer }
 .search__reset:focus-visible { outline: 2px solid #7dbbff; outline-offset: 2px }
-.search__form:has(.search__input:placeholder-shown) .search__reset { display: none }
+.search-perma .search__form:has(.search__input:placeholder-shown) .search__reset { display: none }
 .for-screen-reader { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
 .search { max-height: calc(100vh - 255px); overflow-y: auto; padding: 0 18px 70px; overscroll-behavior: contain }
 .search__results { max-width: min(80ch,100%); margin: 0 auto }
@@ -43,9 +43,6 @@ button, input { font: inherit }
 .circled-text span::before { border-right: 0; border-radius: 100% 0 0 75% / 50% 0 0 50%; top: calc(var(--circled-padding) / 2); right: 50% }
 .circled-text span::after { border-left: 0; border-radius: 0 100% 75% 0 / 0 50% 50% 0; left: 30% }
 .pagination-link { display: block; margin: 1.5rem auto; text-align: center; color: #80b7fc }
-.search-footer { position: fixed; inset: auto 0 0; z-index: 20; display: grid; grid-template-columns: 25% 50% 25%; height: 50px; border-top: 1px solid #304049; background: #101b21 }
-.search-footer a { display: grid; place-items: center; color: #a8b3b9; text-decoration: none; text-transform: uppercase; font-size: .75rem; font-weight: 600 }
-.search-footer a:hover, .search-footer a:focus-visible { color: #eef1f2 }
 @media (max-width: 700px) {
   .header { position: relative; display: block; padding: 16px 12px 10px; text-align: center }
   .header__back { position: absolute; top: 8px; left: 20px; font-size: 0 }
@@ -56,8 +53,4 @@ button, input { font: inherit }
   .search { max-height: calc(100vh - 190px); padding-right: 12px; padding-left: 12px }
   .search__list { gap: 14px }
   .search__title { font-size: 1rem }
-  .search-footer { grid-template-columns: 1fr 3fr 1fr }
-  .search-footer a:first-child, .search-footer a:last-child { font-size: 0 }
-  .search-footer a:first-child::before { content: "📌"; font-size: 19px; filter: grayscale(1) }
-  .search-footer a:last-child::before { content: "🔔"; font-size: 19px; filter: grayscale(1) }
 }

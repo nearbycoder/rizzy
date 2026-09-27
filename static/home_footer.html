@@ -4,14 +4,14 @@
       <dialog id="pin-tray" class="tray__dialog" aria-label="Pinned cards">
         <turbo-frame id="pins"></turbo-frame>
       </dialog>
-      <button type="button" class="tray__toggle" data-open-tray="pins" aria-label="Toggle pins stack" aria-haspopup="true" aria-expanded="false">Pinned <kbd>P</kbd></button>
+      <button type="button" class="tray__toggle" data-open-tray="pins" aria-label="Toggle pins stack" aria-haspopup="true" aria-expanded="false"><span class="tray__icon tray__icon--pins" aria-hidden="true"></span><span class="tray__toggle-text">Pinned <kbd>P</kbd></span></button>
     </section>
     <div class="bar full-width" data-bar>
       <div class="bar__placeholder"><button type="button" class="btn btn--plain" data-open-search>Search <kbd>K</kbd></button></div>
       <div class="bar__input" hidden>
         <form class="search__form" action="/{{ACCOUNT}}/search" method="get">
           <label for="bar-search">Search Rizzy</label>
-          <input id="bar-search" name="q" type="search" placeholder="Find something…" autocomplete="off" aria-label="Search Rizzy">
+          <input id="bar-search" class="search__input" name="q" type="search" placeholder="Find something…" autocomplete="off" aria-label="Search Rizzy">
           <button type="button" class="search__reset" aria-label="Close search">×</button>
         </form>
       </div>
@@ -26,7 +26,7 @@
           <form method="post" action="/{{ACCOUNT}}/notifications/bulk_reading"><button type="submit" title="Mark all notifications as read">Clear all</button></form>
         </div>
       </dialog>
-      <button type="button" class="tray__toggle" data-open-tray="notifications" aria-label="Toggle notifications stack" aria-haspopup="true" aria-expanded="false">Notifications <kbd>N</kbd></button>
+      <button type="button" class="tray__toggle" data-open-tray="notifications" aria-label="Toggle notifications stack" aria-haspopup="true" aria-expanded="false"><span class="tray__icon tray__icon--notifications" aria-hidden="true"></span><span class="tray__toggle-text">Notifications <kbd>N</kbd></span></button>
     </section>
   </div>
 </footer>

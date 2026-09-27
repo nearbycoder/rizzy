@@ -84,7 +84,7 @@ if (menuTrigger && menuDialog) {
   }
   async function openMenu() {
     for (const other of document.querySelectorAll('dialog[open]')) if (other !== menuDialog) other.close();
-    document.querySelector('.search__reset')?.click();
+    document.querySelector('#footer .search__reset')?.click();
     menuDialog.show();
     menuTrigger.setAttribute('aria-expanded', 'true');
     const loadId = ++menuLoad;
@@ -169,7 +169,7 @@ if (footer) {
   const searchInputBar = footer.querySelector('.bar__input');
   const searchInput = document.getElementById('bar-search');
   const searchDialog = document.getElementById('bar-modal');
-  const searchFrame = document.getElementById('bar_content');
+  const searchFrame = footer.querySelector('#bar_content');
   let searchTimer;
   const trayLoads = { pins: 0, notifications: 0 };
 
