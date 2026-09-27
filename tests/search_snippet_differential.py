@@ -61,6 +61,7 @@ def setup(name, directory, cpus):
         }
         login(target)
         board, _ = expect(target, "/boards", "POST", {"board": {"name": "Search snippets"}}, 201)
+        target["board_id"] = board["id"]
         for index, title in enumerate(CARDS):
             description = "Context before " + title + " context after "
             if index % 3 == 0:
@@ -176,7 +177,20 @@ def main():
                     assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", time)
                                for time in times), times
             assert comment_pages["fizzy"] == comment_pages["rizzy"]
-            print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups, 110 equal-time hits, and rapid card/comment ordering also matched")
+            for name, target in targets.items():
+                scope = f"/boards/{target['board_id']}/cards"
+                older, _ = expect(target, scope, "POST", {"card": {
+                    "title": "latestorderproof older", "created_at": "2026-01-01T00:00:00.000Z"}}, 201)
+                expect(target, scope, "POST", {"card": {
+                    "title": "latestorderproof newer", "created_at": "2026-01-02T00:00:00.000Z"}}, 201)
+                query = "/search?q=latestorderproof"
+                assert [card["title"] for card in api(target, query)] == [
+                    "latestorderproof newer", "latestorderproof older"], name
+                expect(target, f"/cards/{older['number']}/comments", "POST", {
+                    "comment": {"body": "A more recent comment"}}, 201)
+                assert [card["title"] for card in api(target, query)] == [
+                    "latestorderproof older", "latestorderproof newer"], name
+            print(f"Search titles and snippets matched on {len(queries())} signed-in queries; numeric lookups, tied hits, rapid creation, and latest-activity JSON order also matched")
         finally:
             for process in reversed(processes):
                 suite.stop_server(process)

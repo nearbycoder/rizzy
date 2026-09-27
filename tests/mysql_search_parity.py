@@ -152,8 +152,16 @@ def run(target, tag):
         api(target, f"/cards/{stemmed['number']}/comments/{walk['id']}", "DELETE", expected=204)
         api(target, f"/cards/{third['number']}", "DELETE", expected=204)
         removed = {term: search(target, term) for term in ("walk", "haggis")}
+        order_term = "orderproof" + tag
+        older = card(order_term + " older")
+        card(order_term + " newer")
+        api(target, f"/cards/{older['number']}/comments", "POST",
+            {"comment": {"body": "Activity after both matching cards were created"}}, 201)
+        ordered = [result["title"].rsplit(" ", 1)[-1] for result in
+                   api(target, "/search?" + urllib.parse.urlencode({"q": order_term}))]
+        assert ordered == ["older", "newer"], (target["name"], ordered)
         return {"initial": initial, "filtered": filtered, "browser": browser,
-                "edited": edited, "removed": removed}
+                "edited": edited, "removed": removed, "latest_activity_order": ordered}
     finally:
         api(target, f"/boards/{board_id}", "DELETE", expected=204)
 
@@ -205,7 +213,7 @@ def main():
             source_result = run(source, uuid.uuid4().hex[:8])
             rust_result = run(rust, uuid.uuid4().hex[:8])
             assert source_result == rust_result, (source_result, rust_result)
-            print("MySQL search matched Fizzy: JSON and browser hits, stemming, card filters, edits, and deletes")
+            print("MySQL search matched Fizzy: JSON and browser hits, latest-activity order, stemming, card filters, edits, and deletes")
         except Exception:
             print(log_path.read_text()[-2000:])
             raise

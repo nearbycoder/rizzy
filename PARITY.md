@@ -203,6 +203,8 @@ assertions. This is evidence for that fixture, not full ActiveSearch parity;
 exact browser highlighting, snippets, Unicode indexing, and search scale remain
 open.
 
+The source JSON search applies `Card.latest`, which sorts by last activity. A paired SQLite test now creates two matching cards, comments on the older card, and confirms both apps move it ahead in JSON search. Rizzy's MySQL JSON query previously sorted by creation time; it now uses the same last-activity order, and `tests/mysql_search_parity.py` includes the matching two-card case. That new MySQL case has not been run on a live MySQL server in this change; its runtime result remains to be verified.
+
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process
 redemption race, member access changes, reset, and restart after a deleted join

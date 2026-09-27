@@ -9996,7 +9996,7 @@ async fn search_cards(
             .await
             .map_err(db_err)?;
         let rows = sqlx::query(&format!(
-            "SELECT c.*{filter} ORDER BY c.created_at DESC,c.id DESC LIMIT ? OFFSET ?"
+            "SELECT c.*{filter} ORDER BY c.last_active_at DESC,c.id DESC LIMIT ? OFFSET ?"
         ))
         .bind(&p.account_id)
         .bind(&p.user_id)
