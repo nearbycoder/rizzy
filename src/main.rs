@@ -3926,6 +3926,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/500.html", get(|| async { static_error_page(include_str!("../static/500.html"), StatusCode::OK) }))
         .route("/", get(home))
         .route("/{account}/", get(events_page::index))
+        .route("/{account}", get(events_page::index))
         .route("/{account}/landing", get(landing))
         .route("/client_configurations/{configuration}", get(client_config))
         .route("/recede_historical_location", get(|| async { Html("Going back…") }))

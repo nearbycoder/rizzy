@@ -36,6 +36,10 @@ def add_card_action(body, account):
 def check(target_item):
     login(target_item)
     account = target_item["account"]
+    for path in (f"/{account}", f"/{account}/"):
+        status, _, root = request(target_item, path, accept="text/html")
+        assert status == 200 and b"Latest Activity" in root, (
+            target_item["name"], "account Home path", path, status)
     status, headers, empty_home = request(target_item, f"/{account}/events",
                                           accept="text/html")
     assert status == 200 and b'Add a card' not in empty_home and b"all boards" in empty_home, (

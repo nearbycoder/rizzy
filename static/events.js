@@ -1,4 +1,11 @@
 const activity = document.getElementById('activity');
+document.addEventListener('click', event => {
+  const link = event.target.closest('a[href]');
+  if (!link) return;
+  const destination = new URL(link.href);
+  if (destination.origin !== location.origin || !new RegExp(`^/${document.body.dataset.account}/cards/\\d+$`).test(destination.pathname)) return;
+  sessionStorage.setItem('rizzy-card-referrer', JSON.stringify({ url: location.href, label: document.title.replace(/ \| Rizzy$/, '') }));
+});
 const eventTime = new Intl.DateTimeFormat('en-US', { timeStyle: 'short' });
 const eventTimeTitle = new Intl.DateTimeFormat('en-US', { timeStyle: 'short', dateStyle: 'short' });
 function localizeEventTimes(root) {

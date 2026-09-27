@@ -103,6 +103,18 @@ now leaves the cached page's Content Security Policy nonce intact, which keeps
 its scripts running after revalidation. The menu's colophon, exact vertical
 spacing, and all conditional sections and navigation states remain incomplete.
 
+The card Back link now preserves the exact filtered board, all-cards, or Home
+URL used to open it, including query parameters and a slashless account Home.
+It uses the source page's label for the return text and falls back to the
+card's board after a direct visit from an unrelated page. Escape and Left Arrow
+follow the same link. In disposable browsers, Fizzy returned to Home, a
+filtered board, and a filtered one-board all-cards view; Rizzy matched those
+links and labels. A direct Rust card visit after account settings kept the
+board fallback despite an older saved filtered URL. `tests/home_add_card_parity.py`
+now also checks that both `/1` and `/1/` render Home in both apps. Board card
+selection, focus restoration after return, and navigation through Turbo
+transitions are still incomplete.
+
 The Home footer now opens source-shaped Pins and Notifications trays and an
 inline Search bar. The Pins HTML response contains rich card previews and
 preserves the separate JSON limit; `tests/pins_html_parity.py` compares its

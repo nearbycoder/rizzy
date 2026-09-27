@@ -44,10 +44,10 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 @media(max-width:850px){.card__footer{grid-template-columns:1fr;grid-template-areas:"meta" "reactions" "actions"}.card__meta{width:100%;grid-template-columns:30px auto minmax(0,1fr) auto}.card__footer>.actions{justify-self:start}}
 </style>
 </head>
-<body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}">
+<body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}" data-board-id="{{BOARD_ID}}">
 <a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header>
 <main id="main">
-<nav><a href="/{{ACCOUNT}}/boards/{{BOARD_ID}}">Back to {{BOARD_NAME}}</a></nav>
+<nav><a id="card-back-link" class="btn--back" href="/{{ACCOUNT}}/boards/{{BOARD_ID}}"><strong>Back to {{BOARD_NAME}}</strong></a></nav>
 <article class="card-perma{{IMAGE_CLASS}}" id="card">
   {{IMAGE}}
   <button id="gold" class="side-action side-action--gold" type="button" aria-label="{{GOLD_LABEL}}" title="{{GOLD_LABEL}}">★</button>
@@ -78,6 +78,25 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 <dialog class="utility-panel" id="utility-panel"><button type="button" class="utility-close" aria-label="Close">×</button><h2 id="utility-title"></h2><input type="search" class="utility-search" id="utility-search" placeholder="Search all cards" aria-label="Search all cards" hidden><div class="utility-content" id="utility-content"></div></dialog>
 <script>
 const account=document.body.dataset.account,number=document.body.dataset.number;
+const backLink=document.getElementById('card-back-link');
+if(backLink){
+  let remembered,referrer;
+  try{remembered=JSON.parse(sessionStorage.getItem('rizzy-card-referrer')||'null')}catch{}
+  try{referrer=new URL(document.referrer)}catch{}
+  const path=referrer?.pathname.replace(/\/$/,'');
+  const root=`/${account}`,cards=`/${account}/cards`,board=`/${account}/boards/${document.body.dataset.boardId}`;
+  if(referrer?.origin===location.origin&&[root,cards,board].includes(path)){
+    backLink.href=referrer.href;
+    const label=remembered?.url===referrer.href?remembered.label:null;
+    if(label)backLink.querySelector('strong').textContent=`Back to ${label==='All boards'?'all boards':label}`;
+    else if(path===root)backLink.querySelector('strong').textContent='Back to Home';
+    else if(path===cards)backLink.querySelector('strong').textContent='Back to all boards';
+  }
+  document.addEventListener('keydown',event=>{
+    if(!['Escape','ArrowLeft'].includes(event.key)||event.repeat||event.altKey||event.ctrlKey||event.metaKey||document.querySelector('dialog[open]')||event.target.closest('input,textarea,lexxy-editor,[contenteditable="true"]'))return;
+    event.preventDefault();backLink.click();
+  });
+}
 const assignmentDialog=document.getElementById('assignment-dialog'),assignmentContent=document.getElementById('assignment-dialog-content'),assignmentError=document.getElementById('assignment-dialog-error');
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
 relativeDates();new MutationObserver(relativeDates).observe(document.querySelector('.card__footer'),{childList:true,subtree:true});
