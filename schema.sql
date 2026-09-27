@@ -692,7 +692,7 @@ CREATE INDEX IF NOT EXISTS webhook_deliveries_stale ON webhook_deliveries(create
 CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
-CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' AND NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) BEGIN
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.bulk_touch_epoch=OLD.bulk_touch_epoch AND NEW.status='published' AND NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
 CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(title,description,tokenize='porter unicode61');
