@@ -144,6 +144,20 @@ def import_source_archive(source, rust, directory):
     assert (storage / ordinary[0]).read_bytes() == ordinary_bytes
 
 
+def with_nested_storage_key(source):
+    result = io.BytesIO()
+    ordinary_path = f"data/active_storage_blobs/{source['ordinary_blob_id']}.json"
+    with zipfile.ZipFile(io.BytesIO(source["archive_bytes"])) as original, \
+            zipfile.ZipFile(result, "w") as rewritten:
+        ordinary = json.loads(original.read(ordinary_path))
+        old_path = f"storage/{ordinary['key']}"
+        ordinary["key"] = "folder/subfolder/file-key"
+        for name in original.namelist():
+            payload = json.dumps(ordinary).encode() if name == ordinary_path else original.read(name)
+            rewritten.writestr(f"storage/{ordinary['key']}" if name == old_path else name, payload)
+    return {**source, "archive_bytes": result.getvalue()}
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="rizzy-export-internal-paired-") as temporary:
         processes = []
@@ -179,7 +193,17 @@ def main():
                 results[name] = check(target)
             assert results["fizzy"] == results["rizzy"], results
             import_source_archive(targets["fizzy"], targets["rizzy"], Path(temporary) / "rizzy")
-            print("Matched Fizzy account ZIP pending/internal blobs and imported pending metadata")
+            nested_directory = Path(temporary) / "rizzy-nested"
+            nested_directory.mkdir()
+            nested_env, nested_credentials = prepare_rust(nested_directory, rust_env(nested_directory))
+            nested_process, nested_url = start_server(
+                "rizzy", nested_directory, nested_env, sorted(os.sched_getaffinity(0))[:2])
+            processes.append(nested_process)
+            nested_target = {"url": nested_url, "token": nested_credentials["token"],
+                             "db": str(nested_directory / "rizzy.sqlite3")}
+            import_source_archive(with_nested_storage_key(targets["fizzy"]),
+                                  nested_target, nested_directory)
+            print("Matched Fizzy account ZIP pending/internal blobs and imported nested-key storage")
         finally:
             for process in reversed(processes):
                 stop_server(process)

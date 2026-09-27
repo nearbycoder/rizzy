@@ -229,11 +229,11 @@ fn load_archive(path: &PathBuf) -> ImportResult<Archive> {
             }
             groups.entry(group.to_owned()).or_default().push(value);
         } else if let Some(key) = name.strip_prefix("storage/") {
-            if key.is_empty()
-                || key.contains('/')
-                || key.contains('\\')
-                || key == "."
-                || key == ".."
+            if key.contains('\\')
+                || key.contains('\0')
+                || key
+                    .split('/')
+                    .any(|segment| segment.is_empty() || segment == "." || segment == "..")
             {
                 return Err(format!("Invalid storage path: {name}"));
             }
