@@ -195,9 +195,14 @@ pub(super) async fn incinerate_due(app: &App) -> std::result::Result<(), sqlx::E
     Ok(())
 }
 
-fn incineration_slot(current: chrono::DateTime<Utc>) -> Option<String> {
+fn incineration_slot<Tz: chrono::TimeZone>(current: chrono::DateTime<Tz>) -> Option<String> {
     if current.hour() % 8 == 0 && current.minute() == 16 {
-        Some(current.format("%Y-%m-%dT%H").to_string())
+        Some(
+            current
+                .with_timezone(&Utc)
+                .format("%Y-%m-%dT%H")
+                .to_string(),
+        )
     } else {
         None
     }
@@ -221,9 +226,14 @@ async fn claim_incineration_slot(app: &App, slot: &str) -> std::result::Result<b
 
 pub(super) async fn incineration_worker(app: Arc<App>) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let started_utc_minute = Utc::now().timestamp().div_euclid(60);
     loop {
         interval.tick().await;
-        let Some(slot) = incineration_slot(Utc::now()) else {
+        let current = Local::now();
+        if !recurring_cleanup::after_start_minute(started_utc_minute, &current) {
+            continue;
+        }
+        let Some(slot) = incineration_slot(current) else {
             continue;
         };
         match claim_incineration_slot(&app, &slot).await {
@@ -250,7 +260,7 @@ pub(super) async fn incineration_worker(app: Arc<App>) {
 #[cfg(test)]
 mod schedule_tests {
     use super::incineration_slot;
-    use chrono::{TimeZone, Utc};
+    use chrono::{FixedOffset, TimeZone, Utc};
 
     #[test]
     fn incineration_runs_every_eight_hours_at_minute_sixteen() {
@@ -264,6 +274,11 @@ mod schedule_tests {
         assert_eq!(
             incineration_slot(Utc.with_ymd_and_hms(2026, 9, 27, 16, 16, 0).unwrap()),
             Some("2026-09-27T16".to_owned())
+        );
+        let chicago = FixedOffset::west_opt(5 * 3600).unwrap();
+        assert_eq!(
+            incineration_slot(chicago.with_ymd_and_hms(2026, 9, 27, 16, 16, 0).unwrap()),
+            Some("2026-09-27T21".to_owned())
         );
     }
 }

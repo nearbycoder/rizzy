@@ -852,3 +852,19 @@ interaction parity remain unverified by this probe.
 The disposable paired `auth-format` suite also passed bearer-only format,
 read-token write denial, JSON suffix, and unauthenticated redirect checks on
 fresh MySQL databases.
+
+Recurring cleanup now checks the host's local clock slots used by the pinned
+Solid Queue configuration. Magic links and device transfers are due every
+four hours at minute 0; completed exports and imports are due hourly at
+minutes 20 and 25. The export/import processing workers retain their
+independent stale-job recovery. Each cleanup task claims its UTC-labeled slot
+in `app_secrets` so a second app process skips it. The explicit
+`cleanup-magic-links`, `cleanup-transfers`, `cleanup-exports`, and
+`cleanup-imports` commands run the same cleanup code without waiting for a
+scheduled slot. The worker skips the minute in which it starts, matching the
+source scheduler's next-occurrence behavior.
+`tests/mysql_recurring_auth_cleanup.py` passed on MySQL 8.4.11 with old and
+fresh rows for all four types. Old ZIPs are removed while fresh files remain;
+an eight-day-old failed import and its account are deleted while another
+account survives. This exercises manual execution; live
+clock-boundary firing and cross-host recovery have not been observed.

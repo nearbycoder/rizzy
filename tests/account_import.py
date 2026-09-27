@@ -580,6 +580,8 @@ def run(archive_path):
             with sqlite3.connect(database) as db:
                 expired = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 db.execute("UPDATE imports SET created_at=? WHERE id=?", (expired, invalid["id"]))
+            subprocess.run([BINARY, "cleanup-imports"], cwd=ROOT, env=env,
+                           capture_output=True, text=True, check=True)
             server = subprocess.Popen([BINARY], cwd=ROOT, env={**env, "RIZZY_BIND": f"127.0.0.1:{port}"},
                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             for _ in range(100):

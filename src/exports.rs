@@ -607,35 +607,6 @@ pub(super) async fn worker(app: Arc<App>) {
                 eprintln!("export recovery failed: {error}");
             }
         }
-        if timer_tick && (ticks == 1 || ticks.is_multiple_of(3600)) {
-            let expired = (Utc::now() - chrono::Duration::hours(24))
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            if let Ok(rows) = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
-                .bind(expired)
-                .fetch_all(&app.db)
-                .await
-            {
-                for row in rows {
-                    let id: String = row.get("id");
-                    let path = export_path(&id);
-                    match tokio::fs::remove_file(&path).await {
-                        Ok(()) => {
-                            let _ = sqlx::query("DELETE FROM exports WHERE id=?")
-                                .bind(id)
-                                .execute(&app.db)
-                                .await;
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            let _ = sqlx::query("DELETE FROM exports WHERE id=?")
-                                .bind(id)
-                                .execute(&app.db)
-                                .await;
-                        }
-                        Err(error) => eprintln!("export cleanup failed: {error}"),
-                    }
-                }
-            }
-        }
         let pending =
             sqlx::query("SELECT * FROM exports WHERE status='pending' ORDER BY created_at LIMIT 1")
                 .fetch_optional(&app.db)
@@ -699,4 +670,28 @@ pub(super) async fn worker(app: Arc<App>) {
         }
         app.export_notify.notify_one();
     }
+}
+
+pub(super) async fn cleanup(app: &App) -> std::result::Result<usize, sqlx::Error> {
+    let expired = (Utc::now() - chrono::Duration::hours(24))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let rows = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
+        .bind(expired)
+        .fetch_all(&app.db)
+        .await?;
+    let mut deleted = 0;
+    for row in rows {
+        let id: String = row.get("id");
+        match tokio::fs::remove_file(export_path(&id)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(sqlx::Error::Io(error)),
+        }
+        deleted += sqlx::query("DELETE FROM exports WHERE id=?")
+            .bind(id)
+            .execute(&app.db)
+            .await?
+            .rows_affected() as usize;
+    }
+    Ok(deleted)
 }

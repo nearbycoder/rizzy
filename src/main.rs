@@ -7,7 +7,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::{Datelike, Timelike, Utc};
+use chrono::{Datelike, Local, Timelike, Utc};
 use rand::Rng;
 use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
@@ -63,6 +63,7 @@ mod push_delivery;
 mod push_subscriptions;
 mod pwa;
 mod reaction_page;
+mod recurring_cleanup;
 mod rich_text;
 mod rich_text_records;
 mod search_page;
@@ -3807,6 +3808,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("Cleaned {count} webhook deliveries");
         return Ok(());
     }
+    if let Some(command) = env::args().nth(1) {
+        if matches!(
+            command.as_str(),
+            "cleanup-magic-links" | "cleanup-transfers" | "cleanup-exports" | "cleanup-imports"
+        ) {
+            recurring_cleanup::run_now(&app, &command).await?;
+            return Ok(());
+        }
+    }
     if env::args().nth(1).as_deref() == Some("incinerate-due") {
         account_cancellation::incinerate_due(&app).await?;
         return Ok(());
@@ -4012,10 +4022,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let expiration = now();
             let attempts_cutoff = (Utc::now() - chrono::Duration::minutes(15))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            let transfer_cutoff = (Utc::now() - chrono::Duration::hours(4))
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             for (statement, cutoff) in [
-                ("DELETE FROM magic_links WHERE expires_at<?", &expiration),
                 (
                     "DELETE FROM email_change_requests WHERE expires_at<?",
                     &expiration,
@@ -4044,10 +4051,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     "DELETE FROM access_token_reveals WHERE expires_at<?",
                     &expiration,
                 ),
-                (
-                    "DELETE FROM identity_transfers WHERE created_at<?",
-                    &transfer_cutoff,
-                ),
             ] {
                 if let Err(error) = sqlx::query(statement)
                     .bind(cutoff)
@@ -4069,18 +4072,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    tokio::spawn(recurring_cleanup::worker(app.clone()));
     tokio::spawn(account_cancellation::incineration_worker(app.clone()));
     if env::var("RIZZY_DISABLE_AUTO_POSTPONE").as_deref() != Ok("1") {
         let app = app.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
+            let started_utc_minute = Utc::now().timestamp().div_euclid(60);
             loop {
                 interval.tick().await;
-                let current = Utc::now();
-                if current.minute() != 50 {
+                let current = Local::now();
+                if !recurring_cleanup::after_start_minute(started_utc_minute, &current)
+                    || current.minute() != 50
+                {
                     continue;
                 }
-                let slot = current.format("%Y-%m-%dT%H").to_string();
+                let slot = current
+                    .with_timezone(&Utc)
+                    .format("%Y-%m-%dT%H")
+                    .to_string();
                 match claim_auto_postpone_slot(&app, &slot).await {
                     Ok(true) => {
                         if let Err(error) = auto_postpone_all_due(&app).await {

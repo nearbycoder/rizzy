@@ -562,13 +562,20 @@ async fn claim_half_hour(app: &App, slot: &str) -> Result<bool> {
 
 pub(super) async fn worker(app: Arc<App>) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let started_utc_minute = Utc::now().timestamp().div_euclid(60);
     loop {
         interval.tick().await;
-        let current = Utc::now();
-        if current.minute() % 30 != 0 || env::var("RIZZY_SENDMAIL").is_err() {
+        let current = Local::now();
+        if !recurring_cleanup::after_start_minute(started_utc_minute, &current)
+            || current.minute() % 30 != 0
+            || env::var("RIZZY_SENDMAIL").is_err()
+        {
             continue;
         }
-        let slot = current.format("%Y-%m-%dT%H:%M").to_string();
+        let slot = current
+            .with_timezone(&Utc)
+            .format("%Y-%m-%dT%H:%M")
+            .to_string();
         match claim_half_hour(&app, &slot).await {
             Ok(true) => {
                 if let Err(error) = deliver_due(&app).await {

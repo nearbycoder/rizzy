@@ -166,10 +166,14 @@ async fn claim_day(app: &App, day: &str) -> Result<bool> {
 
 pub(super) async fn worker(app: Arc<App>) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let started_utc_minute = Utc::now().timestamp().div_euclid(60);
     loop {
         interval.tick().await;
-        let current = Utc::now();
-        if current.hour() < 4 || (current.hour() == 4 && current.minute() < 2) {
+        let current = Local::now();
+        if !recurring_cleanup::after_start_minute(started_utc_minute, &current)
+            || current.hour() != 4
+            || current.minute() != 2
+        {
             continue;
         }
         let day = current.format("%Y-%m-%d").to_string();

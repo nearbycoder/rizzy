@@ -1295,11 +1295,6 @@ pub(super) async fn worker(app: Arc<App>) {
                 eprintln!("import recovery failed: {error}");
             }
         }
-        if timer_tick && (ticks == 1 || ticks.is_multiple_of(3600)) {
-            if let Err(error) = cleanup(&app).await {
-                eprintln!("import cleanup failed: {error}");
-            }
-        }
         let pending = sqlx::query(
             "SELECT id,account_id FROM imports WHERE status='pending' ORDER BY created_at LIMIT 1",
         )
@@ -1352,7 +1347,7 @@ pub(super) async fn worker(app: Arc<App>) {
     }
 }
 
-async fn cleanup(app: &App) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn cleanup(app: &App) -> std::result::Result<(), sqlx::Error> {
     let completed = (Utc::now() - chrono::Duration::hours(24))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let failed = (Utc::now() - chrono::Duration::days(7))

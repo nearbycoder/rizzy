@@ -975,14 +975,36 @@ do not establish equivalent page structure, controls, styling, or interaction.
 The paired `join-code` flow also checks invalid QR signatures and absent account
 prefixes with JSON and SVG Accept headers. Full route parity remains open.
 
-Rizzy's automatic account incineration now runs at minute 16 of UTC hours 0,
+Rizzy's automatic account incineration now runs at minute 16 of local hours 0,
 8, and 16, following the pinned source's eight-hour recurrence. A database
 slot claim prevents multiple Rizzy processes from running the same scheduled
 sweep. The explicit `incinerate-due` command remains available for immediate
 job execution; the SQLite cancellation and paired MySQL retention checks use
 it to verify day-29 retention and day-31 deletion without waiting for a clock
-slot. The schedule check covers all 24 hours at minutes 15–17. Recovery after
-a process exits mid-sweep and live cross-host scheduling remain unverified.
+slot. The schedule check covers all 24 hours at minutes 15–17 and a non-UTC
+offset. Recovery after a process exits mid-sweep and live cross-host scheduling
+remain unverified.
+
+The remaining recurring cleanup jobs now use the pinned source's clock slots:
+magic links and device transfers every four local hours at minute 0, exports
+hourly at minute 20, and imports hourly at minute 25. The existing tag,
+notification, webhook, and auto-postpone workers also evaluate their slots in
+the host's local timezone, matching Solid Queue's unset recurring timezone;
+their claim keys use UTC so a repeated local hour has a distinct key. Workers
+skip the minute in which they start, as the source scheduler plans the next
+occurrence at boot; unused-tag cleanup now checks its exact local 04:02 slot
+instead of running any time later that day. Export and import job recovery
+still runs independently of cleanup. The source schedule parses to
+`0 0,4,8,12,16,20 * * *`, `20 * * * *`, and `25 * * * *`.
+`tests/recurring_auth_cleanup.py`, `tests/exports.py`, and
+`tests/account_import.py` verify explicit SQLite cleanup and retention.
+`tests/mysql_recurring_auth_cleanup.py` verifies stale/fresh magic links,
+transfers, completed exports, completed imports, ZIP files, and deletion of an
+eight-day-old failed import account while another account survives on disposable
+MySQL 8.4.11. Rust tests cover all clock hours, startup-minute skipping, and a
+concurrent one-winner SQLite slot claim. Live scheduled execution through each
+clock boundary, recovery from a process exit mid-job, and multi-host timing
+remain open.
 
 The [128-client](bench/results/mysql-mixed-1000-4boards-4process-c128-15s-2026-09-27.json)
 and [256-client](bench/results/mysql-mixed-1000-4boards-4process-c256-15s-2026-09-27.json)
