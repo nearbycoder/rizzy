@@ -4280,6 +4280,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .post(session_transfer::redeem),
         )
         .route("/session/magic_link", get(show_magic_link).post(complete_magic_link))
+        .route(
+            "/landing",
+            get(|| async {
+                (StatusCode::FOUND, [(header::LOCATION, "/session/menu")])
+                    .into_response()
+            }),
+        )
         .route("/signup", get(signup_redirect).post(request_signup))
         .route("/signup/new", get(new_signup))
         .route("/signup/completion", post(complete_signup))
@@ -5155,7 +5162,11 @@ fn session_body(headers: &HeaderMap, body: &Bytes) -> Result<(Value, bool)> {
 }
 async fn show_magic_link(State(app): Shared, headers: HeaderMap) -> Result<Response> {
     let Some(pending) = cookie_value(&headers, "pending_authentication_token") else {
-        return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
+        return Ok(auth_flash_redirect(
+            "/session/new",
+            "session_missing_email_alert",
+            &headers,
+        ));
     };
     let row = sqlx::query(
         "SELECT email_address FROM pending_authentications WHERE token_hash=? AND expires_at>?",
@@ -5166,7 +5177,11 @@ async fn show_magic_link(State(app): Shared, headers: HeaderMap) -> Result<Respo
     .await
     .map_err(db_err)?;
     let Some(row) = row else {
-        return Ok((StatusCode::FOUND, [(header::LOCATION, "/session/new")]).into_response());
+        return Ok(auth_flash_redirect(
+            "/session/new",
+            "session_missing_email_alert",
+            &headers,
+        ));
     };
     let email: String = row.get("email_address");
     let code_hint = if dev_magic_links() {
@@ -5182,7 +5197,40 @@ async fn show_magic_link(State(app): Shared, headers: HeaderMap) -> Result<Respo
     } else {
         String::new()
     };
-    Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Check your email | Rizzy</title></head><body><main><h1>Check your email</h1><p>Enter the verification code sent to <strong>{}</strong>.</p><form method=\"post\" action=\"/session/magic_link\"><label>Verification code<input name=\"code\" autocomplete=\"one-time-code\" maxlength=\"6\" required autofocus></label><button type=\"submit\">Continue</button></form>{code_hint}</main></body></html>",escape(&email))).into_response())
+    let alert = cookie_value(&headers, "magic_link_rate_alert").as_deref() == Some("1");
+    let shake = cookie_value(&headers, "magic_link_shake").as_deref() == Some("1");
+    let mut response = signup_page::magic_link(&email, &code_hint, alert, shake).into_response();
+    for (present, name) in [
+        (alert, "magic_link_rate_alert"),
+        (shake, "magic_link_shake"),
+    ] {
+        if present {
+            set_cookie(
+                response.headers_mut(),
+                name,
+                "",
+                0,
+                secure_request(&headers),
+            );
+        }
+    }
+    Ok(response)
+}
+
+fn auth_flash_redirect(
+    path: &'static str,
+    cookie_name: &'static str,
+    headers: &HeaderMap,
+) -> Response {
+    let mut response = (StatusCode::FOUND, [(header::LOCATION, path)]).into_response();
+    set_cookie(
+        response.headers_mut(),
+        cookie_name,
+        "1",
+        60,
+        secure_request(headers),
+    );
+    response
 }
 async fn new_signup(State(app): Shared, headers: HeaderMap) -> Result<Response> {
     if headers.contains_key("x-rizzy-json-request") {
@@ -5428,12 +5476,19 @@ async fn complete_magic_link(
     body: Bytes,
 ) -> Result<Response> {
     let (body, form) = session_body(&headers, &body)?;
-    let pending = cookie_value(&headers, "pending_authentication_token").ok_or_else(|| {
-        err(
+    let Some(pending) = cookie_value(&headers, "pending_authentication_token") else {
+        if form {
+            return Ok(auth_flash_redirect(
+                "/session/new",
+                "session_missing_email_alert",
+                &headers,
+            ));
+        }
+        return Err(err(
             StatusCode::UNAUTHORIZED,
             "Enter your email address to sign in.",
-        )
-    })?;
+        ));
+    };
     let _guard = app.auth_lock.lock().await;
     let record = sqlx::query(
         "SELECT email_address FROM pending_authentications WHERE token_hash=? AND expires_at>?",
@@ -5442,25 +5497,51 @@ async fn complete_magic_link(
     .bind(now())
     .fetch_optional(&app.db)
     .await
-    .map_err(db_err)?
-    .ok_or_else(|| {
-        err(
+    .map_err(db_err)?;
+    let Some(record) = record else {
+        if form {
+            return Ok(auth_flash_redirect(
+                "/session/new",
+                "session_missing_email_alert",
+                &headers,
+            ));
+        }
+        return Err(err(
             StatusCode::UNAUTHORIZED,
             "Enter your email address to sign in.",
-        )
-    })?;
-    auth_attempt(
+        ));
+    };
+    let attempt = auth_attempt(
         &app,
         &format!("verify:{}", peer.ip()),
         10,
         15,
         "Try again in 15 minutes.",
     )
-    .await?;
+    .await;
+    if let Err(error) = attempt {
+        if form && error.0 == StatusCode::TOO_MANY_REQUESTS {
+            return Ok(auth_flash_redirect(
+                "/session/magic_link",
+                "magic_link_rate_alert",
+                &headers,
+            ));
+        }
+        return Err(error);
+    }
     let code = normalize_magic_code(&required(&body, "code")?);
     let link=sqlx::query("SELECT m.id,m.identity_id,m.purpose,i.email_address FROM magic_links m JOIN identities i ON i.id=m.identity_id WHERE m.code=? AND m.expires_at>?")
-        .bind(&code).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?
-        .ok_or_else(||err(StatusCode::UNAUTHORIZED,"Try another code."))?;
+        .bind(&code).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?;
+    let Some(link) = link else {
+        if form {
+            return Ok(auth_flash_redirect(
+                "/session/magic_link",
+                "magic_link_shake",
+                &headers,
+            ));
+        }
+        return Err(err(StatusCode::UNAUTHORIZED, "Try another code."));
+    };
     let mut response;
     if link.get::<String, _>("email_address") != record.get::<String, _>("email_address") {
         sqlx::query("DELETE FROM magic_links WHERE id=?")
@@ -5473,11 +5554,15 @@ async fn complete_magic_link(
             .execute(&app.db)
             .await
             .map_err(db_err)?;
-        response = err(
-            StatusCode::UNAUTHORIZED,
-            "Something went wrong. Please try again.",
-        )
-        .into_response();
+        response = if form {
+            auth_flash_redirect("/session/new", "session_mismatch_alert", &headers)
+        } else {
+            err(
+                StatusCode::UNAUTHORIZED,
+                "Something went wrong. Please try again.",
+            )
+            .into_response()
+        };
         set_cookie(
             response.headers_mut(),
             "pending_authentication_token",
@@ -5526,7 +5611,7 @@ async fn complete_magic_link(
         let destination = if purpose == "sign_up" {
             "/signup/completion/new".into()
         } else {
-            join_return_to(&headers).unwrap_or_else(|| "/".into())
+            join_return_to(&headers).unwrap_or_else(|| "/landing".into())
         };
         response.headers_mut().insert(
             header::LOCATION,
@@ -5722,13 +5807,35 @@ async fn new_session(State(app): Shared, headers: HeaderMap) -> Result<Response>
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let signup_link = if accounts == 0 || env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1") {
-        "<p><strong>New here?</strong> <a href=\"/signup/new\">Sign up</a> to create an account.</p>"
-    } else {
-        ""
-    };
+    let signup_open = accounts == 0 || env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1");
     let passkey_button = passkeys::sign_in_button().unwrap_or_default();
-    Ok(Html(format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enter your email | Rizzy</title></head><body><main><h1>Get into Rizzy</h1><form method=\"post\" action=\"/session\"><label>Enter your email address<input type=\"email\" name=\"email_address\" autocomplete=\"username webauthn\" required autofocus></label><button type=\"submit\">Let's go</button></form>{passkey_button}{signup_link}</main></body></html>")).into_response())
+    let missing_email =
+        cookie_value(&headers, "session_missing_email_alert").as_deref() == Some("1");
+    let mismatch = cookie_value(&headers, "session_mismatch_alert").as_deref() == Some("1");
+    let message = if mismatch {
+        Some("Something went wrong. Please try again.")
+    } else if missing_email {
+        Some("Enter your email address to sign in.")
+    } else {
+        None
+    };
+    let mut response =
+        signup_page::session_new(signup_open, &passkey_button, message).into_response();
+    for (present, name) in [
+        (missing_email, "session_missing_email_alert"),
+        (mismatch, "session_mismatch_alert"),
+    ] {
+        if present {
+            set_cookie(
+                response.headers_mut(),
+                name,
+                "",
+                0,
+                secure_request(&headers),
+            );
+        }
+    }
+    Ok(response)
 }
 async fn check_my_scope(app: &App, identity_id: &str, uri: &Uri) -> Result<()> {
     let mut parts = uri.path().trim_start_matches('/').split('/');

@@ -353,11 +353,7 @@ fn missing_passkey(headers: &HeaderMap) -> Response {
         )
             .into_response()
     } else {
-        (
-            StatusCode::NOT_FOUND,
-            Html(include_str!("../static/404.html")),
-        )
-            .into_response()
+        static_error_page(include_str!("../static/404.html"), StatusCode::NOT_FOUND)
     }
 }
 

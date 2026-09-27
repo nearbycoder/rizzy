@@ -730,7 +730,7 @@ The board HTML now switches to a filtered grid when Fizzy's filter-active condit
 
 `tests/access_token_html_parity.py` compares the profile link, personal access token index, new form, browser creation redirect, short-lived reveal, list without the secret, and browser revocation against live Fizzy. It also verifies that a revealed read token works and stops working after revocation. Rust retains token hashes for authorization; a separate reveal record holds the new token for ten seconds, is bound to the creating identity, and is removed after expiry. The page styling remains simpler than Fizzy's.
 
-`tests/session_html.py` checks the local browser form flow from email entry through a development magic code to the board landing page. The same flow was exercised in Chromium without console errors. JSON session requests remain supported. The sign-in pages still have simplified styling, including the passkey control.
+`tests/session_html.py` checks the local browser form flow from email entry through a development magic code, `/landing`, the account menu, and account Home. Chromium also submitted a valid six-character code through the magic-link page's paste handler with a CSP nonce and reached Home. JSON session requests remain supported. The source-shaped sign-in and code pages are compared below; account selection and passkey presentation beyond these states still need work.
 
 `tests/signup_html.py` checks the browser signup route, sign-in page link, email form, magic-code redirect, completion form validation, account creation, and landing redirect on a fresh Rust database. The pinned source's targeted signup, completion, and magic-link controller tests passed (23 runs, 94 assertions); the disposable multi-tenant source and Rust flow is compared in `tests/mysql_pair_selfhost.py signup-browser` below. A rollback-only source signup probe established the initial data counts: one Playground board, 11 published cards, 11 publication events, 11 creator watches, and one board access. Rizzy now seeds those records, and the test matches every starter card's title and plain text against the source. Chromium followed email, code, and name entry to Playground and rendered the orientation video card. `tests/auth.py` also checks that an authenticated identity can create another account through completion, as the source controller permits. Starter card HTML and other source signup side effects have not been exhaustively compared.
 
@@ -959,6 +959,29 @@ are within two pixels of the source positions. Rizzy uses its own logo and an
 independent-implementation footer rather than claiming Fizzy's branding or
 37signals support. The completion form, flash animation, and full light-theme
 geometry still need visual comparison.
+
+The public email sign-in and verification pages now share that shell. The
+paired `session-browser` suite compares missing pending-authentication state,
+one-time alerts, HTML and JSON invalid-code responses, one-time shake state,
+valid sign-in, and the global `/landing` to account-menu redirect chain on
+fresh Fizzy and Rizzy MySQL databases. The paired `session-rate-limit` suite
+checks ten invalid code submissions, the eleventh-request redirect and
+one-time alert, and a JSON 429. Both suites passed. Desktop and mobile browser
+comparisons are saved for [email entry source](docs/visual-baselines/fizzy-session-new-desktop.png),
+[email entry Rust](docs/visual-baselines/rizzy-session-new-desktop.png),
+[email entry mobile source](docs/visual-baselines/fizzy-session-new-mobile.png),
+[email entry mobile Rust](docs/visual-baselines/rizzy-session-new-mobile.png),
+[code entry source](docs/visual-baselines/fizzy-magic-link-desktop.png),
+[code entry Rust](docs/visual-baselines/rizzy-magic-link-desktop.png),
+[code entry mobile source](docs/visual-baselines/fizzy-magic-link-mobile.png), and
+[code entry mobile Rust](docs/visual-baselines/rizzy-magic-link-mobile.png).
+The code-entry field and main text positions were within one pixel at desktop
+and mobile in the tested viewport. The visible logo and footer identify Rizzy
+as independent, while the source shows Fizzy and 37signals. The development
+code hint, other form errors, and all sign-in edge cases have not been
+exhaustively compared. A paired passkey HTML run also found that one missing
+passkey page had an extra dynamic CSP nonce; its static 404 body now matches
+the source and that suite passes.
 
 The paired `signup-rate-limit`, `signup-rate-limit-invalid`, and
 `signup-rate-limit-json` suites now exercise eleven requests each on fresh
