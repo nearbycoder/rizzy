@@ -267,6 +267,7 @@ const reactionRoot=document.querySelector('main');
 reactionRoot.addEventListener('click',async event=>{const emoji=event.target.closest('[data-emoji]');if(emoji){const input=emoji.closest('form')?.querySelector('[name="reaction[content]"]');if(input){input.value=emoji.dataset.emoji;input.focus()}return}const link=event.target.closest('[data-reaction-new],[data-reaction-cancel]');if(link){event.preventDefault();try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load reactions');const page=new DOMParser().parseFromString(await response.text(),'text/html');if(link.hasAttribute('data-reaction-new')){const frame=page.querySelector('turbo-frame[id^=new_reaction_]'),target=link.closest('turbo-frame');if(!frame||!target)throw Error('Reaction form missing');target.replaceWith(document.importNode(frame,true));document.querySelector('turbo-frame[id^=new_reaction_] input')?.focus()}else{const frame=page.querySelector('turbo-frame[id^=reacting_]'),target=link.closest('turbo-frame[id^=reacting_]');if(!frame||!target)throw Error('Reaction list missing');target.replaceWith(document.importNode(frame,true))}}catch(error){alert(error.message)}return}const button=event.target.closest('[data-reaction-delete]');if(button){button.disabled=true;try{const response=await fetch(button.dataset.reactionDelete,{method:'DELETE',headers:{Accept:'text/vnd.turbo-stream.html'}});if(!response.ok)throw Error('Could not delete reaction');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[action=remove]');if(!stream)throw Error('Reaction removal missing');document.getElementById(stream.getAttribute('target'))?.remove()}catch(error){button.disabled=false;alert(error.message)}}});
 reactionRoot.addEventListener('submit',async event=>{const form=event.target;if(!form.matches('.reaction__form'))return;event.preventDefault();const button=event.submitter;if(button)button.disabled=true;try{const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});if(!response.ok)throw Error('Could not add reaction');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[action=replace]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target'));if(!replacement||!target)throw Error('Reaction update missing');target.replaceWith(document.importNode(replacement,true))}catch(error){if(button)button.disabled=false;alert(error.message)}});
 </script>
+<script>{{CARD_EDIT_DRAFT_SCRIPT}}</script>
 <script>
 // Keep an open card current without replacing the editor or the comment draft.
 const liveCardEditor=()=>document.getElementById('edit_card_{{CARD_ID}}');
@@ -409,6 +410,7 @@ async function openCardEditor(url){
     if(!nextFrame)throw Error('Card edit frame missing');
     liveCardDisplayFrame=frame.cloneNode(true);
     frame.replaceWith(document.importNode(nextFrame,true));
+    await restoreCardEditDraft(liveCardEditor().querySelector('form'));
     liveCardEditor().querySelector('textarea')?.focus();
   }catch(error){console.warn('Could not open card editor',error);location.href=url}
 }
@@ -444,6 +446,7 @@ document.addEventListener('submit',async event=>{
     const stream=[...page.querySelectorAll('turbo-stream[action="update"]')].find(item=>item.getAttribute('target')===liveCardEditor().id);
     const template=stream?.querySelector('template');
     if(!template)throw Error('Card update frame missing');
+    clearCardEditDraft(form);
     liveCardEditor().replaceChildren(document.importNode(template.content,true));
     liveCardDisplayFrame=null;
     void refreshLiveCard(true);

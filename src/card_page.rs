@@ -37,7 +37,7 @@ pub(super) fn edit_frame(principal: &Principal, card: &DbRow) -> String {
     let description: String = card.get("description");
     let path = format!("/{}/cards/{number}", principal.slug);
     format!(
-        r##"<turbo-frame id="edit_card_{card_id}"><turbo-stream action="update" target="card_closure_toggle_card_{card_id}"><template><button type="submit" form="edit_form_card_{card_id}">Save changes</button></template></turbo-stream><form id="edit_form_card_{card_id}" action="{path}" method="post"><input type="hidden" name="_method" value="patch"><h1 class="card__title"><label for="card_title">Name it…</label><textarea id="card_title" name="card[title]" maxlength="255" required autofocus>{title}</textarea></h1><lexxy-editor id="card_description" name="card[description]" value="{description}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename"><lexxy-prompt trigger="@" src="/{account}/prompts/boards/{board_id}/users" name="mention"></lexxy-prompt><lexxy-prompt trigger="#" src="/{account}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt></lexxy-editor><button type="submit">Save changes</button><a href="{path}">Close editor and discard changes</a><p role="alert" class="card-edit__error" id="edit-error"></p></form></turbo-frame>"##,
+        r##"<turbo-frame id="edit_card_{card_id}"><turbo-stream action="update" target="card_closure_toggle_card_{card_id}"><template><button type="submit" form="edit_form_card_{card_id}">Save changes</button></template></turbo-stream><form id="edit_form_card_{card_id}" action="{path}" method="post" data-local-save-key-value="card-{card_id}"><input type="hidden" name="_method" value="patch"><h1 class="card__title"><label for="card_title">Name it…</label><textarea id="card_title" name="card[title]" maxlength="255" required autofocus>{title}</textarea></h1><lexxy-editor id="card_description" name="card[description]" value="{description}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename"><lexxy-prompt trigger="@" src="/{account}/prompts/boards/{board_id}/users" name="mention"></lexxy-prompt><lexxy-prompt trigger="#" src="/{account}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt></lexxy-editor><button type="submit">Save changes</button><a href="{path}">Close editor and discard changes</a><p role="alert" class="card-edit__error" id="edit-error"></p></form></turbo-frame>"##,
         path = path,
         card_id = escape(&card_id),
         title = escape(&title),
@@ -51,8 +51,9 @@ pub(super) fn edit(principal: &Principal, card: &DbRow) -> Html<String> {
     let number: i64 = card.get("number");
     let path = format!("/{}/cards/{number}", principal.slug);
     let content = format!(
-        "<div class=\"card-edit\"><p><a href=\"{path}\">← Back to card</a></p>{frame}</div><script>{script}</script>",
+        "<div class=\"card-edit\"><p><a href=\"{path}\">← Back to card</a></p>{frame}</div><script>{draft_script}</script><script>{script}</script>",
         frame = edit_frame(principal, card),
+        draft_script = include_str!("../static/card_edit_draft.js"),
         script = include_str!("../static/card_edit.js"),
     );
     super::signed_in_shell_html(
@@ -526,5 +527,9 @@ pub(super) async fn show(
             .replace("{{ACCOUNT}}", &principal.slug.to_string()),
     );
     values.insert("SHELL_SCRIPT", include_str!("../static/events.js").into());
+    values.insert(
+        "CARD_EDIT_DRAFT_SCRIPT",
+        include_str!("../static/card_edit_draft.js").into(),
+    );
     Ok(Html(render_template(TEMPLATE, &values)))
 }

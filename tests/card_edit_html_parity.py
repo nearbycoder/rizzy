@@ -48,6 +48,7 @@ def check(target):
             assert marker in body, (target["name"], "full edit shell", marker)
         for marker in (b'<turbo-frame id="edit_card_', b'<form id="edit_form_card_',
                        b'name="card[title]"', b'name="card[description]"', b'<lexxy-editor',
+                       f'data-local-save-key-value="card-{card["id"]}"'.encode(),
                        b'Close editor and discard changes', title.encode(), b'A description for editing'):
             assert marker in body, (target["name"], marker)
         frame_request = urllib.request.Request(target["url"] + path, headers={
