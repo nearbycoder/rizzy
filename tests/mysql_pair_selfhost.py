@@ -63,7 +63,7 @@ from account_cancellation_mysql_parity import (age_cancellation,  # noqa: E402
                                                concurrent_rust_incineration,
                                                concurrent_rust_mail_delivery,
                                                deliver_rust_cancellation_mail,
-                                               normalized_mail, retained_counts,
+                                               normalized_mail, retained_counts, stored_blob_count,
                                                run as account_cancellation_run, seed_survivor,
                                                source_cancellation_mail, survivor_access,
                                                source_incineration, source_purge_enqueued_blob,
@@ -338,9 +338,10 @@ def main():
                     for target, result in ((source, source_result), (rust, rust_result)):
                         assert result["day_29"] == (1, 1, 1, 1, 1, 1), (target["name"], result)
                         result["day_29_files"] = (
-                            target["cancelled_image_path"].read_bytes() == IMAGE,
+                            tuple(path.read_bytes() == content for _, path, content
+                                  in target["cancelled_files"]),
                             target["survivor_image_path"].read_bytes() == IMAGE)
-                        assert result["day_29_files"] == (True, True), (target["name"], result)
+                        assert result["day_29_files"] == ((True,) * 4, True), (target["name"], result)
                     for target in (source, rust):
                         age_cancellation(target, 31)
                     source_incineration(fizzy_env)
@@ -354,13 +355,19 @@ def main():
                     rust_result["day_31"] = wait_for_deletion(rust)
                     for target, result in ((source, source_result), (rust, rust_result)):
                         assert result["day_31"] == (0, 1, 0, 0, 1, 1), (target["name"], result)
-                    assert source["cancelled_image_path"].exists(), "Fizzy purge ran before queued job"
-                    source_purge_enqueued_blob(fizzy_env, source["cancelled_image_key"])
+                    for key, path, _ in source["cancelled_files"]:
+                        assert path.exists(), ("Fizzy purge ran before queued job", key)
+                        source_purge_enqueued_blob(fizzy_env, key)
                     for target, result in ((source, source_result), (rust, rust_result)):
                         result["day_31_files"] = (
-                            target["cancelled_image_path"].exists(),
+                            tuple(path.exists() for _, path, _ in target["cancelled_files"]),
                             target["survivor_image_path"].read_bytes() == IMAGE)
-                        assert result["day_31_files"] == (False, True), (target["name"], result)
+                        assert result["day_31_files"] == ((False,) * 4, True), (target["name"], result)
+                        result["day_31_blobs"] = (
+                            tuple(stored_blob_count(target, key) for key, _, _
+                                  in target["cancelled_files"]),
+                            stored_blob_count(target, target["survivor_image_key"]))
+                        assert result["day_31_blobs"] == ((0,) * 4, 1), (target["name"], result)
                     source_result["survivor_access"] = survivor_access(source, source_survivor_token)
                     rust_result["survivor_access"] = survivor_access(rust, rust_survivor_token)
             elif args.suite == "passkeys-html":

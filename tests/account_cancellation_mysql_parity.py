@@ -19,16 +19,17 @@ from email.parser import BytesParser
 from pathlib import Path
 
 from card_image_parity import IMAGE, call
+from embed_parity import FILE
 from draft_workflow_parity import NoRedirect, request
 from sustained_mixed import ROOT, RUST, SOURCE
 from sustained_mixed_mysql import mysql_query
 
 
-def upload_card_image(target, card_number):
+def upload_blob(target, content, filename, content_type):
     account = target["account"]
-    blob = {"filename": "moon.jpg", "byte_size": len(IMAGE),
-            "checksum": base64.b64encode(hashlib.md5(IMAGE).digest()).decode(),
-            "content_type": "image/jpeg"}
+    blob = {"filename": filename, "byte_size": len(content),
+            "checksum": base64.b64encode(hashlib.md5(content).digest()).decode(),
+            "content_type": content_type}
     status, _, raw = call(target, f"/{account}/rails/active_storage/direct_uploads",
                           "POST", {"blob": blob})
     assert status == 200, (target["name"], "direct upload", status, raw[:200])
@@ -39,15 +40,49 @@ def upload_card_image(target, card_number):
         path = path / key[:2] / key[2:4]
     path /= key
     target.setdefault("uploaded_files", []).append(path)
-    status, _, raw = call(target, upload["direct_upload"]["url"], "PUT", IMAGE,
+    status, _, raw = call(target, upload["direct_upload"]["url"], "PUT", content,
                           bearer=False, headers=upload["direct_upload"]["headers"])
     assert status == 204, (target["name"], "upload bytes", status, raw[:200])
+    assert path.read_bytes() == content, (target["name"], "stored bytes", path)
+    return upload, path
+
+
+def upload_card_image(target, card_number):
+    upload, path = upload_blob(target, IMAGE, "moon.jpg", "image/jpeg")
+    account = target["account"]
     status, _, raw = call(target, f"/{account}/cards/{card_number}.json", "PATCH",
                           {"card": {"image": upload["signed_id"]}})
     assert status == 200 and json.loads(raw)["image_url"], (
         target["name"], "attach image", status, raw[:200])
-    assert path.read_bytes() == IMAGE, (target["name"], "stored bytes", path)
-    return key, path
+    return upload["key"], path
+
+
+def upload_avatar(target, user_id):
+    upload, path = upload_blob(target, IMAGE, "avatar.jpg", "image/jpeg")
+    status, _, raw = call(target, f"/{target['account']}/users/{user_id}.json", "PATCH",
+                          {"user": {"avatar": upload["signed_id"]}})
+    assert status == 200 and json.loads(raw)["avatar_url"], (
+        target["name"], "attach avatar", status, raw[:200])
+    return upload["key"], path, IMAGE
+
+
+def upload_embeds(target, card_number):
+    file_upload, file_path = upload_blob(target, FILE, "notes.txt", "text/plain")
+    markup = (f'<p>Read <action-text-attachment sgid="{file_upload["attachable_sgid"]}">'
+              '</action-text-attachment></p>')
+    status, _, raw = call(target, f"/{target['account']}/cards/{card_number}.json", "PATCH",
+                          {"card": {"description": markup}})
+    assert status == 200 and json.loads(raw)["has_attachments"], (
+        target["name"], "attach card file", status, raw[:200])
+    image_upload, image_path = upload_blob(target, IMAGE, "comment.jpg", "image/jpeg")
+    markup = (f'<p><action-text-attachment sgid="{image_upload["attachable_sgid"]}">'
+              '</action-text-attachment></p>')
+    status, _, raw = call(target, f"/{target['account']}/cards/{card_number}/comments.json",
+                          "POST", {"comment": {"body": markup}})
+    assert status == 201 and json.loads(raw)["body"]["html"], (
+        target["name"], "attach comment image", status, raw[:200])
+    return [(file_upload["key"], file_path, FILE),
+            (image_upload["key"], image_path, IMAGE)]
 
 
 def run(target, *, image=False):
@@ -66,6 +101,11 @@ def run(target, *, image=False):
     if image:
         target["cancelled_image_key"], target["cancelled_image_path"] = upload_card_image(
             target, json.loads(raw)["number"])
+        target["cancelled_files"] = [
+            (target["cancelled_image_key"], target["cancelled_image_path"], IMAGE),
+            upload_avatar(target, owner_id),
+            *upload_embeds(target, json.loads(raw)["number"]),
+        ]
 
     status, _, page = request(target, f"/{account}/account/settings", accept="text/html")
     assert status == 200 and b"Delete my account" in page, (target["name"], "settings", status)
@@ -392,6 +432,15 @@ def retained_counts(target):
     raw = mysql_query(target["mysql_client"], target["mysql_socket"],
                       target["mysql_database"], statement)
     return tuple(int(value) for value in raw.split("\t"))
+
+
+def stored_blob_count(target, key):
+    table = "active_storage_blobs" if target["name"] == "fizzy" else "storage_blobs"
+    column = "key" if target["name"] == "fizzy" else "storage_key"
+    assert re.fullmatch(r"[a-zA-Z0-9_-]+", key), key
+    return int(mysql_query(target["mysql_client"], target["mysql_socket"],
+                           target["mysql_database"],
+                           f"SELECT COUNT(*) FROM `{table}` WHERE `{column}`='{key}'"))
 
 
 def wait_for_deletion(target):

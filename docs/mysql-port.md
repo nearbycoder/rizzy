@@ -140,12 +140,14 @@ retention of the account, board, and card. Its `account-cancellation-retention`
 variant adds a surviving account, board, and card on both sides, then compares
 day-29 retention and day-31 scoped deletion after Fizzy's due-incineration
 job and Rizzy's explicit `incinerate-due` command. The surviving owner's settings API
-remains accessible. Both accounts also upload and attach a card image. Both
-files retain their original bytes at day 29; at day 31 Rizzy removes the
-cancelled account's file during incineration, while Fizzy enqueues an Active
-Storage purge. Performing that serialized queued job removes the source file
-and blob. The surviving file remains intact in both apps. Other attachment
-types, live-worker purge timing, and external mail delivery remain open. The separate
+remains accessible. Both accounts upload a card image; the canceled account
+also attaches a user avatar, a card text file, and a comment image. All five
+files retain their bytes at day 29. At day 31 Rizzy removes the canceled
+account's four files during incineration, while Fizzy enqueues four Active
+Storage purges. Performing those queued jobs removes each source file and
+blob. The surviving image and blob remain intact in both apps. Other
+attachment forms, live-worker purge timing, and external mail delivery remain
+open. The separate
 `account-cancellation-concurrent` suite runs the same paired fixture but
 starts two independent Rust `incinerate-due` commands at day 31. A MySQL row
 lock holds the cancellation until both workers are confirmed waiting on it;
