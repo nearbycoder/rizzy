@@ -283,15 +283,20 @@ pub(super) fn next_link(
     )
 }
 
-fn option(value: &str, label: &str, current: Option<&str>) -> String {
+fn radio_option(name: &str, value: &str, label: &str, current: &str) -> String {
     format!(
-        "<option value=\"{}\"{}>{}</option>",
+        "<label class=\"quick-filter__choice\"><input type=\"radio\" name=\"{}\" value=\"{}\"{}><span>{}</span></label>",
+        escape(name),
         escape(value),
-        if current == Some(value) {
-            " selected"
-        } else {
-            ""
-        },
+        if current == value { " checked" } else { "" },
+        escape(label)
+    )
+}
+
+fn quick_filter(label: &str, selected: bool, choices: &str) -> String {
+    format!(
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{choices}</div></div>",
+        if selected { " is-selected" } else { "" },
         escape(label)
     )
 }
@@ -312,20 +317,27 @@ fn choice_group(
     if let Some((_, _, title, true)) = extra {
         selected_names.push(title);
     }
+    let prefix = match name {
+        "assignee_ids[]" => "Assigned to ",
+        "creator_ids[]" => "Added by ",
+        "closer_ids[]" => "Closed by ",
+        _ => "",
+    };
     let summary = match selected_names.len() {
         0 => label.to_owned(),
-        1 => selected_names[0].to_owned(),
-        amount => format!("{label} ({amount})"),
+        1 => format!("{prefix}{}", selected_names[0]),
+        2 => format!("{prefix}{} or {}", selected_names[0], selected_names[1]),
+        count => format!(
+            "{prefix}{}, or {}",
+            selected_names[..count - 1].join(", "),
+            selected_names[count - 1]
+        ),
     };
-    let mut html = format!(
-        "<details class=\"choice-popover\"><summary>{}</summary><div class=\"choice-popover__items\" role=\"group\" aria-label=\"{}\">",
-        escape(&summary),
-        escape(label)
-    );
+    let mut choices_html = String::new();
     if let Some((field, value, title, checked)) = extra {
         let _ = write!(
-            html,
-            "<label class=\"choice-popover__item\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{}><span>{}</span></label>",
+            choices_html,
+            "<label class=\"quick-filter__choice\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{}><span>{}</span></label>",
             escape(field),
             escape(value),
             if checked { " checked" } else { "" },
@@ -339,15 +351,18 @@ fn choice_group(
             ""
         };
         let _ = write!(
-            html,
-            "<label class=\"choice-popover__item\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{checked}><span>{}</span></label>",
+            choices_html,
+            "<label class=\"quick-filter__choice\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{checked}><span>{}</span></label>",
             escape(name),
             escape(id),
             escape(title)
         );
     }
-    html.push_str("</div></details>");
-    html
+    if choices_html.is_empty() {
+        String::new()
+    } else {
+        quick_filter(&summary, !selected_names.is_empty(), &choices_html)
+    }
 }
 
 fn board_label(boards: &[DbRow], selected: &[String]) -> String {
@@ -408,15 +423,15 @@ pub(super) async fn show(
         .map(|user| (user.get("id"), user.get("name")))
         .collect();
     let board_control = choice_group(
-        "Board",
+        "Board…",
         "board_ids[]",
         &board_choices,
         &query.board_ids,
         None,
     );
-    let tag_control = choice_group("Tag", "tag_ids[]", &tag_choices, &query.tag_ids, None);
+    let tag_control = choice_group("Tagged…", "tag_ids[]", &tag_choices, &query.tag_ids, None);
     let assignee_control = choice_group(
-        "Assigned to",
+        "Assigned to…",
         "assignee_ids[]",
         &user_choices,
         &query.assignee_ids,
@@ -428,14 +443,14 @@ pub(super) async fn show(
         )),
     );
     let creator_control = choice_group(
-        "Added by",
+        "Added by…",
         "creator_ids[]",
         &user_choices,
         &query.creator_ids,
         None,
     );
     let closer_control = choice_group(
-        "Closed by",
+        "Closed by…",
         "closer_ids[]",
         &user_choices,
         &query.closer_ids,
@@ -455,6 +470,24 @@ pub(super) async fn show(
             );
         }
     }
+    for (key, value) in [
+        ("creation", query.creation.as_deref()),
+        ("closure", query.closure.as_deref()),
+    ] {
+        if let Some(value) = value {
+            let _ = write!(
+                preserved,
+                "<input type=\"hidden\" name=\"{key}\" value=\"{}\">",
+                escape(value)
+            );
+        }
+    }
+    let expanded = raw.is_some_and(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .any(|(key, value)| key == "expand_all" && value == "true")
+    });
+    let index = query.indexed_by.as_deref().unwrap_or("all");
+    let sort = query.sorted_by.as_deref().unwrap_or("latest");
     let statuses = [
         ("all", "Open"),
         ("closed", "Done"),
@@ -465,16 +498,59 @@ pub(super) async fn show(
     ];
     let status_options = statuses
         .iter()
-        .map(|(value, label)| option(value, label, query.indexed_by.as_deref()))
+        .map(|(value, label)| radio_option("indexed_by", value, label, index))
         .collect::<String>();
     let sort_options = [
-        ("newest", "Newest"),
-        ("oldest", "Oldest"),
-        ("latest", "Latest activity"),
+        ("newest", "Newest to oldest"),
+        ("oldest", "Oldest to newest"),
+        ("latest", "Recently updated"),
     ]
     .iter()
-    .map(|(value, label)| option(value, label, query.sorted_by.as_deref()))
+    .map(|(value, label)| radio_option("sorted_by", value, label, sort))
     .collect::<String>();
+    let status_label = match index {
+        "all" => "Status…",
+        "closed" => "Done",
+        "not_now" => "Not now",
+        "stalled" => "Stalled",
+        "postponing_soon" => "Closing soon",
+        "golden" => "Golden",
+        _ => "Status…",
+    };
+    let sort_label = match sort {
+        "newest" => "Newest to oldest",
+        "oldest" => "Oldest to newest",
+        _ => "Recently updated",
+    };
+    let controls = [
+        board_control,
+        quick_filter(sort_label, sort != "latest", &sort_options),
+        quick_filter(status_label, index != "all", &status_options),
+        tag_control,
+        assignee_control,
+        creator_control,
+        closer_control,
+    ]
+    .concat();
+    let filters_used = !query.board_ids.is_empty()
+        || !query.terms.is_empty()
+        || index != "all"
+        || sort != "latest"
+        || !query.tag_ids.is_empty()
+        || !query.assignee_ids.is_empty()
+        || !query.creator_ids.is_empty()
+        || !query.closer_ids.is_empty()
+        || query.assignment_status.is_some()
+        || query.creation.is_some()
+        || query.closure.is_some();
+    let clear = if filters_used {
+        format!(
+            "<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all\" title=\"Clear all\">×</a>",
+            principal.slug
+        )
+    } else {
+        String::new()
+    };
     let mut list = previews(app, principal, cards).await?;
     if cards.is_empty() {
         list.push_str("<div class=\"blank-slate\">No cards match this filter</div>");
@@ -502,12 +578,22 @@ pub(super) async fn show(
         String::new()
     };
     let form = format!(
-        "<form class=\"filter-form\" action=\"/{}/cards\" method=\"get\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{board_control}<div class=\"more-filters\"><button class=\"more-filters__toggle\" type=\"button\" aria-label=\"Expand filter options\" title=\"Expand filter options\" aria-expanded=\"false\" aria-controls=\"cards-filter-options\">☷</button><div class=\"more-filters__fields\" id=\"cards-filter-options\" hidden><label>Status<select name=\"indexed_by\">{status_options}</select></label><label>Sort<select name=\"sorted_by\">{sort_options}</select></label>{tag_control}{assignee_control}{creator_control}{closer_control}<label>Created<input name=\"creation\" value=\"{}\" placeholder=\"This week\"></label><label>Closed<input name=\"closure\" value=\"{}\" placeholder=\"This month\"></label><button type=\"submit\">Apply filters</button></div></div>{preserved}<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all filters\" title=\"Clear all filters\">×</a></form>",
+        "<form class=\"filter-form{}\" action=\"/{}/cards\" method=\"get\"><input type=\"hidden\" name=\"expand_all\" value=\"true\"{}><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<div class=\"quick-filters\" id=\"cards-filter-options\">{controls}</div><button class=\"more-filters__toggle\" type=\"button\" aria-label=\"{}\" title=\"{}\" aria-expanded=\"{}\" aria-controls=\"cards-filter-options\">☷</button>{clear}</form>",
+        if expanded { " is-expanded" } else { "" },
         principal.slug,
+        if expanded { "" } else { " disabled" },
         escape(query.terms.first().map(String::as_str).unwrap_or("")),
-        escape(query.creation.as_deref().unwrap_or("")),
-        escape(query.closure.as_deref().unwrap_or("")),
-        principal.slug
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        expanded
     );
     let settings_link = query
         .board_ids

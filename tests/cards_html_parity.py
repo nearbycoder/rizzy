@@ -62,15 +62,29 @@ def check(target, signed_in=False):
 
         first_body = html()
         assert 'id="filter-settings-save-toggle"' not in first_body, target["name"]
+        expanded_body = html("&expand_all=true")
+        assert ('filters--expanded' if target["name"] == "fizzy" else
+                'class="filter-form is-expanded"') in expanded_body
+        if target["name"] == "rizzy":
+            assert 'class="filter-form is-expanded"' not in first_body
+            assert all(f'>{label}</button>' in expanded_body for label in
+                       ('Recently updated', 'Status…', 'Assigned to…', 'Added by…', 'Closed by…'))
+            assert 'name="expand_all" value="true"' in expanded_body
         first = found(first_body)
         assert "preview-parity" in first_body and "1/1" in first_body, target["name"]
         second = found(html("&page=2"))
         closed = html("&indexed_by=closed")
         term = found(html("&terms%5B%5D=" + urllib.parse.quote(marker + " card 05")))
         oldest = found(html("&sorted_by=oldest"))
-        assigned = found(html("&assignee_ids%5B%5D=" + urllib.parse.quote(assignee_id)))
+        assigned_body = html("&assignee_ids%5B%5D=" + urllib.parse.quote(assignee_id))
+        assigned = found(assigned_body)
         unassigned_body = html("&assignment_status=unassigned")
         unassigned = found(unassigned_body)
+        if target["name"] == "rizzy":
+            assert '>Done</button>' in closed and 'class="quick-filter is-selected"' in closed
+            assert '>Assigned to Owner</button>' in assigned_body
+            assert f'name="assignee_ids[]" value="{assignee_id}" checked' in assigned_body
+            assert '>Assigned to No one</button>' in unassigned_body
         assert first == list(range(2, 17)), (target["name"], first)
         assert second == [0, 1], (target["name"], second)
         assert f"{marker} completed" in closed and not found(closed)
