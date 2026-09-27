@@ -58,6 +58,19 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 #edit-mobile{display:none}
 .card-perma__closure-message{max-width:48ch;margin:16px auto 28px;padding:0 12px;color:#89bcff;text-align:center;font-size:16px;line-height:1.45}
 .card-perma__closure-message .local-time-value{font-weight:700}
+.card-perma__closure-message--completed{display:flex;align-items:center;justify-content:center;gap:7px;max-width:none;color:#d6dee2}
+.card-perma__closure-message--completed button{padding:0;border:0;background:none;color:inherit;font-weight:inherit;text-decoration:underline}
+.card-perma.is-closed{background:transparent}
+.card-perma.is-closed::before{content:"";position:absolute;inset:0 0 83px;background:#586269;z-index:0}
+.card-perma.is-closed .card__header,.card-perma.is-closed .card__body,.card-perma.is-closed .card__footer{background:#19242a}
+.card-perma.is-closed .card__body{z-index:3}
+.card-perma.is-closed .card__board-label{background:#d5d7d8}
+.card-perma.is-closed #gold,.card-perma.is-closed #edit-mobile,.card-perma.is-closed #closure,.card-perma.is-closed #choose-column{display:none}
+.card__closed{position:absolute;right:10px;bottom:-56px;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:132px;padding:8px 9px;border:4px solid #326849;border-radius:2px;background:#15242a;color:#cbd5d8;box-shadow:0 0 0 2px #16262b inset;transform:rotate(5deg);pointer-events:none;font-size:12px;line-height:1.15}
+.card__closed-title{font-size:20px;font-weight:900;text-transform:uppercase;color:#4c945e}
+.card__closed-date{font-family:ui-monospace,monospace;text-transform:uppercase}
+.card__closed-by{border-bottom:1px dashed currentColor}
+.card__closed--system{border-color:#8b6565}.card__closed--system .card__closed-title{color:#bb8585}
 @media(max-width:639px){
   main{position:relative;padding:22px 0 90px}
   main>nav{position:absolute;top:-42px;left:20px;z-index:30;margin:0}
@@ -79,6 +92,16 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   .card__meta-text{white-space:normal}
   .card__meta-text--assignees{align-self:center}
   .card__footer>turbo-frame[id^="reacting_card_"]{position:absolute;right:21px;bottom:12px}
+  .card-perma.is-closed .card__footer{min-height:141px}
+  .card-perma.is-closed .card__body{padding-bottom:2px}
+  .card-perma.is-closed .stage-rail{margin-top:11px;border-color:#bfc8cd}
+  .card-perma.is-closed .stage-rail__option.is-current{background:#d5d7d8}
+  .card-perma.is-closed .card__meta{position:relative;top:18px;grid-template-columns:1fr;grid-template-areas:"text-added" "text-author" "text-updated" "text-assignees";gap:4px 0}
+  .card-perma.is-closed .card__meta-avatars{display:none}
+  .card-perma.is-closed #watch{background:#d5d7d8;color:#101b20}
+  .card-perma.is-closed #pin{background:#101b20;color:#d5d7d8}
+  .card-perma.is-closed .card-perma__notch #watch,.card-perma.is-closed .card-perma__notch #pin{margin-top:16px}
+  .card-perma.is-closed .card__closed{right:3px;bottom:-59px}
   .card-perma__notch,.card-perma__notch .actions{display:contents}
   .side-action,#edit-mobile,#closure{position:static;align-self:start;justify-self:center;display:grid;place-items:center;width:50px;height:50px;margin:16px 0 0;padding:0;border-radius:50%;font-size:26px}
   #gold{grid-column:1;grid-row:4} .side-action--image{grid-column:2;grid-row:4}
@@ -88,11 +111,17 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   #closure[data-method="DELETE"]::before{content:"↶"}
   #watch{grid-column:5;grid-row:4} #pin{grid-column:6;grid-row:4}
   .card-perma__closure-message{grid-column:1/-1;grid-row:5;max-width:370px;margin:17px auto 0;padding:0 18px;font-size:16px}
+  .card-perma__closure-message--completed{margin:26px auto 0;padding:0 12px;white-space:nowrap;font-size:16px}
+  .card-perma.is-closed{padding-bottom:9px}
+  .card-perma.is-closed .card-perma__notch{grid-column:1/-1;grid-row:4}
   #choose-column{display:none}
   #column-picker{grid-column:1/-1;grid-row:6}
   turbo-frame[id^="edit_card_"]{grid-column:1/-1;grid-row:7}
   #edit:not([open]){display:none}
   section.messages{width:100%;margin:0 auto 18px}
+  section.messages:has(.comment-by-system){margin-top:2px}
+  .comments #comments:has(.comment-by-system){gap:16px}
+  .comment-by-system .comment__content{padding-top:8px;padding-bottom:8px}
   .comment--new{margin-top:0}
 }
 </style>
@@ -102,12 +131,12 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 <a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu" data-open-menu aria-haspopup="dialog" aria-expanded="false"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header><dialog id="menu-dialog" aria-label="Rizzy menu"><turbo-frame id="my_menu"></turbo-frame></dialog>
 <main id="main">
 <nav><a id="card-back-link" class="btn--back" href="/{{ACCOUNT}}/boards/{{BOARD_ID}}"><strong>Back to {{BOARD_NAME}}</strong></a></nav>
-<article class="card-perma{{IMAGE_CLASS}}" id="card">
+<article class="card-perma{{IMAGE_CLASS}}{{STATE_CLASS}}" id="card">
   {{IMAGE}}
   <button id="gold" class="side-action side-action--gold" type="button" aria-label="{{GOLD_LABEL}}" title="{{GOLD_LABEL}}" data-method="{{GOLD_METHOD}}">★</button>
   {{IMAGE_BUTTON}}
   <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
-  <div class="card__body"><div class="card__content"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div>{{STEPS}}</div>{{STAGE_RAIL}}</div>
+  <div class="card__body"><div class="card__content"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div>{{STEPS}}</div>{{STAGE_RAIL}}{{STAMP}}</div>
   <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div class="card-perma__notch">
   <div class="actions">
     <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
@@ -162,7 +191,7 @@ if(backLink){
 }
 const assignmentDialog=document.getElementById('assignment-dialog'),assignmentContent=document.getElementById('assignment-dialog-content'),assignmentError=document.getElementById('assignment-dialog-error');
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
-function formatClosureNotice(){const time=document.querySelector('.card-perma__closure-message time[data-local-time-target="indays"]');if(!time)return;const date=new Date(Number(time.getAttribute('datetime'))*1000);if(Number.isNaN(date.getTime()))return;const days=Math.round(Math.abs(commentDayStart(date)-commentDayStart(new Date()))/86400000);const value=days===0?'today':days===1?'tomorrow':`in ${days} days`;time.innerHTML=days>1?`in <span class="local-time-value">${days}</span> days`:`<span class="local-time-value">${value}</span>`}
+function formatClosureNotice(){const time=document.querySelector('.card-perma__closure-message time[data-local-time-target]');if(!time)return;const date=new Date(Number(time.getAttribute('datetime'))*1000);if(Number.isNaN(date.getTime()))return;if(time.dataset.localTimeTarget==='shortdate'){time.textContent=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric'}).format(date);time.title=commentTitleFormatter.format(date);return}const days=Math.round(Math.abs(commentDayStart(date)-commentDayStart(new Date()))/86400000);const value=days===0?'today':days===1?'tomorrow':`in ${days} days`;time.innerHTML=days>1?`in <span class="local-time-value">${days}</span> days`:`<span class="local-time-value">${value}</span>`}
 relativeDates();new MutationObserver(relativeDates).observe(document.querySelector('.card__footer'),{childList:true,subtree:true});
 document.addEventListener('click',async event=>{const link=event.target.closest('#assignment-link');if(!link)return;event.preventDefault();assignmentError.textContent='';assignmentDialog.showModal();if(assignmentContent.firstElementChild){assignmentContent.querySelector('#user-search')?.focus();return}assignmentContent.textContent='Loading…';try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load assignment picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=assignment_card_]');if(!frame)throw Error('Assignment picker missing');assignmentContent.replaceChildren(document.importNode(frame,true));assignmentContent.querySelector('#user-search')?.focus()}catch(error){assignmentContent.textContent='';assignmentError.textContent=error.message}});
 assignmentDialog.querySelector('.assignment-dialog__close').addEventListener('click',()=>assignmentDialog.close());assignmentDialog.addEventListener('click',event=>{if(event.target===assignmentDialog)assignmentDialog.close()});assignmentContent.addEventListener('input',event=>{if(event.target.id!=='user-search')return;const value=event.target.value.toLocaleLowerCase();assignmentContent.querySelectorAll('.popup__item').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))});
@@ -172,6 +201,7 @@ const deleteCardDialog=document.getElementById('delete-card-dialog');document.ge
 async function mutation(path,method,body){const r=await fetch(`/${account}/cards/${number}${path}`,{method,headers:{Accept:'application/json','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){let message=`Request failed (${r.status})`;try{const result=await r.json();message=result.message||message}catch{}throw Error(message)}return r}
 function action(button,path,method){button.addEventListener('click',async()=>{button.disabled=true;try{await mutation(path,button.dataset.method||method);location.reload()}catch(error){button.disabled=false;alert(error.message)}})}
 action(document.getElementById('closure'),'/closure','{{CLOSURE_METHOD}}');
+cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#undo-closure');if(!button)return;button.disabled=true;try{await mutation('/closure','DELETE');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 action(document.getElementById('watch'),'/watch','{{WATCH_METHOD}}');
 action(document.getElementById('pin'),'/pin','{{PIN_METHOD}}');
 action(document.getElementById('gold'),'/goldness','{{GOLD_METHOD}}');
@@ -274,6 +304,8 @@ async function refreshLiveCard(force=false,revisionHint=null){
     const nextCard=nextPage.getElementById('card');
     if(nextCard){
       cardRoot.classList.toggle('has-image',nextCard.classList.contains('has-image'));
+      cardRoot.classList.toggle('is-closed',nextCard.classList.contains('is-closed'));
+      cardRoot.classList.toggle('is-postponed',nextCard.classList.contains('is-postponed'));
       const image=cardRoot.querySelector(':scope > .card-perma__image'),updatedImage=nextCard.querySelector(':scope > .card-perma__image');
       if(image&&!updatedImage)image.remove();
       else if(!image&&updatedImage)cardRoot.querySelector('#gold').before(document.importNode(updatedImage,true));
@@ -310,6 +342,10 @@ async function refreshLiveCard(force=false,revisionHint=null){
     else if(!closureNotice&&nextClosureNotice)cardRoot.querySelector('#column-picker').before(document.importNode(nextClosureNotice,true));
     else if(closureNotice&&nextClosureNotice&&closureNotice.outerHTML!==nextClosureNotice.outerHTML)closureNotice.replaceWith(document.importNode(nextClosureNotice,true));
     formatClosureNotice();
+    const stamp=cardRoot.querySelector('.card__closed'),nextStamp=nextCard?.querySelector('.card__closed');
+    if(stamp&&!nextStamp)stamp.remove();
+    else if(!stamp&&nextStamp)cardRoot.querySelector('.card__body').append(document.importNode(nextStamp,true));
+    else if(stamp&&nextStamp&&stamp.outerHTML!==nextStamp.outerHTML)stamp.replaceWith(document.importNode(nextStamp,true));
     const stageRail=document.querySelector('.stage-rail'),nextStageRail=nextPage.querySelector('.stage-rail');
     if(stageRail&&nextStageRail)stageRail.innerHTML=nextStageRail.innerHTML;
     const stepSection=stepRoot.querySelector('section[aria-label="Steps"]'),nextStepSection=nextPage.querySelector('.card__content > section[aria-label="Steps"]');
@@ -325,7 +361,7 @@ async function refreshLiveCard(force=false,revisionHint=null){
       for(const editor of openEdits){
         const replacement=stepSection.querySelector(`li[data-step-id="${CSS.escape(editor.dataset.stepId)}"]`);
         if(replacement)replacement.replaceWith(editor);
-        else stepSection.querySelector('#new-step').closest('li').before(editor);
+        else (stepSection.querySelector('#new-step')?.closest('li')||stepSection.querySelector('ul')).append(editor);
       }
       const replacement=stepSection.querySelector('#new-step');
       if(replacement){replacement.value=draftValue;if(draftFocused){replacement.focus();replacement.setSelectionRange(cursorStart,cursorEnd)}}

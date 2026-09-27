@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--cards", type=int, default=100)
     parser.add_argument("--seconds", type=float, default=2)
     parser.add_argument("--concurrency", default="1,8,32,64,128")
+    parser.add_argument("--closed", action="store_true", help="Read a completed card and require its completion UI")
     args = parser.parse_args()
     targets = {}
     for name in ("FIZZY", "RIZZY"):
@@ -23,7 +24,7 @@ def main():
         targets[name.lower()] = {"name": name.lower(), **{
             field.lower(): os.environ[f"{name}_{field}"]
             for field in ("URL", "ACCOUNT", "TOKEN", "EMAIL", "DB")}}
-    results = {"fixture_cards": args.cards, "sample_parity": {}, "runs": {}}
+    results = {"fixture_cards": args.cards, "card_state": "closed" if args.closed else "open", "sample_parity": {}, "runs": {}}
     boards = {}
     try:
         paths = {}
@@ -45,23 +46,31 @@ def main():
                 request(target, reaction_path, "POST", {"reaction": {"content": content}})
                 saved = request(target, reaction_path)
                 assert len(saved) == 1 and saved[0]["content"] == content, (name, reaction_path, saved)
+            if args.closed:
+                request(target, f"/cards/{number}/closure", "POST")
             target["cookie"] = browser_cookie(target)
             path = f"/cards/{number}"
             paths[name] = path
             sample = html(target, path)
             assert b'card-perma' in sample and b'Benchmark card 0' in sample
-            assert b'closure_notice_card_' in sample and b'data-local-time-target="indays"' in sample, name
+            if args.closed:
+                assert b'Completed by ' in sample and b'data-local-time-target="shortdate"' in sample, name
+                assert b'data-text="Done"' in sample and b'Undo' in sample, name
+                assert b'new_step_card_' not in sample and b'closure_notice_card_' not in sample, name
+            else:
+                assert b'closure_notice_card_' in sample and b'data-local-time-target="indays"' in sample, name
             assert all(value.encode() in sample for value in (
                 "Review the idea", "Share the update", "Looks useful.", "benchmark-tag",
                 *reaction_contents)), name
             results["sample_parity"][name] = {
-                "steps": 2, "comments": 1, "tag": True, "inactivity_notice": True,
+                "steps": 2, "comments": 1, "tag": True, "inactivity_notice": not args.closed,
+                "completion_message": args.closed,
                 "card_reactions": 1, "comment_reactions": 1, "html_bytes": len(sample)}
             for _ in range(5):
                 html(target, path)
         assert all(
             results["sample_parity"]["fizzy"][field] == results["sample_parity"]["rizzy"][field]
-            for field in ("steps", "comments", "tag", "inactivity_notice", "card_reactions", "comment_reactions")
+            for field in ("steps", "comments", "tag", "inactivity_notice", "completion_message", "card_reactions", "comment_reactions")
         )
         for concurrency in map(int, args.concurrency.split(",")):
             for name, target in targets.items():

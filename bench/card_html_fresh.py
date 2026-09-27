@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--concurrency", default="8,32")
     parser.add_argument("--cpus", type=int, default=8)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--closed", action="store_true", help="Benchmark the completed-card HTML state")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     original_cpus = os.sched_getaffinity(0)
@@ -59,7 +60,7 @@ def main():
                     str(args.seconds),
                     "--concurrency",
                     args.concurrency,
-                ],
+                ] + (["--closed"] if args.closed else []),
                 cwd=suite.ROOT,
                 env=env,
                 stdout=subprocess.PIPE,

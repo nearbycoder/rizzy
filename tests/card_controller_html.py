@@ -73,14 +73,18 @@ def main():
             _, scheduled_page = html(owner, card_path)
             assert 'data-local-time-target="indays"' in scheduled_page
             assert 'datetime="1899990000"' in scheduled_page  # March 17, 2030 at 15:00 UTC
-            with sqlite3.connect(owner["db"]) as db:
-                db.execute("UPDATE cards SET closed=1 WHERE id=?", (owner_card["id"],))
-            assert 'closure_notice_card_' not in html(owner, card_path)[1]
-            with sqlite3.connect(owner["db"]) as db:
-                db.execute("UPDATE cards SET closed=0,postponed=1 WHERE id=?", (owner_card["id"],))
-            assert 'closure_notice_card_' not in html(owner, card_path)[1]
-            with sqlite3.connect(owner["db"]) as db:
-                db.execute("UPDATE cards SET postponed=0 WHERE id=?", (owner_card["id"],))
+            api(owner, card_path + "/closure", "POST", expected=204)
+            closed_page = html(owner, card_path)[1]
+            assert 'closure_notice_card_' not in closed_page
+            assert 'Completed by Owner on' in closed_page and 'data-local-time-target="shortdate"' in closed_page
+            assert 'id="undo-closure"' in closed_page and 'data-text="Done"' in closed_page
+            assert 'id="new-step"' not in closed_page
+            api(owner, card_path + "/closure", "DELETE", expected=204)
+            assert f'id="closure_notice_card_{owner_card["id"]}"' in html(owner, card_path)[1]
+            api(owner, card_path + "/not_now", "POST", expected=204)
+            postponed_page = html(owner, card_path)[1]
+            assert 'closure_notice_card_' not in postponed_page and 'data-text="Not Now"' in postponed_page
+            api(owner, card_path + "/not_now", "DELETE", expected=204)
 
             member_card = api(member, f"/boards/{board_id}/cards", "POST",
                               {"title": "Member's card"}, 201)

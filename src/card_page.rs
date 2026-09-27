@@ -139,6 +139,26 @@ pub(super) async fn show(
         storage::render_rich_text(app, &principal.account_id, principal.slug, &description).await?;
     let card_board = board(app, principal, &board_id).await?;
     let board_name: String = card_board.get("name");
+    let closed = card.get::<i64, _>("closed") != 0;
+    let postponed = card.get::<i64, _>("postponed") != 0;
+    let completion = if closed {
+        sqlx::query("SELECT z.created_at,u.name FROM closures z LEFT JOIN users u ON u.id=z.user_id WHERE z.card_id=?")
+            .bind(&card_id)
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?
+    } else {
+        None
+    };
+    let not_now = if postponed {
+        sqlx::query("SELECT n.created_at,u.name,u.role FROM card_not_nows n LEFT JOIN users u ON u.id=n.user_id WHERE n.card_id=?")
+            .bind(&card_id)
+            .fetch_optional(&app.db)
+            .await
+            .map_err(db_err)?
+    } else {
+        None
+    };
     let steps = sqlx::query(
         "SELECT id,content,completed FROM steps WHERE card_id=? ORDER BY created_at,id",
     )
@@ -166,7 +186,10 @@ pub(super) async fn show(
                 escape(&content)
             ));
     }
-    step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step\"><form class=\"steps__form\" id=\"step-form\"><label><span aria-hidden=\"true\">□</span><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" aria-label=\"Add a step\"></label></form></li></ul></section>", escape(&card_id)));
+    if !closed {
+        step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step\"><form class=\"steps__form\" id=\"step-form\"><label><span aria-hidden=\"true\">□</span><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" aria-label=\"Add a step\"></label></form></li>", escape(&card_id)));
+    }
+    step_html.push_str("</ul></section>");
     let comments = sqlx::query("SELECT c.id,c.body,c.created_at,c.updated_at,c.creator_id,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
         .bind(&card_id)
         .fetch_all(&app.db)
@@ -259,7 +282,6 @@ pub(super) async fn show(
             )
         })
         .unwrap_or_default();
-    let closed = card.get::<i64, _>("closed") != 0;
     let image_button = if image_url.as_str().is_some() {
         "<button class=\"side-action side-action--image\" id=\"remove-image\" type=\"button\" aria-label=\"Remove background image\" title=\"Remove background image\">⊠</button>".to_owned()
     } else if closed {
@@ -271,8 +293,24 @@ pub(super) async fn show(
         )
     };
     let tag_control = tagging_page::tags(app, principal, card).await?;
-    let postponed = card.get::<i64, _>("postponed") != 0;
-    let closure_notice = if !closed && !postponed {
+    let closure_notice = if closed {
+        let (name, timestamp) = completion
+            .as_ref()
+            .map(|row| {
+                (
+                    row.get::<Option<String>, _>("name").unwrap_or_default(),
+                    row.get::<String, _>("created_at"),
+                )
+            })
+            .unwrap_or_default();
+        let seconds = chrono::DateTime::parse_from_rfc3339(&timestamp)
+            .map(|value| value.timestamp())
+            .unwrap_or_default();
+        format!(
+            "<div class=\"card-perma__closure-message card-perma__closure-message--completed\"><span>Completed by {} on <time datetime=\"{seconds}\" data-local-time-target=\"shortdate\">&nbsp;</time>.</span> <button id=\"undo-closure\" type=\"button\">Undo</button></div>",
+            escape(&name)
+        )
+    } else if !postponed {
         let last_active_at: String = card.get("last_active_at");
         chrono::DateTime::parse_from_rfc3339(&last_active_at)
             .ok()
@@ -292,6 +330,18 @@ pub(super) async fn show(
     } else {
         String::new()
     };
+    let stamp = completion
+        .as_ref()
+        .map(|row| ("Done", row, false))
+        .or_else(|| not_now.as_ref().map(|row| ("Not Now", row, true)))
+        .map(|(label, row, is_not_now)| {
+            let timestamp: String = row.get("created_at");
+            let name = row.get::<Option<String>, _>("name").unwrap_or_default();
+            let familiar = board_views::public_familiar_name(&name);
+            let date = board_views::public_stamp_date(&timestamp);
+            format!("<div class=\"card__closed{}\"><span class=\"card__closed-title\" data-text=\"{label}\">{label}</span><strong class=\"card__closed-date\">{date}</strong><span class=\"card__closed-by-line\">by <span class=\"card__closed-by\">{}</span></span></div>", if is_not_now && row.get::<Option<String>, _>("role").as_deref() == Some("system") { " card__closed--system" } else { "" }, escape(&familiar))
+        })
+        .unwrap_or_default();
     let column_id: Option<String> = card.get("column_id");
     let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
         .bind(&board_id)
@@ -357,6 +407,7 @@ pub(super) async fn show(
         ),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
+        ("STAMP", stamp),
         ("CLOSURE_NOTICE", closure_notice),
         ("IMAGE", image),
         ("IMAGE_BUTTON", image_button),
@@ -384,16 +435,19 @@ pub(super) async fn show(
             }
             .to_owned(),
         ),
+        (
+            "STATE_CLASS",
+            if closed {
+                " is-closed"
+            } else if postponed {
+                " is-postponed"
+            } else {
+                ""
+            }
+            .to_owned(),
+        ),
     ]);
-    values.insert(
-        "STATUS",
-        if closed {
-            "<span class=\"status\">Done</span>"
-        } else {
-            ""
-        }
-        .into(),
-    );
+    values.insert("STATUS", String::new());
     values.insert(
         "CLOSURE_LABEL",
         if closed { "Reopen" } else { "Mark as Done" }.into(),
