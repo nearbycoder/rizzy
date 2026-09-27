@@ -44,7 +44,7 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 @media(max-width:850px){.card__footer{grid-template-columns:1fr;grid-template-areas:"meta" "reactions" "actions"}.card__meta{width:100%;grid-template-columns:30px auto minmax(0,1fr) auto}.card__footer>.actions{justify-self:start}}
 </style>
 </head>
-<body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}" data-board-id="{{BOARD_ID}}">
+<body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}" data-board-id="{{BOARD_ID}}" data-card-revision="{{CARD_REVISION}}">
 <a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header>
 <main id="main">
 <nav><a id="card-back-link" class="btn--back" href="/{{ACCOUNT}}/boards/{{BOARD_ID}}"><strong>Back to {{BOARD_NAME}}</strong></a></nav>
@@ -63,14 +63,14 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   </div></div>
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
   <dialog class="assignment-dialog" id="assignment-dialog" aria-label="Assign this card"><button type="button" class="assignment-dialog__close" aria-label="Close assignment picker">×</button><div id="assignment-dialog-content"></div><p class="error" role="alert" id="assignment-dialog-error"></p></dialog>
-  <details class="editor" id="edit"><summary>Edit card</summary><form id="edit-form">
+  <turbo-frame id="edit_card_{{CARD_ID}}"><details class="editor" id="edit"><summary>Edit card</summary><form id="edit-form">
     <label for="title">Name it</label><textarea id="title" maxlength="255" required>{{TITLE}}</textarea>
     <label for="description">Add some notes, context, pictures, or video</label>
     <lexxy-editor id="description" name="card[description]" value="{{DESCRIPTION_VALUE}}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{{ACCOUNT}}/rails/active_storage/direct_uploads" data-blob-url-template="/{{ACCOUNT}}/rails/active_storage/blobs/redirect/:signed_id/:filename">
       <lexxy-prompt trigger="@" src="/{{ACCOUNT}}/prompts/boards/{{BOARD_ID}}/users" name="mention"></lexxy-prompt>
       <lexxy-prompt trigger="#" src="/{{ACCOUNT}}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt>
     </lexxy-editor><button type="submit">Save changes</button><p class="error" role="alert" id="edit-error"></p>
-  </form></details>
+  </form></details></turbo-frame>
 </article>
 <section class="messages"><turbo-frame id="messages_card_{{CARD_ID}}" class="comments" role="group" aria-label="Messages"><div id="comments">{{COMMENTS}}{{NEW_COMMENT_FORM}}{{COMMENT_WATCHERS}}</div>{{DELETE_ACTION}}</turbo-frame></section>
 </main>
@@ -163,6 +163,65 @@ function utilityList(items,empty){utilityContent.replaceChildren();if(!items.len
 async function loadUtility(kind,term=''){utilityContent.textContent='Loading…';try{const url=kind==='pins'?`/${account}/my/pins`:kind==='notifications'?`/${account}/notifications/tray`:`/${account}/search?q=${encodeURIComponent(term)}`;const response=await fetch(url,{headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not load');const data=await response.json(),rows=Array.isArray(data)?data:[];utilityList(rows.map(item=>kind==='notifications'?{url:item.card?.url||'#',title:item.card?.title||'Notification'}:{url:item.url,title:item.title}),kind==='pins'?'No pinned cards yet':kind==='notifications'?'No notifications':'No matching cards')}catch{utilityContent.textContent='Could not load items.'}}
 document.querySelectorAll('[data-utility]').forEach(button=>button.addEventListener('click',()=>{const kind=button.dataset.utility;utilityTitle.textContent=kind==='pins'?'Pinned cards':kind==='notifications'?'Notifications':'Search cards';utilitySearch.hidden=kind!=='search';utilityContent.replaceChildren();utility.showModal();if(kind==='search'){utilitySearch.value='';utilitySearch.focus()}else loadUtility(kind)}));
 utility.querySelector('.utility-close').addEventListener('click',()=>utility.close());utility.addEventListener('click',event=>{if(event.target===utility)utility.close()});let utilitySearchTimer;utilitySearch.addEventListener('input',()=>{clearTimeout(utilitySearchTimer);if(utilitySearch.value.trim())utilitySearchTimer=setTimeout(()=>loadUtility('search',utilitySearch.value.trim()),300);else utilityContent.replaceChildren()});
+</script>
+<script>
+// Keep an open card current without replacing the editor or the comment draft.
+const liveCardEditor=document.getElementById('edit');
+const liveCardComments=document.getElementById('comments');
+let liveCardRevision=document.body.dataset.cardRevision;
+let liveCardRefreshing=false;
+async function refreshLiveCard(force=false){
+  if(liveCardRefreshing||document.visibilityState==='hidden')return;
+  liveCardRefreshing=true;
+  try{
+    const revisionResponse=await fetch(`/${account}/cards/${number}/revision`,{headers:{Accept:'application/json'},cache:'no-store'});
+    if(!revisionResponse.ok)return;
+    const nextRevision=(await revisionResponse.json()).revision;
+    if(!force&&nextRevision===liveCardRevision)return;
+    const pageResponse=await fetch(`/${account}/cards/${number}`,{headers:{Accept:'text/html'},cache:'no-store'});
+    if(!pageResponse.ok)return;
+    const nextPage=new DOMParser().parseFromString(await pageResponse.text(),'text/html');
+    const nextTitle=nextPage.querySelector('.card__title');
+    const nextDescription=nextPage.querySelector('.card__description');
+    if(!nextTitle||!nextDescription)return;
+    if(!liveCardEditor.open){
+      document.querySelector('.card__title').innerHTML=nextTitle.innerHTML;
+      document.querySelector('.card__description').innerHTML=nextDescription.innerHTML;
+      document.title=nextPage.title;
+      document.getElementById('title').value=nextPage.getElementById('title').value;
+      document.getElementById('description').value=nextPage.getElementById('description').getAttribute('value')||'';
+    }
+    const nextFrames=[...nextPage.querySelectorAll('#comments > turbo-frame[id^="container_comment_"]')];
+    const nextIds=new Set(nextFrames.map(frame=>frame.id));
+    for(const frame of [...liveCardComments.querySelectorAll(':scope > turbo-frame[id^="container_comment_"]')]){
+      if(!nextIds.has(frame.id)&&!frame.querySelector('form'))frame.remove();
+    }
+    const newCommentForm=liveCardComments.querySelector('.comment--new');
+    for(const frame of nextFrames){
+      if(!liveCardComments.querySelector(`:scope > turbo-frame[id="${CSS.escape(frame.id)}"]`)){
+        newCommentForm.before(document.importNode(frame,true));
+      }
+    }
+    liveCardRevision=nextRevision;
+  }catch(error){console.warn('Could not refresh card',error)}finally{liveCardRefreshing=false}
+}
+document.addEventListener('click',event=>{
+  const link=event.target.closest('.card__title-link');
+  if(!link)return;
+  event.preventDefault();
+  liveCardEditor.open=true;
+  document.getElementById('title').focus();
+});
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Escape'||!liveCardEditor.open||!liveCardEditor.contains(event.target))return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  liveCardEditor.open=false;
+  document.querySelector('.card__title-link')?.focus();
+  void refreshLiveCard(true);
+},true);
+setInterval(()=>void refreshLiveCard(),1500);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshLiveCard()});
 </script>
 <script>
 const imageForm=document.getElementById('image-upload-form');

@@ -167,6 +167,11 @@ pub(super) async fn show(
         .fetch_all(&app.db)
         .await
         .map_err(db_err)?;
+    let latest_comment_id = comments
+        .iter()
+        .map(|comment| comment.get::<String, _>("id"))
+        .max()
+        .unwrap_or_default();
     let first_comment = comments.is_empty();
     let rows = sqlx::query("SELECT r.id,r.content,r.reacter_id,r.reactable_id,u.name FROM reactions r JOIN users u ON u.id=r.reacter_id WHERE r.account_id=? AND ((r.reactable_type='Card' AND r.reactable_id=?) OR (r.reactable_type='Comment' AND r.reactable_id IN (SELECT id FROM comments WHERE card_id=?))) ORDER BY r.created_at,r.id")
         .bind(&principal.account_id)
@@ -296,6 +301,14 @@ pub(super) async fn show(
         ("NUMBER", number.to_string()),
         ("TIMEZONE", escape(timezone)),
         ("CARD_ID", escape(&card_id)),
+        (
+            "CARD_REVISION",
+            escape(&format!(
+                "{}:{}",
+                card.get::<String, _>("updated_at"),
+                latest_comment_id
+            )),
+        ),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
         ("TITLE", escape(&title)),
