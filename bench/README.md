@@ -1,5 +1,15 @@
 # Comparative load runs
 
+The [shared-shell all-cards run](results/cards-html-1000-shared-shell-2026-09-27.json)
+used fresh 1,000-card fixtures and checked 15 visible previews on both
+signed-in pages. Eight Fizzy workers and one Rizzy process shared eight CPUs.
+At eight and 32 clients, Rizzy served 3,430 and 3,042 requests/s versus
+Fizzy's 318 and 432, with zero errors in four two-second phases. The Rust
+HTML was 64,885 bytes versus 138,208, and the full markup still differs.
+This measures one local read path, not application-wide speed or maximum scale.
+Reproduce with `python3 bench/cards_html_fresh.py --cards 1000 --seconds 2
+--concurrency 8,32`.
+
 The [populated-notification Home repeat](results/home-media-html-notification-tray-98-2026-09-26.json)
 and [same-binary follow-up](results/home-media-html-notification-tray-repeat-98-2026-09-26.json)
 followed the richer notification card and Home badge behavior. Both used the

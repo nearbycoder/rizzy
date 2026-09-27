@@ -530,6 +530,22 @@ pub(super) async fn show(
         ("COUNT", total.to_string()),
         ("PREVIOUS", previous),
         ("SETTINGS_LINK", settings_link),
+        (
+            "SHELL_STYLES",
+            [
+                ":root{--color-canvas:#101b20;--color-ink:#f4f5f6}",
+                include_str!("../static/shell_footer.css"),
+                include_str!("../static/notification_cards.css"),
+                include_str!("../static/menu_overlay.css"),
+            ]
+            .concat(),
+        ),
+        (
+            "SHELL_FOOTER",
+            include_str!("../static/home_footer.html")
+                .replace("{{ACCOUNT}}", &principal.slug.to_string()),
+        ),
+        ("SHELL_SCRIPT", include_str!("../static/events.js").into()),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))
 }
