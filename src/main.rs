@@ -13500,34 +13500,25 @@ async fn update_card(
     let c = card(&app, &p, &number).await?;
     let input = card_update_input(&app, request).await?;
     let v = nested(&input.body, "card");
-    let mut title = string(v, "title").unwrap_or_else(|| c.get("title"));
-    let old_title: String = c.get("title");
-    let status: String = c.get("status");
-    if status == "published" && title.trim().is_empty() {
-        title = "Untitled".into();
-    }
-    let description = match v.get("description") {
-        Some(Value::Null) => String::new(),
-        _ => string(v, "description").unwrap_or_else(|| c.get("description")),
+    let requested_title = string(v, "title");
+    let requested_description = match v.get("description") {
+        Some(Value::Null) => Some(String::new()),
+        _ => string(v, "description"),
     };
-    let (plain_description, _, _) =
-        storage::render_rich_text(&app, &p.account_id, p.slug, &description).await?;
-    let search_text = search_content(plain_description);
-    let created_at = timestamp_param(v, "created_at")?.unwrap_or_else(|| c.get("created_at"));
+    let requested_search_text = if let Some(description) = &requested_description {
+        let (plain, _, _) =
+            storage::render_rich_text(&app, &p.account_id, p.slug, description).await?;
+        Some(search_content(plain))
+    } else {
+        None
+    };
+    let requested_created_at = timestamp_param(v, "created_at")?;
     let custom_last_active_at = timestamp_param(v, "last_active_at")?;
-    let last_active_at = custom_last_active_at
-        .clone()
-        .unwrap_or_else(|| c.get("last_active_at"));
-    let title_change = if status == "published" && title != old_title && !old_title.is_empty() {
-        let who = escape(&actor_name(&app, &p).await?);
-        let system = system_user(&app, &p).await?;
-        let body = format!(
-            "{who} <strong>changed the title</strong> from “{}” to “{}”.",
-            escape(&old_title),
-            escape(&title)
-        );
-        let (plain, _, _) = storage::render_rich_text(&app, &p.account_id, p.slug, &body).await?;
-        Some((system, body, search_content(plain)))
+    let title_change_actor = if requested_title.is_some() {
+        Some((
+            escape(&actor_name(&app, &p).await?),
+            system_user(&app, &p).await?,
+        ))
     } else {
         None
     };
@@ -13538,7 +13529,7 @@ async fn update_card(
             let _writer = app.write_lock.lock().await;
             // Reserve the SQLite writer before reading attachment state in this transaction.
             // A deferred WAL read cannot be promoted after another process commits a write.
-            let (mut tx, current_board_id) = if status == "published" {
+            let (mut tx, current_board_id) = if c.get::<String, _>("status") == "published" {
                 // A move can invalidate the snapshot above. Lock the current board and
                 // card together so the UPDATE triggers never reach a different board
                 // while this transaction holds the card row.
@@ -13565,6 +13556,46 @@ async fn update_card(
                     .await
                     .map_err(db_err)?;
             }
+            // The first card read authorizes this request, but can be stale by the
+            // time a concurrent edit releases the row lock. Resolve absent fields
+            // against the locked row on every attempt, including deadlock retries.
+            let current_sql = if app.mysql {
+                "SELECT title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=? FOR UPDATE"
+            } else {
+                "SELECT title,description,search_text,status,created_at,last_active_at FROM cards WHERE id=?"
+            };
+            let current = sqlx::query(current_sql)
+                .bind(c.get::<String, _>("id"))
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+            let old_title: String = current.get("title");
+            let status: String = current.get("status");
+            let mut title = requested_title.clone().unwrap_or_else(|| old_title.clone());
+            if status == "published" && title.trim().is_empty() {
+                title = "Untitled".into();
+            }
+            let description = requested_description.clone()
+                .unwrap_or_else(|| current.get("description"));
+            let search_text = requested_search_text.clone()
+                .unwrap_or_else(|| current.get("search_text"));
+            let created_at = requested_created_at.clone()
+                .unwrap_or_else(|| current.get("created_at"));
+            let last_active_at = custom_last_active_at.clone()
+                .unwrap_or_else(|| current.get("last_active_at"));
+            let title_change = if status == "published" && title != old_title && !old_title.is_empty() {
+                let (who, system) = title_change_actor.as_ref()
+                    .ok_or_else(|| err(StatusCode::CONFLICT, "Card changed during write"))?;
+                let body = format!(
+                    "{who} <strong>changed the title</strong> from “{}” to “{}”.",
+                    escape(&old_title),
+                    escape(&title)
+                );
+                let content = search_content(rich_text::plain_text(&body));
+                Some((system, body, content))
+            } else {
+                None
+            };
             if let Some(upload) = &input.image {
                 storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
             }
@@ -13583,10 +13614,10 @@ async fn update_card(
                 false
             };
             let changed = title != old_title
-                || description != c.get::<String, _>("description")
-                || search_text != c.get::<String, _>("search_text")
-                || created_at != c.get::<String, _>("created_at")
-                || last_active_at != c.get::<String, _>("last_active_at")
+                || description != current.get::<String, _>("description")
+                || search_text != current.get::<String, _>("search_text")
+                || created_at != current.get::<String, _>("created_at")
+                || last_active_at != current.get::<String, _>("last_active_at")
                 || image_changed;
             if changed {
                 sqlx::query(
@@ -13614,7 +13645,7 @@ async fn update_card(
                     "Card",
                     &c.get::<String, _>("id"),
                     "description",
-                    &c.get::<String, _>("description"),
+                    &current.get::<String, _>("description"),
                     &description,
                     &timestamp,
                 )
