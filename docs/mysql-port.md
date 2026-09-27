@@ -623,3 +623,12 @@ test also passed 200 owner pin/move pairs and checked all 200 retained pins
 when access persisted. Paired Fizzy/Rizzy pin controls, tray, and access-loss
 checks passed on SQLite. Other access changes and cross-host races remain
 outside these results.
+
+Watch and unwatch now also recheck access after locking the card's current
+board. The same private-board race fixture creates a second card and forces a
+member watch and owner move to wait on that board lock. Three fresh MySQL
+8.4.11 runs left neither a pin nor a watch for the member after the moves;
+the full four-process cluster still passed its owner watch/move phase. Paired
+SQLite checks matched Fizzy's watch timestamp effects and both apps returned
+404 when the former member tried to watch after losing access. Other
+notification and broadcast effects under contention remain open.

@@ -157,9 +157,13 @@ def run(target):
         pin_status, _, _ = request({**target, "token": assignee_token},
                                    f"/{account}/cards/{number}/pin", "POST", bearer=True)
         assert pin_status == 404, (target["name"], "pin after access loss", pin_status)
+        watch_status, _, _ = request({**target, "token": assignee_token},
+                                     f"/{account}/cards/{number}/watch", "POST", bearer=True)
+        assert watch_status == 404, (target["name"], "watch after access loss", watch_status)
         assert state(member_destination, card_id, event_id, assignee) == member_state
         return {"admin": admin_state, "member": member_state,
-                "pin_after_access_loss": pin_status}
+                "pin_after_access_loss": pin_status,
+                "watch_after_access_loss": watch_status}
     finally:
         for board_id in created["boards"]:
             request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
@@ -182,7 +186,7 @@ def main():
                   "db": os.environ[f"{name}_DB"], "opener": urllib.request.build_opener(NoRedirect())}
         results[name.lower()] = run(target)
     assert results["fizzy"] == results["rizzy"], results
-    print("Card move access parity matched: admin grants, member cleanup, and pin rejection after access loss")
+    print("Card move access parity matched: admin grants, member cleanup, and pin/watch rejection after access loss")
 
 
 if __name__ == "__main__":

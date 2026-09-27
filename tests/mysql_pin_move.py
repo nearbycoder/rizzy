@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Race a member pin with a move to a private board they cannot access."""
+"""Race member pin and watch writes with moves to an inaccessible board."""
 
 import concurrent.futures
 import hashlib
@@ -136,7 +136,66 @@ def main():
                 assert status == 404, status
                 status, _, _ = call(servers[1][0], account, member_token, pin_path, "POST")
                 assert status == 404, status
-                print("MySQL pin/move passed: no inaccessible pin after two blocked requests")
+
+                status, watch_card, _ = call(servers[0][0], account, owner_token,
+                                             f"/boards/{source['id']}/cards", "POST",
+                                             {"card": {"title": "Watch during move"}})
+                assert status == 201, (status, watch_card)
+                watch_path = f"/cards/{watch_card['number']}/watch"
+                status, _, _ = call(servers[1][0], account, member_token, watch_path, "POST")
+                assert status == 204, status
+                status, _, _ = call(servers[1][0], account, member_token, watch_path, "DELETE")
+                assert status == 204, status
+                assert scalar(f"SELECT watching FROM watches WHERE card_id='{watch_card['id']}' "
+                              f"AND user_id='{member_id}';") == "0"
+
+                blocker = subprocess.Popen(
+                    [str(MYSQL), "--no-defaults", f"--socket={SOCKET}", "-uroot",
+                     "--unbuffered", "--batch", "--skip-column-names",
+                     "--execute=START TRANSACTION; "
+                     f"SELECT id FROM {database}.boards WHERE id='{source['id']}' FOR UPDATE; "
+                     "DO SLEEP(8); COMMIT;"],
+                    env={**os.environ, "LD_LIBRARY_PATH": str(MYSQL.resolve().parents[1] / "lib")},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                assert blocker.stdout.readline().strip() == source["id"]
+
+                def move_watched_card():
+                    return call(servers[0][0], account, owner_token,
+                                f"/cards/{watch_card['number']}/board", "PATCH",
+                                {"board_id": destination["id"]})
+
+                def watch():
+                    return call(servers[1][0], account, member_token, watch_path, "POST")
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    move_future = pool.submit(move_watched_card)
+                    watch_future = pool.submit(watch)
+                    deadline = time.monotonic() + 6
+                    waits = 0
+                    while time.monotonic() < deadline:
+                        waits = int(root_mysql(
+                            "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                            "JOIN performance_schema.data_locks l ON "
+                            "l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                            "WHERE l.OBJECT_NAME='boards';"))
+                        if waits >= 2:
+                            break
+                        time.sleep(.1)
+                    assert waits >= 2, ("watch and move did not reach the board lock", waits)
+                    moved = move_future.result(timeout=20)
+                    watched = watch_future.result(timeout=20)
+                assert moved[0] == 200, moved
+                assert watched[0] in (204, 404), watched
+                output, error = blocker.communicate(timeout=10)
+                assert blocker.returncode == 0, (output, error)
+                blocker = None
+
+                assert scalar(f"SELECT board_id FROM cards WHERE id='{watch_card['id']}';") == destination["id"]
+                assert scalar(f"SELECT COUNT(*) FROM watches WHERE card_id='{watch_card['id']}' "
+                              f"AND user_id='{member_id}';") == "0"
+                status, _, _ = call(servers[1][0], account, member_token, watch_path, "POST")
+                assert status == 404, status
+                print("MySQL pin/watch moves passed: no inaccessible personal rows after blocked requests")
             except Exception:
                 for _, _, log in servers:
                     print(log.read_text()[-2000:], file=sys.stderr)

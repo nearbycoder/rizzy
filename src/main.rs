@@ -14652,8 +14652,18 @@ async fn set_watch(app: &App, p: &Principal, number: &str, watching: bool) -> Re
     let c = card(app, p, number).await?;
     let card_id: String = c.get("id");
     let timestamp = now();
-    let (mut tx, _) =
+    let (mut tx, board_id) =
         begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&board_id)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
     let statement = if app.mysql {
         "INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(watching<>VALUES(watching),VALUES(updated_at),updated_at),watching=VALUES(watching)"
     } else {

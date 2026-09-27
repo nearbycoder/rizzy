@@ -768,3 +768,11 @@ pin and an owner move to a private board to wait on the same lock; three
 fresh MySQL runs left no inaccessible pin. The four-process cluster passed
 200 owner pin/move pairs and found 200 retained pins where access persisted.
 This does not establish all concurrent permission behavior or full parity.
+
+Watch/unwatch writes now use the same current-board access recheck. The paired
+watch timestamp test still matches Fizzy, and the move-access comparison
+confirms both apps return 404 for a watch attempt after access loss. The
+private-board MySQL fixture forced both pin/move and watch/move waits in three
+fresh runs and left neither personal row after the member lost access. The
+four-process MySQL cluster still passed its owner watch/move phase. Other
+notification, broadcast, and concurrent permission behavior remains open.
