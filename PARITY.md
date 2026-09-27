@@ -50,6 +50,16 @@ dimensions, for the immediate HTML response. Request IDs, periodic
 reconciliation, other Action Text transitions, and MySQL execution of these
 new paths remain open.
 
+The [post-storage-ledger scoped read run](bench/results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
+measured the new attachment lookup on four JSON read routes using fresh
+100-card SQLite fixtures, four assigned app CPUs, four Fizzy workers, one
+Rizzy process, and two reversed-order five-second rounds at 8 and 32 clients.
+Sampled fields and shapes matched, the first card page was 23,974 bytes in
+both apps, and all phases had zero errors. Rizzy served 8,746–8,876 requests/s
+versus Fizzy's 371–440 on that fixture. This is a scoped local read result;
+the fixture contains no embeds and cannot establish whole-app speed or
+maximum scale.
+
 On the MySQL branch, `tests/mysql_search_parity.py` compared the pinned Fizzy
 MySQL adapter with Rizzy on a shared Oracle MySQL 8.4.11 server. Selected JSON
 search results, card text filters, browser hit counts, stemming, edits, and

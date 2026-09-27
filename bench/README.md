@@ -1,5 +1,18 @@
 # Comparative load runs
 
+The [post-storage-ledger scoped read run](results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
+used fresh 100-card SQLite fixtures, four assigned app CPUs, four Fizzy Puma
+workers, one Rust process, and a Rust load client. Two reversed-order
+five-second rounds at 8 and 32 clients read board detail, card detail,
+board-filtered cards, and board activities in equal shares. Sampled shapes,
+card fields, titles, activity descriptions, and description HTML matched;
+the first card page was 23,974 bytes in both apps. Every phase had zero HTTP
+errors. Rizzy served 8,746–8,876 requests/s versus Fizzy's 371–440, with
+Rizzy p95 of 1.69–5.19 ms versus 34.79–119.61 ms. This confirms that the
+new attachment lookup did not erase Rizzy's advantage on these four routes;
+the fixture contains no embeds, the phases are short, and it does not prove
+whole-app or maximum-capacity performance.
+
 The [matched-fixture 1,000-card MySQL JSON read run](results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 uses fresh databases for two reversed-order rounds, four available app CPUs,
 and a separate Rust load generator. Its four GET routes read the board, one
