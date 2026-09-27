@@ -149,11 +149,25 @@ async fn timeline_etag(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
+    // The timeline also renders the user's boards and actions. An event-only
+    // validator can incorrectly return 304 after a board is created or edited.
+    let user_version: String = sqlx::query_scalar("SELECT updated_at FROM users WHERE id=?")
+        .bind(&p.user_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let board_versions: Vec<(String, String, String, Option<String>, String)> =
+        sqlx::query_as("SELECT b.id,b.name,b.updated_at,x.accessed_at,x.involvement FROM accesses x JOIN boards b ON b.id=x.board_id WHERE x.user_id=? AND b.account_id=? ORDER BY b.id")
+            .bind(&p.user_id)
+            .bind(&p.account_id)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
     Ok(format!(
         "W/\"{}\"",
         hash(&format!(
-            "timeline:{}:{}:{day}:{tz}:{view}:{}:{version:?}",
-            p.account_id, p.user_id, params.filter_key
+            "timeline:{}:{}:{day}:{tz}:{view}:{}:{version:?}:{user_version}:{board_versions:?}",
+            p.account_id, p.user_id, params.filter_key,
         ))
     ))
 }
@@ -537,8 +551,21 @@ pub(super) async fn index(
         }
     }
     let timeline = timeline(&app, &p, &params, tz).await?;
-    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? ORDER BY lower(b.name),b.id")
+    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? ORDER BY x.accessed_at DESC,b.id")
         .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let add_card_board = params
+        .boards
+        .iter()
+        .find_map(|selected| {
+            boards
+                .iter()
+                .find(|board| board.get::<String, _>("id") == *selected)
+        })
+        .or_else(|| boards.first());
+    let add_card = add_card_board.map_or_else(String::new, |board| {
+        format!("<form id=\"add-card\" class=\"header__actions header__actions--start\" action=\"/{}/boards/{}/cards\" method=\"post\"><button type=\"submit\" aria-label=\"Add a card\">Add a card <kbd>C</kbd></button></form>",
+            p.slug, escape(&board.get::<String, _>("id")))
+    });
     let users = sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY lower(name),id")
         .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
     let mut board_options = String::new();
@@ -580,7 +607,7 @@ pub(super) async fn index(
     };
     let body = render_day(&timeline, p.slug, &params, "events/days");
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a><h1 class=\"header__title\">{title}</h1><a class=\"button\" href=\"/{}/boards/new\">Add a board</a></header><main id=\"main\"><form class=\"events__filters\" action=\"/{}/events\" method=\"get\"><details class=\"quick-filter\"><summary>Board…</summary><div class=\"quick-filter__options\">{board_options}</div></details><details class=\"quick-filter\"><summary>Person…</summary><div class=\"quick-filter__options\">{user_options}</div></details><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{}/events\">Clear</a></form><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a>{add_card}<h1 class=\"header__title\">{title}</h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><form class=\"events__filters\" action=\"/{}/events\" method=\"get\"><details class=\"quick-filter\"><summary>Board…</summary><div class=\"quick-filter__options\">{board_options}</div></details><details class=\"quick-filter\"><summary>Person…</summary><div class=\"quick-filter__options\">{user_options}</div></details><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{}/events\">Clear</a></form><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
         include_str!("../static/events.css"),
         p.slug,
         p.slug,

@@ -22,3 +22,15 @@ if (activity && 'IntersectionObserver' in window) {
   const first = activity.querySelector('.day-timeline-pagination-link');
   if (first) observer.observe(first);
 }
+
+document.addEventListener('keydown', event => {
+  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey ||
+      event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (event.key.toLowerCase() === 'c') {
+    const form = document.getElementById('add-card');
+    if (form) { event.preventDefault(); form.requestSubmit(); }
+  } else if (event.key.toLowerCase() === 'b') {
+    const link = document.getElementById('add-board');
+    if (link) { event.preventDefault(); link.click(); }
+  }
+});
