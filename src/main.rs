@@ -12213,11 +12213,11 @@ async fn publish_card(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
     let timestamp = now();
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &board_id, app.mysql).await?;
+    let (mut tx, board_id) =
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     sqlx::query("UPDATE cards SET status='published',title=CASE WHEN trim(title)='' THEN 'Untitled' ELSE title END,created_at=?,updated_at=? WHERE id=?")
         .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
     let event_id = id();
@@ -12593,9 +12593,10 @@ async fn delete_card(
     if p.role != "owner" && p.role != "admin" && p.user_id != c.get::<String, _>("creator_id") {
         return Err(err(StatusCode::FORBIDDEN, "Card administrator required"));
     }
-    let board_id: String = c.get("board_id");
     let card_id: String = c.get("id");
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let (mut tx, board_id) =
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let keys = storage::purge_card_storage_tx(
         &mut tx,
         &p.account_id,
@@ -12988,7 +12989,8 @@ async fn set_card_reading(
     let cutoff = (Utc::now() - chrono::Duration::minutes(5))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let (mut tx, board_id) =
-        begin_card_board_write(app, &card_id, &card.get::<String, _>("board_id")).await?;
+        begin_accessible_card_board_write(app, p, &card_id, &card.get::<String, _>("board_id"))
+            .await?;
     let notification_id: Option<String> = sqlx::query_scalar(
         "SELECT id FROM notifications WHERE card_id=? AND user_id=? AND account_id=?",
     )

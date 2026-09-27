@@ -763,7 +763,7 @@ Pin/unpin writes now lock and recheck the card's current board and the user's
 access before changing a pin. The paired card-control and pin-tray tests still
 match Fizzy's HTML, ETag, Turbo, JSON, and unpin behavior; the paired
 move-access test now also confirms both apps return 404 when a former member
-tries to pin after losing access. `tests/mysql_pin_move.py` forced a member
+tries to pin after losing access. `tests/mysql_card_move_access.py` forced a member
 pin and an owner move to a private board to wait on the same lock; three
 fresh MySQL runs left no inaccessible pin. The four-process cluster passed
 200 owner pin/move pairs and found 200 retained pins where access persisted.
@@ -787,3 +787,14 @@ all four returned 404 after the move, with no new reaction, tag, assignment,
 or step row. Tag, reaction, and comment timestamp comparisons still matched
 Fizzy. The MySQL core and fresh four-process cluster passed. These checks
 cover selected writes and one board-move ordering, not all permission changes.
+
+Publish, delete, and read/unread card writes now take the same current-board
+access lock. The private-board MySQL fixture forced an owner move ahead of a
+member creator's delete and reading requests, then ahead of publication of an
+actual browser-created draft. Each queued member write returned 404; the
+deleted card remained on the destination, and the draft remained unpublished
+without a publication event. A paired Fizzy/Rizzy access-loss fixture matched
+the ordinary 404 responses for all three routes. The 142-comparison paired
+JSON workflow, two-server MySQL draft flow with 32 concurrent publishes,
+fresh MySQL core, and four-process cluster passed after the change. Other
+access revocations and the full draft/browser lifecycle remain open.

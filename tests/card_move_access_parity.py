@@ -162,6 +162,9 @@ def run(target):
         assert watch_status == 404, (target["name"], "watch after access loss", watch_status)
         inaccessible_writes = (
             ("card edit", f"/cards/{number}", "PATCH", {"card": {"title": "No access"}}),
+            ("card delete", f"/cards/{number}", "DELETE", None),
+            ("card publish", f"/cards/{number}/publish", "POST", None),
+            ("card reading", f"/cards/{number}/reading", "POST", None),
             ("tag", f"/cards/{number}/taggings", "POST", {"tag_title": "no-access"}),
             ("assignment", f"/cards/{number}/assignments", "POST", {"assignee_id": "nonexistent"}),
             ("step", f"/cards/{number}/steps", "POST", {"step": {"content": "No access"}}),

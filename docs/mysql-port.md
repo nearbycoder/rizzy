@@ -616,7 +616,7 @@ concurrent access change or distributed deployment.
 Pin and unpin now hold the card's current board lock through the access
 check and mutation. This orders a member's pin against a move to a private
 board: either the pin commits first and move cleanup removes it, or the move
-commits first and pin returns 404. `tests/mysql_pin_move.py` forced both
+commits first and pin returns 404. `tests/mysql_card_move_access.py` forced both
 requests to wait on the source board in separate app processes; three fresh
 MySQL 8.4.11 runs left no inaccessible pin. The expanded four-process cluster
 test also passed 200 owner pin/move pairs and checked all 200 retained pins
@@ -643,3 +643,14 @@ Fizzy's post-move 404 responses for these routes, and existing tag, reaction,
 and comment timestamp comparisons still pass. The fresh MySQL core and
 four-process cluster passed; other mutation routes and access-revocation
 interleavings remain to be audited.
+
+Card publication, deletion, and reading also use the current-board access
+transaction. The private-board race fixture queues an owner move before a
+member creator's delete and reading requests, then repeats with a real draft
+created through a session. The later member requests returned 404, the
+deleted card remained on the destination, and the draft kept its drafted
+status and publication-event count. The paired access-loss check matched
+Fizzy's ordinary 404 responses, while the 142-comparison API workflow,
+two-process draft flow with 32 concurrent publishes, MySQL core, and fresh
+four-process cluster passed. Other concurrent card lifecycle combinations
+and access revocations remain open.

@@ -3,12 +3,14 @@
 
 import concurrent.futures
 import hashlib
+import http.cookiejar
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +18,7 @@ from pathlib import Path
 from mysql_cluster import call
 from mysql_webhook_cleanup import MYSQL, SOCKET, root_mysql
 from mysql_webhooks import BINARY, ROOT, start, stop
+from draft_workflow_parity import NoRedirect, login, request
 
 
 def main():
@@ -39,7 +42,8 @@ def main():
                    "RIZZY_STORAGE_DIR": str(Path(temporary) / "storage"),
                    "RIZZY_SEED_EMAIL": "pin-move-" + suffix + "@example.test",
                    "RIZZY_DISABLE_WEBHOOK_DELIVERY": "1",
-                   "RIZZY_DISABLE_PUSH_DELIVERY": "1"}
+                   "RIZZY_DISABLE_PUSH_DELIVERY": "1",
+                   "RIZZY_DEV_MAGIC_LINKS": "1"}
             seed_result = subprocess.run([BINARY, "seed"], cwd=ROOT, env=env,
                                          capture_output=True, text=True)
             assert seed_result.returncode == 0, seed_result.stderr
@@ -294,7 +298,150 @@ def main():
                               f"AND assignee_id='{owner_id}';") == before_assignment
                 assert scalar(f"SELECT COUNT(*) FROM steps WHERE card_id='{reaction_card['id']}' "
                               "AND content='Inaccessible race step';") == "0"
-                print("MySQL pin/watch/reaction/tag/assignment/step moves passed: no inaccessible writes after blocked requests")
+
+                status, delete_card, _ = call(servers[1][0], account, member_token,
+                                              f"/boards/{source['id']}/cards", "POST",
+                                              {"card": {"title": "Delete during move"}})
+                assert status == 201, (status, delete_card)
+                blocker = subprocess.Popen(
+                    [str(MYSQL), "--no-defaults", f"--socket={SOCKET}", "-uroot",
+                     "--unbuffered", "--batch", "--skip-column-names",
+                     "--execute=START TRANSACTION; "
+                     f"SELECT id FROM {database}.boards WHERE id='{source['id']}' FOR UPDATE; "
+                     "DO SLEEP(8); COMMIT;"],
+                    env={**os.environ, "LD_LIBRARY_PATH": str(MYSQL.resolve().parents[1] / "lib")},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                assert blocker.stdout.readline().strip() == source["id"]
+
+                def move_member_card():
+                    return call(servers[0][0], account, owner_token,
+                                f"/cards/{delete_card['number']}/board", "PATCH",
+                                {"board_id": destination["id"]})
+
+                def delete_member_card():
+                    return call(servers[1][0], account, member_token,
+                                f"/cards/{delete_card['number']}", "DELETE")
+
+                def read_member_card():
+                    return call(servers[1][0], account, member_token,
+                                f"/cards/{delete_card['number']}/reading", "POST")
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+                    move_future = pool.submit(move_member_card)
+                    deadline = time.monotonic() + 6
+                    waits = 0
+                    while time.monotonic() < deadline:
+                        waits = int(root_mysql(
+                            "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                            "JOIN performance_schema.data_locks l ON "
+                            "l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                            "WHERE l.OBJECT_NAME='boards';"))
+                        if waits >= 1:
+                            break
+                        time.sleep(.1)
+                    assert waits >= 1, ("member-card move did not reach the board lock", waits)
+                    delete_future = pool.submit(delete_member_card)
+                    read_future = pool.submit(read_member_card)
+                    deadline = time.monotonic() + 6
+                    waits = 0
+                    while time.monotonic() < deadline:
+                        waits = int(root_mysql(
+                            "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                            "JOIN performance_schema.data_locks l ON "
+                            "l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                            "WHERE l.OBJECT_NAME='boards';"))
+                        if waits >= 3:
+                            break
+                        time.sleep(.1)
+                    assert waits >= 3, ("delete and read did not reach the board lock", waits)
+                    moved = move_future.result(timeout=20)
+                    deleted = delete_future.result(timeout=20)
+                    read = read_future.result(timeout=20)
+                assert moved[0] == 200, moved
+                assert deleted[0] == 404, deleted
+                assert read[0] == 404, read
+                output, error = blocker.communicate(timeout=10)
+                assert blocker.returncode == 0, (output, error)
+                blocker = None
+                assert scalar(f"SELECT board_id FROM cards WHERE id='{delete_card['id']}';") == destination["id"]
+
+                session_target = {
+                    "name": "rizzy", "url": servers[1][0], "account": account,
+                    "token": member_token, "email": identity_id + "@example.test",
+                    "opener": urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                        NoRedirect()),
+                }
+                login(session_target)
+                draft_status, draft_headers, _ = request(
+                    session_target, f"/{account}/boards/{source['id']}/cards",
+                    "POST", b"", accept="text/html")
+                assert draft_status == 302, draft_status
+                draft_location = draft_headers["Location"]
+                draft_number = re.search(r"/cards/(\d+)/draft$", draft_location).group(1)
+                draft_id = scalar(f"SELECT id FROM cards WHERE account_id='{account_id}' "
+                                  f"AND number={draft_number};")
+                assert scalar(f"SELECT status FROM cards WHERE id='{draft_id}';") == "drafted"
+                before_events = scalar(f"SELECT COUNT(*) FROM events WHERE card_id='{draft_id}' "
+                                       "AND action='card_published';")
+                blocker = subprocess.Popen(
+                    [str(MYSQL), "--no-defaults", f"--socket={SOCKET}", "-uroot",
+                     "--unbuffered", "--batch", "--skip-column-names",
+                     "--execute=START TRANSACTION; "
+                     f"SELECT id FROM {database}.boards WHERE id='{source['id']}' FOR UPDATE; "
+                     "DO SLEEP(8); COMMIT;"],
+                    env={**os.environ, "LD_LIBRARY_PATH": str(MYSQL.resolve().parents[1] / "lib")},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                assert blocker.stdout.readline().strip() == source["id"]
+
+                def move_draft():
+                    return call(servers[0][0], account, owner_token,
+                                f"/cards/{draft_number}/board", "PATCH",
+                                {"board_id": destination["id"]})
+
+                def publish_draft():
+                    return call(servers[1][0], account, member_token,
+                                f"/cards/{draft_number}/publish", "POST")
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    move_future = pool.submit(move_draft)
+                    deadline = time.monotonic() + 6
+                    waits = 0
+                    while time.monotonic() < deadline:
+                        waits = int(root_mysql(
+                            "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                            "JOIN performance_schema.data_locks l ON "
+                            "l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                            "WHERE l.OBJECT_NAME='boards';"))
+                        if waits >= 1:
+                            break
+                        time.sleep(.1)
+                    assert waits >= 1, ("draft move did not reach the board lock", waits)
+                    publish_future = pool.submit(publish_draft)
+                    deadline = time.monotonic() + 6
+                    waits = 0
+                    while time.monotonic() < deadline:
+                        waits = int(root_mysql(
+                            "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                            "JOIN performance_schema.data_locks l ON "
+                            "l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                            "WHERE l.OBJECT_NAME='boards';"))
+                        if waits >= 2:
+                            break
+                        time.sleep(.1)
+                    assert waits >= 2, ("publish did not reach the board lock", waits)
+                    moved = move_future.result(timeout=20)
+                    published = publish_future.result(timeout=20)
+                assert moved[0] == 200, moved
+                assert published[0] == 404, published
+                output, error = blocker.communicate(timeout=10)
+                assert blocker.returncode == 0, (output, error)
+                blocker = None
+                assert scalar(f"SELECT board_id FROM cards WHERE id='{draft_id}';") == destination["id"]
+                assert scalar(f"SELECT status FROM cards WHERE id='{draft_id}';") == "drafted"
+                assert scalar(f"SELECT COUNT(*) FROM events WHERE card_id='{draft_id}' "
+                              "AND action='card_published';") == before_events
+                print("MySQL inaccessible card-write/move races passed")
             except Exception:
                 for _, _, log in servers:
                     print(log.read_text()[-2000:], file=sys.stderr)
