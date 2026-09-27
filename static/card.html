@@ -56,12 +56,14 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 </style>
 <style>
 #edit-mobile{display:none}
+.card-perma__closure-message{max-width:48ch;margin:16px auto 28px;padding:0 12px;color:#89bcff;text-align:center;font-size:16px;line-height:1.45}
+.card-perma__closure-message .local-time-value{font-weight:700}
 @media(max-width:639px){
   main{position:relative;padding:22px 0 90px}
   main>nav{position:absolute;top:-42px;left:20px;z-index:30;margin:0}
   main>nav a{display:grid;place-items:center;width:38px;height:38px;font-size:0}
   main>nav a::before{content:"←";font-size:34px;line-height:1}
-  .card-perma{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));width:100%;max-width:none;min-height:0;margin:0;padding:5px 4px 28px;border-radius:0}
+  .card-perma{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));width:100%;max-width:none;min-height:0;margin:0;padding:5px 4px 17px;border-radius:0}
   .card__header,.card__body,.card__footer{grid-column:1/-1}
   .card__header{grid-row:1;height:35px}
   .card__board-label{min-height:35px;padding:4px 12px;font-size:15px}
@@ -85,11 +87,13 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   #closure::before{content:"✓";font-size:29px}
   #closure[data-method="DELETE"]::before{content:"↶"}
   #watch{grid-column:5;grid-row:4} #pin{grid-column:6;grid-row:4}
+  .card-perma__closure-message{grid-column:1/-1;grid-row:5;max-width:370px;margin:17px auto 0;padding:0 18px;font-size:16px}
   #choose-column{display:none}
-  #column-picker{grid-column:1/-1;grid-row:5}
-  turbo-frame[id^="edit_card_"]{grid-column:1/-1;grid-row:6}
+  #column-picker{grid-column:1/-1;grid-row:6}
+  turbo-frame[id^="edit_card_"]{grid-column:1/-1;grid-row:7}
   #edit:not([open]){display:none}
-  .messages{width:100%;margin:18px auto}
+  section.messages{width:100%;margin:0 auto 18px}
+  .comment--new{margin-top:0}
 }
 </style>
 <style>{{SHELL_STYLES}}</style>
@@ -113,6 +117,7 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
     <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
     <button id="closure" type="button" data-method="{{CLOSURE_METHOD}}">{{CLOSURE_LABEL}}</button>
   </div></div>
+  {{CLOSURE_NOTICE}}
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
   <dialog class="assignment-dialog" id="assignment-dialog" aria-label="Assign this card"><button type="button" class="assignment-dialog__close" aria-label="Close assignment picker">×</button><div id="assignment-dialog-content"></div><p class="error" role="alert" id="assignment-dialog-error"></p></dialog>
   <turbo-frame id="edit_card_{{CARD_ID}}"><details class="editor" id="edit"><summary>Edit card</summary><form id="edit-form">
@@ -157,6 +162,7 @@ if(backLink){
 }
 const assignmentDialog=document.getElementById('assignment-dialog'),assignmentContent=document.getElementById('assignment-dialog-content'),assignmentError=document.getElementById('assignment-dialog-error');
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
+function formatClosureNotice(){const time=document.querySelector('.card-perma__closure-message time[data-local-time-target="indays"]');if(!time)return;const date=new Date(Number(time.getAttribute('datetime'))*1000);if(Number.isNaN(date.getTime()))return;const days=Math.round(Math.abs(commentDayStart(date)-commentDayStart(new Date()))/86400000);const value=days===0?'today':days===1?'tomorrow':`in ${days} days`;time.innerHTML=days>1?`in <span class="local-time-value">${days}</span> days`:`<span class="local-time-value">${value}</span>`}
 relativeDates();new MutationObserver(relativeDates).observe(document.querySelector('.card__footer'),{childList:true,subtree:true});
 document.addEventListener('click',async event=>{const link=event.target.closest('#assignment-link');if(!link)return;event.preventDefault();assignmentError.textContent='';assignmentDialog.showModal();if(assignmentContent.firstElementChild){assignmentContent.querySelector('#user-search')?.focus();return}assignmentContent.textContent='Loading…';try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load assignment picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=assignment_card_]');if(!frame)throw Error('Assignment picker missing');assignmentContent.replaceChildren(document.importNode(frame,true));assignmentContent.querySelector('#user-search')?.focus()}catch(error){assignmentContent.textContent='';assignmentError.textContent=error.message}});
 assignmentDialog.querySelector('.assignment-dialog__close').addEventListener('click',()=>assignmentDialog.close());assignmentDialog.addEventListener('click',event=>{if(event.target===assignmentDialog)assignmentDialog.close()});assignmentContent.addEventListener('input',event=>{if(event.target.id!=='user-search')return;const value=event.target.value.toLocaleLowerCase();assignmentContent.querySelectorAll('.popup__item').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))});
@@ -218,6 +224,7 @@ const commentTimeFormatter=new Intl.DateTimeFormat('en-US',{timeStyle:'short'});
 const commentTitleFormatter=new Intl.DateTimeFormat('en-US',{dateStyle:'short',timeStyle:'short'});
 const commentWeekdayFormatter=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'});
 function commentDayStart(date){const parts=Object.fromEntries(commentDateFormatter.formatToParts(date).filter(part=>part.type!=='literal').map(part=>[part.type,Number(part.value)]));return Date.UTC(parts.year,parts.month-1,parts.day)}
+formatClosureNotice();setInterval(formatClosureNotice,30000);
 function formatCommentTimes(){const now=new Date();for(const time of commentList.querySelectorAll('time[data-local-time-target]')){if(time.dataset.localTimeReady)continue;const seconds=Number(time.getAttribute('datetime')),date=new Date(seconds*1000);if(!Number.isFinite(seconds)||Number.isNaN(date.getTime()))continue;if(time.dataset.localTimeTarget==='time'){time.textContent=commentTimeFormatter.format(date)}else{const days=Math.round(Math.abs(commentDayStart(now)-commentDayStart(date))/86400000);time.innerHTML=days<=1?`<span class="local-time-value">${days===0?'today':'yesterday'}</span>`:commentWeekdayFormatter.format(date)}time.title=commentTitleFormatter.format(date);time.dataset.localTimeReady='true'}}
 formatCommentTimes();new MutationObserver(()=>formatCommentTimes()).observe(commentList,{childList:true,subtree:true});
 const commentDraftKey='comment-{{CARD_ID}}';
@@ -298,6 +305,11 @@ async function refreshLiveCard(force=false,revisionHint=null){
     const status=document.querySelector('.card__header .status'),nextStatus=nextPage.querySelector('.card__header .status');
     if(status&&!nextStatus)status.remove();
     else if(!status&&nextStatus)document.querySelector('.card__header').append(document.importNode(nextStatus,true));
+    const closureNotice=cardRoot.querySelector('.card-perma__closure-message'),nextClosureNotice=nextCard?.querySelector('.card-perma__closure-message');
+    if(closureNotice&&!nextClosureNotice)closureNotice.remove();
+    else if(!closureNotice&&nextClosureNotice)cardRoot.querySelector('#column-picker').before(document.importNode(nextClosureNotice,true));
+    else if(closureNotice&&nextClosureNotice&&closureNotice.outerHTML!==nextClosureNotice.outerHTML)closureNotice.replaceWith(document.importNode(nextClosureNotice,true));
+    formatClosureNotice();
     const stageRail=document.querySelector('.stage-rail'),nextStageRail=nextPage.querySelector('.stage-rail');
     if(stageRail&&nextStageRail)stageRail.innerHTML=nextStageRail.innerHTML;
     const stepSection=stepRoot.querySelector('section[aria-label="Steps"]'),nextStepSection=nextPage.querySelector('.card__content > section[aria-label="Steps"]');

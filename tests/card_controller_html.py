@@ -57,6 +57,7 @@ def main():
             _, owner_page = html(owner, card_path)
             assert '<code>bug</code>' in owner_page and '&lt;script&gt;' in owner_page
             assert 'class="card__title-link"' in owner_page
+            assert f'id="closure_notice_card_{owner_card["id"]}"' in owner_page
             assert f'action="/{owner["account"]}{card_path}/self_assignment"' in owner_page
             assert '<button type="submit" hidden>Assign to me</button>' in owner_page
             assert "Delete this card" in owner_page
@@ -64,6 +65,22 @@ def main():
             assert "Delete this card" not in member_page
             html(member, card_path, "DELETE", expected=403)
             assert api(owner, card_path)["id"] == owner_card["id"]
+
+            with sqlite3.connect(owner["db"]) as db:
+                db.execute("UPDATE boards SET auto_postpone_period_in_days=7 WHERE id=?", (board_id,))
+                db.execute("UPDATE cards SET last_active_at='2030-03-10T15:00:00.000Z' WHERE id=?",
+                           (owner_card["id"],))
+            _, scheduled_page = html(owner, card_path)
+            assert 'data-local-time-target="indays"' in scheduled_page
+            assert 'datetime="1899990000"' in scheduled_page  # March 17, 2030 at 15:00 UTC
+            with sqlite3.connect(owner["db"]) as db:
+                db.execute("UPDATE cards SET closed=1 WHERE id=?", (owner_card["id"],))
+            assert 'closure_notice_card_' not in html(owner, card_path)[1]
+            with sqlite3.connect(owner["db"]) as db:
+                db.execute("UPDATE cards SET closed=0,postponed=1 WHERE id=?", (owner_card["id"],))
+            assert 'closure_notice_card_' not in html(owner, card_path)[1]
+            with sqlite3.connect(owner["db"]) as db:
+                db.execute("UPDATE cards SET postponed=0 WHERE id=?", (owner_card["id"],))
 
             member_card = api(member, f"/boards/{board_id}/cards", "POST",
                               {"title": "Member's card"}, 201)
@@ -91,7 +108,7 @@ def main():
             assert api(owner, foreign_path, "DELETE", expected=204) is None
         finally:
             stop(process)
-    print("Card HTML title, self-assignment control, delete visibility, permissions, form redirect, and JSON deletion passed")
+    print("Card HTML title, inactivity notice, self-assignment, deletion, and permissions passed")
 
 
 if __name__ == "__main__":

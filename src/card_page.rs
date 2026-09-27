@@ -137,7 +137,8 @@ pub(super) async fn show(
     let description: String = card.get("description");
     let (_, description_html, _) =
         storage::render_rich_text(app, &principal.account_id, principal.slug, &description).await?;
-    let board_name: String = board(app, principal, &board_id).await?.get("name");
+    let card_board = board(app, principal, &board_id).await?;
+    let board_name: String = card_board.get("name");
     let steps = sqlx::query(
         "SELECT id,content,completed FROM steps WHERE card_id=? ORDER BY created_at,id",
     )
@@ -271,6 +272,26 @@ pub(super) async fn show(
     };
     let tag_control = tagging_page::tags(app, principal, card).await?;
     let postponed = card.get::<i64, _>("postponed") != 0;
+    let closure_notice = if !closed && !postponed {
+        let last_active_at: String = card.get("last_active_at");
+        chrono::DateTime::parse_from_rfc3339(&last_active_at)
+            .ok()
+            .and_then(|active| {
+                active.checked_add_signed(chrono::Duration::days(
+                    card_board.get::<i64, _>("auto_postpone_period_in_days"),
+                ))
+            })
+            .map(|deadline| {
+                format!(
+                    "<div class=\"card-perma__closure-message\" id=\"closure_notice_card_{}\">Moves to “Not Now” <time datetime=\"{}\" data-local-time-target=\"indays\">&nbsp;</time> if there’s no activity.</div>",
+                    escape(&card_id),
+                    deadline.timestamp()
+                )
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     let column_id: Option<String> = card.get("column_id");
     let columns = sqlx::query("SELECT id,name FROM columns WHERE board_id=? ORDER BY position,id")
         .bind(&board_id)
@@ -336,6 +357,7 @@ pub(super) async fn show(
         ),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
+        ("CLOSURE_NOTICE", closure_notice),
         ("IMAGE", image),
         ("IMAGE_BUTTON", image_button),
         ("TAG_CONTROL", tag_control),
