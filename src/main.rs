@@ -8066,6 +8066,9 @@ async fn list_board_accesses(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     let b = board(&app, &p, &id).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let total: i64 = sqlx::query_scalar(
@@ -11953,6 +11956,11 @@ async fn column_cards(
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     checked_column(&app, &p, &board_id, &column_id).await?;
+    if !headers.contains_key("x-rizzy-json-request")
+        && !headers.contains_key("x-rizzy-card-fragment")
+    {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let total: i64 = sqlx::query_scalar(named_column_count_sql(app.mysql))

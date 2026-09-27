@@ -61,12 +61,15 @@ def fixture(target):
     webhook_id = webhook["id"]
     card = create(f"/boards/{board_id}/cards", {"card": {"title": "Valid route card", "description": "Body text"}})
     number = card["number"]
+    named_card = create(f"/boards/{board_id}/cards", {"card": {"title": "Named column card"}})
+    status, _, _ = request(target, f"/cards/{named_card['number']}/triage", "POST", {"column_id": column_id})
+    assert status == 204, (target["name"], "triage", status)
     step = create(f"/cards/{number}/steps", {"step": {"content": "First step"}})
     comment = create(f"/cards/{number}/comments", {"comment": {"body": "First comment"}})
     create(f"/cards/{number}/reactions", {"reaction": {"content": "👍"}})
     return {"name": name, "user_id": user_id, "board_id": board_id,
             "column_id": column_id, "webhook_id": webhook_id,
-            "number": number, "step_id": step["id"],
+            "number": number, "card_id": card["id"], "step_id": step["id"],
             "comment_id": comment["id"]}
 
 
@@ -109,31 +112,46 @@ def run_html(target):
     board_id, column_id, webhook_id, number, step_id, comment_id = (
         item[key] for key in ("board_id", "column_id", "webhook_id", "number", "step_id", "comment_id"))
     paths = {
+        "board_accesses": (f"/boards/{board_id}/accesses", None),
         "board": (f"/boards/{board_id}", item["name"]),
         "board_edit": (f"/boards/{board_id}/edit", item["name"]),
         "board_stream": (f"/boards/{board_id}/columns/stream", "Valid route card"),
+        "board_columns": (f"/boards/{board_id}/columns", "Doing"),
         "column": (f"/boards/{board_id}/columns/{column_id}", "Doing"),
+        "column_cards": (f"/boards/{board_id}/columns/{column_id}/cards", "Named column card"),
         "webhooks": (f"/boards/{board_id}/webhooks", "Parity"),
+        "webhook_new": (f"/boards/{board_id}/webhooks/new", None),
         "webhook": (f"/boards/{board_id}/webhooks/{webhook_id}", "Parity"),
         "webhook_edit": (f"/boards/{board_id}/webhooks/{webhook_id}/edit", "Parity"),
         "card": (f"/cards/{number}", "Valid route card"),
         "card_edit": (f"/cards/{number}/edit", "Valid route card"),
+        "card_board_edit": (f"/cards/{number}/board/edit", item["name"]),
+        "card_column_edit": (f"/cards/{number}/column/edit", "Doing"),
+        "card_assignments_new": (f"/cards/{number}/assignments/new", "Assign this to"),
+        "card_taggings_new": (f"/cards/{number}/taggings/new", None),
+        "card_reactions": (f"/cards/{number}/reactions", f"reacting_card_{item['card_id']}"),
+        "card_reactions_new": (f"/cards/{number}/reactions/new", "New reaction"),
         "steps": (f"/cards/{number}/steps", "First step"),
         "step": (f"/cards/{number}/steps/{step_id}", "First step"),
         "step_edit": (f"/cards/{number}/steps/{step_id}/edit", "First step"),
         "comments": (f"/cards/{number}/comments", "First comment"),
         "comment": (f"/cards/{number}/comments/{comment_id}", "First comment"),
         "comment_edit": (f"/cards/{number}/comments/{comment_id}/edit", "First comment"),
+        "comment_reactions": (f"/cards/{number}/comments/{comment_id}/reactions", f"reacting_comment_{comment_id}"),
+        "comment_reactions_new": (f"/cards/{number}/comments/{comment_id}/reactions/new", "New reaction"),
+        "prompt_users": ("/prompts/users", "lexxy-prompt-item"),
+        "prompt_board_users": (f"/prompts/boards/{board_id}/users", "lexxy-prompt-item"),
+        "prompt_cards": ("/prompts/cards", "Valid route card"),
     }
     result = {}
     for label, (path, marker) in paths.items():
         status, headers, body = browser_request(
             target, f"/{target['account']}{path}", accept="text/html")
         content_type = headers.get_content_type()
-        detail = (marker.encode() in body) if status == 200 else (
+        detail = ((marker.encode() in body) if marker else bool(body)) if status == 200 else (
             len(body), hashlib.sha256(body).hexdigest())
         result[label] = (status, content_type, detail)
-        if status == 200:
+        if status == 200 and marker:
             assert marker.encode() in body, (target["name"], label, marker, body[:300])
     steps_path = f"/{target['account']}/cards/{number}/steps"
     status, headers, _ = browser_request(target, steps_path, accept="application/json", bearer=True)

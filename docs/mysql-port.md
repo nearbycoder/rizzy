@@ -786,11 +786,13 @@ populated GET paths. It exposed a user-activity JSON request that returned
 HTML 200 in Rizzy; the handler now matches Fizzy's JSON 406. Full body value
 and browser HTML parity for these paths remain open.
 The `route-get-valid-html` suite matches status, content type, and resource
-text on 15 populated signed-in HTML GET paths, plus one conditional steps
-request. It exposed an HTML card-steps index returning JSON 200 in Rust;
-Rizzy now matches Fizzy's HTML 406. The paired `step-read` and populated JSON
-GET suites passed after the change. Full markup and interaction parity remain
-unverified by this probe.
+text on 30 populated signed-in HTML GET paths, plus one conditional steps
+request; non-200 bodies are compared by length and digest. It exposed browser
+HTML requests to the card-steps index, board-access listing, and named-column
+card list returning JSON 200 in Rust; Rizzy now matches Fizzy's HTML 406.
+The paired `step-read`, populated JSON GET, private/public board-view, and
+named-column browser suites passed after the change. Full markup and
+interaction parity remain unverified by this probe.
 The disposable paired `auth-format` suite also passed bearer-only format,
 read-token write denial, JSON suffix, and unauthenticated redirect checks on
 fresh MySQL databases.

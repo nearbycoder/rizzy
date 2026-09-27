@@ -939,10 +939,13 @@ full response values or HTML, and most valid-resource routes, complete
 permissions, and side effects remain open.
 The `route-get-valid-html` suite also uses persisted fixtures and a signed-in
 browser session to compare status, content type, and resource-text markers on
-15 populated browser GET paths, plus a conditional request for the steps index.
+30 populated browser GET paths, plus a conditional request for the steps index.
+For non-200 responses it also compares body length and digest.
 It found that Rizzy returned JSON 200 for a browser request to the card steps
-index where Fizzy returns HTML 406; the handler now matches Fizzy. The paired
-step-read browser workflow and populated JSON suite still pass. These markers
+index where Fizzy returns HTML 406; the handler now matches Fizzy. It also
+found and fixed the same format mismatch on board-access listings and
+named-column card lists. The paired step-read, populated JSON, private/public
+board-view, and named-column browser suites still pass. These markers
 do not establish equivalent page structure, controls, styling, or interaction.
 The paired `join-code` flow also checks invalid QR signatures and absent account
 prefixes with JSON and SVG Accept headers. Full route parity remains open.
