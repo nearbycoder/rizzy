@@ -9,6 +9,7 @@ use axum::{
 };
 use chrono::{Datelike, Timelike, Utc};
 use rand::Rng;
+use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -22,7 +23,7 @@ use std::{
     env,
     net::{IpAddr, SocketAddr},
     process::Stdio,
-    sync::{Arc, Weak},
+    sync::{Arc, OnceLock, Weak},
     time::{Duration, Instant},
 };
 use tokio::io::AsyncWriteExt;
@@ -1882,7 +1883,133 @@ mod webhook_security_tests {
     }
 }
 
-async fn webhook_payload(app: &App, row: &DbRow, host: &str) -> Result<String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WebhookFormat {
+    Generic,
+    Slack,
+    Campfire,
+    Basecamp,
+}
+
+fn webhook_format(url: &str) -> WebhookFormat {
+    static SLACK: OnceLock<Regex> = OnceLock::new();
+    static CAMPFIRE: OnceLock<Regex> = OnceLock::new();
+    static BASECAMP: OnceLock<Regex> = OnceLock::new();
+    let pattern = |pattern| {
+        RegexBuilder::new(pattern)
+            .case_insensitive(true)
+            .build()
+            .unwrap()
+    };
+    if BASECAMP
+        .get_or_init(|| pattern(r"/\d+/integrations/[^/]+/buckets/\d+/chats/\d+/lines\z"))
+        .is_match(url)
+    {
+        WebhookFormat::Basecamp
+    } else if CAMPFIRE
+        .get_or_init(|| pattern(r"/rooms/\d+/\d+-[^/]+/messages\z"))
+        .is_match(url)
+    {
+        WebhookFormat::Campfire
+    } else if SLACK
+        .get_or_init(|| pattern(r"//hooks\.slack\.com/services/T[^/]+/B[^/]+/[^/]+\z"))
+        .is_match(url)
+    {
+        WebhookFormat::Slack
+    } else {
+        WebhookFormat::Generic
+    }
+}
+
+impl WebhookFormat {
+    fn content_type(self) -> &'static str {
+        match self {
+            Self::Campfire => "text/html",
+            Self::Basecamp => "application/x-www-form-urlencoded",
+            Self::Generic | Self::Slack => "application/json",
+        }
+    }
+
+    fn body(self, item: &Value) -> String {
+        match self {
+            Self::Generic => json!({"id":item["id"],"action":item["action"],
+                "created_at":item["created_at"],"eventable":item["eventable"],
+                "board":item["board"],"creator":item["creator"]})
+            .to_string(),
+            Self::Slack => json!({"text":format!("{} <{}|Open in Fizzy>",
+                item["description"].as_str().unwrap_or(""),
+                item["eventable"]["url"].as_str().unwrap_or(""))})
+            .to_string(),
+            Self::Campfire | Self::Basecamp => {
+                let html = format!(
+                    "{}\n<a href=\"{}\">↗︎</a>",
+                    item["description"].as_str().unwrap_or(""),
+                    escape(item["eventable"]["url"].as_str().unwrap_or(""))
+                );
+                if self == Self::Basecamp {
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("content", &html)
+                        .finish()
+                } else {
+                    html
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod webhook_format_tests {
+    use super::{WebhookFormat, webhook_format};
+    use serde_json::{Value, json};
+
+    fn event() -> Value {
+        json!({"id":"event-1","action":"card_published","created_at":"2026-01-01T00:00:00Z",
+            "description":"David added &quot;Tom &amp; Jerry&#39;s &lt;Great&gt; &quot;Adventure&quot;&quot;",
+            "eventable":{"title":"Tom & Jerry's <Great> \"Adventure\"",
+                "url":"http://example.org/897362094/cards/1"},
+            "board":{"id":"board-1"},"creator":{"name":"David"}})
+    }
+
+    #[test]
+    fn specialized_payloads_match_fizzy_wire_formats() {
+        let event = event();
+        let html = "David added &quot;Tom &amp; Jerry&#39;s &lt;Great&gt; &quot;Adventure&quot;&quot;\n<a href=\"http://example.org/897362094/cards/1\">↗︎</a>";
+        let basecamp = webhook_format(
+            "https://3.basecamp.com/123/integrations/webhook/buckets/456/chats/789/lines",
+        );
+        assert_eq!(basecamp, WebhookFormat::Basecamp);
+        assert_eq!(basecamp.content_type(), "application/x-www-form-urlencoded");
+        assert_eq!(
+            url::form_urlencoded::parse(basecamp.body(&event).as_bytes())
+                .find(|(key, _)| key == "content")
+                .unwrap()
+                .1,
+            html
+        );
+
+        let campfire = webhook_format("https://example.com/rooms/123/456-room-name/messages");
+        assert_eq!(campfire, WebhookFormat::Campfire);
+        assert_eq!(campfire.content_type(), "text/html");
+        assert_eq!(campfire.body(&event), html);
+
+        let slack = webhook_format("https://hooks.slack.com/services/T123/B456/secret");
+        assert_eq!(slack, WebhookFormat::Slack);
+        assert_eq!(slack.content_type(), "application/json");
+        assert_eq!(
+            serde_json::from_str::<Value>(&slack.body(&event)).unwrap()["text"],
+            "David added &quot;Tom &amp; Jerry&#39;s &lt;Great&gt; &quot;Adventure&quot;&quot; <http://example.org/897362094/cards/1|Open in Fizzy>"
+        );
+
+        let generic = webhook_format("https://example.com/webhook");
+        assert_eq!(generic, WebhookFormat::Generic);
+        let body: Value = serde_json::from_str(&generic.body(&event)).unwrap();
+        assert_eq!(body["eventable"]["title"], event["eventable"]["title"]);
+        assert!(body.get("text").is_none());
+    }
+}
+
+async fn webhook_payload(app: &App, row: &DbRow, host: &str) -> Result<(String, WebhookFormat)> {
     let account_id: String = row.get("account_id");
     let slug: i64 = row.get("external_account_id");
     let creator_id: String = row.get("creator_id");
@@ -1900,19 +2027,22 @@ async fn webhook_payload(app: &App, row: &DbRow, host: &str) -> Result<String> {
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
-    let item = activity_items(app, &principal, &[event], host)
+    let item = activity_items(app, &principal, &[event], host, None)
         .await?
         .into_iter()
         .next()
         .ok_or_else(missing)?;
-    Ok(
-        json!({"id":item["id"],"action":item["action"],"created_at":item["created_at"],
-        "eventable":item["eventable"],"board":item["board"],"creator":item["creator"]})
-        .to_string(),
-    )
+    let format = webhook_format(&row.get::<String, _>("url"));
+    Ok((format.body(&item), format))
 }
 
-async fn send_webhook(url: &str, secret: &str, timestamp: &str, body: &str) -> Value {
+async fn send_webhook(
+    url: &str,
+    secret: &str,
+    timestamp: &str,
+    body: &str,
+    content_type: &str,
+) -> Value {
     let Ok(uri) = url::Url::parse(url) else {
         return json!({"error":"destination_unreachable"});
     };
@@ -1952,7 +2082,7 @@ async fn send_webhook(url: &str, secret: &str, timestamp: &str, body: &str) -> V
     let result = client
         .post(uri)
         .header("User-Agent", "fizzy/1.0.0 Webhook")
-        .header("Content-Type", "application/json")
+        .header("Content-Type", content_type)
         .header("X-Webhook-Timestamp", timestamp)
         .header("X-Webhook-Signature", hmac_sha256(secret, body))
         .body(body.to_owned())
@@ -2001,13 +2131,14 @@ async fn process_webhook_delivery(app: &App, delivery_id: &str, host: &str) -> R
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
         })
         .unwrap_or(timestamp);
-    let request = json!({"headers":{"User-Agent":"fizzy/1.0.0 Webhook","Content-Type":"application/json","X-Webhook-Timestamp":timestamp}});
-    let payload = webhook_payload(app, &row, host).await?;
+    let (payload, format) = webhook_payload(app, &row, host).await?;
+    let request = json!({"headers":{"User-Agent":"fizzy/1.0.0 Webhook","Content-Type":format.content_type(),"X-Webhook-Timestamp":timestamp}});
     let response = send_webhook(
         &row.get::<String, _>("url"),
         &row.get::<String, _>("signing_secret"),
         &timestamp,
         &payload,
+        format.content_type(),
     )
     .await;
     let completed_at = now();
@@ -9660,7 +9791,7 @@ fn event_assignee_names(ids: &[Value], users: &HashMap<String, Value>) -> String
     }
 }
 fn activity_description(
-    p: &Principal,
+    viewer_id: Option<&str>,
     event: &DbRow,
     title: &str,
     particulars: &Value,
@@ -9696,7 +9827,9 @@ fn activity_description(
         "comment_created" => format!("{actor} commented on {quoted}"),
         "card_assigned" => {
             let ids = particulars["assignee_ids"].as_array();
-            if ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&p.user_id))) {
+            if viewer_id.is_some_and(|viewer| {
+                ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(viewer)))
+            }) {
                 format!("{actor} will handle {quoted}")
             } else {
                 let names = ids
@@ -9707,13 +9840,14 @@ fn activity_description(
         }
         "card_unassigned" => {
             let ids = particulars["assignee_ids"].as_array();
-            let target =
-                if ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&p.user_id))) {
-                    "yourself".to_string()
-                } else {
-                    ids.map(|ids| event_assignee_names(ids, users))
-                        .unwrap_or_default()
-                };
+            let target = if viewer_id.is_some_and(|viewer| {
+                ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(viewer)))
+            }) {
+                "yourself".to_string()
+            } else {
+                ids.map(|ids| event_assignee_names(ids, users))
+                    .unwrap_or_default()
+            };
             format!("{actor} unassigned {target} from {quoted}")
         }
         _ => String::new(),
@@ -9725,6 +9859,7 @@ async fn activity_items(
     p: &Principal,
     events: &[DbRow],
     host: &str,
+    viewer_id: Option<&str>,
 ) -> Result<Vec<Value>> {
     if events.is_empty() {
         return Ok(Vec::new());
@@ -9951,7 +10086,7 @@ async fn activity_items(
         items.push(
             json!({"id":e.get::<String,_>("id"),"action":e.get::<String,_>("action"),
             "created_at":e.get::<String,_>("created_at"),
-            "description":activity_description(p,e,title,particulars,&users),"particulars":particulars,
+            "description":activity_description(viewer_id,e,title,particulars,&users),"particulars":particulars,
             "url":url,"eventable_type":eventable_type,"eventable":eventable,
             "board":boards.get(&board_id).cloned().ok_or_else(missing)?,
             "creator":users.get(&e.get::<String,_>("creator_id")).cloned().ok_or_else(missing)?}),
@@ -10774,7 +10909,7 @@ async fn list_activities(
         .push_bind(offset);
     let rows = builder.build().fetch_all(&app.db).await.map_err(db_err)?;
     let host = base(&headers);
-    let items = activity_items(&app, &p, &rows, &host).await?;
+    let items = activity_items(&app, &p, &rows, &host, Some(&p.user_id)).await?;
     Ok(paginated(json!(items), total, query.page, &uri, &headers))
 }
 async fn resolved_card_query(app: &App, p: &Principal, raw: Option<String>) -> Result<CardQuery> {

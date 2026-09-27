@@ -19,7 +19,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, and column pages | No |
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; 16 MySQL search shards with selected cross-app checks on this branch; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
-| Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue and JSON delivery | No |
+| Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue, and generic, Slack, Campfire, and Basecamp delivery formats | No |
 | Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, VAPID push queue/delivery, timed multipart text/HTML email bundles, and expiring unsubscribe links | No |
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, common formatted text, signed limit/fill image representation routes, and a storage entry/total ledger | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
@@ -287,7 +287,7 @@ The newer [balanced Rust-client repeat](bench/results/scoped-api-rust-client-rep
 
 `tests/card_edit_html_parity.py` compares the dedicated edit route's Turbo frame, form fields, Lexxy editor, JSON rejection, save, and reloaded title against both apps. Chromium submitted the Rust form and showed the updated card without errors. Fizzy's edit route inserts the editor into the card view and updates its save control via Turbo; Rizzy's route currently renders a standalone editing page with a matching frame and a simpler save flow.
 
-`tests/webhooks_html_parity.py` compares the browser webhook list, new and edit forms, validation, create/update/delete redirects, rendered detail, and JSON collection against Fizzy. Chromium created a webhook and opened its edit form; `tests/webhooks.py` confirmed the JSON API and delivery worker still pass. The Rust pages use simpler styling, and specialized webhook payload formats and broader delivery parity remain outstanding.
+`tests/webhooks_html_parity.py` compares the browser webhook list, new and edit forms, validation, create/update/delete redirects, rendered detail, and JSON collection against Fizzy. Chromium created a webhook and opened its edit form; `tests/webhooks.py` confirmed the JSON API and delivery worker still pass. The Rust pages use simpler styling, and exact payload-byte and broader delivery parity remain outstanding.
 
 `tests/webhook_delinquency_timestamp_parity.py` compares blocked delivery
 failures and deactivation against the pinned Fizzy app. Both preserve the
@@ -307,6 +307,14 @@ matching the pinned Surfguard policy, and keeps an all-private answer blocked.
 The response-body limit now matches Fizzy's 100 KiB. The Rust DNS safety unit
 tests pass; successful internet delivery and response-size boundaries have not
 yet been checked in a paired live delivery test.
+Rizzy now selects Fizzy's generic JSON, Slack JSON, Campfire HTML, and Basecamp
+form payload shapes by webhook URL, including the corresponding content types
+and an event description without a viewer. Its unit test checks the format
+examples and special-character escaping recorded in the pinned source tests;
+the pinned `Webhook::Delivery` suite passed 29 tests and 67 assertions. The
+Rust worker check confirms stored content types and private-target refusals
+for generic, Campfire, and Basecamp hooks. An exact source/Rust wire-body
+comparison, Slack worker delivery, and success and TLS paths remain open.
 
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 
