@@ -4005,7 +4005,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(storage::materialize_worker(app.clone()));
     }
     let maintenance_db = app.db.clone();
-    let maintenance_app = app.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
         loop {
@@ -4068,11 +4067,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             {
                 eprintln!("push delivery cleanup failed: {error}");
             }
-            if let Err(error) = account_cancellation::incinerate_due(&maintenance_app).await {
-                eprintln!("account incineration failed: {error}");
-            }
         }
     });
+    tokio::spawn(account_cancellation::incineration_worker(app.clone()));
     if env::var("RIZZY_DISABLE_AUTO_POSTPONE").as_deref() != Ok("1") {
         let app = app.clone();
         tokio::spawn(async move {

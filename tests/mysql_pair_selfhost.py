@@ -289,9 +289,9 @@ def main():
                     if args.suite == "account-cancellation-concurrent":
                         concurrent_rust_incineration(rust, rizzy_env)
                     else:
-                        stop_server(rizzy_process)
-                        rizzy_process, rust["url"] = start_server("rizzy", rizzy_dir, rizzy_env, cpus)
-                        processes.append(rizzy_process)
+                        subprocess.run([str(ROOT / "target/release/rizzy"), "incinerate-due"],
+                                       cwd=ROOT, env=rizzy_env, capture_output=True,
+                                       text=True, check=True)
                     source_result["day_31"] = wait_for_deletion(source)
                     rust_result["day_31"] = wait_for_deletion(rust)
                     for target, result in ((source, source_result), (rust, rust_result)):

@@ -178,7 +178,7 @@ pub(super) async fn menu(State(app): Shared, headers: HeaderMap) -> Result<Respo
     Ok(Html(body).into_response())
 }
 
-// Runs on startup and hourly. All database records are removed in one transaction;
+// All database records are removed in one transaction;
 // SQLite checks deferred references at commit, while MySQL deletes children first.
 pub(super) async fn incinerate_due(app: &App) -> std::result::Result<(), sqlx::Error> {
     let cutoff = (Utc::now() - chrono::Duration::days(30))
@@ -193,6 +193,79 @@ pub(super) async fn incinerate_due(app: &App) -> std::result::Result<(), sqlx::E
         incinerate_one(app, &account_id).await?;
     }
     Ok(())
+}
+
+fn incineration_slot(current: chrono::DateTime<Utc>) -> Option<String> {
+    if current.hour() % 8 == 0 && current.minute() == 16 {
+        Some(current.format("%Y-%m-%dT%H").to_string())
+    } else {
+        None
+    }
+}
+
+async fn claim_incineration_slot(app: &App, slot: &str) -> std::result::Result<bool, sqlx::Error> {
+    let insert = if app.mysql {
+        "INSERT IGNORE INTO app_secrets(name,value) VALUES('incineration_slot','0')"
+    } else {
+        "INSERT OR IGNORE INTO app_secrets(name,value) VALUES('incineration_slot','0')"
+    };
+    sqlx::query(insert).execute(&app.db).await?;
+    let result =
+        sqlx::query("UPDATE app_secrets SET value=? WHERE name='incineration_slot' AND value<?")
+            .bind(slot)
+            .bind(slot)
+            .execute(&app.db)
+            .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub(super) async fn incineration_worker(app: Arc<App>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        interval.tick().await;
+        let Some(slot) = incineration_slot(Utc::now()) else {
+            continue;
+        };
+        match claim_incineration_slot(&app, &slot).await {
+            Ok(true) => {
+                if let Err(error) = incinerate_due(&app).await {
+                    eprintln!("account incineration failed: {error}");
+                    if let Err(release) = sqlx::query(
+                        "UPDATE app_secrets SET value='0' WHERE name='incineration_slot' AND value=?",
+                    )
+                    .bind(&slot)
+                    .execute(&app.db)
+                    .await
+                    {
+                        eprintln!("account incineration claim release failed: {release}");
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(error) => eprintln!("account incineration claim failed: {error}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::incineration_slot;
+    use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn incineration_runs_every_eight_hours_at_minute_sixteen() {
+        for hour in 0..24 {
+            for minute in [15, 16, 17] {
+                let current = Utc.with_ymd_and_hms(2026, 9, 27, hour, minute, 0).unwrap();
+                let slot = incineration_slot(current);
+                assert_eq!(slot.is_some(), hour % 8 == 0 && minute == 16);
+            }
+        }
+        assert_eq!(
+            incineration_slot(Utc.with_ymd_and_hms(2026, 9, 27, 16, 16, 0).unwrap()),
+            Some("2026-09-27T16".to_owned())
+        );
+    }
 }
 
 async fn mysql_account_tables(db: &DbPool) -> std::result::Result<Vec<String>, sqlx::Error> {

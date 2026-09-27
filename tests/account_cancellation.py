@@ -138,6 +138,8 @@ def main():
                 db.execute("UPDATE account_cancellations SET created_at=?", (stamp(31),))
         finally:
             stop(server)
+        subprocess.run([BINARY, "incinerate-due"], cwd=ROOT, env=env,
+                       capture_output=True, text=True, check=True)
         port, server = start(env)
         try:
             for _ in range(100):
