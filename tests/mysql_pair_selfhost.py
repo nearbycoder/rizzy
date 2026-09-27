@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run core or search parity on disposable Fizzy and Rizzy MySQL databases."""
+"""Run paired parity suites on disposable Fizzy and Rizzy MySQL databases."""
 
 import argparse
 import os
@@ -18,11 +18,12 @@ from sustained_mixed_mysql import (create_databases, drop_databases, rust_env,  
                                    source_env)
 from mysql_search_parity import browser_login, run as search_run  # noqa: E402
 from parity import run as core_run  # noqa: E402
+from board_filter_html_parity import run as board_filter_run  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("core", "search"))
+    parser.add_argument("suite", choices=("core", "search", "board-filter"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -70,6 +71,11 @@ def main():
                 browser_login(rust)
                 source_result = search_run(source, uuid.uuid4().hex[:8])
                 rust_result = search_run(rust, uuid.uuid4().hex[:8])
+            elif args.suite == "board-filter":
+                browser_login(source)
+                browser_login(rust)
+                source_result = board_filter_run(source, signed_in=True)
+                rust_result = board_filter_run(rust, signed_in=True)
             else:
                 source_result = core_run(source)
                 rust_result = core_run(rust)
@@ -79,6 +85,9 @@ def main():
                 print(f"Disposable MySQL search fixture matched pinned Fizzy: "
                       f"{len(source_result['query_probe'])} query cases, "
                       f"{len(source_result['browser'])} rendered search cases")
+            elif args.suite == "board-filter":
+                print(f"Disposable MySQL board filters matched pinned Fizzy: "
+                      f"{len(source_result)} browser workflow comparisons")
             else:
                 print(f"Disposable MySQL core workflow matched pinned Fizzy: "
                       f"{len(source_result)} comparisons")

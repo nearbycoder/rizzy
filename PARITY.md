@@ -219,6 +219,14 @@ workflow on fresh Fizzy and Rizzy MySQL databases with zero differences. Its
 scope is the workflow described below; it does not prove parity for every route
 or browser page.
 
+`tests/mysql_pair_selfhost.py board-filter` found that MySQL card-preview
+fragments returned 500 when a step aggregate was decoded as a decimal by SQLx.
+Rizzy now casts the aggregate to an integer on MySQL. Fresh paired MySQL and
+SQLite runs passed the board-filter browser fixture, including a two-step card
+with one completed step, filtered pagination, people filters, and empty results.
+The fixture compares seven workflow summaries and additional per-page
+assertions; exact board markup and other browser flows remain open.
+
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process
 redemption race, member access changes, reset, and restart after a deleted join

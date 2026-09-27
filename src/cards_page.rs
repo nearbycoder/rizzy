@@ -44,6 +44,11 @@ async fn preview_metadata(app: &App, cards: &[DbRow]) -> Result<HashMap<String, 
         return Ok(metadata);
     }
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
+    let step_relation = if app.mysql {
+        "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,CAST(COALESCE(SUM(s.completed),0) AS SIGNED) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN ("
+    } else {
+        "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN ("
+    };
     // Each relationship is read in one page-scoped query. The UNION avoids a
     // per-card set of round trips while leaving the JSON card API untouched.
     let relations = [
@@ -51,10 +56,7 @@ async fn preview_metadata(app: &App, cards: &[DbRow]) -> Result<HashMap<String, 
             "SELECT 'tag' AS kind,g.card_id,t.title AS label,NULL AS user_id,0 AS completed,1 AS amount FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",
             "",
         ),
-        (
-            "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN (",
-            " GROUP BY s.card_id",
-        ),
+        (step_relation, " GROUP BY s.card_id"),
         (
             "SELECT 'comment' AS kind,m.card_id,NULL AS label,NULL AS user_id,0 AS completed,COUNT(*) AS amount FROM comments m JOIN users u ON u.id=m.creator_id AND u.role!='system' WHERE m.card_id IN (",
             " GROUP BY m.card_id",

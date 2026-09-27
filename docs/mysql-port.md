@@ -287,6 +287,14 @@ comments, activities, notifications, and webhooks. This checks one workflow
 with one account per app; it does not cover every registered route or browser
 interaction.
 
+`tests/mysql_pair_selfhost.py board-filter` runs the signed-in board-filter
+browser fixture on both MySQL apps. It initially found a 500 from card-preview
+step metadata: MySQL returned `SUM(completed)` as a decimal that SQLx `Any`
+could not map. Rizzy now casts that aggregate to a signed integer. The fresh
+paired MySQL run and a paired SQLite regression passed, including a two-step
+card with one completed step and the filtered second-page preview fragment.
+Other browser routes and full HTML equivalence remain unverified on MySQL.
+
 Remaining database work:
 
 The storage entry and total tables now have a live MySQL 8.4.11 regression in

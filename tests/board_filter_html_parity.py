@@ -14,11 +14,12 @@ from draft_workflow_parity import NoRedirect, login, request
 GRID = '<section class="cards cards--grid"'
 
 
-def run(target):
-    try:
-        login(target)
-    except AssertionError as error:
-        raise AssertionError(f"{target['name']} sign-in failed: {error}") from error
+def run(target, signed_in=False):
+    if not signed_in:
+        try:
+            login(target)
+        except AssertionError as error:
+            raise AssertionError(f"{target['name']} sign-in failed: {error}") from error
     account = target["account"]
     marker = f"boardfilter{time.time_ns()}"
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board": {"name": marker}}, bearer=True)
@@ -32,6 +33,15 @@ def run(target):
             if index == 0:
                 tagged_number = json.loads(raw)["number"]
                 owner_id = json.loads(raw)["creator"]["id"]
+                step_path = f"/{account}/cards/{tagged_number}/steps"
+                status, _, raw = request(target, step_path, "POST", {"step": {"content": "First"}}, bearer=True)
+                assert status == 201, (target["name"], status)
+                first_step_id = json.loads(raw)["id"]
+                status, _, _ = request(target, step_path, "POST", {"step": {"content": "Second"}}, bearer=True)
+                assert status == 201, (target["name"], status)
+                status, _, _ = request(target, step_path + "/" + first_step_id, "PUT",
+                                       {"step": {"completed": True}}, bearer=True)
+                assert status == 200, (target["name"], status)
         tag_title = f"tag{marker}"
         status, _, _ = request(target, f"/{account}/cards/{tagged_number}/taggings", "POST",
                                {"tag_title": tag_title}, bearer=True)
@@ -68,6 +78,7 @@ def run(target):
                 target["extra_headers"].pop("X-Rizzy-Card-Fragment")
             assert status == 200 and fragment.count(b"<article ") == 2, fragment[:200]
             assert b'card__meta' in fragment and f"{marker} card 00".encode() in fragment
+            assert b'Steps completed">1/2' in fragment, fragment[:300]
             status, _, _ = request(target, board_path + "/involvement", "PUT", {"involvement": "access_only"}, bearer=True)
             assert status == 204, status
             assert "No one is watching for new cards" in html()
