@@ -100,3 +100,32 @@ pub(super) fn magic_link(email: &str, code_hint: &str, alert: bool, shake: bool)
         shake,
     )
 }
+
+pub(super) fn account_menu(accounts: &[(i64, String)]) -> Html<String> {
+    let mut content = String::new();
+    if accounts.is_empty() {
+        content.push_str("<p class=\"account-menu-empty\">You don’t have any Rizzy accounts.</p>");
+    } else {
+        content.push_str("<menu class=\"popup__list account-list\">");
+        for (slug, name) in accounts {
+            content.push_str(&format!(
+                r#"<li class="popup__item txt-medium"><svg class="popup__icon" width="24" height="24" viewBox="0 0 19 20" aria-hidden="true"><path d="M10 9.55c-.568 0-1.113-.237-1.515-.659A2.3 2.3 0 0 1 7.857 7.3c0-.597.226-1.169.628-1.591A2.1 2.1 0 0 1 10 5.05c.568 0 1.113.237 1.515.659.402.422.628.994.628 1.591s-.226 1.169-.628 1.591A2.1 2.1 0 0 1 10 9.55ZM10 1C8.409 1 6.883 1.664 5.757 2.845 4.632 4.027 4 5.629 4 7.3 4 12.025 10 19 10 19s6-6.975 6-11.7c0-1.671-.632-3.273-1.757-4.455A5.82 5.82 0 0 0 10 1Z" fill="currentColor"/></svg><a href="/{slug}/landing" class="btn overflow-ellipsis fill-transparent popup__btn"><strong class="overflow-ellipsis">{}</strong></a></li>"#,
+                escape(name)
+            ));
+        }
+        content.push_str("</menu>");
+    }
+    content.push_str("<a href=\"/signup/new\" class=\"btn center txt-small margin-block-start account-menu-signup\">Sign up for a new Rizzy account</a>");
+    page(
+        "Choose an account",
+        if accounts.is_empty() {
+            "Hmm..."
+        } else {
+            "Your Rizzy accounts"
+        },
+        None,
+        &content,
+        None,
+        false,
+    )
+}

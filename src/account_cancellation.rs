@@ -155,27 +155,11 @@ pub(super) async fn menu(State(app): Shared, headers: HeaderMap) -> Result<Respo
         let slug: i64 = accounts[0].get("external_account_id");
         return Ok((StatusCode::FOUND, [(header::LOCATION, format!("/{slug}/"))]).into_response());
     }
-    let mut body = String::from(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Choose an account | Rizzy</title></head><body><main>",
-    );
-    if accounts.is_empty() {
-        body.push_str("<h1>Hmm...</h1><p>You don’t have any Rizzy accounts.</p>");
-    } else {
-        body.push_str("<h1>Your Rizzy accounts</h1><menu>");
-        for account in accounts {
-            let slug: i64 = account.get("external_account_id");
-            let name: String = account.get("name");
-            body.push_str(&format!(
-                "<li><a href=\"/{slug}/landing\">{}</a></li>",
-                escape(&name)
-            ));
-        }
-        body.push_str("</menu>");
-    }
-    body.push_str(
-        "<a href=\"/signup/new\">Sign up for a new Rizzy account</a></main></body></html>",
-    );
-    Ok(Html(body).into_response())
+    let accounts = accounts
+        .iter()
+        .map(|row| (row.get("external_account_id"), row.get("name")))
+        .collect::<Vec<(i64, String)>>();
+    Ok(signup_page::account_menu(&accounts).into_response())
 }
 
 // All database records are removed in one transaction;

@@ -56,6 +56,7 @@ from signup_paired_parity import (check as signup_browser_check,  # noqa: E402
                                   check_rate_limit_cluster as signup_rate_limit_cluster_check)
 from session_browser_parity import (check as session_browser_check,  # noqa: E402
                                     check_rate_limit as session_rate_limit_check)
+from session_menu_parity import check as session_menu_check  # noqa: E402
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
 from account_cancellation_mysql_parity import (age_cancellation,  # noqa: E402
@@ -80,7 +81,7 @@ def main():
                                           "step-read", "public-page", "join-code",
                                           "user-events", "route-get", "route-get-contract",
                                           "route-get-html", "route-get-valid", "route-get-valid-html",
-                                          "filters-browser", "signup-browser", "session-browser", "session-rate-limit", "signup-rate-limit",
+                                          "filters-browser", "signup-browser", "session-browser", "session-rate-limit", "session-menu", "signup-rate-limit",
                                           "signup-rate-limit-invalid", "signup-rate-limit-json",
                                           "signup-rate-limit-cluster",
                                           "signup-completion-cluster",
@@ -113,13 +114,13 @@ def main():
             fizzy_dir.mkdir()
             rizzy_dir.mkdir()
             source_settings = source_env(fizzy_dir, 1, host, port, source_dbs)
-            if args.suite in ("signup-browser", "signup-rate-limit", "signup-rate-limit-invalid", "signup-rate-limit-json", "signup-rate-limit-cluster", "signup-completion-cluster", "account-cancellation", "account-cancellation-retention",
+            if args.suite in ("signup-browser", "signup-rate-limit", "signup-rate-limit-invalid", "signup-rate-limit-json", "signup-rate-limit-cluster", "signup-completion-cluster", "session-menu", "account-cancellation", "account-cancellation-retention",
                               "account-cancellation-concurrent", "account-cancellation-mail",
                               "account-cancellation-mail-concurrent"):
                 source_settings["MULTI_TENANT"] = "true"
             fizzy_env, fizzy_credentials = prepare_source(fizzy_dir, 1, source_settings)
             local_rust_env = rust_env(rizzy_dir, host, port, rust_db)
-            if args.suite in ("signup-browser", "signup-rate-limit", "signup-rate-limit-invalid", "signup-rate-limit-json", "signup-rate-limit-cluster", "signup-completion-cluster", "account-cancellation", "account-cancellation-retention",
+            if args.suite in ("signup-browser", "signup-rate-limit", "signup-rate-limit-invalid", "signup-rate-limit-json", "signup-rate-limit-cluster", "signup-completion-cluster", "session-menu", "account-cancellation", "account-cancellation-retention",
                               "account-cancellation-concurrent", "account-cancellation-mail",
                               "account-cancellation-mail-concurrent"):
                 local_rust_env["RIZZY_MULTI_TENANT"] = "1"
@@ -269,6 +270,9 @@ def main():
             elif args.suite == "session-rate-limit":
                 source_result = session_rate_limit_check(source)
                 rust_result = session_rate_limit_check(rust)
+            elif args.suite == "session-menu":
+                source_result = session_menu_check(source)
+                rust_result = session_menu_check(rust)
             elif args.suite in ("signup-rate-limit", "signup-rate-limit-invalid",
                                 "signup-rate-limit-json"):
                 invalid = args.suite == "signup-rate-limit-invalid"
@@ -484,6 +488,8 @@ def main():
                 print("Disposable MySQL email and code browser sign-in matched pinned Fizzy")
             elif args.suite == "session-rate-limit":
                 print("Disposable MySQL sign-in code rate limit matched pinned Fizzy")
+            elif args.suite == "session-menu":
+                print("Disposable MySQL account chooser states matched pinned Fizzy")
             elif args.suite in ("signup-rate-limit", "signup-rate-limit-invalid",
                                 "signup-rate-limit-json"):
                 print(f"Disposable MySQL {args.suite} matched pinned Fizzy")
