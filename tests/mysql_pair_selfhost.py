@@ -51,6 +51,7 @@ from route_get_status_parity import run as route_get_run  # noqa: E402
 from route_get_valid_parity import run as route_get_valid_run, run_html as route_get_valid_html_run  # noqa: E402
 from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
+from account_cancellation_mysql_parity import run as account_cancellation_run  # noqa: E402
 
 
 def main():
@@ -65,7 +66,7 @@ def main():
                                           "user-events", "route-get", "route-get-contract",
                                           "route-get-html", "route-get-valid", "route-get-valid-html",
                                           "passkeys-html",
-                                          "passkeys-flow", "auth-format"))
+                                          "passkeys-flow", "auth-format", "account-cancellation"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -87,9 +88,13 @@ def main():
             fizzy_dir, rizzy_dir = root / "fizzy", root / "rizzy"
             fizzy_dir.mkdir()
             rizzy_dir.mkdir()
-            fizzy_env, fizzy_credentials = prepare_source(
-                fizzy_dir, 1, source_env(fizzy_dir, 1, host, port, source_dbs))
+            source_settings = source_env(fizzy_dir, 1, host, port, source_dbs)
+            if args.suite == "account-cancellation":
+                source_settings["MULTI_TENANT"] = "true"
+            fizzy_env, fizzy_credentials = prepare_source(fizzy_dir, 1, source_settings)
             local_rust_env = rust_env(rizzy_dir, host, port, rust_db)
+            if args.suite == "account-cancellation":
+                local_rust_env["RIZZY_MULTI_TENANT"] = "1"
             local_rust_env["RIZZY_SEED_EMAIL"] = "mysql-pair-owner@example.test"
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
             rizzy_env, rizzy_credentials = prepare_rust(rizzy_dir, local_rust_env)
@@ -103,14 +108,14 @@ def main():
                       "token": fizzy_credentials["token"], "email": "owner@example.com",
                       "mysql_client": client, "mysql_database": source_dbs[""],
                       "mysql_host": host, "mysql_port": port, "mysql_user": "rizzy",
-                      "mysql_password": "rizzy"}
+                      "mysql_password": "rizzy", "mysql_socket": socket}
             rust = {"name": "rizzy", "url": rizzy_url,
                     "account": str(rizzy_credentials["account"]),
                     "token": rizzy_credentials["token"],
                     "email": local_rust_env["RIZZY_SEED_EMAIL"],
                     "mysql_client": client, "mysql_database": rust_db,
                     "mysql_host": host, "mysql_port": port, "mysql_user": "rizzy",
-                    "mysql_password": "rizzy"}
+                    "mysql_password": "rizzy", "mysql_socket": socket}
             if args.suite == "search":
                 browser_login(source)
                 browser_login(rust)
@@ -215,6 +220,13 @@ def main():
                     login(target)
                 source_result = route_get_valid_html_run(source)
                 rust_result = route_get_valid_html_run(rust)
+            elif args.suite == "account-cancellation":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                    login(target)
+                source_result = account_cancellation_run(source)
+                rust_result = account_cancellation_run(rust)
             elif args.suite == "passkeys-html":
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
@@ -332,6 +344,8 @@ def main():
             elif args.suite == "route-get-valid-html":
                 print(f"Disposable MySQL populated HTML GET contracts matched pinned Fizzy: "
                       f"{len(source_result)} probes")
+            elif args.suite == "account-cancellation":
+                print("Disposable MySQL owner cancellation and retained records matched pinned Fizzy")
             elif args.suite == "passkeys-html":
                 print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
             elif args.suite == "auth-format":

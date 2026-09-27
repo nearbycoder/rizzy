@@ -133,6 +133,11 @@ key dependency and keeps foreign-key checks enabled; the cancellation row is
 locked before deletion. The SQLite cancellation regression also passes. This
 fixture does not establish parity for every account lifecycle workflow or
 concurrent incineration workers.
+The fresh paired MySQL `account-cancellation` suite runs both apps in
+multi-tenant mode and verifies the owner browser action, session-menu
+redirect, initiating owner record, immediate loss of account access, and
+retention of the account, board, and card. It does not compare delayed
+incineration or cancellation mail delivery across the two apps.
 `tests/mysql_session_transfer.py` now checks device transfer link creation,
 revocation, QR rendering, redemption by PUT and PATCH, replay rejection,
 four-hour expiry, and simultaneous redemption with exactly one winner.
