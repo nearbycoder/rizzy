@@ -69,7 +69,7 @@ csrf_token = None
 
 def request(path, method='GET', data=None, accept='application/json'):
     headers = {'Accept': accept}
-    if SOURCE and csrf_token:
+    if csrf_token:
         headers['X-CSRF-Token'] = csrf_token
     if isinstance(data, dict):
         raw = json.dumps(data, separators=(',', ':')).encode()
@@ -154,14 +154,14 @@ def count():
                           (b64(CREDENTIAL_ID),)).fetchone()[0]
 
 
-def logout_source():
+def logout():
     global csrf_token
-    if not SOURCE:
-        return
     status, _, _ = request('/session', 'DELETE')
     assert status in (204, 302), status
     status, _, signin_html = request('/session/new', accept='text/html')
     assert status == 200
+    if not SOURCE:
+        assert b'X-CSRF-Token' in signin_html
     match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', signin_html)
     assert match
     csrf_token = match.group(1).decode()
@@ -175,10 +175,10 @@ def main():
     assert status == 200 and b'Register a passkey' in html, (status, html[:300])
     if not SOURCE:
         assert b'"residentKey":"required"' in html and b'"requireResidentKey":true' in html
-    if SOURCE:
-        match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', html)
-        assert match
-        csrf_token = match.group(1).decode()
+        assert b'X-CSRF-Token' in html
+    match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', html)
+    assert match
+    csrf_token = match.group(1).decode()
     before = count()
     challenge_value = challenge('registration')
     status, headers, body = request(PASSKEYS_PATH, 'POST', registration(challenge_value))
@@ -197,7 +197,7 @@ def main():
     redirects['update'] = (status, headers.get_content_type())
     status, _, html = request(PASSKEYS_PATH, accept='text/html')
     assert status == 200 and b'Test key' in html
-    logout_source()
+    logout()
     with tempfile.TemporaryDirectory() as folder:
         der_path = pathlib.Path(folder) / 'key.der'
         key_path = pathlib.Path(folder) / 'key.pem'
@@ -207,7 +207,7 @@ def main():
         auth_challenge = challenge('authentication')
         status, _, body = request('/session/passkey.json', 'POST', assertion(auth_challenge, key_path))
         assert status == 200 and json.loads(body).get('session_token'), (status, body[:300])
-        logout_source()
+        logout()
         status, _, body = request('/session/passkey.json', 'POST', assertion(auth_challenge, key_path))
         assert status == 401, (status, body[:300])
         wrong_challenge = challenge('authentication')
@@ -225,13 +225,12 @@ def main():
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 statuses = sorted(pool.map(lambda _: compete(), range(2)))
             assert statuses == [200, 401], statuses
-    if SOURCE:
-        login()
-        status, _, html = request(PASSKEYS_PATH, accept='text/html')
-        assert status == 200
-        match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', html)
-        assert match
-        csrf_token = match.group(1).decode()
+    login()
+    status, _, html = request(PASSKEYS_PATH, accept='text/html')
+    assert status == 200
+    match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', html)
+    assert match
+    csrf_token = match.group(1).decode()
     status, headers, _ = request(path.removesuffix('/edit'), 'DELETE')
     assert status == 302 and urllib.parse.urlparse(headers['Location']).path == PASSKEYS_PATH
     redirects['destroy'] = (status, headers.get_content_type())

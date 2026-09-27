@@ -479,8 +479,23 @@ async fn assign_request_id(mut request: Request, next: Next) -> Response {
     response.headers_mut().insert("x-request-id", header_value);
     response
 }
-async fn prevent_request_forgery(request: Request, next: Next) -> Response {
-    let path = request.uri().path();
+fn rejected_forgery(headers: &HeaderMap) -> Response {
+    if headers.contains_key("x-rizzy-json-request") {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            [(header::CONTENT_TYPE, "application/json; charset=UTF-8")],
+            r#"{"status":422,"error":"Unprocessable Content"}"#,
+        )
+            .into_response()
+    } else {
+        static_error_page(
+            include_str!("../static/422.html"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+    }
+}
+async fn prevent_request_forgery(State(app): Shared, mut request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_owned();
     let exempt = path.ends_with("/notifications/unsubscribe")
         || path.contains("/collections/")
         || (path == "/signup" && request.method() == Method::GET)
@@ -492,6 +507,30 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
         || path.starts_with("/app-icon");
     if exempt {
         return next.run(request).await;
+    }
+    if request.method() == Method::POST && path.ends_with("/my/passkey_challenge") {
+        let valid_header = valid_passkey_csrf(&app, request.headers());
+        if !valid_header {
+            let form = request
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+            if !form {
+                return rejected_forgery(request.headers());
+            }
+            let (parts, body) = request.into_parts();
+            let Ok(bytes) = axum::body::to_bytes(body, 1024 * 1024).await else {
+                return rejected_forgery(&parts.headers);
+            };
+            let valid_form = url::form_urlencoded::parse(&bytes)
+                .filter(|(key, _)| key == "authenticity_token")
+                .any(|(_, value)| valid_passkey_csrf_value(&app, &parts.headers, &value));
+            request = Request::from_parts(parts, Body::from(bytes));
+            if !valid_form {
+                return rejected_forgery(request.headers());
+            }
+        }
     }
     let headers = request.headers();
     let safe = matches!(request.method().as_str(), "GET" | "HEAD" | "QUERY");
@@ -517,17 +556,7 @@ async fn prevent_request_forgery(request: Request, next: Next) -> Response {
             _ => false,
         };
         if !origin_matches || !site_allowed {
-            if headers.contains_key("x-rizzy-json-request") {
-                return (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(json!({"status":422,"error":"Unprocessable Content"})),
-                )
-                    .into_response();
-            }
-            return static_error_page(
-                include_str!("../static/422.html"),
-                StatusCode::UNPROCESSABLE_ENTITY,
-            );
+            return rejected_forgery(headers);
         }
     }
     let mut response = next.run(request).await;
@@ -1381,6 +1410,67 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .filter_map(|part| part.trim().split_once('='))
         .find(|(key, _)| *key == name)
         .map(|(_, value)| value.to_string())
+}
+fn passkey_csrf_signature(app: &App, headers: &HeaderMap, token: &str) -> String {
+    let session = cookie_value(headers, "session_token").unwrap_or_default();
+    hmac_sha256(&app.qr_secret, &format!("passkey-csrf:{session}:{token}"))
+}
+fn passkey_csrf_from_cookie(app: &App, headers: &HeaderMap) -> Option<String> {
+    let cookie = cookie_value(headers, "passkey_csrf")?;
+    let (token, signature) = cookie.split_once('.')?;
+    if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let expected = passkey_csrf_signature(app, headers, token);
+    if signature.len() != expected.len()
+        || signature
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            })
+            != 0
+    {
+        return None;
+    }
+    Some(token.to_owned())
+}
+fn passkey_csrf_token(app: &App, headers: &HeaderMap) -> String {
+    passkey_csrf_from_cookie(app, headers).unwrap_or_else(random_token)
+}
+fn set_passkey_csrf_cookie(
+    app: &App,
+    request_headers: &HeaderMap,
+    response_headers: &mut HeaderMap,
+    token: &str,
+) {
+    let signature = passkey_csrf_signature(app, request_headers, token);
+    set_cookie(
+        response_headers,
+        "passkey_csrf",
+        &format!("{token}.{signature}"),
+        12 * 3600,
+        secure_request(request_headers),
+    );
+}
+fn valid_passkey_csrf(app: &App, headers: &HeaderMap) -> bool {
+    headers
+        .get("x-csrf-token")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|provided| valid_passkey_csrf_value(app, headers, provided))
+}
+fn valid_passkey_csrf_value(app: &App, headers: &HeaderMap, provided: &str) -> bool {
+    let Some(token) = passkey_csrf_from_cookie(app, headers) else {
+        return false;
+    };
+    provided.len() == token.len()
+        && provided
+            .bytes()
+            .zip(token.bytes())
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            })
+            == 0
 }
 fn etag_timezone(headers: &HeaderMap) -> Option<String> {
     let cookie = cookie_value(headers, "timezone")?;
@@ -4816,9 +4906,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             app.clone(),
             redirect_tenanted_public_route,
         ))
-        .with_state(app)
+        .with_state(app.clone())
         .layer(middleware::from_fn(block_search_engine_indexing))
-        .layer(middleware::from_fn(prevent_request_forgery))
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            prevent_request_forgery,
+        ))
         .layer(middleware::from_fn(mark_request_format))
         .layer(middleware::from_fn(html_error_contract))
         .layer(middleware::from_fn(content_security_policy))
@@ -5874,8 +5967,16 @@ async fn new_session(State(app): Shared, headers: HeaderMap) -> Result<Response>
     } else {
         None
     };
-    let mut response =
-        signup_page::session_new(signup_open, &passkey_button, message).into_response();
+    let csrf_token = passkey_csrf_token(&app, &headers);
+    let html = signup_page::session_new(signup_open, &passkey_button, message)
+        .0
+        .replacen(
+            "</head>",
+            &format!("<meta name=\"csrf-token\" content=\"{csrf_token}\"></head>"),
+            1,
+        );
+    let mut response = Html(html).into_response();
+    set_passkey_csrf_cookie(&app, &headers, response.headers_mut(), &csrf_token);
     for (present, name) in [
         (missing_email, "session_missing_email_alert"),
         (mismatch, "session_mismatch_alert"),
