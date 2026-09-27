@@ -11,7 +11,7 @@ Path parameters and account mount prefixes are normalized before comparison.
 | Fizzy application controllers | 211 | 0 |
 | Turbo Native navigation | 3 | 0 |
 | Active Storage | 9 | 0 |
-| Action Mailbox | 0 | 14 |
+| Action Mailbox | 14 | 0 |
 
 The three Turbo Native history endpoints now return the pinned source's 200
 HTML responses and exact text, with and without the account prefix. All nine
@@ -28,12 +28,15 @@ variants when an image is embedded in rich text; the paired representation
 test confirms both cache files exist before the first image request.
 
 The 14 Action Mailbox routes are installed by Rails, but Fizzy has no mailbox
-classes or configured ingress. `tests/action_mailbox_source_probe.py` runs a
-disposable production Fizzy server and checks that it returns
-404 for all six ingress methods, 403 for the four conductor GET routes, and
-422 for the four conductor POST routes without CSRF tokens. Development
-conductor behavior and configured ingress behavior are still unimplemented in
-Rizzy; these routes remain outside the production app's normal workflow.
+classes or configured ingress. `tests/action_mailbox_parity.py` runs disposable
+production Fizzy and Rizzy servers and compares all 14 method/path responses,
+three `.json` suffixes, HTML and JSON Accept headers, and anonymous and
+bearer-token requests. Both return empty HTML 404 responses for six inactive
+ingress methods and empty HTML 403 responses for four conductor reads. Four
+conductor writes without CSRF tokens return the same 422 JSON or static HTML
+body according to the requested format. Development conductor behavior and
+configured ingress behavior remain unimplemented in Rizzy; these routes are
+outside the production app's normal workflow.
 
 This check establishes path and HTTP-method registration only. It does not
 verify response shape, permissions, side effects, browser behavior, or whether

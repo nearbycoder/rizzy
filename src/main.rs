@@ -34,6 +34,7 @@ mod access_tokens_page;
 mod account_cancellation;
 mod account_settings;
 mod account_transfer;
+mod action_mailbox;
 mod assignment_page;
 mod board_page;
 mod board_settings;
@@ -593,6 +594,10 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
         request.uri().path(),
         "/400.html" | "/404.html" | "/406-unsupported-browser.html" | "/422.html" | "/500.html"
     );
+    let framework_error_page = request
+        .uri()
+        .path()
+        .starts_with("/rails/conductor/action_mailbox/");
     let session_cookie = cookie_value(request.headers(), "session_token").is_some();
     let agent = platform_user_agent(request.headers());
     let public_layout = public_layout_path(request.uri().path());
@@ -602,7 +607,7 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
         None
     };
     let response = next.run(request).await;
-    if static_error_page {
+    if static_error_page || framework_error_page {
         return response;
     }
     if matches!(
@@ -3934,6 +3939,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     let routes = Router::new()
         .route("/up", get(|| async { "ok" }))
+        .route("/rails/action_mailbox/postmark/inbound_emails", post(action_mailbox::unavailable_ingress))
+        .route("/rails/action_mailbox/relay/inbound_emails", post(action_mailbox::unavailable_ingress))
+        .route("/rails/action_mailbox/sendgrid/inbound_emails", post(action_mailbox::unavailable_ingress))
+        .route("/rails/action_mailbox/mandrill/inbound_emails", get(action_mailbox::unavailable_ingress).post(action_mailbox::unavailable_ingress))
+        .route("/rails/action_mailbox/mailgun/inbound_emails/mime", post(action_mailbox::unavailable_ingress))
+        .route("/rails/conductor/action_mailbox/inbound_emails", get(action_mailbox::gated_conductor).post(action_mailbox::rejected_conductor_write))
+        .route("/rails/conductor/action_mailbox/inbound_emails/new", get(action_mailbox::gated_conductor))
+        .route("/rails/conductor/action_mailbox/inbound_emails/{id}", get(action_mailbox::gated_conductor))
+        .route("/rails/conductor/action_mailbox/inbound_emails/sources/new", get(action_mailbox::gated_conductor))
+        .route("/rails/conductor/action_mailbox/inbound_emails/sources", post(action_mailbox::rejected_conductor_write))
+        .route("/rails/conductor/action_mailbox/{inbound_email_id}/reroute", post(action_mailbox::rejected_conductor_write))
+        .route("/rails/conductor/action_mailbox/{inbound_email_id}/incinerate", post(action_mailbox::rejected_conductor_write))
         .route("/400.html", get(|| async { static_error_page(include_str!("../static/400.html"), StatusCode::OK) }))
         .route("/404.html", get(|| async { static_error_page(include_str!("../static/404.html"), StatusCode::OK) }))
         .route("/406-unsupported-browser.html", get(|| async { static_error_page(include_str!("../static/406-unsupported-browser.html"), StatusCode::OK) }))

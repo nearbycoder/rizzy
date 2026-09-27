@@ -2,6 +2,8 @@
 
 Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is complete only when its route behavior, JSON and HTML response, permissions, side effects, and upstream tests are reproduced. A check means an initial implementation exists; it does not establish one-for-one parity.
 
+`python3 tests/route_coverage.py --strict` now finds all 211 application routes, three Turbo Native routes, nine Active Storage routes, and 14 Action Mailbox routes registered. `tests/action_mailbox_parity.py` compares the pinned production source's default disabled-ingress and gated-conductor responses with Rizzy across all 14 methods, three JSON suffixes, HTML and JSON Accept headers, and anonymous and bearer-token requests. Configured mailbox ingress and development conductor behavior remain open, as does functional parity for the rest of the route inventory.
+
 | Area | Initial implementation | Full parity |
 | --- | --- | --- |
 | Account scoped routing, bearer tokens, identity, user listing and settings | ✓ | No |
