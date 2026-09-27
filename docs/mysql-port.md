@@ -577,6 +577,8 @@ one PATCH with an ActiveSearch shard deadlock, so the two-round comparison is
 not fully clean and its 27.19 workflows/s cannot be used as a paired
 throughput result. The Rust binary hash and source revisions are in the
 artifacts; the source and Rust apps still have incomplete feature parity.
+
+The later 16-client mixed run on `49fbbb5` exposed an intermittent Rizzy `1213` deadlock during JSON card creation; Fizzy's ActiveSearch also deadlocked in both rounds. MySQL deadlock tracing was enabled for a subsequent 32-client, two-round paired repeat and a Rust-only 90-second, 64-client pass. Both completed without errors; the Rust-only pass verified all 16,087 completed workflow units against final card, event, and comment counts. The absence of a repeat does not clear the observed failure. Capture its InnoDB lock graph on recurrence, fix the transaction, and rerun the write workload before claiming sustained write reliability or greater scale.
 A [16-client repeat](../bench/results/mysql-mixed-1000-c16-30s-2026-09-26.json)
 likewise produced one clean pair, 138.86 Rizzy versus 24.37 Fizzy
 workflows/s, and one Fizzy ActiveSearch deadlock phase. Lower concurrency did
