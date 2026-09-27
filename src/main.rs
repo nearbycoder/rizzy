@@ -1986,29 +1986,85 @@ async fn system_user(app: &App, p: &Principal) -> Result<String> {
 async fn system_comment(app: &App, p: &Principal, card_id: &str, body: &str) -> Result<()> {
     let system = system_user(app, p).await?;
     let timestamp = now();
-    let comment_id = id();
     let (plain, _, _) = storage::render_rich_text(app, &p.account_id, p.slug, body).await?;
     let content = search_content(plain);
     let mut tx = begin_write(&app).await.map_err(db_err)?;
+    insert_system_comment_tx(
+        app, &mut tx, p, &system, card_id, body, &content, &timestamp,
+    )
+    .await?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
+async fn insert_system_comment_tx(
+    app: &App,
+    tx: &mut sqlx::Transaction<'_, Db>,
+    p: &Principal,
+    system: &str,
+    card_id: &str,
+    body: &str,
+    content: &str,
+    timestamp: &str,
+) -> Result<()> {
+    let comment_id = id();
     sqlx::query("INSERT INTO comments(id,card_id,creator_id,body,search_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(&comment_id).bind(card_id).bind(system).bind(body).bind(content).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+        .bind(&comment_id).bind(card_id).bind(system).bind(body).bind(content).bind(timestamp).bind(timestamp).execute(&mut **tx).await.map_err(db_err)?;
     rich_text_records::sync(
-        &mut tx,
+        tx,
         &p.account_id,
         "Comment",
         &comment_id,
         "body",
         "",
         body,
-        &timestamp,
+        timestamp,
     )
     .await?;
     if app.mysql {
-        mysql_search::sync_comment(&mut tx, &p.account_id, &comment_id)
+        mysql_search::sync_comment(tx, &p.account_id, &comment_id)
             .await
             .map_err(db_err)?;
     }
-    tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
+async fn insert_event_tx(
+    app: &App,
+    tx: &mut sqlx::Transaction<'_, Db>,
+    p: &Principal,
+    board_id: &str,
+    card_id: &str,
+    eventable_type: &str,
+    eventable_id: &str,
+    action: &str,
+    particulars: &Value,
+    timestamp: &str,
+) -> Result<()> {
+    let event_id = id();
+    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(&event_id).bind(&p.account_id).bind(board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
+        .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(timestamp).bind(timestamp)
+        .execute(&mut **tx).await.map_err(db_err)?;
+    queue_webhooks(tx, &p.account_id, board_id, &event_id, action, timestamp).await?;
+    queue_notifications(
+        app,
+        tx,
+        p,
+        board_id,
+        card_id,
+        &event_id,
+        eventable_type,
+        action,
+        particulars,
+        timestamp,
+    )
+    .await?;
+    sqlx::query("UPDATE cards SET last_active_at=?,updated_at=? WHERE id=?")
+        .bind(timestamp)
+        .bind(timestamp)
+        .bind(card_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
     Ok(())
 }
 async fn record_event(
@@ -2022,41 +2078,20 @@ async fn record_event(
     particulars: Value,
 ) -> Result<()> {
     let timestamp = now();
-    let event_id = id();
     let (mut tx, event_board_id) = begin_card_board_write(app, card_id, board_id).await?;
-    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(&event_id).bind(&p.account_id).bind(&event_board_id).bind(card_id).bind(&p.user_id).bind(eventable_type)
-        .bind(eventable_id).bind(action).bind(particulars.to_string()).bind(&timestamp).bind(&timestamp)
-        .execute(&mut *tx).await.map_err(db_err)?;
-    queue_webhooks(
-        &mut tx,
-        &p.account_id,
-        &event_board_id,
-        &event_id,
-        action,
-        &timestamp,
-    )
-    .await?;
-    queue_notifications(
+    insert_event_tx(
         app,
         &mut tx,
         p,
         &event_board_id,
         card_id,
-        &event_id,
         eventable_type,
+        eventable_id,
         action,
         &particulars,
         &timestamp,
     )
     .await?;
-    sqlx::query("UPDATE cards SET last_active_at=?,updated_at=? WHERE id=?")
-        .bind(&timestamp)
-        .bind(&timestamp)
-        .bind(card_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     Ok(())
 }
@@ -13483,6 +13518,19 @@ async fn update_card(
     let last_active_at = custom_last_active_at
         .clone()
         .unwrap_or_else(|| c.get("last_active_at"));
+    let title_change = if status == "published" && title != old_title && !old_title.is_empty() {
+        let who = escape(&actor_name(&app, &p).await?);
+        let system = system_user(&app, &p).await?;
+        let body = format!(
+            "{who} <strong>changed the title</strong> from “{}” to “{}”.",
+            escape(&old_title),
+            escape(&title)
+        );
+        let (plain, _, _) = storage::render_rich_text(&app, &p.account_id, p.slug, &body).await?;
+        Some((system, body, search_content(plain)))
+    } else {
+        None
+    };
     let timestamp = now();
     let mut deadlock_retries = 0;
     let (replaced_image_keys, removed_embed_keys) = loop {
@@ -13604,6 +13652,34 @@ async fn update_card(
                     .await
                     .map_err(db_err)?;
             }
+            if let Some((system, body, content)) = &title_change {
+                let event_timestamp = now();
+                let particulars = json!({"old_title":&old_title,"new_title":&title});
+                insert_event_tx(
+                    &app,
+                    &mut tx,
+                    &p,
+                    &current_board_id,
+                    &c.get::<String, _>("id"),
+                    "Card",
+                    &c.get::<String, _>("id"),
+                    "card_title_changed",
+                    &particulars,
+                    &event_timestamp,
+                )
+                .await?;
+                insert_system_comment_tx(
+                    &app,
+                    &mut tx,
+                    &p,
+                    system,
+                    &c.get::<String, _>("id"),
+                    body,
+                    content,
+                    &event_timestamp,
+                )
+                .await?;
+            }
             tx.commit().await.map_err(db_err)?;
             Ok((replaced_image_keys, removed_embed_keys))
         }
@@ -13622,31 +13698,6 @@ async fn update_card(
     }
     storage::remove_files(replaced_image_keys).await;
     storage::remove_files(removed_embed_keys).await;
-    if status == "published" && title != old_title && !old_title.is_empty() {
-        record_event(
-            &app,
-            &p,
-            &c.get::<String, _>("board_id"),
-            &c.get::<String, _>("id"),
-            "Card",
-            &c.get::<String, _>("id"),
-            "card_title_changed",
-            json!({"old_title":&old_title,"new_title":&title}),
-        )
-        .await?;
-        let who = escape(&actor_name(&app, &p).await?);
-        system_comment(
-            &app,
-            &p,
-            &c.get::<String, _>("id"),
-            &format!(
-                "{who} <strong>changed the title</strong> from “{}” to “{}”.",
-                escape(&old_title),
-                escape(&title)
-            ),
-        )
-        .await?;
-    }
     if let Some(last_active_at) = custom_last_active_at {
         sqlx::query("UPDATE cards SET last_active_at=? WHERE id=?")
             .bind(last_active_at)
