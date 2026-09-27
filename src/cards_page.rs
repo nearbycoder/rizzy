@@ -101,11 +101,20 @@ async fn preview_metadata(app: &App, cards: &[DbRow]) -> Result<HashMap<String, 
 }
 
 pub(super) async fn previews(app: &App, principal: &Principal, cards: &[DbRow]) -> Result<String> {
+    Ok(preview_fragments(app, principal, cards).await?.concat())
+}
+
+pub(super) async fn preview_fragments(
+    app: &App,
+    principal: &Principal,
+    cards: &[DbRow],
+) -> Result<Vec<String>> {
     let metadata = preview_metadata(app, cards).await?;
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
     let images = storage::image_urls_for_cards(app, principal, &ids).await?;
-    let mut html = String::new();
+    let mut fragments = Vec::with_capacity(cards.len());
     for card in cards {
+        let mut html = String::new();
         let id: String = card.get("id");
         let meta = metadata.get(&id);
         let number: i64 = card.get("number");
@@ -233,8 +242,9 @@ pub(super) async fn previews(app: &App, principal: &Principal, cards: &[DbRow]) 
             escape(last_active_at.get(..10).unwrap_or(&last_active_at)),
             escape(&familiar_name)
         );
+        fragments.push(html);
     }
-    Ok(html)
+    Ok(fragments)
 }
 
 fn page_query(raw: Option<&str>, page: i64, target: Option<&str>) -> String {

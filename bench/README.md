@@ -1,5 +1,17 @@
 # Comparative load runs
 
+The [Home footer repeat](results/home-media-html-footer-98-2026-09-26.json)
+followed the Pins, Search, and Notifications tray implementation. Fresh matched
+samples still showed 100 events, three columns, and matching selected media
+counts. Rizzy's HTML grew to 160,643 bytes versus Fizzy's 216,774 bytes. Two
+reversed-order five-second rounds on four assigned server CPUs had zero HTTP
+errors: Rizzy served 6,928–7,460 requests/s at eight clients and 5,626–6,746
+at 32, versus Fizzy's 319–376 and 380–414. Rizzy p95 was 1.84–1.99 ms and
+8.49–10.83 ms, versus 37.09–49.44 ms and 132.11–133.08 ms. The Rust Home
+cache was warm; these results measure local reads of differently sized pages,
+not tray interactions, whole-app speed, or maximum capacity. Reproduce with
+`python3 bench/home_media_html.py --cards 98 --seconds 5 --concurrency 8,32 --rounds 2`.
+
 The [Home media HTML run](results/home-media-html-98-2026-09-26.json)
 uses fresh 98-card boards plus one image-rich card and one comment containing
 a file and remote video. Before timing, both pages showed 100 events, three

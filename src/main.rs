@@ -55,6 +55,7 @@ mod named_column_page;
 mod notification_mail;
 mod notification_page;
 mod passkeys;
+mod pins_page;
 mod public_pages;
 mod push_delivery;
 mod push_subscriptions;
@@ -14498,16 +14499,76 @@ async fn list_pins(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
-    let rows=sqlx::query("SELECT c.* FROM pins pin JOIN cards c ON c.id=pin.card_id JOIN boards b ON b.id=c.board_id WHERE pin.user_id=? AND pin.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) ORDER BY pin.created_at DESC,pin.id DESC LIMIT 100")
-        .bind(&p.user_id).bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let json_request = headers.contains_key("x-rizzy-json-request");
+    let limit = if json_request { 100 } else { 20 };
+    let rows=sqlx::query("SELECT c.*,pin.id pin_id,pin.created_at pin_created_at,b.name board_name,(SELECT name FROM columns WHERE id=c.column_id) column_name,(SELECT color FROM columns WHERE id=c.column_id) column_color,(SELECT name FROM users WHERE id=c.creator_id) creator_name FROM pins pin JOIN cards c ON c.id=pin.card_id JOIN boards b ON b.id=c.board_id WHERE pin.user_id=? AND pin.account_id=? AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=?) ORDER BY pin.created_at DESC,pin.id DESC LIMIT ?")
+        .bind(&p.user_id).bind(&p.account_id).bind(&p.user_id).bind(limit).fetch_all(&app.db).await.map_err(db_err)?;
+    if !json_request {
+        let version: Vec<(String, String, String)> = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.get("pin_id"),
+                    row.get("pin_created_at"),
+                    row.get("updated_at"),
+                )
+            })
+            .collect();
+        let etag = format!(
+            "W/\"{}\"",
+            hash(&format!(
+                "pins:{}:{}:{version:?}:{}:{}",
+                p.account_id,
+                p.user_id,
+                include_str!("pins_page.rs"),
+                include_str!("../static/pins.css")
+            ))
+        );
+        let unchanged = headers
+            .get(header::IF_NONE_MATCH)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.split(',').any(|candidate| candidate.trim() == etag));
+        if unchanged {
+            let mut response = StatusCode::NOT_MODIFIED.into_response();
+            response.headers_mut().insert(
+                header::ETAG,
+                HeaderValue::from_str(&etag).expect("pin ETag"),
+            );
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("max-age=0, private, must-revalidate"),
+            );
+            return Ok(response);
+        }
+        let previews = cards_page::preview_fragments(&app, &p, &rows).await?;
+        let items: Vec<pins_page::PinPreview> = rows
+            .iter()
+            .zip(previews)
+            .map(|(row, card)| pins_page::PinPreview {
+                id: row.get("pin_id"),
+                number: row.get("number"),
+                card,
+            })
+            .collect();
+        let mut response = Html(pins_page::index(p.slug, &items)).into_response();
+        response.headers_mut().insert(
+            header::ETAG,
+            HeaderValue::from_str(&etag).expect("pin ETag"),
+        );
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("max-age=0, private, must-revalidate"),
+        );
+        return Ok(response);
+    }
     let host = base(&headers);
     let mut out = Vec::new();
     for r in &rows {
         out.push(card_json(&app, &p, r, &host, false).await?);
     }
-    Ok(Json(json!(out)))
+    Ok(Json(json!(out)).into_response())
 }
 
 async fn reaction_json(

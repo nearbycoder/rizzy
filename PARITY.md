@@ -14,13 +14,13 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Sign up, magic links, sessions, passkeys | Magic links, sessions, browser email/code entry, signup/completion forms, device transfer links with QR codes, passkey registration/management/sign-in, and initial Playground data | No |
 | Users, roles, invitations, board involvement | JSON users, browser profile and name edit, roles, join links, email changes, verification, and name entry | No |
 | Mobile client configuration and personal timezone | Parameterized Android/iOS JSON route and timezone updates | No |
-| Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pin/watch JSON mutations, cacheable HTML frames, and Turbo replacement streams | No |
+| Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pin/watch JSON mutations, a source-shaped pinned-card HTML page and Home tray, cacheable HTML frames, and Turbo replacement streams | No |
 | Card filters, tag listing, basic search | Saved IDs, terms, dates, closures, activity spikes, FTS5 index, and selected MySQL FULLTEXT queries on this branch | No |
-| Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, column pages, Home add-card board selection, inline board/person filter controls, action-specific event sentences, and common event media previews | No |
+| Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, column pages, Home add-card board selection, inline board/person filter controls, action-specific event sentences, common event media previews, and footer Search/Pins/Notifications controls | No |
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; 16 MySQL search shards with selected cross-app checks on this branch; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue, and generic, Slack, Campfire, and Basecamp delivery formats | No |
-| Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls, access cleanup, VAPID push queue/delivery, timed multipart text/HTML email bundles, and expiring unsubscribe links | No |
+| Notifications, mail, push, jobs | Event and User attachment mention notifications, read controls and Home notification tray, access cleanup, VAPID push queue/delivery, timed multipart text/HTML email bundles, and expiring unsubscribe links | No |
 | Attachments and Action Text rich text | Card images, avatars, image and file embeds in card/comment text, common formatted text, signed limit/fill image representation routes, and a storage entry/total ledger | No |
 | Imports, exports, account lifecycle | Asynchronous user and account ZIPs; account import upload/status, transactional record restoration, file bytes, and expiry for represented records; owner cancellation and 30-day incineration | No |
 | API response shape and pagination parity | Partial | No |
@@ -75,9 +75,25 @@ hour row and the page had no console errors. The
 [post-grid Home run](bench/results/home-media-html-day-grid-98-2026-09-26.json)
 showed 148,727-byte Rust versus 216,774-byte source HTML and 6,500–7,679
 versus 308–403 requests/s across 8 and 32 clients, with zero HTTP errors.
-Fizzy's footer trays, remaining header/menu behavior, exact event dimensions,
-and many visual details still differ. Browser timezone preference persistence
+Remaining header/menu behavior, exact event dimensions, and many visual
+details still differ. Browser timezone preference persistence
 and changes during a live session remain to be compared end to end.
+
+The Home footer now opens source-shaped Pins and Notifications trays and an
+inline Search bar. The Pins HTML response contains rich card previews and
+preserves the separate JSON limit; `tests/pins_html_parity.py` compares its
+items, ETag revalidation, card-edit invalidation, and unpin result against the
+pinned source. Chromium exercised a pin, unpin, three search hits, and an empty
+notification tray without console errors. Search also follows a numeric card
+query to the card. The
+[footer Home repeat](bench/results/home-media-html-footer-98-2026-09-26.json)
+checked the same 100 events and selected media counts on fresh fixtures, with
+zero HTTP errors in two reversed-order five-second rounds. Rizzy served
+5,626–7,460 requests/s versus Fizzy's 319–414 at 8 and 32 clients, while
+rendering 160,643 versus 216,774 HTML bytes. Live Turbo updates, populated
+notification interactions, complete keyboard behavior, and exact tray/card
+styling still need cross-app verification. This read-only run cannot establish
+whole-app speed or greater maximum scale.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.

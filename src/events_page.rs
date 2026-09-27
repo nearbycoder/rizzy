@@ -161,11 +161,12 @@ fn view_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION.get_or_init(|| {
         hash(&format!(
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             include_str!("events_page.rs"),
             include_str!("../static/events.css"),
             include_str!("../static/events.js"),
-            include_str!("../assets/timezone_cookie.html")
+            include_str!("../assets/timezone_cookie.html"),
+            include_str!("../static/home_footer.html")
         ))
     })
 }
@@ -1063,8 +1064,11 @@ pub(super) async fn index(
         &event_users,
         &media,
     );
+    let footer =
+        include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &p.slug.to_string());
+    let account = p.slug;
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body data-account=\"{account}\"><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main>{footer}<script>{}</script></body></html>",
         include_str!("../static/events.css"),
         p.slug,
         p.slug,

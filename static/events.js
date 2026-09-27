@@ -52,3 +52,118 @@ document.addEventListener('keydown', event => {
     if (link) { event.preventDefault(); link.click(); }
   }
 });
+
+const footer = document.getElementById('footer');
+if (footer) {
+  const account = document.body.dataset.account;
+  const trays = {
+    pins: document.getElementById('pin-tray'),
+    notifications: document.getElementById('notification-tray')
+  };
+  const toggles = Object.fromEntries(Object.keys(trays).map(kind => [kind, footer.querySelector(`[data-open-tray="${kind}"]`)]));
+  const searchButton = footer.querySelector('[data-open-search]');
+  const searchPlaceholder = footer.querySelector('.bar__placeholder');
+  const searchInputBar = footer.querySelector('.bar__input');
+  const searchInput = document.getElementById('bar-search');
+  const searchDialog = document.getElementById('bar-modal');
+  const searchFrame = document.getElementById('bar_content');
+  let searchTimer;
+
+  function closeTray(kind) {
+    trays[kind].close();
+    toggles[kind].setAttribute('aria-expanded', 'false');
+  }
+  function resetSearch() {
+    clearTimeout(searchTimer);
+    if (searchDialog.open) searchDialog.close();
+    searchInputBar.hidden = true;
+    searchPlaceholder.hidden = false;
+    searchFrame.replaceChildren();
+  }
+  async function loadTray(kind) {
+    const frame = trays[kind].querySelector('turbo-frame');
+    frame.textContent = 'Loading…';
+    const path = kind === 'pins' ? `/${account}/my/pins` : `/${account}/notifications/tray`;
+    try {
+      const response = await fetch(path, { headers: { Accept: 'text/html' } });
+      if (!response.ok) throw new Error('Could not load');
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const loaded = page.getElementById(frame.id);
+      if (!loaded) throw new Error('Tray content was unavailable');
+      frame.replaceChildren(...loaded.cloneNode(true).childNodes);
+      if (kind === 'pins' && !frame.querySelector('.tray__item')) frame.textContent = 'No pinned cards yet';
+      if (kind === 'notifications' && !frame.querySelector('.tray__item')) frame.textContent = 'Nothing new for you';
+    } catch { frame.textContent = 'Could not load items.'; }
+  }
+  function toggleTray(kind) {
+    if (trays[kind].open) { closeTray(kind); return; }
+    for (const other of Object.keys(trays)) if (trays[other].open) closeTray(other);
+    resetSearch();
+    trays[kind].show();
+    toggles[kind].setAttribute('aria-expanded', 'true');
+    loadTray(kind);
+  }
+  for (const kind of Object.keys(trays)) {
+    toggles[kind].addEventListener('click', () => toggleTray(kind));
+    trays[kind].addEventListener('close', () => toggles[kind].setAttribute('aria-expanded', 'false'));
+  }
+  document.addEventListener('click', event => {
+    for (const kind of Object.keys(trays)) {
+      if (trays[kind].open && !trays[kind].contains(event.target) && !toggles[kind].contains(event.target)) closeTray(kind);
+    }
+  });
+  trays.pins.addEventListener('submit', async event => {
+    const form = event.target.closest('.tray__item--pin form');
+    if (!form) return;
+    event.preventDefault();
+    const response = await fetch(form.action, { method: 'DELETE', headers: { Accept: 'application/json' } });
+    if (response.ok) form.closest('.tray__item--pin').remove();
+    else loadTray('pins');
+  });
+  trays.notifications.addEventListener('submit', async event => {
+    const form = event.target.closest('form');
+    if (!form) return;
+    event.preventDefault();
+    const read = form.querySelector('input[name="_method"]')?.value !== 'delete';
+    const method = form.hasAttribute('data-notification-toggle') ? (read ? 'POST' : 'DELETE') : 'POST';
+    const response = await fetch(form.action, { method, headers: { Accept: 'application/json' } });
+    if (response.ok) loadTray('notifications');
+  });
+  async function showSearchResults() {
+    const query = searchInput.value.trim();
+    if (!query) { if (searchDialog.open) searchDialog.close(); searchFrame.replaceChildren(); return; }
+    searchFrame.textContent = 'Searching…';
+    if (!searchDialog.open) searchDialog.show();
+    try {
+      const response = await fetch(`/${account}/search?q=${encodeURIComponent(query)}`, { headers: { Accept: 'text/html' } });
+      if (!response.ok) throw new Error('Could not search');
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const loaded = page.getElementById('bar_content');
+      if (!loaded) throw new Error('Search results were unavailable');
+      if (searchInput.value.trim() !== query) return;
+      const cardRedirect = loaded.querySelector('form[data-controller="auto-submit"]');
+      if (cardRedirect) { window.location.assign(new URL(cardRedirect.getAttribute('action'), window.location.origin)); return; }
+      searchFrame.replaceChildren(...loaded.cloneNode(true).childNodes);
+    } catch { if (searchInput.value.trim() === query) searchFrame.textContent = 'Could not search.'; }
+  }
+  searchButton.addEventListener('click', () => {
+    for (const kind of Object.keys(trays)) if (trays[kind].open) closeTray(kind);
+    searchPlaceholder.hidden = true;
+    searchInputBar.hidden = false;
+    searchInput.focus();
+  });
+  footer.querySelector('.search__reset').addEventListener('click', resetSearch);
+  footer.querySelector('.search__form').addEventListener('submit', event => { event.preventDefault(); clearTimeout(searchTimer); showSearchResults(); });
+  searchInput.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(showSearchResults, 300); });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      if (!searchInputBar.hidden) resetSearch();
+      for (const kind of Object.keys(trays)) if (trays[kind].open) closeTray(kind);
+      return;
+    }
+    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const kind = event.key.toLowerCase();
+    if (kind === 'p' || kind === 'n') { event.preventDefault(); toggleTray(kind === 'p' ? 'pins' : 'notifications'); }
+    if (kind === 'k') { event.preventDefault(); searchButton.click(); }
+  });
+}
