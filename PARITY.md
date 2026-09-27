@@ -733,3 +733,15 @@ four-process MySQL cluster run passed 200 flag/move pairs and 200 simultaneous
 double-close or double-gild pairs, checking final flags, record counts, and
 closure event counts. This verifies those workflows on one host; the other
 write paths and a whole-app throughput or scale advantage remain open.
+
+The [post-lock mixed API run](bench/results/mixed-flag-lock-1000-32-30s-2026-09-27.json)
+used fresh 1,000-card SQLite fixtures, 32 clients, eight assigned app CPUs,
+eight Fizzy Puma workers, one release Rizzy process, and two reversed-order
+30-second rounds. Each unit made five JSON reads and four card writes,
+including closure. Sampled response content and shape matched before load;
+each phase had zero HTTP errors and the expected final card, event, and
+comment counts. Rizzy completed 122.99–124.62 units/s versus Fizzy's
+28.05–28.64, about 4.3–4.4 times as many on this workload. Rizzy's p95 unit
+latency was 487–491 ms versus 1,532–1,555 ms. The artifact records both
+revisions, the release binary hash, CPU, and memory samples. This local API
+comparison does not establish full application parity or multi-host capacity.
