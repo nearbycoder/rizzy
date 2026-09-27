@@ -20,6 +20,17 @@ CREATE TABLE IF NOT EXISTS account_cancellations (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_cancellations_due ON account_cancellations(created_at);
+CREATE TABLE IF NOT EXISTS cancellation_mail_jobs (
+  id TEXT PRIMARY KEY,
+  cancellation_id TEXT NOT NULL UNIQUE REFERENCES account_cancellations(id) ON DELETE CASCADE,
+  recipient TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  status INTEGER NOT NULL DEFAULT 0,
+  claimed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cancellation_mail_jobs_pending ON cancellation_mail_jobs(status,claimed_at);
 CREATE TABLE IF NOT EXISTS account_join_codes (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,

@@ -2,6 +2,8 @@
 """Compare owner cancellation and retained records on fresh paired MySQL databases."""
 
 import base64
+import email
+import html
 import hashlib
 import json
 import os
@@ -12,6 +14,8 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from email import policy
+from email.parser import BytesParser
 from pathlib import Path
 
 from card_image_parity import IMAGE, call
@@ -91,6 +95,8 @@ def run(target, *, image=False):
     status, _, raw = request(target, "/my/identity", bearer=True)
     assert status == 200, (target["name"], "identity", status)
     identity_accounts = len(json.loads(raw)["accounts"])
+    scoped_status, scoped_headers, _ = request(target, f"/{account}/my/identity.json", bearer=True)
+    scoped_redirect = urllib.parse.urlparse(scoped_headers.get("Location", "")).path
     menu_status, _, menu = request(target, "/session/menu", accept="text/html")
     assert menu_status == 200, (target["name"], "menu", menu_status)
     menu_has_account = f'/{account}/landing'.encode() in menu
@@ -101,6 +107,7 @@ def run(target, *, image=False):
     return {"redirect": redirect, "cancellation_owner": initiated_by == expected_owner,
             "retained": (account_count, board_count, card_count),
             "identity_accounts": identity_accounts,
+            "scoped_identity": (scoped_status, scoped_redirect),
             "menu": (menu_status, menu_has_account), "settings_after": settings_status}
 
 
@@ -153,6 +160,64 @@ def age_cancellation(target, days):
 def source_incineration(source_env):
     subprocess.run(["bin/rails", "runner", "Account::IncinerateDueJob.perform_now"],
                    cwd=SOURCE, env=source_env, capture_output=True, text=True, check=True)
+
+
+def source_cancellation_mail(source_env):
+    script = '''require "json"
+      message = AccountMailer.cancellation(Account::Cancellation.first).message
+      puts JSON.generate({to: message.to, subject: message.subject,
+                          text: message.text_part.body.decoded,
+                          html: message.html_part.body.decoded})'''
+    completed = subprocess.run(["bin/rails", "runner", script], cwd=SOURCE,
+                               env=source_env, capture_output=True, text=True, check=True)
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def normalized_mail(message, source=False):
+    text = message["text"]
+    markup = message["html"]
+    subject = message["subject"]
+    if source:
+        text = text.replace("Fizzy", "Rizzy").replace("support@fizzy.do", "support@example.test")
+        markup = markup.replace("Fizzy", "Rizzy").replace("support@fizzy.do", "support@example.test")
+        subject = subject.replace("Fizzy", "Rizzy")
+    content = html.unescape(re.sub(r"<[^>]+>", " ", markup))
+    return {"subject": subject,
+            "text": " ".join(text.split()),
+            "html_markers": tuple(phrase in " ".join(content.lower().split()) for phrase in (
+                "your rizzy account", "was cancelled", "what happens now?",
+                "no one can access", "deleted in about 1 month", "changed your mind?",
+                "support@example.test")),
+            "support_link": 'mailto:support@example.test' in markup}
+
+
+def deliver_rust_cancellation_mail(target, rust_env, directory):
+    database = target["mysql_database"]
+    def status():
+        return mysql_query(target["mysql_client"], target["mysql_socket"], database,
+                           "SELECT status FROM cancellation_mail_jobs")
+    assert status() == "0", (target["name"], "queued mail", status())
+    failed = directory / "fail-sendmail.sh"
+    failed.write_text("#!/bin/sh\nexit 1\n")
+    failed.chmod(0o700)
+    capture = directory / "cancellation-mail.eml"
+    success = directory / "capture-sendmail.sh"
+    success.write_text('#!/bin/sh\ncat > "$RIZZY_MAIL_CAPTURE"\n')
+    success.chmod(0o700)
+    mail_env = {**rust_env, "RIZZY_MAIL_FROM": "support@example.test",
+                "RIZZY_SUPPORT_EMAIL": "support@example.test",
+                "RIZZY_MAIL_CAPTURE": str(capture)}
+    for executable, expected in ((failed, "0"), (success, "2")):
+        completed = subprocess.run([RUST, "deliver-cancellation-mail"], cwd=ROOT,
+                                   env={**mail_env, "RIZZY_SENDMAIL": str(executable)},
+                                   capture_output=True, text=True, check=True)
+        assert status() == expected, (target["name"], "mail retry", expected, completed.stdout)
+    parsed = BytesParser(policy=policy.default).parsebytes(capture.read_bytes())
+    assert parsed.is_multipart(), parsed.get_content_type()
+    parts = {part.get_content_type(): part.get_content() for part in parsed.iter_parts()}
+    assert set(parts) == {"text/plain", "text/html"}, parts.keys()
+    return {"to": str(parsed["To"]), "subject": str(parsed["Subject"]),
+            "text": parts["text/plain"], "html": parts["text/html"]}
 
 
 def concurrent_rust_incineration(target, rust_env):

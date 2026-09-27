@@ -13,45 +13,60 @@ pub(super) async fn create(
     // Fizzy allows cancellation only while accepting new account signups.
     if env::var("RIZZY_MULTI_TENANT").as_deref() == Ok("1") {
         let stamp = now();
+        let cancellation_id = id();
+        let mut tx = app.db.begin().await.map_err(db_err)?;
         let statement = if app.mysql {
             "INSERT IGNORE INTO account_cancellations(id,account_id,initiated_by_id,created_at,updated_at) VALUES(?,?,?,?,?)"
         } else {
             "INSERT OR IGNORE INTO account_cancellations(id,account_id,initiated_by_id,created_at,updated_at) VALUES(?,?,?,?,?)"
         };
         let inserted = sqlx::query(statement)
-            .bind(id())
+            .bind(&cancellation_id)
             .bind(&p.account_id)
             .bind(&p.user_id)
             .bind(&stamp)
             .bind(&stamp)
-            .execute(&app.db)
+            .execute(&mut *tx)
             .await
             .map_err(db_err)?;
         if inserted.rows_affected() == 1 {
             let recipient = sqlx::query("SELECT a.name,i.email_address FROM accounts a JOIN users u ON u.account_id=a.id JOIN identities i ON i.id=u.identity_id WHERE u.id=?")
-                .bind(&p.user_id).fetch_one(&app.db).await.map_err(db_err)?;
+                .bind(&p.user_id).fetch_one(&mut *tx).await.map_err(db_err)?;
             let name: String = recipient.get("name");
             let email: String = recipient.get("email_address");
-            tokio::spawn(async move {
-                if let Err(error) = send_notice(&email, &name).await {
-                    eprintln!("account cancellation email failed: {error:?}");
-                }
-            });
+            sqlx::query("INSERT INTO cancellation_mail_jobs(id,cancellation_id,recipient,account_name,status,created_at,updated_at) VALUES(?,?,?,?,0,?,?)")
+                .bind(id()).bind(&cancellation_id).bind(email).bind(name)
+                .bind(&stamp).bind(&stamp).execute(&mut *tx).await.map_err(db_err)?;
         }
+        tx.commit().await.map_err(db_err)?;
     }
     Ok((StatusCode::FOUND, [(header::LOCATION, "/session/menu")]).into_response())
 }
 
 async fn send_notice(email: &str, name: &str) -> Result<()> {
-    let Ok(sendmail) = env::var("RIZZY_SENDMAIL") else {
-        return Ok(());
-    };
+    let sendmail = env::var("RIZZY_SENDMAIL").map_err(|_| {
+        err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Mail delivery is not configured",
+        )
+    })?;
     let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
-    if !valid_email(email) || from.contains(['\r', '\n']) {
+    let support = env::var("RIZZY_SUPPORT_EMAIL").unwrap_or_else(|_| "support@rizzy.local".into());
+    if !valid_email(email) || !valid_email(&support) || from.contains(['\r', '\n']) {
         return Err(bad("Invalid mail address"));
     }
+    let boundary = format!("rizzy-{}", id());
+    let plain = format!(
+        "Your Rizzy account \"{name}\" was cancelled.\n\nWHAT HAPPENS NOW?\n\n- No one can access the account anymore\n- Everything in the account will be deleted in about 1 month\n\nCHANGED YOUR MIND?\n\nIf you want to cancel this deletion and restore your account, send us an email to {support} as soon as possible.\n"
+    );
+    let html = format!(
+        "<p>Your Rizzy account <strong>{}</strong> was cancelled.</p>\n<h2>What happens now?</h2>\n<ul><li>No one can access the account anymore</li><li>Everything in the account will be deleted in about 1 month</li></ul>\n<i>Changed your mind?</i>\n<p>If you want to cancel this deletion and restore your account, send us an email to <a href=\"mailto:{support}\">{support}</a> as soon as possible.</p>",
+        escape(name)
+    );
     let message = format!(
-        "From: {from}\nTo: {email}\nSubject: Your Rizzy account was cancelled\nContent-Type: text/plain; charset=UTF-8\n\nYour Rizzy account \"{name}\" was cancelled.\n\nNo one can access the account anymore. Everything in the account will be deleted in 30 days.\n"
+        "From: {from}\r\nTo: {email}\r\nSubject: Your Rizzy account was cancelled\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n--{boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n--{boundary}--\r\n",
+        plain.replace('\n', "\r\n"),
+        html.replace('\n', "\r\n")
     );
     let mut child = Command::new(sendmail)
         .arg("-t")
@@ -75,6 +90,55 @@ async fn send_notice(email: &str, name: &str) -> Result<()> {
         return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
     }
     Ok(())
+}
+
+pub(super) async fn deliver_due(app: &App) -> Result<usize> {
+    if env::var("RIZZY_SENDMAIL").is_err() {
+        return Ok(0);
+    }
+    let stale = (Utc::now() - chrono::Duration::minutes(15))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let jobs = sqlx::query("SELECT id,recipient,account_name FROM cancellation_mail_jobs WHERE status=0 OR (status=1 AND claimed_at<?) ORDER BY created_at,id LIMIT 50")
+        .bind(&stale).fetch_all(&app.db).await.map_err(db_err)?;
+    let mut delivered = 0;
+    for job in jobs {
+        let job_id: String = job.get("id");
+        let claimed = sqlx::query("UPDATE cancellation_mail_jobs SET status=1,claimed_at=?,updated_at=? WHERE id=? AND (status=0 OR (status=1 AND claimed_at<?))")
+            .bind(now()).bind(now()).bind(&job_id).bind(&stale)
+            .execute(&app.db).await.map_err(db_err)?;
+        if claimed.rows_affected() == 0 {
+            continue;
+        }
+        let email: String = job.get("recipient");
+        let name: String = job.get("account_name");
+        match send_notice(&email, &name).await {
+            Ok(()) => {
+                sqlx::query("UPDATE cancellation_mail_jobs SET status=2,updated_at=? WHERE id=?")
+                    .bind(now())
+                    .bind(&job_id)
+                    .execute(&app.db)
+                    .await
+                    .map_err(db_err)?;
+                delivered += 1;
+            }
+            Err(error) => {
+                sqlx::query("UPDATE cancellation_mail_jobs SET status=0,claimed_at=NULL,updated_at=? WHERE id=?")
+                    .bind(now()).bind(&job_id).execute(&app.db).await.map_err(db_err)?;
+                eprintln!("account cancellation email failed: {}", error.1);
+            }
+        }
+    }
+    Ok(delivered)
+}
+
+pub(super) async fn worker(app: Arc<App>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(10));
+    loop {
+        interval.tick().await;
+        if let Err(error) = deliver_due(&app).await {
+            eprintln!("account cancellation mail worker failed: {}", error.1);
+        }
+    }
 }
 
 pub(super) async fn menu(State(app): Shared, headers: HeaderMap) -> Result<Response> {

@@ -330,7 +330,7 @@ async fn redirect_tenanted_public_route(
         || rest.starts_with("/session/")
         || rest == "/signup"
         || rest.starts_with("/signup/")
-        || rest == "/my/identity"
+        || (rest == "/my/identity" && !request.headers().contains_key("x-rizzy-original-path"))
         || rest == "/my/passkey_challenge"
         || rest == "/account/imports/new"
         || (rest == "/account/imports" && request.method() == Method::POST)
@@ -3811,6 +3811,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         account_cancellation::incinerate_due(&app).await?;
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("deliver-cancellation-mail") {
+        let count = account_cancellation::deliver_due(&app)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Delivered {count} account cancellation emails");
+        return Ok(());
+    }
     if env::args().nth(1).as_deref() == Some("inspect-webhook") {
         let delivery_id = env::args()
             .nth(2)
@@ -3990,6 +3997,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(exports::worker(app.clone()));
     tokio::spawn(imports::worker(app.clone()));
     tokio::spawn(notification_mail::worker(app.clone()));
+    tokio::spawn(account_cancellation::worker(app.clone()));
     if env::var("RIZZY_DISABLE_PUSH_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(push_delivery::worker(app.clone()));
     }

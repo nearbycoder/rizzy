@@ -153,6 +153,13 @@ after release, both exit successfully and the scoped rows and files reach the
 same final state as one Fizzy due-incineration job. This tests an actual
 two-worker Rust overlap, while concurrent Fizzy jobs and multi-host workers
 remain unverified.
+The `account-cancellation-mail` paired suite confirms Fizzy's queued mail job
+and Rizzy's transactional pending job. A failed local send leaves the Rizzy
+job pending; `deliver-cancellation-mail` then sends it through a capture
+executable and records completion. The message has text and HTML parts,
+matching normalized subject and text content, and an owner recipient. Rizzy
+uses `RIZZY_SUPPORT_EMAIL` for its recovery contact. Exact HTML layout,
+external mail transport, and live-worker retry timing remain open.
 `tests/mysql_session_transfer.py` now checks device transfer link creation,
 revocation, QR rendering, redemption by PUT and PATCH, replay rejection,
 four-hour expiry, and simultaneous redemption with exactly one winner.

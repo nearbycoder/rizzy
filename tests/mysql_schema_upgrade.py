@@ -31,7 +31,8 @@ def main():
         account_id = mysql("SELECT id FROM accounts WHERE external_account_id=" + slug,
                            database)
         mysql("ALTER TABLE storage_entries MODIFY COLUMN request_id VARCHAR(64) NULL; "
-              "ALTER TABLE card_bulk_touches DROP FOREIGN KEY fk_card_bulk_touches_0;",
+              "ALTER TABLE card_bulk_touches DROP FOREIGN KEY fk_card_bulk_touches_0; "
+              "DROP TABLE cancellation_mail_jobs;",
               database)
         for _ in range(2):
             subprocess.run([BINARY, "init-db"], cwd=ROOT, env=env,
@@ -44,7 +45,12 @@ def main():
                 "SELECT COUNT(*) FROM information_schema.referential_constraints "
                 "WHERE constraint_schema=DATABASE() "
                 "AND constraint_name='fk_card_bulk_touches_0'", database)
-            assert capacity == "255" and foreign_key == "1", (capacity, foreign_key)
+            mail_fk = mysql(
+                "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                "WHERE constraint_schema=DATABASE() "
+                "AND constraint_name='fk_cancellation_mail_jobs_0'", database)
+            assert capacity == "255" and foreign_key == "1" and mail_fk == "1", (
+                capacity, foreign_key, mail_fk)
             assert mysql("SELECT id FROM accounts WHERE external_account_id=" + slug,
                          database) == account_id
         long_id = "X" * 255
@@ -53,7 +59,7 @@ def main():
               database)
         assert mysql("SELECT CHAR_LENGTH(request_id) FROM storage_entries "
                      "WHERE id='trace-probe'", database) == "255"
-        print("PASS MySQL request ID width and board guard FK upgrade")
+        print("PASS MySQL request ID, board guard FK, and cancellation mail table upgrade")
     finally:
         mysql(f"DROP DATABASE `{database}`")
 

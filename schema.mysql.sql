@@ -24,6 +24,17 @@ CREATE TABLE `account_cancellations` (
   `updated_at` LONGTEXT NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `cancellation_mail_jobs` (
+  `id` VARCHAR(64),
+  `cancellation_id` VARCHAR(64) NOT NULL,
+  `recipient` LONGTEXT NOT NULL,
+  `account_name` LONGTEXT NOT NULL,
+  `status` BIGINT NOT NULL DEFAULT 0,
+  `claimed_at` VARCHAR(40),
+  `created_at` LONGTEXT NOT NULL,
+  `updated_at` LONGTEXT NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `account_join_codes` (
   `id` VARCHAR(64),
   `account_id` VARCHAR(64) NOT NULL,
@@ -617,6 +628,8 @@ CREATE TABLE `search_migrations` (
 CREATE UNIQUE INDEX `uniq_accounts_0` ON `accounts` (`external_account_id`);
 CREATE INDEX `account_cancellations_due` ON `account_cancellations` (`created_at`);
 CREATE UNIQUE INDEX `uniq_account_cancellations_1` ON `account_cancellations` (`account_id`);
+CREATE INDEX `cancellation_mail_jobs_pending` ON `cancellation_mail_jobs` (`status`, `claimed_at`);
+CREATE UNIQUE INDEX `uniq_cancellation_mail_jobs_1` ON `cancellation_mail_jobs` (`cancellation_id`);
 CREATE UNIQUE INDEX `uniq_account_join_codes_0` ON `account_join_codes` (`code`);
 CREATE UNIQUE INDEX `uniq_account_join_codes_1` ON `account_join_codes` (`account_id`);
 CREATE UNIQUE INDEX `uniq_identities_0` ON `identities` (`email_address`);
@@ -727,6 +740,7 @@ CREATE UNIQUE INDEX `storage_user_avatar_blob_unique` ON `storage_attachments` (
 CREATE UNIQUE INDEX `storage_embed_unique` ON `storage_attachments` (`record_type`, `record_id`, `embed_name_key`, `blob_id`);
 ALTER TABLE `account_cancellations` ADD CONSTRAINT `fk_account_cancellations_0` FOREIGN KEY (`initiated_by_id`) REFERENCES `users` (`id`);
 ALTER TABLE `account_cancellations` ADD CONSTRAINT `fk_account_cancellations_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
+ALTER TABLE `cancellation_mail_jobs` ADD CONSTRAINT `fk_cancellation_mail_jobs_0` FOREIGN KEY (`cancellation_id`) REFERENCES `account_cancellations` (`id`) ON DELETE CASCADE;
 ALTER TABLE `account_join_codes` ADD CONSTRAINT `fk_account_join_codes_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `identity_transfers` ADD CONSTRAINT `fk_identity_transfers_0` FOREIGN KEY (`identity_id`) REFERENCES `identities` (`id`) ON DELETE CASCADE;
 ALTER TABLE `users` ADD CONSTRAINT `fk_users_0` FOREIGN KEY (`identity_id`) REFERENCES `identities` (`id`);
