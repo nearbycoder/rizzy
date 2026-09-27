@@ -1,5 +1,14 @@
 # Comparative load runs
 
+The [shared-shell named-column read](results/named-column-html-100-shared-shell-2026-09-27.json)
+uses fresh 100-card fixtures, 15 visible previews, eight shared CPUs, eight
+Fizzy workers, and one release Rizzy process. Two reversed-order rounds at
+eight and 32 clients had zero errors. Rizzy served 4,143–4,263 and
+4,916–5,031 requests/s at those levels; Fizzy served 291–408 and 379–439.
+The Rust response was 59,804 bytes versus 121,093. This measures one local
+read path with different markup, not whole-app speed or maximum scale.
+Reproduce with `python3 bench/named_column_html_fresh.py --cards 100 --seconds 2 --concurrency 8,32 --rounds 2`.
+
 The [shared-shell signed-in board run](results/board-html-1000-shared-shell-2026-09-27.json)
 used fresh 1,000-card fixtures, 15 visible previews on each page, eight shared
 CPUs, eight Fizzy workers, and one release Rizzy process. Two-second runs at

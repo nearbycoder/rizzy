@@ -45,6 +45,21 @@ pub(super) fn render(
         ("BOARD_NAME", escape(board_name)),
         ("FRAME", escape(&frame)),
         ("CONTENT", content),
+        (
+            "SHELL_STYLES",
+            [
+                ":root{--color-canvas:#101b20;--color-ink:#f4f5f6}",
+                include_str!("../static/shell_footer.css"),
+                include_str!("../static/notification_cards.css"),
+                include_str!("../static/menu_overlay.css"),
+            ]
+            .concat(),
+        ),
+        (
+            "SHELL_FOOTER",
+            include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &escape(account)),
+        ),
+        ("SHELL_SCRIPT", include_str!("../static/events.js").into()),
     ]);
     Html(render_template(TEMPLATE, &values))
 }

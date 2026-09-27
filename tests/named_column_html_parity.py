@@ -43,6 +43,11 @@ def check(name, directory):
         assert status == 200 and b"No cards here" in empty, (name, status)
         assert f'<turbo-frame id="{frame}">'.encode() in empty, name
         assert b'data-drag-drop-item-container' in empty, name
+        if name == "rizzy":
+            assert all(marker in empty for marker in (
+                b'data-open-menu', b'id="menu-dialog"', b'id="footer"',
+                b'id="pin-tray"', b'id="notification-tray"'))
+            assert b'id="utility-panel"' not in empty
         for index in range(16):
             card, _ = expect(target, f"/boards/{board['id']}/cards", "POST",
                              {"card": {"title": f"Browser column card {index:02d}"}}, 201)
