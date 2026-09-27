@@ -817,7 +817,8 @@ eight Fizzy Puma workers, one release Rizzy process, and two reversed-order
 30-second rounds. Each unit made four JSON reads plus create, edit, comment,
 close, and read writes. Sampled response shape and content matched before load;
 all four phases had zero HTTP errors and verified final card, event, and comment
-counts. Rizzy completed 108.48–123.69 units/s versus Fizzy's 27.00–28.99,
-about 4.0–4.3 times as many on this workload. Both apps were slower in the
-second round; this run does not isolate the access-check cost or establish
-whole-app performance or multi-host scale.
+counts. Rizzy completed 107.16–123.48 units/s versus Fizzy's 17.07–28.22;
+the paired ratios were about 6.3 and 4.4. Fizzy's first phase was much slower
+than its second, so this local result is variable. The artifact records the
+committed Rizzy revision and exact release-binary hash. It does not isolate
+the access-check cost or establish whole-app performance or multi-host scale.
