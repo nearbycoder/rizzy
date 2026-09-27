@@ -54,7 +54,10 @@ including a 404, and matches request IDs on attachment, transfer, and deletion
 ledger entries. Background-job request context and untested request paths
 remain open. The MySQL schema now permits the source's 255-character request
 IDs and startup widens older columns; that migration has not yet been run
-against a live MySQL server.
+against a live MySQL server. The paired check also covers a stored 255-character
+ID, replacement entries, and board deletion. A fresh schema regeneration now
+matches `schema.mysql.sql` exactly; the new `card_bulk_touches` foreign key
+still needs a live MySQL install and upgrade check.
 
 The [post-storage-ledger scoped read run](bench/results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
 measured the new attachment lookup on four JSON read routes using fresh

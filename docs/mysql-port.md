@@ -151,6 +151,10 @@ regenerate it after a SQLite schema change, seed a new SQLite database and run
 Storage entry request IDs use `VARCHAR(255)` to match the source's request ID
 limit. Startup widens that column on databases created from the older 64-character
 snapshot. This migration still needs a live MySQL verification run.
+`tests/mysql_schema_snapshot.py` now regenerates the DDL from a fresh SQLite
+database and compares it byte for byte. The snapshot includes the board
+foreign key on `card_bulk_touches`; installing that constraint on an older
+MySQL database still needs a live check.
 The generator preserves the current 64 application tables, ordinary indexes, foreign
 keys, 15 checks, and the partial uniqueness rules through generated columns.
 It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16

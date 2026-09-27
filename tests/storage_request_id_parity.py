@@ -50,6 +50,7 @@ def check(target):
                        {"board": {"name": f"Trace first {stamp}"}}, expected=201)
     second, _ = request(target, prefix + "/boards", "POST",
                         {"board": {"name": f"Trace second {stamp}"}}, expected=201)
+    deleted_boards = set()
     try:
         card, _ = request(target, prefix + f"/boards/{first['id']}/cards", "POST",
                           {"card": {"title": "Trace storage"}}, expected=201)
@@ -79,10 +80,29 @@ def check(target):
                                       {"board": {"public_description": board_markup}})
         assert UUID.fullmatch(generated_attach), (target["name"], generated_attach)
         assert entries(target)[-1] == ("attach", len(board_file), generated_attach)
+        replacement_file = FILE + b"replacement"
+        replacement = upload(target, replacement_file, "replacement.txt", "text/plain")
+        replacement_markup = (
+            f'<p><action-text-attachment sgid="{replacement["attachable_sgid"]}">'
+            '</action-text-attachment></p>')
+        _, long_id = request(target, prefix + f"/boards/{first['id']}", "PATCH",
+                             {"board": {"public_description": replacement_markup}},
+                             raw_id="X" * 300)
+        assert long_id == "X" * 255, (target["name"], long_id)
+        assert entries(target)[-2:] == [
+            ("detach", -len(board_file), long_id),
+            ("attach", len(replacement_file), long_id),
+        ], (target["name"], entries(target)[-2:])
+        _, board_deleted = request(target, prefix + f"/boards/{first['id']}", "DELETE",
+                                   raw_id="board-delete-42", expected=204)
+        deleted_boards.add(first["id"])
+        assert board_deleted == "board-delete-42", (target["name"], board_deleted)
+        assert entries(target)[-1] == ("detach", -len(replacement_file), board_deleted)
         return trace
     finally:
         for board in (first, second):
-            request(target, prefix + f"/boards/{board['id']}", "DELETE", expected=204)
+            if board["id"] not in deleted_boards:
+                request(target, prefix + f"/boards/{board['id']}", "DELETE", expected=204)
 
 
 def main():
@@ -93,7 +113,7 @@ def main():
                for name in ("FIZZY", "RIZZY")]
     source, rust = (check(target) for target in targets)
     assert source == rust, (source, rust)
-    print("Request ID parity passed: sanitization, generation, and storage entries")
+    print("Request ID parity passed: sanitization, generation, long IDs, and storage entries")
 
 
 if __name__ == "__main__":

@@ -81,7 +81,10 @@ def generate(db: sqlite3.Connection) -> str:
             if sql_type is None:
                 if kind.upper() != "TEXT":
                     raise ValueError(f"unsupported SQLite type {table}.{name}: {kind}")
-                sql_type = string_type(name, name in indexed)
+                # Existing MySQL installations use a bounded timestamp for
+                # this column; preserve the type when regenerating the snapshot.
+                sql_type = ("VARCHAR(40)" if (table, name) == ("assignments", "updated_at")
+                            else string_type(name, name in indexed))
             definition = f"  {quoted(name)} {sql_type}"
             if required:
                 definition += " NOT NULL"

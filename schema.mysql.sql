@@ -749,6 +749,7 @@ ALTER TABLE `cards` ADD CONSTRAINT `fk_cards_0` FOREIGN KEY (`creator_id`) REFER
 ALTER TABLE `cards` ADD CONSTRAINT `fk_cards_1` FOREIGN KEY (`column_id`) REFERENCES `columns` (`id`) ON DELETE SET NULL;
 ALTER TABLE `cards` ADD CONSTRAINT `fk_cards_2` FOREIGN KEY (`board_id`) REFERENCES `boards` (`id`) ON DELETE CASCADE;
 ALTER TABLE `cards` ADD CONSTRAINT `fk_cards_3` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`);
+ALTER TABLE `card_bulk_touches` ADD CONSTRAINT `fk_card_bulk_touches_0` FOREIGN KEY (`board_id`) REFERENCES `boards` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_blobs` ADD CONSTRAINT `fk_storage_blobs_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_variant_records` ADD CONSTRAINT `fk_storage_variant_records_0` FOREIGN KEY (`blob_id`) REFERENCES `storage_blobs` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_variant_records` ADD CONSTRAINT `fk_storage_variant_records_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
