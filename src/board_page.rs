@@ -82,11 +82,20 @@ fn column_color_picker(selected: &str) -> String {
     html
 }
 
+fn quick_filter(label: &str, selected: bool, choices: &str) -> String {
+    format!(
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{choices}</div></div>",
+        if selected { " is-selected" } else { "" },
+        escape(label)
+    )
+}
+
 async fn filter_form(
     app: &App,
     principal: &Principal,
     board_id: &str,
     query: &CardQuery,
+    expanded: bool,
 ) -> Result<String> {
     let account = principal.slug;
     let term = query.terms.first().map(String::as_str).unwrap_or("");
@@ -114,14 +123,10 @@ async fn filter_form(
             ));
         }
     }
-    let option = |value: &str, label: &str, current: Option<&str>| {
+    let radio_option = |name: &str, value: &str, label: &str, current: &str| {
         format!(
-            "<option value=\"{value}\"{}>{label}</option>",
-            if current == Some(value) {
-                " selected"
-            } else {
-                ""
-            }
+            "<label class=\"filter-choice\"><input type=\"radio\" name=\"{name}\" value=\"{value}\"{}><span>{label}</span></label>",
+            if current == value { " checked" } else { "" }
         )
     };
     let index = query.indexed_by.as_deref().unwrap_or("all");
@@ -178,6 +183,76 @@ async fn filter_form(
     );
     let creator_choices = user_choices("creator_ids[]", &query.creator_ids);
     let closer_choices = user_choices("closer_ids[]", &query.closer_ids);
+    let board_choices = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=? ORDER BY x.accessed_at DESC,b.id")
+        .bind(&principal.account_id)
+        .bind(&principal.user_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let board_options = board_choices
+        .iter()
+        .map(|board| {
+            let id: String = board.get("id");
+            let name: String = board.get("name");
+            format!(
+                "<button class=\"filter-choice filter-choice--board\" type=\"button\" data-board-filter-id=\"{}\" role=\"checkbox\" aria-checked=\"{}\">{}</button>",
+                escape(&id),
+                false,
+                escape(&name)
+            )
+        })
+        .collect::<String>();
+    let status_label = match index {
+        "all" => "Status…",
+        "closed" => "Done",
+        "not_now" => "Not now",
+        "stalled" => "Stalled",
+        "postponing_soon" => "Closing soon",
+        "golden" => "Golden",
+        _ => "Status…",
+    };
+    let sort_label = match sort {
+        "newest" => "Newest to oldest",
+        "oldest" => "Oldest to newest",
+        _ => "Recently updated",
+    };
+    let status_options = [
+        ("all", "Open"),
+        ("closed", "Done"),
+        ("not_now", "Not now"),
+        ("stalled", "Stalled"),
+        ("postponing_soon", "Closing soon"),
+        ("golden", "Golden"),
+    ]
+    .iter()
+    .map(|(value, label)| radio_option("indexed_by", value, label, index))
+    .collect::<String>();
+    let sort_options = [
+        ("newest", "Newest to oldest"),
+        ("oldest", "Oldest to newest"),
+        ("latest", "Recently updated"),
+    ]
+    .iter()
+    .map(|(value, label)| radio_option("sorted_by", value, label, sort))
+    .collect::<String>();
+    let filter_controls = [
+        quick_filter("Board…", false, &board_options),
+        quick_filter(sort_label, sort != "latest", &sort_options),
+        quick_filter(status_label, index != "all", &status_options),
+        if tags.is_empty() {
+            String::new()
+        } else {
+            quick_filter("Tagged…", !query.tag_ids.is_empty(), &tag_choices)
+        },
+        quick_filter(
+            "Assigned to…",
+            !query.assignee_ids.is_empty() || query.assignment_status.is_some(),
+            &assignee_choices,
+        ),
+        quick_filter("Added by…", !query.creator_ids.is_empty(), &creator_choices),
+        quick_filter("Closed by…", !query.closer_ids.is_empty(), &closer_choices),
+    ]
+    .concat();
     let clear = if !query.terms.is_empty()
         || !matches!(index, "all")
         || !matches!(sort, "latest")
@@ -190,17 +265,30 @@ async fn filter_form(
         || query.closure.is_some()
     {
         format!(
-            "<a class=\"filter-clear\" href=\"/{account}/boards/{}\" aria-label=\"Clear filters\" title=\"Clear filters\">×</a>",
+            "<a class=\"filter-clear\" href=\"/{account}/boards/{}\" aria-label=\"Clear all\" title=\"Clear all\">×</a>",
             escape(board_id)
         )
     } else {
         String::new()
     };
     Ok(format!(
-        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><input type=\"hidden\" name=\"board_ids[]\" value=\"{}\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<div class=\"filter-more\"><button class=\"filter-more__toggle\" type=\"button\" aria-label=\"Expand filter options\" title=\"Expand filter options\" aria-expanded=\"false\" aria-controls=\"board-filter-options\">☷{}</button><div class=\"filter-more__fields\" id=\"board-filter-options\" hidden><label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><fieldset class=\"filter-choices\"><legend>Tagged</legend>{tag_choices}</fieldset><fieldset class=\"filter-choices\"><legend>Assigned to</legend>{assignee_choices}</fieldset><fieldset class=\"filter-choices\"><legend>Added by</legend>{creator_choices}</fieldset><fieldset class=\"filter-choices\"><legend>Closed by</legend>{closer_choices}</fieldset><button class=\"button\" type=\"submit\">Filter</button></div></div>{clear}</form>",
+        "<form class=\"board-filter{}\" method=\"get\" action=\"/{account}/boards/{}\"><input type=\"hidden\" name=\"expand_all\" value=\"true\"{}><input type=\"hidden\" name=\"board_ids[]\" value=\"{}\" data-board-scope><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<div class=\"quick-filters\" id=\"board-filter-options\">{filter_controls}</div><button class=\"filter-more__toggle\" type=\"button\" aria-label=\"{}\" title=\"{}\" aria-expanded=\"{}\" aria-controls=\"board-filter-options\">☷{}</button>{clear}</form>",
+        if expanded { " is-expanded" } else { "" },
         escape(board_id),
+        if expanded { "" } else { " disabled" },
         escape(board_id),
         escape(term),
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        expanded,
         if query.tag_ids.is_empty()
             && query.assignee_ids.is_empty()
             && query.creator_ids.is_empty()
@@ -218,25 +306,6 @@ async fn filter_form(
                     + usize::from(query.assignment_status.is_some())
             )
         },
-        [
-            ("all", "Open"),
-            ("closed", "Done"),
-            ("not_now", "Not now"),
-            ("stalled", "Stalled"),
-            ("postponing_soon", "Closing soon"),
-            ("golden", "Golden")
-        ]
-        .iter()
-        .map(|(value, label)| option(value, label, Some(index)))
-        .collect::<String>(),
-        [
-            ("newest", "Newest"),
-            ("oldest", "Oldest"),
-            ("latest", "Latest activity")
-        ]
-        .iter()
-        .map(|(value, label)| option(value, label, Some(sort)))
-        .collect::<String>(),
     ))
 }
 
@@ -325,7 +394,17 @@ pub(super) async fn show_filtered(
         ("ADD_COLUMN", String::new()),
         (
             "FILTER_FORM",
-            filter_form(app, principal, &board_id, query).await?,
+            filter_form(
+                app,
+                principal,
+                &board_id,
+                query,
+                raw_query.is_some_and(|raw| {
+                    url::form_urlencoded::parse(raw.as_bytes())
+                        .any(|(key, value)| key == "expand_all" && value == "true")
+                }),
+            )
+            .await?,
         ),
         ("COLUMNS", list),
     ]);
@@ -623,6 +702,7 @@ pub(super) async fn show(
     principal: &Principal,
     board: &DbRow,
     page: i64,
+    expanded: bool,
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
@@ -736,7 +816,7 @@ pub(super) async fn show(
         ),
         (
             "FILTER_FORM",
-            filter_form(app, principal, &board_id, &CardQuery::default()).await?,
+            filter_form(app, principal, &board_id, &CardQuery::default(), expanded).await?,
         ),
         ("COLUMNS", column_markup),
     ]);

@@ -7063,13 +7063,20 @@ async fn board_data_version(app: &App) -> Option<i64> {
         .ok()
 }
 
-fn board_etag_key(p: &Principal, board_id: &str, page: i64, headers: &HeaderMap) -> String {
+fn board_etag_key(
+    p: &Principal,
+    board_id: &str,
+    page: i64,
+    expanded: bool,
+    headers: &HeaderMap,
+) -> String {
     format!(
-        "{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}",
         p.account_id,
         p.user_id,
         board_id,
         page,
+        expanded,
         etag_timezone(headers).unwrap_or_default()
     )
 }
@@ -8750,6 +8757,10 @@ async fn show_board(
     let r = board(&app, &p, &id).await?;
     let mut query = parse_card_query(raw.clone());
     let page = query.page;
+    let expanded = raw.as_deref().is_some_and(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .any(|(key, value)| key == "expand_all" && value == "true")
+    });
     if let Some(filter_id) = query.filter_id.as_deref() {
         let fields: String = sqlx::query_scalar(
             "SELECT fields FROM filters WHERE id=? AND account_id=? AND creator_id=?",
@@ -8781,12 +8792,12 @@ async fn show_board(
             .await?
             .into_response()
         } else {
-            let key = board_etag_key(&p, &id, page, &headers);
+            let key = board_etag_key(&p, &id, page, expanded, &headers);
             if let Some(response) = cached_board_not_modified(&app, &key, &headers).await {
                 return Ok(response);
             }
             let before = board_data_version(&app).await;
-            let html = board_page::show(&app, &p, &r, page).await?;
+            let html = board_page::show(&app, &p, &r, page, expanded).await?;
             let response = conditional_html_response(html.0, &headers);
             if let Some(etag) = response
                 .headers()

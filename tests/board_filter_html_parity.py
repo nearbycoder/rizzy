@@ -67,11 +67,18 @@ def run(target, signed_in=False):
         plain = html()
         assert "card-columns" in plain and "cards--maybe" in plain and GRID not in plain
         assert 'id="filter-settings-save-toggle"' not in plain, target["name"]
+        unfiltered_expanded = html("?expand_all=true")
+        assert "card-columns" in unfiltered_expanded and GRID not in unfiltered_expanded
+        assert ('filters--expanded' if target["name"] == "fizzy" else
+                'class="board-filter is-expanded"') in unfiltered_expanded
         if target["name"] == "rizzy":
             assert 'cards--maybe is-expanded' in plain and 'board-tools__watch-toggle' in plain
             assert 'data-card-number=' in plain and 'id="footer"' in plain
             assert 'data-open-menu' in plain and 'id="pin-tray"' in plain
             assert '<span>System</span></label>' not in plain
+            assert 'class="board-filter is-expanded"' not in plain
+            assert all(f'>{label}</button>' in plain for label in
+                       ('Board…', 'Recently updated', 'Status…', 'Assigned to…', 'Added by…', 'Closed by…'))
             target["extra_headers"] = {"X-Rizzy-Card-Fragment": "1"}
             try:
                 status, _, fragment = request(target, board_path + "/columns/stream?page=2", accept="text/html")
@@ -94,6 +101,13 @@ def run(target, signed_in=False):
             assert re.search(rf'name="tag_ids\[\]" value="{re.escape(tag_id)}" checked', tagged)
         closed = html("?indexed_by=closed")
         assert GRID in closed and special["closed"] in closed and special["not_now"] not in closed
+        expanded_closed = html("?expand_all=true&indexed_by=closed")
+        if target["name"] == "rizzy":
+            assert 'class="board-filter is-expanded"' in expanded_closed
+            assert 'name="expand_all" value="true"' in expanded_closed
+            assert '>Done</button>' in expanded_closed
+        else:
+            assert 'filters--expanded' in expanded_closed
         postponed = html("?indexed_by=not_now")
         assert GRID in postponed and special["not_now"] in postponed and special["closed"] not in postponed
         term = urllib.parse.quote(marker)
