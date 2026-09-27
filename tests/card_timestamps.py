@@ -38,7 +38,8 @@ def main():
             cards, _ = call(port, f"/{account}/cards?board_ids%5B%5D={board['id']}&creation=thisweek", bearer=token)
             assert [card["id"] for card in cards] == [fresh["id"]]
             with sqlite3.connect(database) as db:
-                assert db.execute("SELECT created_at,last_active_at FROM cards WHERE id=?", (restored["id"],)).fetchone() == (date, active)
+                assert db.execute("SELECT created_at,last_active_at FROM cards WHERE id=?", (restored["id"],)).fetchone() == (
+                    date.replace("Z", "000Z"), active.replace("Z", "000Z"))
             call(port, path, "POST", {"card": {"title": "Invalid", "created_at": "not-a-time"}}, bearer=token, status=422)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM cards WHERE board_id=?", (board["id"],)).fetchone()[0] == 3
