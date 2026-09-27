@@ -299,6 +299,8 @@ def run(archive_path):
                     assert actual == expected, (group, actual, expected)
                 assert db.execute("SELECT COUNT(*) FROM users WHERE account_id=? AND role='owner' AND id=?",
                                   (imported_id, owner["id"])).fetchone()[0] == 1
+                assert db.execute("SELECT identity_id FROM users WHERE account_id=? AND role='system'",
+                                  (imported_id,)).fetchone() == (None,)
                 assert db.execute("SELECT COUNT(*) FROM cards WHERE account_id=? AND description!=''",
                                   (imported_id,)).fetchone()[0] == described_cards
                 assert db.execute("SELECT COUNT(*) FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND m.body!=''",

@@ -151,6 +151,20 @@ def check(name, directory):
                     due_labels}
     assert set(comment_text.values()) == {"Moved to “Not Now” due to inactivity"}, (
         name, comment_text)
+    with sqlite3.connect(database) as db:
+        due_numbers = {label: db.execute("SELECT number FROM cards WHERE id=?", (ids[label],))
+                       .fetchone()[0] for label in due_labels}
+    process, url = start_server(name, directory, env, sorted(os.sched_getaffinity(0))[:2])
+    try:
+        target["url"] = url
+        for label, number in due_numbers.items():
+            comments, _ = expect(target, f"/cards/{number}/comments")
+            assert sum(comment["creator"]["role"] == "system" for comment in comments) == comments_after[label], (
+                name, label, comments)
+            assert any("Moved to “Not Now” due to inactivity" in comment["body"]["plain_text"]
+                       for comment in comments), (name, label, comments)
+    finally:
+        stop_server(process)
     return before, after, comment_delta, comment_text
 
 

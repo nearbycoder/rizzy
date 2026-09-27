@@ -89,7 +89,6 @@ pub(super) async fn create(
         .unwrap_or_else(|| email.split('@').next().unwrap_or("Importer").to_owned());
     let account_id = id();
     let user_id = id();
-    let system_identity = id();
     let system_id = id();
     let timestamp = now();
     let slug = account_sequence::next(&app.db, app.mysql)
@@ -111,16 +110,15 @@ pub(super) async fn create(
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")
         .bind(&user_id).bind(&account_id).bind(&identity_id).bind(owner_name).bind(&timestamp).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
-    sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
-        .bind(&system_identity)
-        .bind(format!("system+{account_id}@rizzy.invalid"))
-        .bind(&timestamp)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-        .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
-        .execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query(
+        "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+    )
+    .bind(&system_id)
+    .bind(&account_id)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
     sqlx::query(
         "INSERT INTO imports(id,account_id,identity_id,created_at,updated_at) VALUES(?,?,?,?,?)",
     )
@@ -532,12 +530,6 @@ async fn apply_archive(
     let join_code = field(join, "code")?;
     let imported_at = now();
     let mut tx = app.db.begin().await.map_err(|e| e.to_string())?;
-    let system_identity: String =
-        sqlx::query_scalar("SELECT identity_id FROM users WHERE account_id=? AND role='system'")
-            .bind(account_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
     let importer_identity: String =
         sqlx::query_scalar("SELECT identity_id FROM imports WHERE account_id=?")
             .bind(account_id)
@@ -579,34 +571,30 @@ async fn apply_archive(
     for user in records(&archive, "users") {
         let user_id = field(user, "id")?;
         let role = field(user, "role")?;
-        let identity_id = if role == "system" {
-            Some(system_identity.clone())
-        } else {
-            if let Some(email) =
-                maybe_field(user, "email_address").filter(|email| !email.trim().is_empty())
-            {
-                let insert_identity = if app.mysql {
-                    "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
-                } else {
-                    "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
-                };
-                sqlx::query(insert_identity)
-                    .bind(id())
-                    .bind(email)
-                    .bind(field(user, "created_at")?)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                Some(
-                    sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
-                        .bind(email)
-                        .fetch_one(&mut *tx)
-                        .await
-                        .map_err(|e| e.to_string())?,
-                )
+        let identity_id: Option<String> = if let Some(email) =
+            maybe_field(user, "email_address").filter(|email| !email.trim().is_empty())
+        {
+            let insert_identity = if app.mysql {
+                "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
             } else {
-                None
-            }
+                "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+            };
+            sqlx::query(insert_identity)
+                .bind(id())
+                .bind(email)
+                .bind(field(user, "created_at")?)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            Some(
+                sqlx::query_scalar::<_, String>("SELECT id FROM identities WHERE email_address=?")
+                    .bind(email)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
         };
         sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,active,verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
             .bind(user_id).bind(account_id).bind(identity_id).bind(field(user,"name")?).bind(role)
@@ -707,9 +695,15 @@ async fn apply_archive(
         .iter()
         .any(|user| maybe_field(user, "role") == Some("system"))
     {
-        sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-            .bind(id()).bind(account_id).bind(system_identity).bind(now())
-            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+        )
+        .bind(id())
+        .bind(account_id)
+        .bind(now())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     for tag in records(&archive, "tags") {
         sqlx::query("INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)")

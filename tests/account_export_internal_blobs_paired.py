@@ -106,6 +106,11 @@ def archive(target):
 
 
 def check(target):
+    with sqlite3.connect(target["db"]) as db:
+        system_identity = db.execute(
+            "SELECT identity_id FROM users WHERE role='system' LIMIT 1"
+        ).fetchone()
+    assert system_identity == (None,), (target["name"], system_identity)
     blobs = [upload(target) for _ in range(3)]
     ordinary, exported, imported = blobs
     pending = pending_direct_upload(target)
@@ -124,6 +129,12 @@ def check(target):
         assert inactive_path in names, target["name"]
         inactive = json.loads(zipped.read(inactive_path))
         assert inactive["active"] is False and inactive["email_address"] is None, inactive
+        users = [json.loads(zipped.read(name)) for name in names
+                 if name.startswith("data/users/") and name.endswith(".json")]
+        system_users = [user for user in users if user["role"] == "system"]
+        assert len(system_users) == 1, (target["name"], system_users)
+        assert system_users[0]["identity_id"] is None
+        assert system_users[0]["email_address"] is None
         for blob, attachment in ((exported, exported_attachment), (imported, imported_attachment)):
             assert f"data/active_storage_blobs/{blob['id']}.json" not in names, target["name"]
             assert f"data/active_storage_attachments/{attachment}.json" not in names, target["name"]
@@ -131,6 +142,7 @@ def check(target):
     return {"ordinary_blob": True, "ordinary_file": True,
             "pending_blob": True, "pending_file": False,
             "inactive_member_without_identity": True,
+            "system_user_without_identity": True,
             "excluded_internal_blobs": 2, "excluded_internal_attachments": 2,
             "excluded_internal_files": 2}
 

@@ -1800,7 +1800,7 @@ async fn card(app: &App, p: &Principal, number: &str) -> Result<DbRow> {
         .bind(&p.account_id).bind(n).bind(&p.user_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)
 }
 async fn user_json(app: &App, p: &Principal, id: &str, host: &str) -> Result<Value> {
-    let r = sqlx::query("SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=? AND u.account_id=?")
+    let r = sqlx::query("SELECT u.*,i.email_address FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.id=? AND u.account_id=?")
         .bind(id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     Ok(user_json_row(p, &r, host))
 }
@@ -1810,7 +1810,7 @@ fn user_json_row(p: &Principal, r: &DbRow, host: &str) -> Value {
     let email: Option<String> = if role == "system" {
         None
     } else {
-        Some(r.get("email_address"))
+        r.get::<Option<String>, _>("email_address")
     };
     json!({"id":id,"name":r.get::<String,_>("name"),"role":role,"active":r.get::<i64,_>("active")!=0,"email_address":email,"created_at":r.get::<String,_>("created_at"),"url":format!("{host}/{}/users/{id}",p.slug),"avatar_url":format!("{host}/{}/users/{id}/avatar",p.slug)})
 }
@@ -1832,36 +1832,42 @@ async fn system_user(app: &App, p: &Principal) -> Result<String> {
     {
         return Ok(id);
     }
-    let identity_id = id();
-    let user_id = id();
-    let timestamp = now();
-    let email = format!("system+{}@rizzy.invalid", p.account_id);
-    let insert_identity = if app.mysql {
-        "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
-    } else {
-        "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
-    };
-    sqlx::query(insert_identity)
-        .bind(&identity_id)
-        .bind(&email)
-        .bind(&timestamp)
-        .execute(&app.db)
+    if app.mysql {
+        let mut tx = app.db.begin().await.map_err(db_err)?;
+        sqlx::query("SELECT id FROM accounts WHERE id=? FOR UPDATE")
+            .bind(&p.account_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        if let Some(existing) = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM users WHERE account_id=? AND role='system'",
+        )
+        .bind(&p.account_id)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(db_err)?;
-    let identity_id: String = sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
-        .bind(&email)
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
-    let insert_user = if app.mysql {
-        "INSERT IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)"
-    } else {
-        "INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)"
-    };
-    sqlx::query(insert_user)
+        .map_err(db_err)?
+        {
+            tx.commit().await.map_err(db_err)?;
+            return Ok(existing);
+        }
+        let user_id = id();
+        sqlx::query(
+            "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+        )
         .bind(&user_id)
         .bind(&p.account_id)
-        .bind(&identity_id)
+        .bind(now())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        return Ok(user_id);
+    }
+    let user_id = id();
+    let timestamp = now();
+    sqlx::query("INSERT OR IGNORE INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)")
+        .bind(&user_id)
+        .bind(&p.account_id)
         .bind(&timestamp)
         .execute(&app.db)
         .await
@@ -2973,7 +2979,7 @@ async fn boards_json_batch(
     );
     let creators = rows_for_ids(
         app,
-        "SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",
+        "SELECT u.*,i.email_address FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",
         &creator_ids,
     )
     .await?;
@@ -3175,7 +3181,7 @@ async fn cards_json_batch(
                     .map(|a| a.get::<String, _>("assignee_id")),
             ),
     );
-    let users=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
+    let users=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
     let users: HashMap<String, Value> = users
         .iter()
         .map(|u| (u.get::<String, _>("id"), user_json_row(p, u, host)))
@@ -3502,7 +3508,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sqlx::query("INSERT OR IGNORE INTO user_attachables(user_id,account_id,sgid) SELECT id,account_id,lower(hex(randomblob(32))) FROM users")
         .execute(&db).await?;
         migrate_notification_sources(&db).await?;
-        backfill_system_users(&db).await?;
         let blob_columns = sqlx::query("PRAGMA table_info(storage_blobs)")
             .fetch_all(&db)
             .await?;
@@ -3624,6 +3629,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db)
             .await?;
         migrate_deactivated_users(&db).await?;
+        backfill_system_users(&db).await?;
         sqlx::query("CREATE TRIGGER IF NOT EXISTS users_updated_at_insert AFTER INSERT ON users WHEN NEW.updated_at='' BEGIN UPDATE users SET updated_at=NEW.created_at WHERE id=NEW.id; END")
         .execute(&db)
         .await?;
@@ -3996,6 +4002,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         };
         (db, qr_secret, board_etag_connection)
     };
+    detach_legacy_system_identities(&db, mysql).await?;
     if env::args().nth(1).as_deref() == Some("init-db") {
         return Ok(());
     }
@@ -4960,7 +4967,6 @@ async fn seed(db: &DbPool, mysql: bool) -> std::result::Result<(), Box<dyn std::
     let account_id = id();
     let identity_id = id();
     let user_id = id();
-    let system_identity = id();
     let system_id = id();
     let token_id = id();
     let timestamp = now();
@@ -4985,15 +4991,14 @@ async fn seed(db: &DbPool, mysql: bool) -> std::result::Result<(), Box<dyn std::
         .execute(&mut *tx)
         .await?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)").bind(&user_id).bind(&account_id).bind(&identity_id).bind(name).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
-        .bind(&system_identity)
-        .bind(format!("system+{account_id}@rizzy.invalid"))
-        .bind(&timestamp)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-        .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
-        .execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+    )
+    .bind(&system_id)
+    .bind(&account_id)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("INSERT INTO access_tokens(id,identity_id,token_hash,description,permission,created_at) VALUES(?,?,?,?,?,?)").bind(&token_id).bind(&identity_id).bind(hash(&token)).bind("Bootstrap token").bind("write").bind(&timestamp).execute(&mut *tx).await?;
     tx.commit().await?;
     println!("Account: {slug}\nBearer token: {token}");
@@ -5006,24 +5011,82 @@ async fn backfill_system_users(db: &DbPool) -> std::result::Result<(), sqlx::Err
     for account in accounts {
         let account_id: String = account.get("id");
         let timestamp = now();
-        let email = format!("system+{account_id}@rizzy.invalid");
+        sqlx::query("INSERT OR IGNORE INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)")
+            .bind(id()).bind(&account_id).bind(&timestamp)
+            .execute(db).await?;
+    }
+    Ok(())
+}
+
+async fn detach_legacy_system_identities(
+    db: &DbPool,
+    mysql: bool,
+) -> std::result::Result<(), sqlx::Error> {
+    let already_done: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='system_identity_detached_v1')",
+    )
+    .fetch_one(db)
+    .await?;
+    if already_done != 0 {
+        return Ok(());
+    }
+    let rows = sqlx::query("SELECT u.id,u.account_id,u.identity_id,u.updated_at,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.role='system'")
+        .fetch_all(db).await?;
+    for row in rows {
+        let account_id: String = row.get("account_id");
+        let email: String = row.get("email_address");
+        if email != format!("system+{account_id}@rizzy.invalid") {
+            continue;
+        }
+        let user_id: String = row.get("id");
+        let identity_id: String = row.get("identity_id");
+        let updated_at: String = row.get("updated_at");
         let mut tx = db.begin().await?;
-        sqlx::query("INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)")
-            .bind(id())
-            .bind(&email)
-            .bind(&timestamp)
+        sqlx::query("UPDATE users SET identity_id=NULL WHERE id=?")
+            .bind(&user_id)
             .execute(&mut *tx)
             .await?;
-        let identity_id: String =
-            sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
-                .bind(&email)
-                .fetch_one(&mut *tx)
+        sqlx::query("UPDATE users SET updated_at=? WHERE id=?")
+            .bind(updated_at)
+            .bind(&user_id)
+            .execute(&mut *tx)
+            .await?;
+        let references = [
+            ("users", "identity_id"),
+            ("identity_transfers", "identity_id"),
+            ("access_tokens", "identity_id"),
+            ("access_token_reveals", "identity_id"),
+            ("magic_links", "identity_id"),
+            ("email_change_requests", "old_identity_id"),
+            ("sessions", "identity_id"),
+            ("passkeys", "identity_id"),
+            ("passkey_challenges", "identity_id"),
+            ("imports", "identity_id"),
+        ];
+        let predicates = references
+            .iter()
+            .map(|(table, column)| format!("EXISTS(SELECT 1 FROM {table} WHERE {column}=?)"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let reference_query = format!("SELECT {predicates}");
+        let mut check = sqlx::query_scalar::<_, i64>(&reference_query);
+        for _ in references {
+            check = check.bind(&identity_id);
+        }
+        if check.fetch_one(&mut *tx).await? == 0 {
+            sqlx::query("DELETE FROM identities WHERE id=?")
+                .bind(&identity_id)
+                .execute(&mut *tx)
                 .await?;
-        sqlx::query("INSERT OR IGNORE INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-            .bind(id()).bind(&account_id).bind(identity_id).bind(&timestamp)
-            .execute(&mut *tx).await?;
+        }
         tx.commit().await?;
     }
+    let insert = if mysql {
+        "INSERT IGNORE INTO app_secrets(name,value) VALUES('system_identity_detached_v1','done')"
+    } else {
+        "INSERT OR IGNORE INTO app_secrets(name,value) VALUES('system_identity_detached_v1','done')"
+    };
+    sqlx::query(insert).execute(db).await?;
     Ok(())
 }
 
@@ -5860,7 +5923,6 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
     }
     let account_id = id();
     let user_id = id();
-    let system_identity = id();
     let system_id = id();
     let timestamp = now();
     let first = name.split_whitespace().next().unwrap_or("New");
@@ -5879,16 +5941,15 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")
         .bind(&user_id).bind(&account_id).bind(&identity_id)
         .bind(&name).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-    sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
-        .bind(&system_identity)
-        .bind(format!("system+{account_id}@rizzy.invalid"))
-        .bind(&timestamp)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-        .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
-        .execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query(
+        "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+    )
+    .bind(&system_id)
+    .bind(&account_id)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
     signup_seed::playground(&mut tx, &account_id, &user_id, &timestamp)
         .await
         .map_err(db_err)?;
@@ -11072,7 +11133,7 @@ async fn activity_items(
                     .filter_map(|id| id.as_str().map(str::to_owned))
             })),
     );
-    let user_rows=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
+    let user_rows=rows_for_ids(app,"SELECT u.*,i.email_address FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",&user_ids).await?;
     let users: HashMap<String, Value> = user_rows
         .iter()
         .map(|u| (u.get::<String, _>("id"), user_json_row(p, u, host)))
@@ -11531,7 +11592,7 @@ async fn notification_items(
     .collect();
     let users: HashMap<String, Value> = rows_for_ids(
         app,
-        "SELECT u.*,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",
+        "SELECT u.*,i.email_address FROM users u LEFT JOIN identities i ON i.id=u.identity_id WHERE u.id IN (",
         &creator_ids,
     )
     .await?
