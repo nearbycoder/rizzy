@@ -13454,124 +13454,139 @@ async fn update_card(
         .clone()
         .unwrap_or_else(|| c.get("last_active_at"));
     let timestamp = now();
-    let _writer = app.write_lock.lock().await;
-    // Reserve the SQLite writer before reading attachment state in this transaction.
-    // A deferred WAL read cannot be promoted after another process commits a write.
-    let (mut tx, current_board_id) = if status == "published" {
-        // A move can invalidate the snapshot above. Lock the current board and
-        // card together so the UPDATE triggers never reach a different board
-        // while this transaction holds the card row.
-        begin_accessible_card_board_write(
-            &app,
-            &p,
-            &c.get::<String, _>("id"),
-            &c.get::<String, _>("board_id"),
-        )
-        .await?
-    } else {
-        (
-            begin_write(&app).await.map_err(db_err)?,
-            c.get::<String, _>("board_id"),
-        )
-    };
-    if let Some(upload) = &input.image {
-        storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
-    }
-    let uploaded_image = input.image.as_ref().map(|upload| json!(upload.signed_id));
-    let image_value = uploaded_image.as_ref().or(v.get("image"));
-    let image_changed = if let Some(value) = image_value {
-        let current: Option<String> = sqlx::query_scalar("SELECT b.signed_id FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='Card' AND a.name='image' AND a.record_id=?")
-            .bind(c.get::<String, _>("id"))
-            .fetch_optional(&mut *tx).await.map_err(db_err)?;
-        match value {
-            Value::Null => current.is_some(),
-            Value::String(signed_id) => current.as_deref() != Some(signed_id),
-            _ => true,
-        }
-    } else {
-        false
-    };
-    let changed = title != old_title
-        || description != c.get::<String, _>("description")
-        || search_text != c.get::<String, _>("search_text")
-        || created_at != c.get::<String, _>("created_at")
-        || last_active_at != c.get::<String, _>("last_active_at")
-        || image_changed;
-    if changed {
-        sqlx::query(
-            "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
-        )
-        .bind(&title)
-        .bind(&description)
-        .bind(&search_text)
-        .bind(&status)
-        .bind(&created_at)
-        .bind(&timestamp)
-        .bind(&last_active_at)
-        .bind(c.get::<String, _>("id"))
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    }
-    if v.get("description") == Some(&Value::Null) {
-        sqlx::query("DELETE FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'")
-            .bind(c.get::<String, _>("id")).execute(&mut *tx).await.map_err(db_err)?;
-    } else {
-        rich_text_records::sync(
-            &mut tx,
-            &p.account_id,
-            "Card",
-            &c.get::<String, _>("id"),
-            "description",
-            &c.get::<String, _>("description"),
-            &description,
-            &timestamp,
-        )
-        .await?;
-    }
-    if v.get("description").and_then(Value::as_str) == Some("") {
-        rich_text_records::ensure(
-            &mut tx,
-            &p.account_id,
-            "Card",
-            &c.get::<String, _>("id"),
-            "description",
-            &timestamp,
-        )
-        .await?;
-    }
-    let replaced_image_keys =
-        storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), image_value).await?;
-    let removed_embed_keys =
-        storage::sync_embeds_tx(&mut tx, &p, "Card", &c.get::<String, _>("id"), &description)
-            .await?;
-    if status == "published" {
-        create_new_mentions(
-            &app,
-            &mut tx,
-            &p,
-            &current_board_id,
-            &c.get::<String, _>("id"),
-            "Card",
-            &c.get::<String, _>("id"),
-            &description,
-        )
-        .await?;
-        if !changed {
-            sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+    let mut deadlock_retries = 0;
+    let (replaced_image_keys, removed_embed_keys) = loop {
+        let write: Result<(Vec<String>, Vec<String>)> = async {
+            let _writer = app.write_lock.lock().await;
+            // Reserve the SQLite writer before reading attachment state in this transaction.
+            // A deferred WAL read cannot be promoted after another process commits a write.
+            let (mut tx, current_board_id) = if status == "published" {
+                // A move can invalidate the snapshot above. Lock the current board and
+                // card together so the UPDATE triggers never reach a different board
+                // while this transaction holds the card row.
+                begin_accessible_card_board_write(
+                    &app,
+                    &p,
+                    &c.get::<String, _>("id"),
+                    &c.get::<String, _>("board_id"),
+                )
+                .await?
+            } else {
+                (
+                    begin_write(&app).await.map_err(db_err)?,
+                    c.get::<String, _>("board_id"),
+                )
+            };
+            if let Some(upload) = &input.image {
+                storage::store_multipart_image_tx(&mut tx, &p, upload).await?;
+            }
+            let uploaded_image = input.image.as_ref().map(|upload| json!(upload.signed_id));
+            let image_value = uploaded_image.as_ref().or(v.get("image"));
+            let image_changed = if let Some(value) = image_value {
+                let current: Option<String> = sqlx::query_scalar("SELECT b.signed_id FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='Card' AND a.name='image' AND a.record_id=?")
+                    .bind(c.get::<String, _>("id"))
+                    .fetch_optional(&mut *tx).await.map_err(db_err)?;
+                match value {
+                    Value::Null => current.is_some(),
+                    Value::String(signed_id) => current.as_deref() != Some(signed_id),
+                    _ => true,
+                }
+            } else {
+                false
+            };
+            let changed = title != old_title
+                || description != c.get::<String, _>("description")
+                || search_text != c.get::<String, _>("search_text")
+                || created_at != c.get::<String, _>("created_at")
+                || last_active_at != c.get::<String, _>("last_active_at")
+                || image_changed;
+            if changed {
+                sqlx::query(
+                    "UPDATE cards SET title=?,description=?,search_text=?,status=?,created_at=?,updated_at=?,last_active_at=? WHERE id=?",
+                )
+                .bind(&title)
+                .bind(&description)
+                .bind(&search_text)
+                .bind(&status)
+                .bind(&created_at)
                 .bind(&timestamp)
-                .bind(&current_board_id)
+                .bind(&last_active_at)
+                .bind(c.get::<String, _>("id"))
                 .execute(&mut *tx)
                 .await
                 .map_err(db_err)?;
+            }
+            if v.get("description") == Some(&Value::Null) {
+                sqlx::query("DELETE FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'")
+                    .bind(c.get::<String, _>("id")).execute(&mut *tx).await.map_err(db_err)?;
+            } else {
+                rich_text_records::sync(
+                    &mut tx,
+                    &p.account_id,
+                    "Card",
+                    &c.get::<String, _>("id"),
+                    "description",
+                    &c.get::<String, _>("description"),
+                    &description,
+                    &timestamp,
+                )
+                .await?;
+            }
+            if v.get("description").and_then(Value::as_str) == Some("") {
+                rich_text_records::ensure(
+                    &mut tx,
+                    &p.account_id,
+                    "Card",
+                    &c.get::<String, _>("id"),
+                    "description",
+                    &timestamp,
+                )
+                .await?;
+            }
+            let replaced_image_keys =
+                storage::attach_card_image_tx(&mut tx, &p, &c.get::<String, _>("id"), image_value).await?;
+            let removed_embed_keys =
+                storage::sync_embeds_tx(&mut tx, &p, "Card", &c.get::<String, _>("id"), &description)
+                    .await?;
+            if status == "published" {
+                create_new_mentions(
+                    &app,
+                    &mut tx,
+                    &p,
+                    &current_board_id,
+                    &c.get::<String, _>("id"),
+                    "Card",
+                    &c.get::<String, _>("id"),
+                    &description,
+                )
+                .await?;
+                if !changed {
+                    sqlx::query("UPDATE boards SET updated_at=? WHERE id=?")
+                        .bind(&timestamp)
+                        .bind(&current_board_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db_err)?;
+                }
+            }
+            if app.mysql && changed {
+                mysql_search::sync_card(&mut tx, &p.account_id, &c.get::<String, _>("id"))
+                    .await
+                    .map_err(db_err)?;
+            }
+            tx.commit().await.map_err(db_err)?;
+            Ok((replaced_image_keys, removed_embed_keys))
         }
-    }
-    if app.mysql && changed {
-        mysql_search::sync_card(&mut tx, &p.account_id, &c.get::<String, _>("id"))
-            .await
-            .map_err(db_err)?;
-    }
-    tx.commit().await.map_err(db_err)?;
+        .await;
+        match write {
+            Ok(result) => break result,
+            Err(error) if app.mysql && error.is_retryable_deadlock() && deadlock_retries < 3 => {
+                deadlock_retries += 1;
+                tokio::time::sleep(Duration::from_millis(10 * deadlock_retries)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
     if let Some(upload) = input.image {
         upload.keep();
     }
