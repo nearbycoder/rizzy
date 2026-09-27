@@ -148,7 +148,7 @@ async fn filter_form(
             .collect::<String>()
     };
     let users =
-        sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 ORDER BY name,id")
+        sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role IN ('owner','admin','member') ORDER BY name,id")
             .bind(&principal.account_id)
             .fetch_all(&app.db)
             .await

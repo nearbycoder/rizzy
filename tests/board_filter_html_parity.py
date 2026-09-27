@@ -71,6 +71,7 @@ def run(target, signed_in=False):
             assert 'cards--maybe is-expanded' in plain and 'board-tools__watch-toggle' in plain
             assert 'data-card-number=' in plain and 'id="footer"' in plain
             assert 'data-open-menu' in plain and 'id="pin-tray"' in plain
+            assert '<span>System</span></label>' not in plain
             target["extra_headers"] = {"X-Rizzy-Card-Fragment": "1"}
             try:
                 status, _, fragment = request(target, board_path + "/columns/stream?page=2", accept="text/html")
