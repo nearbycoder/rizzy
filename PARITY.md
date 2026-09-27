@@ -39,6 +39,14 @@ The paired request-forgery regression now again matches the source's exact stati
 | SQLite and MySQL deployment parity | SQLite runtime; MySQL 8.4.11 core, search, notification, webhook, account import/cancellation, device transfer, deletion cleanup, partial schema recovery, and two-process write and worker checks on this branch | No |
 | Comparative performance and scale proof | Scoped reads plus 30- and 60-second mixed API runs through 256 clients | No |
 
+`tests/account_export_field_inventory.py` builds a fresh board/card fixture on
+both SQLite apps and compares every exported record group's field names and
+counts. The represented groups and counts matched; Fizzy's user JSON alone had
+one additional field, `attachable_sgid`. It is a Rails signed GlobalID used by
+Action Text, whereas Rizzy currently stores an opaque user attachment token.
+The diagnostic's `--strict` mode fails on this difference. Export field shape,
+signed ID compatibility, and archive round trips with user mentions remain open.
+
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed
 before deployment parity or a greater-scale claim can be made.
