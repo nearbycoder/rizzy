@@ -271,7 +271,7 @@ The pinned Fizzy MySQL search controller and sharded adapter suites passed
 `tests/mysql_search_parity.py` compares the two live apps on title,
 description, and comment hits; English stemming; card text filters; browser
 result titles, highlighted words, and 20-word excerpts; edits; and deletions.
-Its selected JSON and browser results matched. `tests/mysql_search_selfhost.py`
+Its selected JSON and browser results matched. `tests/mysql_pair_selfhost.py search`
 now creates disposable Fizzy and Rizzy databases, boots both apps, and compares
 86 JSON query cases and 10 rendered search cases, including accented text,
 punctuation, quotes, shared card/comment title highlights, and last-activity
@@ -279,6 +279,13 @@ ordering. A fresh two-process Rizzy run created 80 cards and 80 search records;
 an existing database backfilled 63 records for 63 published cards and comments.
 These fixtures do not cover the complete query grammar, every browser snippet,
 Unicode indexing, or search throughput.
+
+`tests/mysql_pair_selfhost.py core` now runs the existing 142-comparison JSON
+workflow against fresh Fizzy and Rizzy MySQL databases. Its first run matched
+all comparisons, including account settings, boards, cards, search, filters,
+comments, activities, notifications, and webhooks. This checks one workflow
+with one account per app; it does not cover every registered route or browser
+interaction.
 
 Remaining database work:
 

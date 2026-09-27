@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Run the MySQL search differential on disposable Fizzy and Rizzy databases."""
+"""Run core or search parity on disposable Fizzy and Rizzy MySQL databases."""
 
+import argparse
 import os
 import subprocess
 import sys
@@ -15,10 +16,14 @@ from sustained_mixed import (first_difference, prepare_rust, prepare_source,  # 
                              start_server, stop_server)
 from sustained_mixed_mysql import (create_databases, drop_databases, rust_env,  # noqa: E402
                                    source_env)
-from mysql_search_parity import browser_login, run  # noqa: E402
+from mysql_search_parity import browser_login, run as search_run  # noqa: E402
+from parity import run as core_run  # noqa: E402
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("suite", choices=("core", "search"))
+    args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
     host = os.environ.get("MYSQL_HOST", "127.0.0.1")
@@ -60,15 +65,23 @@ def main():
                     "account": str(rizzy_credentials["account"]),
                     "token": rizzy_credentials["token"],
                     "email": local_rust_env["RIZZY_SEED_EMAIL"]}
-            browser_login(source)
-            browser_login(rust)
-            source_result = run(source, uuid.uuid4().hex[:8])
-            rust_result = run(rust, uuid.uuid4().hex[:8])
+            if args.suite == "search":
+                browser_login(source)
+                browser_login(rust)
+                source_result = search_run(source, uuid.uuid4().hex[:8])
+                rust_result = search_run(rust, uuid.uuid4().hex[:8])
+            else:
+                source_result = core_run(source)
+                rust_result = core_run(rust)
             difference = first_difference(source_result, rust_result)
             assert difference is None, difference
-            print(f"Disposable MySQL search fixture matched pinned Fizzy: "
-                  f"{len(source_result['query_probe'])} query cases, "
-                  f"{len(source_result['browser'])} rendered search cases")
+            if args.suite == "search":
+                print(f"Disposable MySQL search fixture matched pinned Fizzy: "
+                      f"{len(source_result['query_probe'])} query cases, "
+                      f"{len(source_result['browser'])} rendered search cases")
+            else:
+                print(f"Disposable MySQL core workflow matched pinned Fizzy: "
+                      f"{len(source_result)} comparisons")
         except Exception:
             for name in ("fizzy", "rizzy"):
                 log = root / name / f"{name}.log"
