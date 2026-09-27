@@ -55,7 +55,7 @@ def check(name, url, credentials, directory):
         assert headers.get("Content-Security-Policy") is None, (name, path, headers)
         results["json:" + path] = (status, body)
     target = {"name": name, "url": url, "account": str(credentials["account"]),
-              "email": "mixed-benchmark@example.com" if name == "fizzy" else "owner@example.com",
+              "email": "owner@example.com",
               "db": str(directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3"))}
     cookie = browser_cookie(target)
     for path, accept, session in (

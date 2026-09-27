@@ -242,6 +242,30 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
     }
     next.run(request).await
 }
+
+async fn assign_request_id(mut request: Request, next: Next) -> Response {
+    let supplied = request
+        .headers()
+        .get("x-request-id")
+        .map(HeaderValue::as_bytes);
+    let request_id = match supplied {
+        Some(value) if value.iter().any(|byte| !byte.is_ascii_whitespace()) => value
+            .iter()
+            .copied()
+            .filter(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'@'))
+            .take(255)
+            .map(char::from)
+            .collect::<String>(),
+        _ => uuid::Uuid::new_v4().to_string(),
+    };
+    let header_value = HeaderValue::from_str(&request_id).expect("sanitized request id");
+    request
+        .headers_mut()
+        .insert("x-request-id", header_value.clone());
+    let mut response = next.run(request).await;
+    response.headers_mut().insert("x-request-id", header_value);
+    response
+}
 async fn prevent_request_forgery(request: Request, next: Next) -> Response {
     let path = request.uri().path();
     let exempt = path.ends_with("/notifications/unsubscribe")
@@ -916,6 +940,16 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
     }
     let schema = include_str!("../schema.mysql.sql");
     resume_mysql_schema(&db, schema).await?;
+    let request_id_capacity: Option<i64> = sqlx::query_scalar(
+        "SELECT CAST(character_maximum_length AS SIGNED) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='storage_entries' AND column_name='request_id'",
+    )
+    .fetch_optional(&db)
+    .await?;
+    if request_id_capacity.is_some_and(|length| length < 255) {
+        sqlx::query("ALTER TABLE storage_entries MODIFY COLUMN request_id VARCHAR(255) NULL")
+            .execute(&db)
+            .await?;
+    }
     let bulk_touch_epoch_exists: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cards' AND column_name='bulk_touch_epoch'",
     )
@@ -1290,6 +1324,7 @@ struct Principal {
     role: String,
     permission: String,
     slug: i64,
+    request_id: String,
 }
 impl Principal {
     fn write(&self) -> Result<()> {
@@ -1334,6 +1369,11 @@ async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Princip
         role: r.get("role"),
         permission,
         slug,
+        request_id: headers
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned(),
     })
 }
 async fn board(app: &App, p: &Principal, id: &str) -> Result<DbRow> {
@@ -1819,6 +1859,7 @@ async fn webhook_payload(app: &App, row: &DbRow, host: &str) -> Result<String> {
         slug,
         role: "owner".into(),
         permission: "write".into(),
+        request_id: String::new(),
     };
     let event = sqlx::query("SELECT * FROM events WHERE id=?")
         .bind(row.get::<String, _>("event_id"))
@@ -3951,7 +3992,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn(block_search_engine_indexing))
         .layer(middleware::from_fn(prevent_request_forgery))
         .layer(middleware::from_fn(mark_request_format))
-        .layer(middleware::from_fn(content_security_policy));
+        .layer(middleware::from_fn(content_security_policy))
+        .layer(middleware::from_fn(assign_request_id));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
     if dev_magic_links() && !bind.starts_with("127.0.0.1:") && !bind.starts_with("[::1]:") {
         return Err("RIZZY_DEV_MAGIC_LINKS requires a loopback bind address".into());
@@ -5220,6 +5262,7 @@ async fn my_identity(
             role: r.get("role"),
             permission: "read".into(),
             slug,
+            request_id: String::new(),
         };
         accounts.push(json!({"id":p.account_id,"name":r.get::<String,_>("name"),"slug":format!("/{slug}"),"created_at":r.get::<String,_>("created_at"),"user":user_json(&app,&p,&p.user_id,&host).await?}));
     }
@@ -8205,9 +8248,15 @@ async fn delete_board(
     let b = board(&app, &p, &id).await?;
     p.admin(&b.get::<String, _>("creator_id"))?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys =
-        storage::purge_card_storage_tx(&mut tx, &p.account_id, None, Some(&id), Some(&p.user_id))
-            .await?;
+    let keys = storage::purge_card_storage_tx(
+        &mut tx,
+        &p.account_id,
+        None,
+        Some(&id),
+        Some(&p.user_id),
+        Some(&p.request_id),
+    )
+    .await?;
     deletion_cleanup::board(&mut tx, &p.account_id, &id).await?;
     sqlx::query("DELETE FROM storage_totals WHERE owner_type='Board' AND owner_id=?")
         .bind(&id)
@@ -11967,6 +12016,7 @@ async fn delete_card(
         Some(&card_id),
         None,
         Some(&p.user_id),
+        Some(&p.request_id),
     )
     .await?;
     deletion_cleanup::card(&mut tx, &p.account_id, &card_id).await?;
@@ -12680,6 +12730,7 @@ async fn move_card(
             &old_board_id,
             &destination,
             &p.user_id,
+            &p.request_id,
         )
         .await?;
         sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")

@@ -51,11 +51,12 @@ async fn record_storage_entry_tx(
     delta: i64,
     operation: &str,
     user_id: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<()> {
     if delta == 0 {
         return Ok(());
     }
-    sqlx::query("INSERT INTO storage_entries(id,account_id,blob_id,board_id,created_at,delta,operation,recordable_id,recordable_type,user_id) VALUES(?,?,?,?,?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO storage_entries(id,account_id,blob_id,board_id,created_at,delta,operation,recordable_id,recordable_type,user_id,request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(id())
         .bind(account_id)
         .bind(blob_id)
@@ -66,6 +67,7 @@ async fn record_storage_entry_tx(
         .bind(record_id)
         .bind(record_type)
         .bind(user_id)
+        .bind(request_id)
         .execute(&mut **tx)
         .await
         .map_err(db_err)?;
@@ -80,6 +82,7 @@ async fn record_attachment_change_tx(
     blob_id: &str,
     operation: &str,
     user_id: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<()> {
     let board_query = match record_type {
         "Board" => "SELECT id FROM boards WHERE id=? AND account_id=?",
@@ -112,6 +115,7 @@ async fn record_attachment_change_tx(
         if operation == "detach" { -bytes } else { bytes },
         operation,
         user_id,
+        request_id,
     )
     .await
 }
@@ -123,6 +127,7 @@ pub(super) async fn record_board_transfer_tx(
     old_board_id: &str,
     new_board_id: &str,
     user_id: &str,
+    request_id: &str,
 ) -> Result<()> {
     let rows = sqlx::query("SELECT a.record_type,a.record_id,SUM(b.byte_size) AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id=?) OR (a.record_type='Comment' AND a.record_id IN (SELECT id FROM comments WHERE card_id=?))) GROUP BY a.record_type,a.record_id")
         .bind(account_id)
@@ -145,6 +150,7 @@ pub(super) async fn record_board_transfer_tx(
             -bytes,
             "transfer_out",
             Some(user_id),
+            Some(request_id),
         )
         .await?;
         record_storage_entry_tx(
@@ -157,6 +163,7 @@ pub(super) async fn record_board_transfer_tx(
             bytes,
             "transfer_in",
             Some(user_id),
+            Some(request_id),
         )
         .await?;
     }
@@ -880,8 +887,15 @@ pub(super) async fn attach_card_image_tx(
     if existing == blob_id {
         return Ok(Vec::new());
     }
-    let keys =
-        purge_card_images_tx(tx, &p.account_id, Some(card_id), None, Some(&p.user_id)).await?;
+    let keys = purge_card_images_tx(
+        tx,
+        &p.account_id,
+        Some(card_id),
+        None,
+        Some(&p.user_id),
+        Some(&p.request_id),
+    )
+    .await?;
     if let Some(blob_id) = blob_id {
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'Card',?,'image',?)")
             .bind(id()).bind(&p.account_id).bind(&blob_id).bind(card_id).bind(now())
@@ -894,6 +908,7 @@ pub(super) async fn attach_card_image_tx(
             &blob_id,
             "attach",
             Some(&p.user_id),
+            Some(&p.request_id),
         )
         .await?;
     }
@@ -1013,6 +1028,7 @@ pub(super) async fn purge_card_images_tx(
     card_id: Option<&str>,
     board_id: Option<&str>,
     user_id: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<Vec<String>> {
     let rows = sqlx::query("SELECT a.id AS attachment_id,a.record_id,b.id AS blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id JOIN cards c ON c.id=a.record_id WHERE a.record_type='Card' AND a.name='image' AND c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?)")
         .bind(account_id)
@@ -1025,7 +1041,7 @@ pub(super) async fn purge_card_images_tx(
         let blob_id: String = row.get("blob_id");
         let record_id: String = row.get("record_id");
         record_attachment_change_tx(
-            tx, account_id, "Card", &record_id, &blob_id, "detach", user_id,
+            tx, account_id, "Card", &record_id, &blob_id, "detach", user_id, request_id,
         )
         .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
@@ -1112,6 +1128,7 @@ async fn sync_embeds_tx_inner(
             &blob_id,
             "detach",
             Some(&p.user_id),
+            Some(&p.request_id),
         )
         .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
@@ -1146,6 +1163,7 @@ async fn sync_embeds_tx_inner(
             blob_id,
             "attach",
             Some(&p.user_id),
+            Some(&p.request_id),
         )
         .await?;
     }
@@ -1158,6 +1176,7 @@ pub(super) async fn purge_card_storage_tx(
     card_id: Option<&str>,
     board_id: Option<&str>,
     user_id: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<Vec<String>> {
     let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))) OR (a.record_type='Board' AND a.record_id=? AND ? IS NOT NULL))")
         .bind(account_id).bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
@@ -1175,6 +1194,7 @@ pub(super) async fn purge_card_storage_tx(
             &blob_id,
             "detach",
             user_id,
+            request_id,
         )
         .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
@@ -2205,6 +2225,7 @@ pub(super) async fn delete_image(
         Some(&card_id),
         None,
         Some(&p.user_id),
+        Some(&p.request_id),
     )
     .await?;
     tx.commit().await.map_err(db_err)?;

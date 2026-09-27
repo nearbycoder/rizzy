@@ -19,6 +19,8 @@ def quoted(name: str) -> str:
 def string_type(name: str, indexed: bool) -> str:
     if not indexed:
         return "LONGTEXT"
+    if name == "request_id":
+        return "VARCHAR(255)"
     if name == "id" or name.endswith("_id"):
         return "VARCHAR(64)"
     if name.endswith("_at"):

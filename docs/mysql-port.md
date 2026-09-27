@@ -148,6 +148,9 @@ yet been exercised on MariaDB.
 `schema.mysql.sql` is a snapshot of an initialized Rizzy SQLite database. To
 regenerate it after a SQLite schema change, seed a new SQLite database and run
 `python3 scripts/generate_mysql_schema.py path/to/fresh.sqlite3 schema.mysql.sql`.
+Storage entry request IDs use `VARCHAR(255)` to match the source's request ID
+limit. Startup widens that column on databases created from the older 64-character
+snapshot. This migration still needs a live MySQL verification run.
 The generator preserves the current 64 application tables, ordinary indexes, foreign
 keys, 15 checks, and the partial uniqueness rules through generated columns.
 It deliberately excludes FTS5 shadow tables. MySQL setup creates another 16

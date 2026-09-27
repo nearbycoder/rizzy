@@ -46,9 +46,15 @@ list, activity, and ledger states match in that fixture. Fizzy retains an embed
 when rich text becomes empty or null and detaches it on a nonempty edit without
 the embed. `tests/embed_parity.py` also matches rendered Action Text after
 Rizzy began using blob analysis metadata, rather than locally detected image
-dimensions, for the immediate HTML response. Request IDs, periodic
-reconciliation, other Action Text transitions, and MySQL execution of these
-new paths remain open.
+dimensions, for the immediate HTML response. Periodic reconciliation, other
+Action Text transitions, and MySQL execution of these
+new paths remain open. `tests/storage_request_id_parity.py` now checks both
+apps' generated, sanitized, and truncated `X-Request-Id` response headers,
+including a 404, and matches request IDs on attachment, transfer, and deletion
+ledger entries. Background-job request context and untested request paths
+remain open. The MySQL schema now permits the source's 255-character request
+IDs and startup widens older columns; that migration has not yet been run
+against a live MySQL server.
 
 The [post-storage-ledger scoped read run](bench/results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
 measured the new attachment lookup on four JSON read routes using fresh

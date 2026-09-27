@@ -296,7 +296,7 @@ CREATE TABLE `storage_entries` (
   `operation` LONGTEXT NOT NULL,
   `recordable_id` VARCHAR(64),
   `recordable_type` VARCHAR(255),
-  `request_id` VARCHAR(64),
+  `request_id` VARCHAR(255),
   `user_id` VARCHAR(64),
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
