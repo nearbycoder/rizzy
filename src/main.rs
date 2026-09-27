@@ -13267,54 +13267,73 @@ async fn publish_card(
     let c = card(&app, &p, &number).await?;
     let card_id: String = c.get("id");
     let timestamp = now();
-    let (mut tx, board_id) =
-        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+    let mut deadlock_retries = 0;
+    let board_id = loop {
+        let write: Result<String> = async {
+            let (mut tx, board_id) = begin_accessible_card_board_write(
+                &app,
+                &p,
+                &card_id,
+                &c.get::<String, _>("board_id"),
+            )
             .await?;
-    sqlx::query("UPDATE cards SET status='published',title=CASE WHEN trim(title)='' THEN 'Untitled' ELSE title END,created_at=?,updated_at=? WHERE id=?")
-        .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
-    let event_id = id();
-    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
-        .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&card_id).bind(&p.user_id)
-        .bind(&card_id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-    queue_webhooks(
-        &mut tx,
-        &p.account_id,
-        &board_id,
-        &event_id,
-        "card_published",
-        &timestamp,
-    )
-    .await?;
-    queue_notifications(
-        &app,
-        &mut tx,
-        &p,
-        &board_id,
-        &card_id,
-        &event_id,
-        "Card",
-        "card_published",
-        &json!({}),
-        &timestamp,
-    )
-    .await?;
-    create_new_mentions(
-        &app,
-        &mut tx,
-        &p,
-        &board_id,
-        &card_id,
-        "Card",
-        &card_id,
-        &c.get::<String, _>("description"),
-    )
-    .await?;
-    if app.mysql {
-        mysql_search::sync_card(&mut tx, &p.account_id, &card_id)
-            .await
-            .map_err(db_err)?;
-    }
-    tx.commit().await.map_err(db_err)?;
+            sqlx::query("UPDATE cards SET status='published',title=CASE WHEN trim(title)='' THEN 'Untitled' ELSE title END,created_at=?,updated_at=? WHERE id=?")
+                .bind(&timestamp).bind(&timestamp).bind(&card_id).execute(&mut *tx).await.map_err(db_err)?;
+            let event_id = id();
+            sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
+                .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&card_id).bind(&p.user_id)
+                .bind(&card_id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+            queue_webhooks(
+                &mut tx,
+                &p.account_id,
+                &board_id,
+                &event_id,
+                "card_published",
+                &timestamp,
+            )
+            .await?;
+            queue_notifications(
+                &app,
+                &mut tx,
+                &p,
+                &board_id,
+                &card_id,
+                &event_id,
+                "Card",
+                "card_published",
+                &json!({}),
+                &timestamp,
+            )
+            .await?;
+            create_new_mentions(
+                &app,
+                &mut tx,
+                &p,
+                &board_id,
+                &card_id,
+                "Card",
+                &card_id,
+                &c.get::<String, _>("description"),
+            )
+            .await?;
+            if app.mysql {
+                mysql_search::sync_card(&mut tx, &p.account_id, &card_id)
+                    .await
+                    .map_err(db_err)?;
+            }
+            tx.commit().await.map_err(db_err)?;
+            Ok(board_id)
+        }
+        .await;
+        match write {
+            Ok(board_id) => break board_id,
+            Err(error) if app.mysql && error.is_retryable_deadlock() && deadlock_retries < 3 => {
+                deadlock_retries += 1;
+                tokio::time::sleep(Duration::from_millis(10 * deadlock_retries)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
     if headers.contains_key("x-rizzy-json-request") {
         return Ok(StatusCode::CREATED.into_response());
     }
