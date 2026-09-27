@@ -12249,44 +12249,59 @@ async fn create_or_resume_draft(
     headers: &HeaderMap,
     force_new: bool,
 ) -> Result<Response> {
-    let _guard = app.write_lock.lock().await;
-    let mut tx = begin_accessible_board_write(app, p, board_id).await?;
-    let existing: Option<i64> = if force_new {
-        None
-    } else {
-        sqlx::query_scalar(
-            "SELECT number FROM cards WHERE board_id=? AND creator_id=? AND status='drafted' ORDER BY created_at,id LIMIT 1",
-        )
-        .bind(board_id)
-        .bind(&p.user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(db_err)?
+    let mut deadlock_retries = 0;
+    let number = loop {
+        let write: Result<i64> = async {
+            let _guard = app.write_lock.lock().await;
+            let mut tx = begin_accessible_board_write(app, p, board_id).await?;
+            let existing: Option<i64> = if force_new {
+                None
+            } else {
+                sqlx::query_scalar(
+                    "SELECT number FROM cards WHERE board_id=? AND creator_id=? AND status='drafted' ORDER BY created_at,id LIMIT 1",
+                )
+                .bind(board_id)
+                .bind(&p.user_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?
+            };
+            let timestamp = now();
+            let number = if let Some(number) = existing {
+                sqlx::query("UPDATE cards SET created_at=?,updated_at=?,last_active_at=? WHERE account_id=? AND number=?")
+                    .bind(&timestamp).bind(&timestamp).bind(&timestamp).bind(&p.account_id).bind(number)
+                    .execute(&mut *tx).await.map_err(db_err)?;
+                number
+            } else {
+                let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
+                let card_id = id();
+                sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,status,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,'','','drafted',?,?,?)")
+                    .bind(&card_id).bind(&p.account_id).bind(board_id).bind(&p.user_id).bind(number)
+                    .bind(&timestamp).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+                sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
+                    .bind(id())
+                    .bind(card_id)
+                    .bind(&p.user_id)
+                    .bind(&timestamp)
+                    .bind(&timestamp)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                number
+            };
+            tx.commit().await.map_err(db_err)?;
+            Ok(number)
+        }
+        .await;
+        match write {
+            Ok(number) => break number,
+            Err(error) if app.mysql && error.is_retryable_deadlock() && deadlock_retries < 3 => {
+                deadlock_retries += 1;
+                tokio::time::sleep(Duration::from_millis(10 * deadlock_retries)).await;
+            }
+            Err(error) => return Err(error),
+        }
     };
-    let timestamp = now();
-    let number = if let Some(number) = existing {
-        sqlx::query("UPDATE cards SET created_at=?,updated_at=?,last_active_at=? WHERE account_id=? AND number=?")
-            .bind(&timestamp).bind(&timestamp).bind(&timestamp).bind(&p.account_id).bind(number)
-            .execute(&mut *tx).await.map_err(db_err)?;
-        number
-    } else {
-        let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
-        let card_id = id();
-        sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,status,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,'','','drafted',?,?,?)")
-            .bind(&card_id).bind(&p.account_id).bind(board_id).bind(&p.user_id).bind(number)
-            .bind(&timestamp).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-        sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
-            .bind(id())
-            .bind(card_id)
-            .bind(&p.user_id)
-            .bind(&timestamp)
-            .bind(&timestamp)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        number
-    };
-    tx.commit().await.map_err(db_err)?;
     Ok((
         StatusCode::FOUND,
         [(
