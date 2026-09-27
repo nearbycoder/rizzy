@@ -188,7 +188,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "active_storage_blobs",
-        query: "SELECT b.id,b.account_id,b.byte_size,b.checksum,b.content_type,b.created_at,b.filename,b.storage_key AS `key`,b.metadata FROM storage_blobs b WHERE b.account_id=? AND b.uploaded_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM storage_attachments a WHERE a.account_id=b.account_id AND a.blob_id=b.id AND a.record_type IN ('Export','Account::Import')) ORDER BY b.id",
+        query: "SELECT b.id,b.account_id,b.byte_size,b.checksum,b.content_type,b.created_at,b.filename,b.storage_key AS `key`,b.metadata FROM storage_blobs b WHERE b.account_id=? AND NOT EXISTS (SELECT 1 FROM storage_attachments a WHERE a.account_id=b.account_id AND a.blob_id=b.id AND a.record_type IN ('Export','Account::Import')) ORDER BY b.id",
         booleans: &[],
         json_fields: &["metadata"],
     },
@@ -375,7 +375,7 @@ pub(crate) async fn build(app: &App, export: &DbRow) -> BuildResult<()> {
             sqlx::query("UPDATE exports SET updated_at=? WHERE id=?")
                 .bind(now()).bind(&export_id).execute(&app.db).await?;
         }
-        let mut blobs = sqlx::query("SELECT b.storage_key FROM storage_blobs b WHERE b.account_id=? AND b.uploaded_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM storage_attachments a WHERE a.account_id=b.account_id AND a.blob_id=b.id AND a.record_type IN ('Export','Account::Import')) ORDER BY b.id")
+        let mut blobs = sqlx::query("SELECT b.storage_key FROM storage_blobs b WHERE b.account_id=? AND NOT EXISTS (SELECT 1 FROM storage_attachments a WHERE a.account_id=b.account_id AND a.blob_id=b.id AND a.record_type IN ('Export','Account::Import')) ORDER BY b.id")
             .bind(&account_id).fetch(&app.db);
         while let Some(blob) = blobs.try_next().await? {
             let key: String = blob.get("storage_key");

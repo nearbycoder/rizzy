@@ -1079,16 +1079,18 @@ async fn apply_archive(
         if !seen_storage.insert(old_key.to_owned()) {
             return Err("Duplicate blob key".into());
         }
-        let bytes = archive
-            .storage
-            .get(old_key)
-            .ok_or_else(|| format!("Missing storage file: {old_key}"))?;
-        if bytes.len() as i64 != integer(blob, "byte_size", -1) {
-            return Err(format!("Storage size mismatch: {old_key}"));
-        }
-        let checksum = base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes));
-        if checksum != field(blob, "checksum")? {
-            return Err(format!("Storage checksum mismatch: {old_key}"));
+        let bytes = archive.storage.get(old_key);
+        let checksum = field(blob, "checksum")?;
+        let byte_size = integer(blob, "byte_size", -1);
+        if let Some(bytes) = bytes {
+            if bytes.len() as i64 != byte_size {
+                return Err(format!("Storage size mismatch: {old_key}"));
+            }
+            let actual_checksum =
+                base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes));
+            if actual_checksum != checksum {
+                return Err(format!("Storage checksum mismatch: {old_key}"));
+            }
         }
         let new_key = random_token();
         let signed_id = random_token();
@@ -1097,15 +1099,17 @@ async fn apply_archive(
         let metadata = serde_json::to_string(blob.get("metadata").unwrap_or(&json!({})))
             .map_err(|e| e.to_string())?;
         let path = storage::storage_dir().join(&new_key);
-        tokio::fs::write(&path, bytes)
-            .await
-            .map_err(|e| e.to_string())?;
-        files.0.push(path);
+        if let Some(bytes) = bytes {
+            tokio::fs::write(&path, bytes)
+                .await
+                .map_err(|e| e.to_string())?;
+            files.0.push(path);
+        }
         sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,metadata,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(blob_id).bind(account_id).bind(new_key).bind(field(blob,"filename")?)
-            .bind(field(blob,"content_type")?).bind(bytes.len() as i64).bind(checksum)
+            .bind(field(blob,"content_type")?).bind(byte_size).bind(checksum)
             .bind(metadata)
-            .bind(signed_id).bind(&sgid).bind(upload_hash).bind(now()).bind(now())
+            .bind(signed_id).bind(&sgid).bind(upload_hash).bind(now()).bind(bytes.map(|_| now()))
             .bind(field(blob,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         blob_sgids.insert(blob_id.to_owned(), sgid);
     }
