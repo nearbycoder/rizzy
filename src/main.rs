@@ -1267,6 +1267,16 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
             .execute(&db)
             .await?;
     }
+    let signed_id_capacity: Option<i64> = sqlx::query_scalar(
+        "SELECT CAST(character_maximum_length AS SIGNED) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='storage_blobs' AND column_name='signed_id'",
+    )
+    .fetch_optional(&db)
+    .await?;
+    if signed_id_capacity.is_some_and(|length| length < 255) {
+        sqlx::query("ALTER TABLE storage_blobs MODIFY COLUMN signed_id VARCHAR(255) NOT NULL")
+            .execute(&db)
+            .await?;
+    }
     let bulk_touch_epoch_exists: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cards' AND column_name='bulk_touch_epoch'",
     )

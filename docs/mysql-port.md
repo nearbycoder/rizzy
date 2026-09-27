@@ -2,6 +2,15 @@
 
 Fizzy supports MySQL. Rizzy's MySQL work is in progress on this branch. The
 `mysql:` URL now starts the web server. The repeatable
+`tests/mysql_storage_variant_concurrency.py` test initializes a disposable
+database, downgrades its empty `storage_blobs.signed_id` column to the old
+64-character width, and verifies that startup widens it to 255 characters.
+It then embeds one image from eight concurrent cards across two Rust processes,
+requires one pair of variant records, and checks that deleting the final card
+removes those records and files. The paired `card-image` MySQL fixture still
+matches Fizzy after this schema change. This verifies the image path and
+migration on a local MySQL instance, not broader media parity or capacity.
+The repeatable
 `tests/mysql_core.py` flow covers account seeding, board and card creation,
 columns, triage, steps, tags, account and board entropy, the closing-soon
 filter, assignment and activity spikes, watch and pin controls, assigned-card

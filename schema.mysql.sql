@@ -275,7 +275,7 @@ CREATE TABLE `storage_blobs` (
   `byte_size` BIGINT NOT NULL,
   `checksum` LONGTEXT NOT NULL,
   `metadata` LONGTEXT NOT NULL DEFAULT ('{}'),
-  `signed_id` VARCHAR(64) NOT NULL,
+  `signed_id` VARCHAR(255) NOT NULL,
   `attachable_sgid` VARCHAR(255) NOT NULL,
   `upload_token_hash` VARCHAR(255) NOT NULL,
   `upload_expires_at` LONGTEXT NOT NULL,
