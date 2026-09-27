@@ -302,6 +302,11 @@ legacy webhook columns. A disposable MySQL 8.4.11 server passed partial-schema
 recovery, two-worker delivery, account import, and
 `tests/mysql_webhook_tracker_migration.py`'s legacy backfill and second restart.
 Cross-host delivery ordering and remaining payload variants are still open.
+Webhook DNS selection now pins the first public address in mixed DNS answers,
+matching the pinned Surfguard policy, and keeps an all-private answer blocked.
+The response-body limit now matches Fizzy's 100 KiB. The Rust DNS safety unit
+tests pass; successful internet delivery and response-size boundaries have not
+yet been checked in a paired live delivery test.
 
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 

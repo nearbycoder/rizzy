@@ -1808,6 +1808,14 @@ fn public_ip(ip: IpAddr) -> bool {
     }
 }
 
+fn first_public_address(addresses: impl IntoIterator<Item = SocketAddr>) -> Option<SocketAddr> {
+    addresses
+        .into_iter()
+        .find(|address| public_ip(address.ip()))
+}
+
+const MAX_WEBHOOK_RESPONSE_SIZE: usize = 100 * 1024;
+
 fn hmac_sha256(secret: &str, body: &str) -> String {
     let mut key = [0u8; 64];
     let bytes = secret.as_bytes();
@@ -1832,7 +1840,7 @@ fn hmac_sha256(secret: &str, body: &str) -> String {
 
 #[cfg(test)]
 mod webhook_security_tests {
-    use super::{hmac_sha256, public_ip};
+    use super::{first_public_address, hmac_sha256, public_ip};
 
     #[test]
     fn signature_matches_hmac_sha256_reference_vector() {
@@ -1859,6 +1867,18 @@ mod webhook_security_tests {
         for address in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
             assert!(public_ip(address.parse().unwrap()), "{address}");
         }
+    }
+
+    #[test]
+    fn mixed_dns_answers_pin_the_first_public_address() {
+        let addresses = [
+            "10.0.0.1:443".parse().unwrap(),
+            "93.184.216.34:443".parse().unwrap(),
+            "192.168.1.1:443".parse().unwrap(),
+            "1.1.1.1:443".parse().unwrap(),
+        ];
+        assert_eq!(first_public_address(addresses), Some(addresses[1]));
+        assert_eq!(first_public_address([addresses[0], addresses[2]]), None);
     }
 }
 
@@ -1913,18 +1933,17 @@ async fn send_webhook(url: &str, secret: &str, timestamp: &str, body: &str) -> V
             _ => return json!({"error":"dns_lookup_failed"}),
         }
     };
-    // Refuse the destination if DNS returns even one private or reserved address.
     if addresses.is_empty() {
         return json!({"error":"dns_lookup_failed"});
     }
-    if addresses.iter().any(|address| !public_ip(address.ip())) {
+    let Some(address) = first_public_address(addresses) else {
         return json!({"error":"private_uri"});
-    }
+    };
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(7))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
-        .resolve_to_addrs(host, &addresses)
+        .resolve_to_addrs(host, &[address])
         .build()
     {
         Ok(client) => client,
@@ -1955,7 +1974,7 @@ async fn send_webhook(url: &str, secret: &str, timestamp: &str, body: &str) -> V
         match response.chunk().await {
             Ok(Some(chunk)) => {
                 bytes += chunk.len();
-                if bytes > 100_000 {
+                if bytes > MAX_WEBHOOK_RESPONSE_SIZE {
                     return json!({"error":"response_too_large"});
                 }
             }
