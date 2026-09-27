@@ -293,11 +293,16 @@ fn radio_option(name: &str, value: &str, label: &str, current: &str) -> String {
     )
 }
 
-fn quick_filter(label: &str, selected: bool, choices: &str) -> String {
+fn quick_filter(label: &str, selected: bool, searchable: bool, choices: &str) -> String {
     format!(
-        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{choices}</div></div>",
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{}{choices}</div></div>",
         if selected { " is-selected" } else { "" },
-        escape(label)
+        escape(label),
+        if searchable {
+            "<input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter…\" autocomplete=\"off\" autocorrect=\"off\">".to_owned()
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -361,7 +366,12 @@ fn choice_group(
     if choices_html.is_empty() {
         String::new()
     } else {
-        quick_filter(&summary, !selected_names.is_empty(), &choices_html)
+        quick_filter(
+            &summary,
+            !selected_names.is_empty(),
+            choices.len() > 1,
+            &choices_html,
+        )
     }
 }
 
@@ -524,8 +534,8 @@ pub(super) async fn show(
     };
     let controls = [
         board_control,
-        quick_filter(sort_label, sort != "latest", &sort_options),
-        quick_filter(status_label, index != "all", &status_options),
+        quick_filter(sort_label, sort != "latest", false, &sort_options),
+        quick_filter(status_label, index != "all", false, &status_options),
         tag_control,
         assignee_control,
         creator_control,

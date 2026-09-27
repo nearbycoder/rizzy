@@ -25,8 +25,13 @@ def run(target, signed_in=False):
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board": {"name": marker}}, bearer=True)
     assert status == 201, (target["name"], status, raw[:200])
     board_id = json.loads(raw)["id"]
+    second_board_id = None
     board_path = f"/{account}/boards/{board_id}"
     try:
+        status, _, raw = request(target, f"/{account}/boards", "POST",
+                                 {"board": {"name": marker + " Café second"}}, bearer=True)
+        assert status == 201, (target["name"], status, raw[:200])
+        second_board_id = json.loads(raw)["id"]
         for index in range(17):
             status, _, raw = request(target, board_path + "/cards", "POST", {"card": {"title": f"{marker} card {index:02d}"}}, bearer=True)
             assert status == 201, (status, raw[:200])
@@ -66,6 +71,7 @@ def run(target, signed_in=False):
 
         plain = html()
         assert "card-columns" in plain and "cards--maybe" in plain and GRID not in plain
+        assert 'placeholder="Filter…"' in plain, (target["name"], "multi-board search")
         assert 'id="filter-settings-save-toggle"' not in plain, target["name"]
         unfiltered_expanded = html("?expand_all=true")
         assert "card-columns" in unfiltered_expanded and GRID not in unfiltered_expanded
@@ -144,6 +150,9 @@ def run(target, signed_in=False):
                 "term_pages": (first_numbers, second_numbers), "oldest": True, "empty": True,
                 "people_filters": True}
     finally:
+        if second_board_id:
+            status, _, _ = request(target, f"/{account}/boards/{second_board_id}", "DELETE", bearer=True)
+            assert status == 204, status
         status, _, _ = request(target, board_path, "DELETE", bearer=True)
         assert status == 204, status
 

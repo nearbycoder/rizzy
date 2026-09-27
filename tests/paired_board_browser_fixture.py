@@ -39,11 +39,17 @@ def main():
                                                  else "rizzy.sqlite3"))}
                 board, _ = expect(target, "/boards", "POST",
                                   {"board": {"name": "Paired board", "all_access": True}}, 201)
+                second, _ = expect(target, "/boards", "POST",
+                                   {"board": {"name": "Café second board", "all_access": True}}, 201)
                 for index in range(3):
-                    expect(target, f"/boards/{board['id']}/cards", "POST",
-                           {"card": {"title": f"Idea {index + 1}"}}, 201)
+                    card, _ = expect(target, f"/boards/{board['id']}/cards", "POST",
+                                     {"card": {"title": f"Idea {index + 1}"}}, 201)
+                    if index < 2:
+                        expect(target, f"/cards/{card['number']}/taggings", "POST",
+                               {"tag_title": "#Café" if index == 0 else "#Backlog"}, 204)
                 print(json.dumps({"name": name,
                                   "board_url": f"{url}/{target['account']}/boards/{board['id']}",
+                                  "second_board_url": f"{url}/{target['account']}/boards/{second['id']}",
                                   "cards_url": f"{url}/{target['account']}/cards",
                                   "database": target["db"]}), flush=True)
             print("Sign in through each browser's email form, then inspect the URLs above.", flush=True)

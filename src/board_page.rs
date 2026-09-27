@@ -82,11 +82,16 @@ fn column_color_picker(selected: &str) -> String {
     html
 }
 
-fn quick_filter(label: &str, selected: bool, choices: &str) -> String {
+fn quick_filter(label: &str, selected: bool, searchable: bool, choices: &str) -> String {
     format!(
-        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{choices}</div></div>",
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{}{choices}</div></div>",
         if selected { " is-selected" } else { "" },
-        escape(label)
+        escape(label),
+        if searchable {
+            "<input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter…\" autocomplete=\"off\" autocorrect=\"off\">".to_owned()
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -236,21 +241,37 @@ async fn filter_form(
     .map(|(value, label)| radio_option("sorted_by", value, label, sort))
     .collect::<String>();
     let filter_controls = [
-        quick_filter("Board…", false, &board_options),
-        quick_filter(sort_label, sort != "latest", &sort_options),
-        quick_filter(status_label, index != "all", &status_options),
+        quick_filter("Board…", false, board_choices.len() > 1, &board_options),
+        quick_filter(sort_label, sort != "latest", false, &sort_options),
+        quick_filter(status_label, index != "all", false, &status_options),
         if tags.is_empty() {
             String::new()
         } else {
-            quick_filter("Tagged…", !query.tag_ids.is_empty(), &tag_choices)
+            quick_filter(
+                "Tagged…",
+                !query.tag_ids.is_empty(),
+                tags.len() > 1,
+                &tag_choices,
+            )
         },
         quick_filter(
             "Assigned to…",
             !query.assignee_ids.is_empty() || query.assignment_status.is_some(),
+            users.len() > 1,
             &assignee_choices,
         ),
-        quick_filter("Added by…", !query.creator_ids.is_empty(), &creator_choices),
-        quick_filter("Closed by…", !query.closer_ids.is_empty(), &closer_choices),
+        quick_filter(
+            "Added by…",
+            !query.creator_ids.is_empty(),
+            users.len() > 1,
+            &creator_choices,
+        ),
+        quick_filter(
+            "Closed by…",
+            !query.closer_ids.is_empty(),
+            users.len() > 1,
+            &closer_choices,
+        ),
     ]
     .concat();
     let clear = if !query.terms.is_empty()

@@ -109,6 +109,7 @@ def check(target, signed_in=False):
             assert status == 201, (target["name"], status, raw[:160])
             time.sleep(0.02)
         ordered_html = html()
+        assert 'placeholder="Filter…"' in ordered_html, (target["name"], "multi-board search")
         if target["name"] == "fizzy":
             choice = lambda board: f'data-multi-selection-combobox-value="{board}"'
         else:
