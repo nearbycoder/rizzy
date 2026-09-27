@@ -41,6 +41,12 @@ def stable(value):
     return value
 
 
+def stable_wire(body):
+    body = re.sub(r"[0-9a-z]{25}", "<generated>", body)
+    return re.sub(r"20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d\.\d\d\dZ",
+                  "<timestamp>", body)
+
+
 def api(target, path, method="GET", payload=None, expected=200):
     status, _, body = call(target, f"/{target['account']}{path}", method, payload)
     assert status == expected, (target["name"], method, path, status, body[:350])
@@ -144,6 +150,10 @@ def main():
                 shape(source_generic), shape(rust_generic))
             assert stable(source_generic) == stable(rust_generic), (
                 stable(source_generic), stable(rust_generic))
+            for key in ("generic_card_published", "generic_comment_created"):
+                assert stable_wire(source[key]["body"]) == stable_wire(rust[key]["body"]), (
+                    key, stable_wire(source[key]["body"]),
+                    stable_wire(rust[key]["body"]))
             for name in ("slack", "campfire", "basecamp", "generic"):
                 key = f"{name}_comment_created"
                 assert source[key]["content_type"] == rust[key]["content_type"], key

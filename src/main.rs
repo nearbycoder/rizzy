@@ -1933,9 +1933,7 @@ impl WebhookFormat {
 
     fn body(self, item: &Value) -> String {
         match self {
-            Self::Generic => webhook_wire_json(json!({"id":item["id"],"action":item["action"],
-                "created_at":item["created_at"],"eventable":item["eventable"],
-                "board":item["board"],"creator":item["creator"]})),
+            Self::Generic => webhook_generic_json(item),
             Self::Slack => webhook_wire_json(json!({"text":format!("{} <{}|Open in Fizzy>",
                 item["description"].as_str().unwrap_or(""),
                 item["url"].as_str().unwrap_or(""))})),
@@ -1958,13 +1956,142 @@ impl WebhookFormat {
 }
 
 fn webhook_wire_json(value: Value) -> String {
+    webhook_escape_json(value.to_string())
+}
+
+fn webhook_escape_json(value: String) -> String {
     value
-        .to_string()
         .replace('&', "\\u0026")
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
+}
+
+#[derive(Clone, Copy)]
+enum WebhookJsonObject {
+    Event,
+    Card,
+    Comment,
+    Board,
+    Column,
+    User,
+    Body,
+    CardRef,
+}
+
+fn webhook_generic_json(event: &Value) -> String {
+    webhook_escape_json(webhook_ordered_json(event, WebhookJsonObject::Event))
+}
+
+fn webhook_ordered_json(value: &Value, kind: WebhookJsonObject) -> String {
+    use WebhookJsonObject as Object;
+    let fields: &[&str] = match kind {
+        Object::Event => &[
+            "id",
+            "action",
+            "created_at",
+            "eventable",
+            "board",
+            "creator",
+        ],
+        Object::Card => &[
+            "id",
+            "number",
+            "title",
+            "status",
+            "description",
+            "description_html",
+            "image_url",
+            "has_attachments",
+            "tags",
+            "closed",
+            "postponed",
+            "golden",
+            "last_active_at",
+            "created_at",
+            "url",
+            "board",
+            "column",
+            "creator",
+            "assignees",
+            "has_more_assignees",
+            "comments_url",
+            "reactions_url",
+        ],
+        Object::Comment => &[
+            "id",
+            "created_at",
+            "updated_at",
+            "body",
+            "creator",
+            "card",
+            "reactions_url",
+            "url",
+        ],
+        Object::Board => &[
+            "id",
+            "name",
+            "all_access",
+            "created_at",
+            "auto_postpone_period_in_days",
+            "url",
+            "creator",
+            "public_description",
+            "public_description_html",
+            "public_url",
+        ],
+        Object::Column => &["id", "name", "color", "created_at", "cards_url"],
+        Object::User => &[
+            "id",
+            "name",
+            "role",
+            "active",
+            "email_address",
+            "created_at",
+            "url",
+            "avatar_url",
+        ],
+        Object::Body => &["plain_text", "html"],
+        Object::CardRef => &["id", "url"],
+    };
+    let mut output = String::from("{");
+    for key in fields {
+        let Some(child) = value.get(*key) else {
+            continue;
+        };
+        if output.len() > 1 {
+            output.push(',');
+        }
+        output.push_str(&serde_json::to_string(key).expect("static JSON key"));
+        output.push(':');
+        let nested = match *key {
+            "eventable" if child.get("number").is_some() => Some(Object::Card),
+            "eventable" if child.get("body").is_some() => Some(Object::Comment),
+            "board" => Some(Object::Board),
+            "column" => Some(Object::Column),
+            "creator" => Some(Object::User),
+            "body" => Some(Object::Body),
+            "card" => Some(Object::CardRef),
+            _ => None,
+        };
+        if let Some(nested) = nested {
+            output.push_str(&webhook_ordered_json(child, nested));
+        } else if *key == "assignees" {
+            output.push('[');
+            for (index, assignee) in child.as_array().into_iter().flatten().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&webhook_ordered_json(assignee, Object::User));
+            }
+            output.push(']');
+        } else {
+            output.push_str(&serde_json::to_string(child).expect("JSON value"));
+        }
+    }
+    output.push('}');
+    output
 }
 
 #[cfg(test)]
