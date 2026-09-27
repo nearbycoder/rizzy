@@ -74,6 +74,7 @@ mod rich_text;
 mod rich_text_records;
 mod search_page;
 mod session_transfer;
+mod signed_global_id;
 mod signup_page;
 mod signup_seed;
 mod storage;
@@ -89,6 +90,7 @@ struct App {
     db: DbPool,
     mysql: bool,
     qr_secret: String,
+    sgid_signer: signed_global_id::Signer,
     write_lock: tokio::sync::Mutex<()>,
     auth_lock: tokio::sync::Mutex<()>,
     notification_html_cache: tokio::sync::Mutex<HashMap<String, NotificationHtmlCacheEntry>>,
@@ -2026,6 +2028,7 @@ async fn record_event(
     )
     .await?;
     queue_notifications(
+        app,
         &mut tx,
         p,
         &event_board_id,
@@ -2107,6 +2110,7 @@ async fn queue_webhooks(
 }
 
 async fn referenced_users(
+    app: &App,
     tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     content: &str,
@@ -2118,6 +2122,13 @@ async fn referenced_users(
         {
             sqlx::query_scalar("SELECT id FROM users WHERE id=? AND account_id=?")
                 .bind(legacy_id)
+                .bind(account_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(db_err)?
+        } else if let Some(signed_id) = app.sgid_signer.parse_user(&sgid) {
+            sqlx::query_scalar("SELECT id FROM users WHERE id=? AND account_id=?")
+                .bind(signed_id)
                 .bind(account_id)
                 .fetch_optional(&mut **tx)
                 .await
@@ -2138,6 +2149,7 @@ async fn referenced_users(
 }
 
 async fn queue_notifications(
+    app: &App,
     tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     board_id: &str,
@@ -2169,7 +2181,7 @@ async fn queue_notifications(
         None
     };
     let mentioned: HashSet<String> = if let Some(content) = mention_content {
-        referenced_users(tx, &p.account_id, &content)
+        referenced_users(app, tx, &p.account_id, &content)
             .await?
             .into_iter()
             .collect()
@@ -2222,6 +2234,7 @@ async fn queue_notifications(
 }
 
 async fn create_new_mentions(
+    app: &App,
     tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     board_id: &str,
@@ -2230,7 +2243,7 @@ async fn create_new_mentions(
     source_id: &str,
     content: &str,
 ) -> Result<()> {
-    for user_id in referenced_users(tx, &p.account_id, content).await? {
+    for user_id in referenced_users(app, tx, &p.account_id, content).await? {
         let accessible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users u JOIN accesses a ON a.user_id=u.id WHERE u.id=? AND u.account_id=? AND a.board_id=?")
             .bind(&user_id).bind(&p.account_id).bind(board_id)
             .fetch_one(&mut **tx).await.map_err(db_err)?;
@@ -4194,10 +4207,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         seed(&db, mysql).await?;
         return Ok(());
     }
+    let sgid_secret = env::var("RIZZY_SECRET_KEY_BASE").unwrap_or_else(|_| qr_secret.clone());
     let app = Arc::new(App {
         db,
         mysql,
         qr_secret,
+        sgid_signer: signed_global_id::Signer::new(&sgid_secret),
         write_lock: tokio::sync::Mutex::new(()),
         auth_lock: tokio::sync::Mutex::new(()),
         notification_html_cache: tokio::sync::Mutex::new(HashMap::new()),
@@ -7093,10 +7108,10 @@ async fn remember_board_etag(app: &App, key: String, before: Option<i64>, etag: 
     }
 }
 
-fn prompt_user_item(p: &Principal, row: &DbRow) -> String {
+fn prompt_user_item(app: &App, p: &Principal, row: &DbRow) -> String {
     let id: String = row.get("id");
     let name: String = row.get("name");
-    let sgid: String = row.get("sgid");
+    let sgid = app.sgid_signer.user(&id);
     let first = name.split_whitespace().next().unwrap_or(&name);
     let initials: String = name
         .split_whitespace()
@@ -7131,7 +7146,9 @@ async fn prompt_users(
     let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id WHERE u.account_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
         .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
     let response = conditional_html_response(
-        rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
+        rows.iter()
+            .map(|row| prompt_user_item(&app, &p, row))
+            .collect(),
         &headers,
     );
     if headers.contains_key("x-rizzy-json-request") && response.status() != StatusCode::NOT_MODIFIED
@@ -7151,7 +7168,9 @@ async fn prompt_board_users(
     let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id JOIN accesses a ON a.user_id=u.id WHERE u.account_id=? AND a.board_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
         .bind(&p.account_id).bind(&board_id).fetch_all(&app.db).await.map_err(db_err)?;
     let response = conditional_html_response(
-        rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
+        rows.iter()
+            .map(|row| prompt_user_item(&app, &p, row))
+            .collect(),
         &headers,
     );
     if headers.contains_key("x-rizzy-json-request") && response.status() != StatusCode::NOT_MODIFIED
@@ -12936,6 +12955,7 @@ async fn create_card(
             )
             .await?;
             queue_notifications(
+                &app,
                 &mut tx,
                 &p,
                 &board_id,
@@ -12947,7 +12967,7 @@ async fn create_card(
                 &timestamp,
             )
             .await?;
-            create_new_mentions(&mut tx, &p, &board_id, &id, "Card", &id, &description).await?;
+            create_new_mentions(&app, &mut tx, &p, &board_id, &id, "Card", &id, &description).await?;
             if app.mysql {
                 mysql_search::sync_card(&mut tx, &p.account_id, &id)
                     .await
@@ -13245,6 +13265,7 @@ async fn publish_card(
     )
     .await?;
     queue_notifications(
+        &app,
         &mut tx,
         &p,
         &board_id,
@@ -13257,6 +13278,7 @@ async fn publish_card(
     )
     .await?;
     create_new_mentions(
+        &app,
         &mut tx,
         &p,
         &board_id,
@@ -13515,6 +13537,7 @@ async fn update_card(
             .await?;
     if status == "published" {
         create_new_mentions(
+            &app,
             &mut tx,
             &p,
             &current_board_id,
@@ -15159,6 +15182,7 @@ async fn create_comment(
     }
     storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
     create_new_mentions(
+        &app,
         &mut tx,
         &p,
         &board_id,
@@ -15428,7 +15452,10 @@ async fn update_comment_data(
             .await?;
     }
     let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &id, &content).await?;
-    create_new_mentions(&mut tx, &p, &board_id, &card_id, "Comment", &id, &content).await?;
+    create_new_mentions(
+        &app, &mut tx, &p, &board_id, &card_id, "Comment", &id, &content,
+    )
+    .await?;
     if app.mysql {
         mysql_search::sync_comment(&mut tx, &p.account_id, id)
             .await

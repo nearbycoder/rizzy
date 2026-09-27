@@ -843,9 +843,13 @@ pub(super) async fn render_rich_text(
             let mut user = sqlx::query("SELECT u.name FROM user_attachables s JOIN users u ON u.id=s.user_id WHERE s.sgid=? AND s.account_id=?")
                 .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
             if user.is_none() {
-                if let Some(user_id) = value.strip_prefix("gid://fizzy/User/") {
+                if let Some(user_id) = app
+                    .sgid_signer
+                    .parse_user(value)
+                    .or_else(|| value.strip_prefix("gid://fizzy/User/").map(str::to_owned))
+                {
                     user = sqlx::query("SELECT name FROM users WHERE id=? AND account_id=?")
-                        .bind(user_id)
+                        .bind(&user_id)
                         .bind(account_id)
                         .fetch_optional(&app.db)
                         .await

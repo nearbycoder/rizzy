@@ -502,6 +502,7 @@ mod tests {
             db,
             mysql: false,
             qr_secret: "test-qr-secret".into(),
+            sgid_signer: crate::signed_global_id::Signer::new("test-qr-secret"),
             write_lock: tokio::sync::Mutex::new(()),
             auth_lock: tokio::sync::Mutex::new(()),
             notification_html_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),

@@ -287,6 +287,10 @@ async fn emit_record_set(
     let mut rows = query.fetch(&app.db);
     while let Some(row) = rows.try_next().await? {
         let mut value = row_value(&row, record_set)?;
+        if record_set.directory == "users" {
+            let user_id = value["id"].as_str().ok_or("missing user ID")?;
+            value["attachable_sgid"] = json!(app.sgid_signer.user(user_id));
+        }
         if record_set.directory == "action_text_rich_texts" {
             if let Some(body) = value["body"].as_str() {
                 value["body"] = if body.trim().is_empty() {
@@ -368,6 +372,7 @@ pub(crate) async fn build(app: &App, export: &DbRow) -> BuildResult<()> {
             let user_id: String = user.get("user_id");
             let gid = format!("gid://fizzy/User/{user_id}");
             blob_ids.insert(user.get("sgid"), gid.clone());
+            blob_ids.insert(app.sgid_signer.user(&user_id), gid.clone());
             blob_ids.insert(gid.clone(), gid);
         }
         for record_set in RECORD_SETS {
