@@ -440,6 +440,7 @@ CREATE TABLE `pins` (
   `card_id` VARCHAR(64) NOT NULL,
   `user_id` VARCHAR(64) NOT NULL,
   `created_at` VARCHAR(40) NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `reactions` (
@@ -450,6 +451,7 @@ CREATE TABLE `reactions` (
   `reacter_id` VARCHAR(64) NOT NULL,
   `content` LONGTEXT NOT NULL,
   `created_at` VARCHAR(40) NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `mentions` (

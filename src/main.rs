@@ -1362,6 +1362,37 @@ async fn mysql_setup(url: &str) -> std::result::Result<DbPool, Box<dyn std::erro
         sqlx::query("INSERT INTO app_secrets(name,value) VALUES('tag_records_v1','done') ON DUPLICATE KEY UPDATE value='done'")
             .execute(&db).await?;
     }
+    let interaction_records_backfilled: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='pin_reaction_update_v1')",
+    )
+    .fetch_one(&db)
+    .await?;
+    for table in ["pins", "reactions"] {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? AND column_name='updated_at'",
+        )
+        .bind(table)
+        .fetch_one(&db)
+        .await?;
+        if exists == 0 {
+            sqlx::query(&format!(
+                "ALTER TABLE `{table}` ADD COLUMN updated_at VARCHAR(40) NOT NULL DEFAULT ''"
+            ))
+            .execute(&db)
+            .await?;
+        }
+        if interaction_records_backfilled == 0 {
+            sqlx::query(&format!(
+                "UPDATE `{table}` SET updated_at=created_at WHERE updated_at=''"
+            ))
+            .execute(&db)
+            .await?;
+        }
+    }
+    if interaction_records_backfilled == 0 {
+        sqlx::query("INSERT INTO app_secrets(name,value) VALUES('pin_reaction_update_v1','done') ON DUPLICATE KEY UPDATE value='done'")
+            .execute(&db).await?;
+    }
     validate_mysql_schema(&db, schema).await?;
     mysql_search::setup(&db).await?;
     let bulk_touch_triggers_installed: i64 = sqlx::query_scalar(
@@ -3921,6 +3952,39 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .execute(&db).await?;
         if tag_records_backfilled == 0 {
             sqlx::query("INSERT INTO app_secrets(name,value) VALUES('tag_records_v1','done') ON CONFLICT(name) DO UPDATE SET value='done'")
+                .execute(&db).await?;
+        }
+        let interaction_records_backfilled: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM app_secrets WHERE name='pin_reaction_update_v1')",
+        )
+        .fetch_one(&db)
+        .await?;
+        for table in ["pins", "reactions"] {
+            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(&db)
+                .await?;
+            if !columns
+                .iter()
+                .any(|r| r.get::<String, _>("name") == "updated_at")
+            {
+                sqlx::query(&format!(
+                    "ALTER TABLE {table} ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"
+                ))
+                .execute(&db)
+                .await?;
+            }
+            if interaction_records_backfilled == 0 {
+                sqlx::query(&format!(
+                    "UPDATE {table} SET updated_at=created_at WHERE updated_at=''"
+                ))
+                .execute(&db)
+                .await?;
+            }
+            sqlx::query(&format!("CREATE TRIGGER IF NOT EXISTS {table}_updated_at_insert AFTER INSERT ON {table} WHEN NEW.updated_at='' BEGIN UPDATE {table} SET updated_at=NEW.created_at WHERE id=NEW.id; END"))
+                .execute(&db).await?;
+        }
+        if interaction_records_backfilled == 0 {
+            sqlx::query("INSERT INTO app_secrets(name,value) VALUES('pin_reaction_update_v1','done') ON CONFLICT(name) DO UPDATE SET value='done'")
                 .execute(&db).await?;
         }
         let board_columns = sqlx::query("PRAGMA table_info(boards)")
@@ -15690,17 +15754,19 @@ async fn set_pin(app: &App, p: &Principal, number: &str, pinned: bool) -> Result
         return Err(missing());
     }
     if pinned {
+        let timestamp = now();
         let statement = if app.mysql {
-            "INSERT IGNORE INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)"
+            "INSERT IGNORE INTO pins(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)"
         } else {
-            "INSERT OR IGNORE INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)"
+            "INSERT OR IGNORE INTO pins(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)"
         };
         sqlx::query(statement)
             .bind(id())
             .bind(&p.account_id)
             .bind(&card_id)
             .bind(&p.user_id)
-            .bind(now())
+            .bind(&timestamp)
+            .bind(&timestamp)
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
@@ -15874,8 +15940,10 @@ async fn create_reaction(
     let (mut tx, _) =
         begin_accessible_card_board_write(app, p, &card_id, &c.get::<String, _>("board_id"))
             .await?;
-    sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content).bind(now()).execute(&mut *tx).await.map_err(db_err)?;
+    let timestamp = now();
+    sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
+        .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content)
+        .bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
     if kind == "Comment" {
         sqlx::query("UPDATE comments SET updated_at=? WHERE id=?")
             .bind(now())

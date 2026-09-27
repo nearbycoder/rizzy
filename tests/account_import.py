@@ -24,6 +24,8 @@ FRESH_UPDATE_TABLES = {
     "user_settings": "user_settings_records",
     "tags": "tags",
     "taggings": "taggings",
+    "pins": "pins",
+    "reactions": "reactions",
     "boards": "boards",
     "columns": "columns",
     "board_publications": "board_publications",

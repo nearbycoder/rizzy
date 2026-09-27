@@ -142,6 +142,7 @@ def main():
             comment = api(target, f"/cards/{card['number']}/comments", "POST",
                           {"comment": {"body": "An observation"}}, 201)
             mutate(target, f"/cards/{card['number']}/taggings", payload={"tag_title": "#transfer"})
+            mutate(target, f"/cards/{card['number']}/pin")
             with sqlite3.connect(db_path) as db:
                 tag_record = db.execute("SELECT id,title,created_at,updated_at FROM tags WHERE title='transfer'").fetchone()
                 tagging_record = db.execute("SELECT id,card_id,tag_id,created_at,updated_at FROM taggings WHERE card_id=?", (card["id"],)).fetchone()
@@ -159,12 +160,16 @@ def main():
                 watch_record = db.execute(
                     "SELECT id,user_id,watching,created_at,updated_at FROM watches WHERE card_id=? AND user_id=?",
                     (card["id"], owner["id"])).fetchone()
+                pin_record = db.execute(
+                    "SELECT id,card_id,user_id,created_at,updated_at FROM pins WHERE card_id=? AND user_id=?",
+                    (card["id"], owner["id"])).fetchone()
                 rich_record = db.execute(
                     "SELECT id,created_at,updated_at FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'",
                     (card["id"],)).fetchone()
             assert assignment_record and assignment_record[4] == assignment_record[5]
             assert gold_record
             assert watch_record
+            assert pin_record and pin_record[3] == pin_record[4]
             assert rich_record
             with sqlite3.connect(db_path) as db:
                 spike_record = db.execute(
@@ -178,6 +183,11 @@ def main():
                     (card["id"],)).fetchone()
             assert closure_record and closure_record[2] == owner["id"]
             mutate(target, f"/cards/{card['number']}/reactions", payload={"reaction": {"content": "👍"}})
+            with sqlite3.connect(db_path) as db:
+                reaction_record = db.execute(
+                    "SELECT id,reactable_type,reactable_id,reacter_id,content,created_at,updated_at FROM reactions WHERE reactable_type='Card' AND reactable_id=?",
+                    (card["id"],)).fetchone()
+            assert reaction_record and reaction_record[5] == reaction_record[6]
             mutate(target, f"/boards/{board['id']}/publication")
             with sqlite3.connect(db_path) as db:
                 publication_record = db.execute(
@@ -307,6 +317,13 @@ def main():
                 assert (watch_data["card_id"], watch_data["user_id"], watch_data["watching"],
                         watch_data["created_at"], watch_data["updated_at"]) == (
                     card["id"], owner["id"], bool(watch_record[2]), watch_record[3], watch_record[4])
+                pin_data = json.loads(archive.read(f"data/pins/{pin_record[0]}.json"))
+                assert (pin_data["card_id"], pin_data["user_id"], pin_data["created_at"],
+                        pin_data["updated_at"]) == pin_record[1:]
+                reaction_data = json.loads(archive.read(f"data/reactions/{reaction_record[0]}.json"))
+                assert (reaction_data["reactable_type"], reaction_data["reactable_id"],
+                        reaction_data["reacter_id"], reaction_data["content"],
+                        reaction_data["created_at"], reaction_data["updated_at"]) == reaction_record[1:]
                 not_now_data = json.loads(archive.read(f"data/card_not_nows/{postponed_record[0]}.json"))
                 assert (not_now_data["card_id"], not_now_data["user_id"], not_now_data["created_at"]) == (
                     postponed_card["id"], owner["id"], postponed_record[2])

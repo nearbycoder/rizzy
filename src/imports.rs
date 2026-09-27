@@ -964,21 +964,22 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for pin in records(&archive, "pins") {
-        sqlx::query("INSERT INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)")
+        sqlx::query("INSERT INTO pins(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(field(pin, "id")?)
             .bind(account_id)
             .bind(field(pin, "card_id")?)
             .bind(field(pin, "user_id")?)
             .bind(field(pin, "created_at")?)
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
     }
     for reaction in records(&archive, "reactions") {
-        sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
             .bind(field(reaction,"id")?).bind(account_id).bind(field(reaction,"reactable_type")?)
             .bind(field(reaction,"reactable_id")?).bind(field(reaction,"reacter_id")?)
-            .bind(field(reaction,"content")?).bind(field(reaction,"created_at")?)
+            .bind(field(reaction,"content")?).bind(field(reaction,"created_at")?).bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for mention in records(&archive, "mentions") {

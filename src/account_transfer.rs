@@ -134,13 +134,13 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "pins",
-        query: "SELECT id,account_id,card_id,created_at,created_at updated_at,user_id FROM pins WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,card_id,created_at,COALESCE(NULLIF(updated_at,''),created_at) updated_at,user_id FROM pins WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
     RecordSet {
         directory: "reactions",
-        query: "SELECT id,account_id,content,created_at,reactable_id,reactable_type,reacter_id,created_at updated_at FROM reactions WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,content,created_at,reactable_id,reactable_type,reacter_id,COALESCE(NULLIF(updated_at,''),created_at) updated_at FROM reactions WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },

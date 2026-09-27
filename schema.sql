@@ -482,6 +482,7 @@ CREATE TABLE IF NOT EXISTS pins (
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(user_id,card_id)
 );
 CREATE INDEX IF NOT EXISTS pins_user_recent ON pins(user_id,created_at DESC);
@@ -492,7 +493,8 @@ CREATE TABLE IF NOT EXISTS reactions (
   reactable_id TEXT NOT NULL,
   reacter_id TEXT NOT NULL REFERENCES users(id),
   content TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS reactions_target ON reactions(reactable_type,reactable_id,created_at);
 CREATE TABLE IF NOT EXISTS mentions (
