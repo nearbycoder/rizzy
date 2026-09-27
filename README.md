@@ -1,17 +1,23 @@
 # Rizzy
 
-Rizzy is an in-progress Rust implementation of [Fizzy](https://github.com/basecamp/fizzy). The reference checkout in `upstream/` is pinned to commit `477c943e0506f109e5bc83ae9dadbe519732c045` and is ignored by this repository. Fizzy's API docs, routes, schema, and controller tests are the behavioral reference.
+Rizzy is an experimental Rust implementation of [Fizzy](https://github.com/basecamp/fizzy). It is an independent project and is not affiliated with 37signals. The reference checkout in `upstream/` is pinned to commit `477c943e0506f109e5bc83ae9dadbe519732c045` and is ignored by this repository. Fizzy's API docs, routes, schema, and controller tests are the behavioral reference.
 
-**Status: partial implementation.** Rizzy currently has a usable board view, email-code sign-in, and a subset of Fizzy's JSON API. It is not a one-for-one replacement. A parity checked local read workload runs faster, but a product-wide speed or scale advantage has not been established.
+**Status:** Rizzy supports many core board and card workflows, but it is not a one-for-one Fizzy replacement or ready for production use. The [parity tracker](PARITY.md) records what has been checked and what remains. Local benchmarks show faster results for specific parity-checked workloads; they do not establish a product-wide speed or scale advantage.
 
-## Run
+**License:** This repository is public and source available under Fizzy's [O'Saasy License](LICENSE.md). Its restriction on directly competing hosted services means it does **not** meet the [Open Source Definition](https://opensource.org/osd). Please read the license before using or distributing Rizzy.
+
+## Quick start
+
+You need Rust 1.85 or newer (for the 2024 edition). From the repository root:
 
 ```sh
 cargo run --release -- seed
 # For local development only, show sign-in codes in the browser:
 RIZZY_DEV_MAGIC_LINKS=1 cargo run --release
-# Open http://localhost:3007/ and sign in with the seeded email.
+# Open http://localhost:3007/ and sign in as owner@example.com.
 ```
+
+The `seed` command prints an account number and bearer token; keep the token private. `RIZZY_DEV_MAGIC_LINKS=1` displays sign-in codes in the browser and is for local development only. To run the checks, use `cargo test` and the relevant Python scripts under `tests/`; comparisons with Fizzy require both applications running and their credentials configured. See [Contributing](CONTRIBUTING.md) and [Verification and benchmarks](#verification-and-benchmarks).
 
 The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a different SQLite URL, `RIZZY_BIND` to another bind address, and `RIZZY_DB_POOL_SIZE` to change the SQLite connection pool (default 12). `seed` creates a new account and owner token; its email, name, and account name can be set with `RIZZY_SEED_EMAIL`, `RIZZY_SEED_NAME`, and `RIZZY_SEED_ACCOUNT`. Card images and user avatar bytes are stored in `data/storage/files` by default; set `RIZZY_STORAGE_DIR` to move them. User and account exports are stored in `data/exports` by default; set `RIZZY_EXPORT_DIR` for another path. Uploaded account import ZIPs are stored in `data/imports` by default; set `RIZZY_IMPORT_DIR` to move them. Export notifications use `RIZZY_SENDMAIL` and `RIZZY_PUBLIC_URL` when configured.
 
@@ -119,4 +125,8 @@ For a comparative run, start both applications on the same machine using the sam
 
 ## License
 
-Fizzy is released under the O'Saasy License. The required notice is retained in [LICENSE.md](LICENSE.md). In particular, its terms restrict offering a derivative as a directly competing hosted service. Review the license before distribution or hosting.
+Fizzy is released under the O'Saasy License. The required notice is retained in [LICENSE.md](LICENSE.md). Its terms restrict offering a derivative as a directly competing hosted service. This is a source-available project, not OSI open source. Third-party Lexxy and Rails asset licenses are included in [static/lexxy](static/lexxy/README.md).
+
+## Contributing
+
+Bug reports, parity findings, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and how to document comparisons with Fizzy.
