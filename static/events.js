@@ -23,6 +23,24 @@ if (activity && 'IntersectionObserver' in window) {
   if (first) observer.observe(first);
 }
 
+const timelineFilters = document.querySelector('.events__filters');
+timelineFilters?.addEventListener('change', event => {
+  if (event.target.matches('input[type="checkbox"]')) timelineFilters.requestSubmit();
+});
+timelineFilters?.addEventListener('input', event => {
+  if (!event.target.matches('.quick-filter__search')) return;
+  const query = event.target.value.trim().toLocaleLowerCase();
+  for (const option of event.target.closest('.quick-filter').querySelectorAll('.quick-filter__option')) {
+    option.hidden = !option.textContent.toLocaleLowerCase().includes(query);
+  }
+});
+timelineFilters?.addEventListener('toggle', event => {
+  if (event.target.open) event.target.querySelector('.quick-filter__search')?.focus();
+}, true);
+timelineFilters?.addEventListener('keydown', event => {
+  if (event.key === 'Escape') event.target.closest('.quick-filter')?.removeAttribute('open');
+});
+
 document.addEventListener('keydown', event => {
   if (event.repeat || event.altKey || event.ctrlKey || event.metaKey ||
       event.target.closest('input, textarea, select, [contenteditable="true"]')) return;

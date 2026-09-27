@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare Home's add-card board choice and draft form with Fizzy."""
+"""Compare Home's add-card and board-filter behavior with Fizzy."""
 
 import json
 import os
@@ -38,7 +38,8 @@ def check(target_item):
     account = target_item["account"]
     status, headers, empty_home = request(target_item, f"/{account}/events",
                                           accept="text/html")
-    assert status == 200 and b'Add a card' not in empty_home, target_item["name"]
+    assert status == 200 and b'Add a card' not in empty_home and b"all boards" in empty_home, (
+        target_item["name"], "empty Home filter")
     empty_etag = headers["ETag"]
     first = board(target_item, "Home selection first")
     target_item["extra_headers"] = {"If-None-Match": empty_etag}
@@ -47,6 +48,8 @@ def check(target_item):
     del target_item["extra_headers"]
     assert status == 200 and add_card_action(refreshed, account) == f"/{account}/boards/{first}/cards", (
         target_item["name"], "Home stayed stale after a board was created", status)
+    assert b"Latest Activity" in refreshed and b"events__filter-select" not in refreshed, (
+        target_item["name"], "single-board Home filter")
     second = board(target_item, "Home selection recent")
     with sqlite3.connect(target_item["db"]) as db:
         db.execute("UPDATE accesses SET accessed_at='2025-01-01T00:00:00.000Z'")
@@ -56,11 +59,15 @@ def check(target_item):
                    "WHERE board_id=(SELECT id FROM boards WHERE name='Home selection recent')")
     status, _, home = request(target_item, f"/{account}/events", accept="text/html")
     assert status == 200, (target_item["name"], status)
+    assert b"Activity across" in home and b"all boards" in home and b"events__filter-select" in home, (
+        target_item["name"], "multi-board Home filter")
     assert add_card_action(home, account) == f"/{account}/boards/{second}/cards", target_item["name"]
     selected = urllib.parse.urlencode({"board_ids[]": first})
     status, _, filtered = request(target_item, f"/{account}/events?{selected}",
                                   accept="text/html")
     assert status == 200, (target_item["name"], status)
+    assert b"Activity in" in filtered and b"Home selection first" in filtered, (
+        target_item["name"], "selected-board Home heading")
     action = add_card_action(filtered, account)
     assert action == f"/{account}/boards/{first}/cards", (target_item["name"], action)
     csrf = re.search(rb'<meta name="csrf-token" content="([^"]+)"', filtered)
@@ -104,7 +111,7 @@ def main():
                               credentials["token"], email, str(database))
                 checks.append(check(item))
             assert checks[0] == checks[1]
-            print("PASS Home add-card recent/selected board and browser draft redirect")
+            print("PASS Home add-card, draft redirect, and board-filter headings")
         finally:
             for process in processes:
                 stop_server(process)

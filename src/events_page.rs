@@ -357,6 +357,34 @@ fn filter_query(params: &Params) -> String {
     serializer.finish()
 }
 
+fn selection_label(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [name] => name.clone(),
+        [first, second] => format!("{first} and {second}"),
+        _ => format!(
+            "{}, and {}",
+            names[..names.len() - 1].join(", "),
+            names.last().unwrap()
+        ),
+    }
+}
+
+fn familiar_name(name: &str) -> String {
+    let mut words = name.split_whitespace();
+    let Some(first) = words.next() else {
+        return String::new();
+    };
+    let initials: Vec<String> = words
+        .filter_map(|word| word.chars().next().map(|initial| format!("{initial}.")))
+        .collect();
+    if initials.is_empty() {
+        first.to_owned()
+    } else {
+        format!("{first}\u{a0}{}", initials.join(""))
+    }
+}
+
 fn excerpt(text: &str) -> String {
     let plain = super::rich_text::plain_text(text);
     let mut short: String = plain.chars().take(200).collect();
@@ -569,8 +597,13 @@ pub(super) async fn index(
     let users = sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY lower(name),id")
         .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
     let mut board_options = String::new();
+    let mut selected_boards = Vec::new();
     for board in &boards {
         let id: String = board.get("id");
+        let name: String = board.get("name");
+        if params.boards.contains(&id) {
+            selected_boards.push(name.clone());
+        }
         board_options.push_str(&format!(
             "<label class=\"quick-filter__option\"><input type=\"checkbox\" name=\"board_ids[]\" value=\"{}\"{}>{}</label>",
             escape(&id),
@@ -579,12 +612,17 @@ pub(super) async fn index(
             } else {
                 ""
             },
-            escape(&board.get::<String, _>("name"))
+            escape(&name)
         ));
     }
     let mut user_options = String::new();
+    let mut selected_users = Vec::new();
     for user in &users {
         let id: String = user.get("id");
+        let name: String = user.get("name");
+        if params.creators.contains(&id) {
+            selected_users.push(familiar_name(&name));
+        }
         user_options.push_str(&format!(
             "<label class=\"quick-filter__option\"><input type=\"checkbox\" name=\"creator_ids[]\" value=\"{}\"{}>{}</label>",
             escape(&id),
@@ -593,7 +631,7 @@ pub(super) async fn index(
             } else {
                 ""
             },
-            escape(&user.get::<String, _>("name"))
+            escape(&name)
         ));
     }
     let title = if boards.len() > 1 {
@@ -605,11 +643,36 @@ pub(super) async fn index(
     } else {
         "Latest Activity"
     };
+    let board_filter = if boards.len() != 1 {
+        let label = if selected_boards.is_empty() {
+            "all boards".to_owned()
+        } else {
+            selection_label(&selected_boards)
+        };
+        format!(
+            "<details class=\"quick-filter\"><summary class=\"events__filter-select\">{}</summary><div class=\"quick-filter__options\"><strong>Board…</strong><input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter boards\"><div class=\"quick-filter__list\">{board_options}</div></div></details>",
+            escape(&label)
+        )
+    } else {
+        String::new()
+    };
+    let user_filter = if users.len() != 1 {
+        let label = if selected_users.is_empty() {
+            "everyone".to_owned()
+        } else {
+            selection_label(&selected_users)
+        };
+        format!(
+            "<span>by</span><details class=\"quick-filter\"><summary class=\"events__filter-select\">{}</summary><div class=\"quick-filter__options\"><strong>Person…</strong><input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter people\"><div class=\"quick-filter__list\">{user_options}</div></div></details>",
+            escape(&label)
+        )
+    } else {
+        String::new()
+    };
     let body = render_day(&timeline, p.slug, &params, "events/days");
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a>{add_card}<h1 class=\"header__title\">{title}</h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><form class=\"events__filters\" action=\"/{}/events\" method=\"get\"><details class=\"quick-filter\"><summary>Board…</summary><div class=\"quick-filter__options\">{board_options}</div></details><details class=\"quick-filter\"><summary>Person…</summary><div class=\"quick-filter__options\">{user_options}</div></details><button class=\"button\" type=\"submit\">Filter</button><a href=\"/{}/events\">Clear</a></form><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
         include_str!("../static/events.css"),
-        p.slug,
         p.slug,
         p.slug,
         p.slug,
