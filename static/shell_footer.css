@@ -3,7 +3,7 @@
 #footer button,#footer input { font-family: inherit }
 #footer button { cursor: pointer }
 .tray { position: relative; min-width: 0 }
-.tray__toggle,.bar__placeholder button { display: block; width: 100%; height: 100%; border: 0; background: transparent; color: inherit; font-size: .75rem; font-weight: 600; text-transform: uppercase }
+.tray__toggle,.bar__placeholder button { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; color: inherit; font-size: .75rem; font-weight: 600; text-transform: uppercase }
 .tray__icon { display: none }
 .tray__toggle[aria-expanded="true"],.bar__placeholder button:hover,.tray__toggle:hover { color: #e7ebed }
 .tray__toggle.unread::after { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 0 1px 7px; border-radius: 50%; background: #e7bd61 }
@@ -15,8 +15,8 @@
 .bar__input[hidden] { display: none }
 #footer .search__form { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; max-width: none; margin: 0; padding: 0 }
 #footer .search__form label { display: block; white-space: nowrap; font-size: 13px; font-weight: 700 }
-#footer .search__input { flex: none; width: min(44vw,520px); height: 30px; padding: 5px 9px; border: 1px solid #52616a; border-radius: 5px; background: #192931; color: #edf0f1 }
-#footer .search__reset { border: 0; background: transparent; color: #c3cbd0; font-size: 22px }
+#footer .search__input { flex: none; width: min(44vw,520px); height: 30px; margin: 0; padding: 5px 9px; border: 1px solid #52616a; border-radius: 5px; background: #192931; color: #edf0f1 }
+#footer .search__reset { width: 30px; height: 35px; padding: 0; border: 0; background: transparent; color: #c3cbd0; font-size: 22px }
 .tray__dialog,.bar__modal { position: fixed; inset: auto auto 49px 0; z-index: 21; width: min(420px,calc(100vw - 16px)); max-height: 75vh; margin: 0; overflow: auto; padding: 10px; border: 1px solid #3d505a; border-radius: 8px 8px 0 0; background: #14232b; color: #e7ebed; box-shadow: 0 -8px 24px #0007 }
 .tray--notifications .tray__dialog { inset-inline: auto 0 }
 .bar__modal { inset-inline: 50% auto; transform: translateX(-50%); width: min(800px,100vw) }
