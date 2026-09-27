@@ -5,9 +5,10 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::{Any as Db, QueryBuilder, Row, any::AnyRow as DbRow};
 use std::{
+    collections::HashMap,
     sync::{Arc, Weak},
     time::{Duration, Instant},
 };
@@ -236,7 +237,7 @@ fn column_clause(query: &mut QueryBuilder<'_, Db>, column: &str) {
     }
 }
 
-const EVENT_FIELDS: &str = "SELECT e.id,e.action,e.created_at,e.eventable_type,e.eventable_id,c.id card_id,c.number,c.title,c.description,c.golden,b.name board_name,u.name creator_name,m.body comment_body";
+const EVENT_FIELDS: &str = "SELECT e.id,e.action,e.created_at,e.eventable_type,e.eventable_id,e.particulars,e.creator_id,c.id card_id,c.number,c.title,c.description,c.golden,b.name board_name,u.name creator_name,m.body comment_body";
 
 struct Column {
     id: &'static str,
@@ -394,12 +395,91 @@ fn excerpt(text: &str) -> String {
     escape(&short)
 }
 
-fn render_event(event: &DbRow, account: i64) -> String {
+fn event_description(event: &DbRow, viewer: &str, users: &HashMap<String, String>) -> String {
+    let action: String = event.get("action");
+    let creator_id: String = event.get("creator_id");
+    let creator: String = event.get("creator_name");
+    let actor = if creator_id == viewer {
+        "You".to_owned()
+    } else {
+        escape(&creator)
+    };
+    let title = format!(
+        "<span class=\"txt-underline\">{}</span>",
+        escape(&event.get::<String, _>("title"))
+    );
+    let stored: Value =
+        serde_json::from_str(&event.get::<String, _>("particulars")).unwrap_or_else(|_| json!({}));
+    let details = stored.get("particulars").unwrap_or(&stored);
+    let field = |name: &str| escape(details.get(name).and_then(Value::as_str).unwrap_or(""));
+    let assignee_ids: Vec<&str> = stored
+        .get("assignee_ids")
+        .and_then(Value::as_array)
+        .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let assignee_names = || {
+        let mut names: Vec<(&str, &str)> = assignee_ids
+            .iter()
+            .filter_map(|id| users.get(*id).map(|name| (*id, name.as_str())))
+            .collect();
+        names.sort_by_key(|(id, _)| *id);
+        selection_label(
+            &names
+                .iter()
+                .map(|(_, name)| escape(name))
+                .collect::<Vec<_>>(),
+        )
+    };
+    match action.as_str() {
+        "card_assigned" if assignee_ids.contains(&viewer) => {
+            format!("{actor} will handle {title}")
+        }
+        "card_assigned" => format!("{actor} assigned {} to {title}", assignee_names()),
+        "card_unassigned" => format!(
+            "{actor} unassigned {} from {title}",
+            if assignee_ids.contains(&viewer) {
+                "yourself".to_owned()
+            } else {
+                assignee_names()
+            }
+        ),
+        "card_published" => format!("{actor} added {title}"),
+        "card_closed" => format!("{actor} moved {title} to &quot;Done&quot;"),
+        "card_reopened" => format!("{actor} reopened {title}"),
+        "card_postponed" => format!("{actor} moved {title} to &quot;Not Now&quot;"),
+        "card_auto_postponed" => {
+            format!("{title} moved to &quot;Not Now&quot; due to inactivity")
+        }
+        "card_triaged" => format!("{actor} moved {title} to &quot;{}&quot;", field("column")),
+        "card_sent_back_to_triage" => {
+            format!("{actor} moved {title} back to &quot;Maybe?&quot;")
+        }
+        "card_board_changed" => {
+            format!(
+                "{actor} moved {title} to &quot;{}&quot;",
+                field("new_board")
+            )
+        }
+        "card_collection_changed" => {
+            format!(
+                "{actor} moved {title} to &quot;{}&quot;",
+                field("new_collection")
+            )
+        }
+        "comment_created" => format!("{actor} commented on {title}"),
+        _ => String::new(),
+    }
+}
+
+fn render_event(
+    event: &DbRow,
+    account: i64,
+    viewer: &str,
+    users: &HashMap<String, String>,
+) -> String {
     let id: String = event.get("id");
     let action: String = event.get("action");
     let number: i64 = event.get("number");
-    let title: String = event.get("title");
-    let creator: String = event.get("creator_name");
     let board: String = event.get("board_name");
     let card_id: String = event.get("card_id");
     let comment: Option<String> = event.get("comment_body");
@@ -410,20 +490,7 @@ fn render_event(event: &DbRow, account: i64) -> String {
     } else {
         String::new()
     };
-    let verb = match action.as_str() {
-        "card_published" => "added",
-        "card_closed" => "closed",
-        "card_reopened" => "reopened",
-        "card_assigned" => "assigned someone to",
-        "card_unassigned" => "removed someone from",
-        "comment_created" => "commented on",
-        "card_postponed" | "card_auto_postponed" => "moved to Not Now",
-        "card_sent_back_to_triage" => "sent back to triage",
-        "card_triaged" => "triaged",
-        "card_board_changed" => "moved",
-        "card_collection_changed" => "updated",
-        _ => "updated",
-    };
+    let description = event_description(event, viewer, users);
     let comment_fragment = if action == "comment_created" {
         format!(
             "#comment_{}",
@@ -433,7 +500,7 @@ fn render_event(event: &DbRow, account: i64) -> String {
         String::new()
     };
     format!(
-        "<a id=\"timelined_event_{}\" class=\"event event--{}{}\" href=\"/{account}/cards/{number}{comment_fragment}\" data-card-id=\"{}\"><span class=\"event__board\"><span class=\"event__number\">#{number}</span> {}</span><span class=\"event__creator\">{}</span><strong>{} {}</strong><span class=\"event__excerpt\">{body}</span></a>",
+        "<a id=\"timelined_event_{}\" class=\"event event--{}{}\" href=\"/{account}/cards/{number}{comment_fragment}\" data-card-id=\"{}\"><span class=\"event__board\"><span class=\"event__number\">#{number}</span> {}</span><strong class=\"event__title\">{description}</strong><span class=\"event__excerpt\">{body}</span></a>",
         escape(&id),
         escape(&action),
         if event.get::<i64, _>("golden") != 0 {
@@ -443,13 +510,30 @@ fn render_event(event: &DbRow, account: i64) -> String {
         },
         escape(&card_id),
         escape(&board),
-        escape(&creator),
-        verb,
-        escape(&title)
     )
 }
 
-fn render_column(column: &Column, day: NaiveDate, tz: Tz, account: i64, params: &Params) -> String {
+async fn account_user_names(app: &App, p: &Principal) -> Result<HashMap<String, String>> {
+    let rows = sqlx::query("SELECT id,name FROM users WHERE account_id=?")
+        .bind(&p.account_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.get("id"), row.get("name")))
+        .collect())
+}
+
+fn render_column(
+    column: &Column,
+    day: NaiveDate,
+    tz: Tz,
+    account: i64,
+    params: &Params,
+    viewer: &str,
+    users: &HashMap<String, String>,
+) -> String {
     let mut html = format!(
         "<div class=\"events__column\"><h3 class=\"events__column-header\"><span>{} {}{}</span>",
         column.title,
@@ -480,7 +564,7 @@ fn render_column(column: &Column, day: NaiveDate, tz: Tz, account: i64, params: 
             html.push_str(&format!("<div class=\"events__time-block\" style=\"grid-area: {}/{}\"><time class=\"event__timestamp\" datetime=\"{}\">{}</time>", 25-hour, column.index, escape(&created), local.format("%-I:%M %p")));
             last_hour = Some(hour);
         }
-        html.push_str(&render_event(event, account));
+        html.push_str(&render_event(event, account, viewer, users));
     }
     if last_hour.is_some() {
         html.push_str("</div>");
@@ -492,7 +576,14 @@ fn render_column(column: &Column, day: NaiveDate, tz: Tz, account: i64, params: 
     html
 }
 
-fn render_day(timeline: &Timeline, account: i64, params: &Params, pagination_path: &str) -> String {
+fn render_day(
+    timeline: &Timeline,
+    account: i64,
+    params: &Params,
+    pagination_path: &str,
+    viewer: &str,
+    users: &HashMap<String, String>,
+) -> String {
     let mut html = format!(
         "<turbo-frame id=\"day-timeline-pagination-contents-{}\" role=\"presentation\"><section class=\"events__day\">",
         timeline.day
@@ -506,6 +597,8 @@ fn render_day(timeline: &Timeline, account: i64, params: &Params, pagination_pat
                 timeline.tz,
                 account,
                 params,
+                viewer,
+                users,
             ));
         }
         html.push_str("</div>");
@@ -594,8 +687,23 @@ pub(super) async fn index(
         format!("<form id=\"add-card\" class=\"header__actions header__actions--start\" action=\"/{}/boards/{}/cards\" method=\"post\"><button type=\"submit\" aria-label=\"Add a card\">Add a card <kbd>C</kbd></button></form>",
             p.slug, escape(&board.get::<String, _>("id")))
     });
-    let users = sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY lower(name),id")
-        .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let users = sqlx::query(
+        "SELECT id,name,active,role FROM users WHERE account_id=? ORDER BY lower(name),id",
+    )
+    .bind(&p.account_id)
+    .fetch_all(&app.db)
+    .await
+    .map_err(db_err)?;
+    let event_users: HashMap<String, String> = users
+        .iter()
+        .map(|user| (user.get("id"), user.get("name")))
+        .collect();
+    let filter_users: Vec<&DbRow> = users
+        .iter()
+        .filter(|user| {
+            user.get::<i64, _>("active") != 0 && user.get::<String, _>("role") != "system"
+        })
+        .collect();
     let mut board_options = String::new();
     let mut selected_boards = Vec::new();
     for board in &boards {
@@ -617,7 +725,7 @@ pub(super) async fn index(
     }
     let mut user_options = String::new();
     let mut selected_users = Vec::new();
-    for user in &users {
+    for user in &filter_users {
         let id: String = user.get("id");
         let name: String = user.get("name");
         if params.creators.contains(&id) {
@@ -656,7 +764,7 @@ pub(super) async fn index(
     } else {
         String::new()
     };
-    let user_filter = if users.len() != 1 {
+    let user_filter = if filter_users.len() != 1 {
         let label = if selected_users.is_empty() {
             "everyone".to_owned()
         } else {
@@ -669,7 +777,14 @@ pub(super) async fn index(
     } else {
         String::new()
     };
-    let body = render_day(&timeline, p.slug, &params, "events/days");
+    let body = render_day(
+        &timeline,
+        p.slug,
+        &params,
+        "events/days",
+        &p.user_id,
+        &event_users,
+    );
     let html = format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
         include_str!("../static/events.css"),
@@ -708,8 +823,17 @@ pub(super) async fn days(
         return Ok(response);
     }
     let timeline = timeline(&app, &p, &params, tz).await?;
+    let event_users = account_user_names(&app, &p).await?;
     Ok(cache_headers(
-        Html(render_day(&timeline, p.slug, &params, "events/days")).into_response(),
+        Html(render_day(
+            &timeline,
+            p.slug,
+            &params,
+            "events/days",
+            &p.user_id,
+            &event_users,
+        ))
+        .into_response(),
         &etag,
     ))
 }
@@ -751,6 +875,7 @@ pub(super) async fn user_fragment(
     params.creators = vec![id.clone()];
     params.filter_key = format!("user:{id}");
     let timeline = timeline(app, p, &params, timezone(headers)).await?;
+    let event_users = account_user_names(app, p).await?;
     let heading = if p.user_id == id {
         "What have you been up to?".to_owned()
     } else {
@@ -763,7 +888,7 @@ pub(super) async fn user_fragment(
     let path = format!("users/{}/events", escape(&id));
     Ok(format!(
         "<turbo-frame id=\"user_events\"><h1>{heading}</h1><div class=\"events\" id=\"activity\" data-controller=\"pagination\">{}</div></turbo-frame>",
-        render_day(&timeline, p.slug, &params, &path)
+        render_day(&timeline, p.slug, &params, &path, &p.user_id, &event_users)
     ))
 }
 
@@ -789,9 +914,10 @@ pub(super) async fn column(
         .iter()
         .find(|column| column.id == id)
         .ok_or_else(missing)?;
+    let event_users = account_user_names(&app, &p).await?;
     let mut events = String::new();
     for event in &selected.events {
-        events.push_str(&render_event(event, p.slug));
+        events.push_str(&render_event(event, p.slug, &p.user_id, &event_users));
     }
     Ok(cache_headers(Html(format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header class=\"header\"><a href=\"/{}/\">Activity</a><h1>{} {} ({})</h1></header><main id=\"main\" class=\"events--grid\">{events}</main></body></html>",

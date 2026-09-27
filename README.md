@@ -106,6 +106,7 @@ python3 tests/account_export_parity.py
 python3 tests/step_read_parity.py
 python3 tests/events_html_parity.py
 python3 tests/home_add_card_parity.py
+python3 tests/timeline_event_descriptions_parity.py
 python3 tests/users_events_html_parity.py
 python3 tests/user_profile_html_parity.py
 python3 tests/session_transfer_parity.py
