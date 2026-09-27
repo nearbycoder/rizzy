@@ -200,7 +200,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "active_storage_attachments",
-        query: "SELECT id,account_id,blob_id,created_at,name,record_id,record_type FROM storage_attachments WHERE account_id=? AND record_type NOT IN ('Export','Account::Import') ORDER BY id",
+        query: "SELECT a.id,a.account_id,a.blob_id,a.created_at,CASE WHEN r.id IS NOT NULL THEN 'embeds' ELSE a.name END name,CASE WHEN r.id IS NOT NULL THEN r.id ELSE a.record_id END record_id,CASE WHEN r.id IS NOT NULL THEN 'ActionText::RichText' ELSE a.record_type END record_type FROM storage_attachments a LEFT JOIN rich_text_records r ON a.name IN ('embed','embeds') AND r.account_id=a.account_id AND r.record_type=a.record_type AND r.record_id=a.record_id AND r.name=CASE WHEN a.record_type='Comment' THEN 'body' ELSE 'description' END WHERE a.account_id=? AND a.record_type NOT IN ('Export','Account::Import') ORDER BY a.id",
         booleans: &[],
         json_fields: &[],
     },

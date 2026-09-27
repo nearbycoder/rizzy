@@ -41,6 +41,39 @@ fn image_url(p: &Principal, signed_id: &str, filename: &str) -> String {
     )
 }
 
+async fn mark_blob_attached(tx: &mut sqlx::Transaction<'_, Db>, blob_id: &str) -> Result<()> {
+    let blob = sqlx::query("SELECT content_type,metadata FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    let content_type: String = blob.get("content_type");
+    let raw: String = blob.get("metadata");
+    let mut metadata: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+    let fields = metadata
+        .as_object_mut()
+        .ok_or_else(|| bad("Invalid blob metadata"))?;
+    fields.insert("identified".into(), json!(true));
+    // Active Storage's NullAnalyzer runs inline on first attachment. Media
+    // analyzers run later and fill dimensions or duration asynchronously.
+    if !["image/", "video/", "audio/"]
+        .iter()
+        .any(|prefix| content_type.starts_with(prefix))
+    {
+        fields.insert("analyzed".into(), json!(true));
+    }
+    let updated = metadata.to_string();
+    if updated != raw {
+        sqlx::query("UPDATE storage_blobs SET metadata=? WHERE id=?")
+            .bind(updated)
+            .bind(blob_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    }
+    Ok(())
+}
+
 async fn record_storage_entry_tx(
     tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
@@ -98,6 +131,9 @@ async fn record_attachment_change_tx(
         .fetch_one(&mut **tx)
         .await
         .map_err(db_err)?;
+    if operation == "attach" {
+        mark_blob_attached(tx, blob_id).await?;
+    }
     let bytes: i64 =
         sqlx::query_scalar("SELECT byte_size FROM storage_blobs WHERE id=? AND account_id=?")
             .bind(blob_id)
@@ -1392,6 +1428,7 @@ pub(super) async fn attach_user_avatar_tx(
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'User',?,'avatar',?)")
             .bind(id()).bind(&p.account_id).bind(blob_id).bind(user_id).bind(now())
             .execute(&mut **tx).await.map_err(db_err)?;
+        mark_blob_attached(tx, blob_id).await?;
     }
     Ok(keys)
 }
