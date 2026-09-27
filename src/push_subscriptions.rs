@@ -76,38 +76,12 @@ pub(super) async fn index(
     Path((account, _user)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
-    let p = principal(&app, &headers, &account).await?;
-    let rows = sqlx::query("SELECT id,endpoint,user_agent,created_at FROM push_subscriptions WHERE user_id=? ORDER BY created_at DESC")
-        .bind(&p.user_id)
-        .fetch_all(&app.db)
-        .await
-        .map_err(db_err)?;
-    if headers.contains_key("x-rizzy-json-request") {
-        return Ok(Json(json!(
-            rows.iter()
-                .map(|row| json!({
-                    "id":row.get::<String,_>("id"),
-                    "endpoint":row.get::<String,_>("endpoint"),
-                    "user_agent":row.get::<Option<String>,_>("user_agent"),
-                    "created_at":row.get::<String,_>("created_at")
-                }))
-                .collect::<Vec<_>>()
-        ))
-        .into_response());
-    }
-    let mut items = String::new();
-    for row in rows {
-        let endpoint: String = row.get("endpoint");
-        let id: String = row.get("id");
-        items.push_str(&format!(
-            "<li>{}<form method=\"post\" action=\"/{}/users/{}/push_subscriptions/{}\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button>Remove</button></form></li>",
-            escape(&endpoint),p.slug,escape(&p.user_id),escape(&id)
-        ));
-    }
-    Ok(Html(format!(
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Push subscriptions | Rizzy</title><main><h1>Push subscriptions</h1><ul>{items}</ul></main></html>"
-    ))
-    .into_response())
+    principal(&app, &headers, &account).await?;
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+    )
+        .into_response())
 }
 
 pub(super) async fn create(

@@ -112,12 +112,12 @@ pub(super) async fn new(
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.account_admin()?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(form(p.slug, &board_id, None, None, None))
 }
 
@@ -126,13 +126,13 @@ pub(super) async fn edit(
     Path((account, board_id, webhook_id)): Path<(String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.account_admin()?;
     let webhook = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(form(p.slug, &board_id, Some(&webhook), None, None))
 }
 

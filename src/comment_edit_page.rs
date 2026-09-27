@@ -100,12 +100,12 @@ pub(super) async fn edit(
     Path((account, number, id)): Path<(String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let principal = principal(&app, &headers, &account).await?;
     let card = card(&app, &principal, &number).await?;
     let comment = comment_row(&app, &card, &id).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     if comment.get::<String, _>("creator_id") != principal.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Comment creator required"));
     }

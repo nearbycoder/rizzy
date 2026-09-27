@@ -41,6 +41,15 @@ def check(item):
     assert status == 200 and b"Add people" in page
     assert original["code"].encode() in page and b"Change limit" in page
     first_qr = qr_path(item, page, original["url"])
+    anonymous = {**item, "opener": urllib.request.build_opener(NoRedirect())}
+    tampered = first_qr[:-1] + ("a" if first_qr[-1] != "a" else "b")
+    wrong_account = first_qr.replace(f"/{item['account']}/qr_codes/",
+                                     "/999999/qr_codes/", 1)
+    qr_errors = {}
+    for label, url in (("tampered", tampered), ("wrong_account", wrong_account)):
+        for accepted in ("application/json", "image/svg+xml"):
+            status, headers, _ = request(anonymous, url, accept=accepted)
+            qr_errors[(label, accepted)] = (status, headers.get_content_type())
     csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', page)
     csrf = csrf_match.group(1).decode() if csrf_match else None
     status, _, edit = request(item, path + "/edit", accept="text/html")
@@ -65,10 +74,9 @@ def check(item):
         status, _, page = request(item, path, accept="text/html")
         assert status == 200
         assert qr_path(item, page, latest["url"]) != first_qr
-        anonymous = {**item, "opener": urllib.request.build_opener(NoRedirect())}
         assert request(anonymous, first_qr, accept="image/svg+xml")[0] == 200
         return {"show": True, "edit": True, "update": True, "invalid": True,
-                "reset": True, "qr": True}
+                "reset": True, "qr": True, "qr_errors": qr_errors}
     finally:
         request(item, path + ".json", "PUT", {"account_join_code": {"usage_limit": original["usage_limit"]}}, bearer=True)
 

@@ -5,11 +5,11 @@ pub(super) async fn edit(
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    let principal = principal(&app, &headers, &account).await?;
+    let card = card(&app, &principal, &number).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let principal = principal(&app, &headers, &account).await?;
-    let card = card(&app, &principal, &number).await?;
     let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses a ON a.board_id=b.id WHERE b.account_id=? AND a.user_id=? ORDER BY a.accessed_at DESC,b.created_at DESC,b.id")
         .bind(&principal.account_id).bind(&principal.user_id)
         .fetch_all(&app.db).await.map_err(db_err)?;

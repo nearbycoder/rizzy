@@ -464,7 +464,7 @@ Fizzy's `Card.sorted_by` scope orders equal-time oldest cards by ID ascending. `
 
 [ROUTE_COVERAGE.md](ROUTE_COVERAGE.md) inventories source controller actions and Rizzy method/path declarations; all 209 normalized signatures are now present. Route presence does not establish functional parity. `tests/client_configuration_route_parity.py` compares the parameterized mobile route against fresh Fizzy and Rizzy servers in 24 root and account-scoped cases: versioned `.json` URLs, JSON negotiation without a suffix, query format selection, missing versions, invalid platforms, and HTML errors. Status, content type, cache, indexing header, and body matched. `tests/client_settings.py` also checks the supported configuration contents and personal timezone updates. Fizzy's three generated legacy `collections` redirects remain excluded from the inventory. A live comparison matched 34 GET and HEAD redirects across ordinary paths, `.json` suffixes, queries, trailing slashes, and an unknown numeric account. These route checks do not establish broader feature parity.
 
-`tests/session_transfer_parity.py` compares profile link generation, replacement of an older link, public QR image rendering and decoded destination, one-year public QR caching, anonymous transfer pages, PUT/PATCH redemption, and replay rejection on both apps. Previously issued QR images now survive link replacement, redemption, and four-hour transfer expiry, as Fizzy's signed URL does. Rizzy signs the QR destination with a persistent local key and rejects tampered or cross-account QR paths; a previously issued image also rendered after a Rust process restart. It does not reproduce Rails' signed-token bytes or exact SVG encoding. The test checks simultaneous Rust redemption from two requests. The profile's broader layout and CSRF meta markup still differ.
+`tests/session_transfer_parity.py` compares profile link generation, replacement of an older link, public QR image rendering and decoded destination, one-year public QR caching, anonymous transfer pages, PUT/PATCH redemption, and replay rejection on both apps. Previously issued QR images now survive link replacement, redemption, and four-hour transfer expiry, as Fizzy's signed URL does. Rizzy signs the QR destination with a persistent local key; a previously issued image also rendered after a Rust process restart. Invalid signatures return Fizzy's 500 error by requested format, while an absent account prefix redirects to the session menu. It does not reproduce Rails' signed-token bytes or exact SVG encoding. The test checks simultaneous Rust redemption from two requests. The profile's broader layout and CSRF meta markup still differ.
 
 `tests/passkey_parity.py` registers the same fixed-key WebAuthn test credential on both running apps, names it, verifies a signed assertion, checks challenge replay and bad-signature rejection, and deletes the credential. Rizzy stores one-use challenges and verifier state in SQLite, and asks browsers for resident credentials so the account-free sign-in picker can find them. The rendered scripts pass JavaScript syntax checks. This verifies a synthetic credential flow; hardware authenticator/browser interoperability and the full Fizzy passkey presentation still need testing.
 
@@ -921,3 +921,11 @@ the paired ratios were about 6.3 and 4.4. Fizzy's first phase was much slower
 than its second, so this local result is variable. The artifact records the
 committed Rizzy revision and exact release-binary hash. It does not isolate
 the access-check cost or establish whole-app performance or multi-host scale.
+
+`tests/mysql_pair_selfhost.py route-get` checks the status code and content type
+of 92 distinct pinned Fizzy GET paths against Rizzy, using a JSON request and
+absent resource identifiers on fresh paired MySQL databases. All 92 matched.
+This covers routing and missing-resource behavior only; it does not compare
+response bodies, redirects, valid resources, HTML, permissions, or side effects.
+The paired `join-code` flow also checks invalid QR signatures and absent account
+prefixes with JSON and SVG Accept headers. Full route parity remains open.

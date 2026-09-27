@@ -232,6 +232,14 @@ impl IntoResponse for ApiError {
 fn err(status: StatusCode, message: &str) -> ApiError {
     ApiError(status, message.into())
 }
+fn source_json_internal_error() -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        r#"{"status":500,"error":"Internal Server Error"}"#,
+    )
+        .into_response()
+}
 fn token_denied() -> ApiError {
     err(StatusCode::UNAUTHORIZED, "HTTP Token: Access denied.")
 }
@@ -297,6 +305,49 @@ async fn mark_request_format(mut request: Request, next: Next) -> Response {
             .insert("x-rizzy-write-request", HeaderValue::from_static("1"));
     }
     next.run(request).await
+}
+
+async fn redirect_tenanted_public_route(
+    State(app): Shared,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let Some((account, rest)) = path.trim_start_matches('/').split_once('/') else {
+        return next.run(request).await;
+    };
+    let Ok(slug) = account.parse::<i64>() else {
+        return next.run(request).await;
+    };
+    let rest = format!("/{rest}");
+    let disallowed = rest == "/session"
+        || rest.starts_with("/session/")
+        || rest == "/signup"
+        || rest.starts_with("/signup/")
+        || rest == "/my/identity"
+        || rest == "/my/passkey_challenge"
+        || rest == "/account/imports/new"
+        || (rest == "/account/imports" && request.method() == Method::POST)
+        || rest == "/manifest"
+        || rest == "/service-worker";
+    if !disallowed {
+        return next.run(request).await;
+    }
+    let exists =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
+            .bind(slug)
+            .fetch_one(&app.db)
+            .await;
+    match exists {
+        Ok(0) => next.run(request).await,
+        Ok(_) => (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("{}/", base(request.headers())))],
+            Html(String::new()),
+        )
+            .into_response(),
+        Err(error) => db_err(error).into_response(),
+    }
 }
 
 async fn assign_request_id(mut request: Request, next: Next) -> Response {
@@ -4065,6 +4116,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/session/menu", get(account_cancellation::menu))
         .route("/my/passkey_challenge", post(passkeys::challenge))
         .route("/my/passkeys", get(passkeys::index).post(passkeys::register))
+        .route("/{account}/my/passkeys", get(passkeys::index_scoped))
         .route("/my/passkeys/{id}/edit", get(passkeys::edit))
         .route(
             "/my/passkeys/{id}",
@@ -4565,6 +4617,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn_with_state(
             app.clone(),
             allow_modern_browser,
+        ))
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            redirect_tenanted_public_route,
         ))
         .with_state(app)
         .layer(middleware::from_fn(block_search_engine_indexing))
@@ -5910,9 +5966,6 @@ async fn show_token(
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let (identity_id, _) = identity_auth(&app, &headers).await?;
     check_my_scope(&app, &identity_id, &uri).await?;
     let reveal_id = uri.path().rsplit('/').next().ok_or_else(missing)?;
@@ -5925,6 +5978,7 @@ async fn show_token(
                 header::LOCATION,
                 format!("{}/my/access_tokens", token_root(&uri)),
             )],
+            Html(String::new()),
         )
             .into_response());
     };
@@ -5943,8 +5997,12 @@ async fn show_token(
                 header::LOCATION,
                 format!("{}/my/access_tokens", token_root(&uri)),
             )],
+            Html(String::new()),
         )
             .into_response());
+    }
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
     let mut response = access_tokens_page::show(
         &token_root(&uri),
@@ -6237,10 +6295,15 @@ async fn prompt_users(
     let p = principal(&app, &headers, &account).await?;
     let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id WHERE u.account_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
         .bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
-    Ok(conditional_html_response(
+    let response = conditional_html_response(
         rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
         &headers,
-    ))
+    );
+    if headers.contains_key("x-rizzy-json-request") && response.status() != StatusCode::NOT_MODIFIED
+    {
+        return Ok(source_json_internal_error());
+    }
+    Ok(response)
 }
 
 async fn prompt_board_users(
@@ -6252,10 +6315,15 @@ async fn prompt_board_users(
     board(&app, &p, &board_id).await?;
     let rows = sqlx::query("SELECT u.id,u.name,s.sgid FROM users u JOIN user_attachables s ON s.user_id=u.id JOIN accesses a ON a.user_id=u.id WHERE u.account_id=? AND a.board_id=? AND u.active=1 AND u.role!='system' ORDER BY lower(u.name),u.id")
         .bind(&p.account_id).bind(&board_id).fetch_all(&app.db).await.map_err(db_err)?;
-    Ok(conditional_html_response(
+    let response = conditional_html_response(
         rows.iter().map(|row| prompt_user_item(&p, row)).collect(),
         &headers,
-    ))
+    );
+    if headers.contains_key("x-rizzy-json-request") && response.status() != StatusCode::NOT_MODIFIED
+    {
+        return Ok(source_json_internal_error());
+    }
+    Ok(response)
 }
 
 #[derive(Deserialize)]
@@ -6325,7 +6393,12 @@ async fn prompt_cards(
         .iter()
         .map(|row| prompt_card_item(p.slug, row))
         .collect();
-    Ok(conditional_html_response(html, &headers))
+    let response = conditional_html_response(html, &headers);
+    if headers.contains_key("x-rizzy-json-request") && response.status() != StatusCode::NOT_MODIFIED
+    {
+        return Ok(source_json_internal_error());
+    }
+    Ok(response)
 }
 async fn list_users(
     State(app): Shared,
@@ -6382,11 +6455,11 @@ async fn edit_user(
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    let u = active_user(&app, &p, &id).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
-    let u = active_user(&app, &p, &id).await?;
     let email: String = sqlx::query_scalar("SELECT email_address FROM identities WHERE id=?")
         .bind(u.get::<String, _>("identity_id"))
         .fetch_one(&app.db)
@@ -6703,14 +6776,14 @@ async fn new_email_change(
     Path((account, user_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     if p.user_id != user_id {
         return Err(missing());
     }
     active_user(&app, &p, &user_id).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(user_page::new_email(&p, &user_id))
 }
 fn email_change_error(form: bool, p: &Principal, user_id: &str, message: &str) -> Response {
@@ -7498,23 +7571,29 @@ async fn new_user_join(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<Html<String>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(Html(format!(
         "<!doctype html><html><title>Enter your name</title><main><h1>Great! Now enter your name</h1><form method=post action=\"/{}/users/joins\"><label>Full name <input name=\"user[name]\" autocomplete=name required autofocus></label><button id=log_in>Continue</button></form></main></html>",
         p.slug
-    )))
+    )).into_response())
 }
 async fn new_user_verification(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-) -> Result<Html<String>> {
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(Html(format!(
         "<!doctype html><html><title>Verify</title><main><form method=post action=\"/{}/users/verifications\"><button>Continue</button></form></main><script>document.forms[0].requestSubmit()</script></html>",
         p.slug
-    )))
+    )).into_response())
 }
 async fn verify_user(
     State(app): Shared,
@@ -11880,11 +11959,11 @@ async fn edit_card(
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let c = card(&app, &p, &number).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
-    let c = card(&app, &p, &number).await?;
     Ok(card_page::edit(&p, &c).into_response())
 }
 async fn next_card_number(
@@ -15170,7 +15249,12 @@ async fn landing(
     } else {
         format!("/{account}/")
     };
-    Ok((StatusCode::FOUND, [(header::LOCATION, destination)]).into_response())
+    Ok((
+        StatusCode::FOUND,
+        [(header::LOCATION, destination)],
+        Html(String::new()),
+    )
+        .into_response())
 }
 
 async fn home() -> axum::response::Html<&'static str> {

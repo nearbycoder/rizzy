@@ -40,6 +40,7 @@ fn root(account: &str) -> Response {
     (
         StatusCode::FOUND,
         [(header::LOCATION, format!("/{account}/"))],
+        Html(String::new()),
     )
         .into_response()
 }

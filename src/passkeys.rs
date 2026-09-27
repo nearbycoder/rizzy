@@ -211,6 +211,15 @@ pub(super) async fn index(State(app): Shared, headers: HeaderMap) -> Result<Resp
     Ok(Html(html).into_response())
 }
 
+pub(super) async fn index_scoped(
+    State(app): Shared,
+    Path(account): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    principal(&app, &headers, &account).await?;
+    index(State(app), headers).await
+}
+
 pub(super) async fn register(
     State(app): Shared,
     headers: HeaderMap,

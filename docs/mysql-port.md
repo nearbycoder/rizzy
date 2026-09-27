@@ -764,3 +764,11 @@ SQLite fixture matched Fizzy's 404 response for board-scoped and account-
 scoped creation after access loss. The existing two-server draft and fresh
 four-process cluster suites passed. Other revocation paths and wider
 concurrent creation behavior remain open.
+
+`tests/mysql_pair_selfhost.py route-get` passed a 92-path paired GET census on
+fresh MySQL databases. It compares JSON-request status and content type with
+missing resource identifiers, including account-scope redirects, lookup order,
+and missing-template errors. The paired `join-code` suite passed invite-link
+browser behavior plus invalid QR signatures and absent-account prefixes for
+JSON and SVG requests. Response bodies, valid-resource routes, and most write
+paths are outside this census.

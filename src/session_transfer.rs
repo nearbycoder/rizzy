@@ -72,9 +72,37 @@ pub(super) async fn show(Path(token): Path<String>) -> Html<String> {
 pub(super) async fn qr_code(
     State(app): Shared,
     Path((account, token)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> Result<Response> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
-    let (payload, signature) = token.rsplit_once("--").ok_or_else(missing)?;
+    let account_exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
+            .bind(slug)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    if account_exists == 0 {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, "/session/menu")],
+            Html(String::new()),
+        )
+            .into_response());
+    }
+    let invalid_link = || {
+        if headers.contains_key("x-rizzy-json-request") {
+            source_json_internal_error()
+        } else {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Html(include_str!("../static/500.html")),
+            )
+                .into_response()
+        }
+    };
+    let Some((payload, signature)) = token.rsplit_once("--") else {
+        return Ok(invalid_link());
+    };
     let expected = hmac_sha256(&app.qr_secret, &format!("qr_code:{payload}"));
     if signature.len() != expected.len()
         || signature
@@ -85,28 +113,20 @@ pub(super) async fn qr_code(
             })
             != 0
     {
-        return Err(missing());
+        return Ok(invalid_link());
     }
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|_| missing())?;
-    let signed: Value = serde_json::from_slice(&decoded).map_err(|_| missing())?;
+    let Ok(decoded) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) else {
+        return Ok(invalid_link());
+    };
+    let Ok(signed): std::result::Result<Value, _> = serde_json::from_slice(&decoded) else {
+        return Ok(invalid_link());
+    };
     if signed.get("account").and_then(Value::as_i64) != Some(slug) {
-        return Err(missing());
+        return Ok(invalid_link());
     }
-    let url = signed
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(missing)?;
-    let account_exists: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
-            .bind(slug)
-            .fetch_one(&app.db)
-            .await
-            .map_err(db_err)?;
-    if account_exists == 0 {
-        return Err(missing());
-    }
+    let Some(url) = signed.get("url").and_then(Value::as_str) else {
+        return Ok(invalid_link());
+    };
     let qr = QrCode::encode_text(&url, QrCodeEcc::Medium)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "Link too long for QR code"))?;
     let size = qr.size();

@@ -70,11 +70,11 @@ async fn show(
     headers: &HeaderMap,
     control: Control,
 ) -> Result<Response> {
+    let principal = principal(app, headers, account).await?;
+    let card = card(app, &principal, number).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let principal = principal(app, headers, account).await?;
-    let card = card(app, &principal, number).await?;
     let card_id: String = card.get("id");
     let active = enabled(app, &principal, &card_id, control).await?;
     let etag = format!(

@@ -945,6 +945,9 @@ pub(super) async fn index(
     RawQuery(raw): RawQuery,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let params = resolved_params(&app, &p, raw).await?;
     let tz = timezone(&headers);
     let etag = timeline_etag(&app, &p, &params, tz, "index").await?;
@@ -1135,6 +1138,9 @@ pub(super) async fn days(
     RawQuery(raw): RawQuery,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     let params = resolved_params(&app, &p, raw).await?;
     let tz = timezone(&headers);
     let etag = timeline_etag(&app, &p, &params, tz, "days").await?;
@@ -1228,10 +1234,14 @@ pub(super) async fn column(
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
 ) -> Result<Response> {
-    if !["added", "updated", "closed"].contains(&id.as_str()) {
-        return Err(err(StatusCode::NOT_FOUND, "Not found"));
-    }
     let p = principal(&app, &headers, &account).await?;
+    if !["added", "updated", "closed"].contains(&id.as_str()) {
+        return Ok((
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        )
+            .into_response());
+    }
     let params = resolved_params(&app, &p, raw).await?;
     let tz = timezone(&headers);
     let etag = timeline_etag(&app, &p, &params, tz, "column").await?;

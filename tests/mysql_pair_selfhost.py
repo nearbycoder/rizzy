@@ -6,6 +6,7 @@ Requires the local MySQL server and its socket-authenticated root account.
 
 import argparse
 import http.cookiejar
+import json
 import os
 import subprocess
 import sys
@@ -44,6 +45,9 @@ from board_settings_html_parity import run as board_settings_run  # noqa: E402
 from webhooks_html_parity import check as webhooks_html_check  # noqa: E402
 from step_read_parity import run as step_read_run  # noqa: E402
 from public_page_html_parity import run as public_page_run  # noqa: E402
+from join_code_html_parity import check as join_code_check  # noqa: E402
+from users_events_html_parity import check as user_events_check  # noqa: E402
+from route_get_status_parity import run as route_get_run  # noqa: E402
 
 
 def main():
@@ -54,7 +58,8 @@ def main():
                                           "card-board", "card-edit", "assignment", "reaction",
                                           "column-turbo", "card-previews", "account-card",
                                           "board-views", "board-settings", "webhooks-html",
-                                          "step-read", "public-page"))
+                                          "step-read", "public-page", "join-code",
+                                          "user-events", "route-get"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -164,6 +169,28 @@ def main():
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
                 source_result = step_read_run(source)
                 rust_result = step_read_run(rust)
+            elif args.suite == "join-code":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                source_result = join_code_check(source)
+                rust_result = join_code_check(rust)
+            elif args.suite == "user-events":
+                for target in (source, rust):
+                    target["opener"] = urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+                    request = urllib.request.Request(
+                        f"{target['url']}/{target['account']}/users.json",
+                        headers={"Authorization": f"Bearer {target['token']}",
+                                 "Accept": "application/json"})
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        users = json.load(response)
+                    target["user_id"] = next(user["id"] for user in users if user["role"] == "owner")
+                source_result = user_events_check(source)
+                rust_result = user_events_check(rust)
+            elif args.suite == "route-get":
+                source_result = route_get_run(source)
+                rust_result = route_get_run(rust)
             elif args.suite in ("card-controls", "card-board", "card-edit",
                                  "assignment", "reaction", "column-turbo",
                                  "card-previews", "account-card"):
@@ -190,6 +217,11 @@ def main():
                 source_result = core_run(source)
                 rust_result = core_run(rust)
             difference = first_difference(source_result, rust_result)
+            if args.suite == "route-get" and difference is not None:
+                for path in source_result.keys() | rust_result.keys():
+                    if source_result.get(path) != rust_result.get(path):
+                        print(f"{path}: Fizzy={source_result.get(path)} "
+                              f"Rizzy={rust_result.get(path)}", file=sys.stderr)
             assert difference is None, difference
             if args.suite == "search":
                 print(f"Disposable MySQL search fixture matched pinned Fizzy: "
@@ -220,6 +252,13 @@ def main():
                 print(f"Disposable MySQL {args.suite} browser workflow matched pinned Fizzy")
             elif args.suite in ("step-read", "public-page"):
                 print(f"Disposable MySQL {args.suite} workflow matched pinned Fizzy")
+            elif args.suite == "join-code":
+                print("Disposable MySQL invite-link browser and QR workflow matched pinned Fizzy")
+            elif args.suite == "user-events":
+                print("Disposable MySQL user activity browser workflow matched pinned Fizzy")
+            elif args.suite == "route-get":
+                print(f"Disposable MySQL GET error contracts matched pinned Fizzy: "
+                      f"{len(source_result)} routes")
             elif args.suite in ("card-controls", "card-board", "card-edit",
                                      "assignment", "reaction", "column-turbo",
                                      "card-previews", "account-card"):

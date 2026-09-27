@@ -39,11 +39,11 @@ pub(super) async fn edit(
     Path((account, id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
+    let p = principal(&app, &headers, &account).await?;
+    let b = board(&app, &p, &id).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
-    let b = board(&app, &p, &id).await?;
     let admin = p.admin(&b.get::<String, _>("creator_id")).is_ok();
     let disabled = if admin { "" } else { " disabled" };
     let board_path = format!("/{}/boards/{}", p.slug, escape(&id));

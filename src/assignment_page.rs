@@ -5,11 +5,11 @@ pub(super) async fn new(
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let card = card(&app, &p, &number).await?;
     if headers.contains_key("x-rizzy-json-request") || wants_turbo_stream(&headers) {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
-    let card = card(&app, &p, &number).await?;
     let frame = picker(&app, &p, &card).await?;
     let meta = meta(&app, &p, &card).await?;
     let page = format!(
