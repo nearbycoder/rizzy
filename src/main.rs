@@ -2058,7 +2058,7 @@ async fn send_webhook(
     if !matches!(uri.scheme(), "http" | "https") {
         return json!({"error":"destination_unreachable"});
     }
-    let Some(host) = uri.host_str() else {
+    let Some(host) = uri.host_str().map(str::to_owned) else {
         return json!({"error":"dns_lookup_failed"});
     };
     let Some(port) = uri.port_or_known_default() else {
@@ -2067,7 +2067,8 @@ async fn send_webhook(
     let addresses = if let Ok(ip) = host.parse::<IpAddr>() {
         vec![SocketAddr::new(ip, port)]
     } else {
-        match tokio::time::timeout(Duration::from_secs(7), lookup_host((host, port))).await {
+        match tokio::time::timeout(Duration::from_secs(7), lookup_host((host.as_str(), port))).await
+        {
             Ok(Ok(found)) => found.collect::<Vec<_>>(),
             _ => return json!({"error":"dns_lookup_failed"}),
         }
@@ -2078,6 +2079,36 @@ async fn send_webhook(
     let Some(address) = first_public_address(addresses) else {
         return json!({"error":"private_uri"});
     };
+    send_webhook_pinned(uri, &host, address, secret, timestamp, body, content_type).await
+}
+
+fn webhook_request_error(error: &reqwest::Error) -> Value {
+    if error.is_timeout() {
+        return json!({"error":"connection_timeout"});
+    }
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = cause {
+        if current.downcast_ref::<rustls::Error>().is_some() {
+            return json!({"error":"failed_tls"});
+        }
+        cause = current
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .map(|inner| inner as &(dyn std::error::Error + 'static))
+            .or_else(|| current.source());
+    }
+    json!({"error":"destination_unreachable"})
+}
+
+async fn send_webhook_pinned(
+    uri: url::Url,
+    host: &str,
+    address: SocketAddr,
+    secret: &str,
+    timestamp: &str,
+    body: &str,
+    content_type: &str,
+) -> Value {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(7))
         .redirect(reqwest::redirect::Policy::none())
@@ -2098,14 +2129,7 @@ async fn send_webhook(
         .send()
         .await;
     let Ok(mut response) = result else {
-        let error = result.unwrap_err();
-        return if error.is_timeout() {
-            json!({"error":"connection_timeout"})
-        } else if error.is_connect() {
-            json!({"error":"destination_unreachable"})
-        } else {
-            json!({"error":"destination_unreachable"})
-        };
+        return webhook_request_error(&result.unwrap_err());
     };
     let code = response.status().as_u16();
     let mut bytes = 0usize;
@@ -2118,16 +2142,116 @@ async fn send_webhook(
                 }
             }
             Ok(None) => break,
-            Err(error) => {
-                return if error.is_timeout() {
-                    json!({"error":"connection_timeout"})
-                } else {
-                    json!({"error":"destination_unreachable"})
-                };
-            }
+            Err(error) => return webhook_request_error(&error),
         }
     }
     json!({"code":code})
+}
+
+#[cfg(test)]
+mod webhook_transport_tests {
+    use super::{MAX_WEBHOOK_RESPONSE_SIZE, hmac_sha256, send_webhook_pinned};
+    use serde_json::json;
+    use std::net::SocketAddr;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    async fn serve_http(body_size: usize) -> (SocketAddr, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let count = stream.read(&mut chunk).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    break end + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]).into_owned();
+            let content_length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length: ")
+                        .and_then(|value| value.trim().parse().ok())
+                })
+                .unwrap();
+            while request.len() - header_end < content_length {
+                let count = stream.read(&mut chunk).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+            }
+            assert_eq!(&request[header_end..], b"wire payload");
+            stream.write_all(format!("HTTP/1.1 202 Accepted\r\nContent-Length: {body_size}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            stream.write_all(&vec![b'x'; body_size]).await.unwrap();
+            headers
+        });
+        (address, handle)
+    }
+
+    #[tokio::test]
+    async fn pinned_delivery_signs_body_and_enforces_fizzy_size_boundary() {
+        for (body_size, expected) in [
+            (MAX_WEBHOOK_RESPONSE_SIZE, json!({"code":202})),
+            (
+                MAX_WEBHOOK_RESPONSE_SIZE + 1,
+                json!({"error":"response_too_large"}),
+            ),
+        ] {
+            let (address, server) = serve_http(body_size).await;
+            let actual = send_webhook_pinned(
+                "http://webhook.example/receive".parse().unwrap(),
+                "webhook.example",
+                address,
+                "shared secret",
+                "2026-01-01T00:00:00Z",
+                "wire payload",
+                "application/json",
+            )
+            .await;
+            assert_eq!(actual, expected);
+            let request = server.await.unwrap();
+            assert!(request.contains("content-type: application/json\r\n"));
+            assert!(request.contains("x-webhook-timestamp: 2026-01-01T00:00:00Z\r\n"));
+            assert!(request.contains(&format!(
+                "x-webhook-signature: {}\r\n",
+                hmac_sha256("shared secret", "wire payload")
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_tls_response_is_reported_as_failed_tls() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut hello = [0u8; 4096];
+            assert!(stream.read(&mut hello).await.unwrap() > 0);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let result = send_webhook_pinned(
+            "https://webhook.example/receive".parse().unwrap(),
+            "webhook.example",
+            address,
+            "shared secret",
+            "2026-01-01T00:00:00Z",
+            "wire payload",
+            "application/json",
+        )
+        .await;
+        server.await.unwrap();
+        assert_eq!(result, json!({"error":"failed_tls"}));
+    }
 }
 
 async fn process_webhook_delivery(app: &App, delivery_id: &str, host: &str) -> Result<()> {

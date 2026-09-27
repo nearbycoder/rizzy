@@ -305,8 +305,12 @@ Cross-host delivery ordering and less-common event variants are still open.
 Webhook DNS selection now pins the first public address in mixed DNS answers,
 matching the pinned Surfguard policy, and keeps an all-private answer blocked.
 The response-body limit now matches Fizzy's 100 KiB. The Rust DNS safety unit
-tests pass; successful internet delivery and response-size boundaries have not
-yet been checked in a paired live delivery test.
+tests pass. A local pinned-connection transport test checks the signature and
+timestamp headers, a successful 202 response at exactly 100 KiB, and
+`response_too_large` one byte over the limit. A local invalid TLS response now
+reports `failed_tls`, matching Fizzy's delivery error category. Production DNS
+selection still uses only a public pinned address; successful internet delivery
+and these transport cases have not yet been checked in a paired live test.
 Rizzy now selects Fizzy's generic JSON, Slack JSON, Campfire HTML, and Basecamp
 form payload shapes by webhook URL, including the corresponding content types
 and an event description without a viewer. Its unit test checks the format
@@ -319,7 +323,7 @@ and Rizzy databases and compares the complete Slack, Campfire, and Basecamp
 content types and body bytes. It found and closed the source JSON serializer's
 `\u0026` and `\u003c` escaping difference. Generic JSON has matching structure
 and selected title, board, creator, and action values in that fixture; its
-complete values and bytes, Slack worker delivery, and success and TLS paths
+complete values and bytes, Slack worker delivery, and external success and TLS paths
 remain open. The read-only `inspect-webhook` command exposes a queued Rust
 delivery body and content type for this diagnostic check without sending it.
 
