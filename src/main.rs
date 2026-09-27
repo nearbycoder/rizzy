@@ -213,7 +213,13 @@ type Shared = State<Arc<App>>;
 type Result<T> = std::result::Result<T, ApiError>;
 
 #[derive(Debug)]
-struct ApiError(StatusCode, String);
+// The final field allows a handler to retry a transaction after MySQL rolls it back.
+struct ApiError(StatusCode, String, bool);
+impl ApiError {
+    fn is_retryable_deadlock(&self) -> bool {
+        self.2
+    }
+}
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         if self.0 == StatusCode::FOUND {
@@ -237,7 +243,7 @@ impl IntoResponse for ApiError {
     }
 }
 fn err(status: StatusCode, message: &str) -> ApiError {
-    ApiError(status, message.into())
+    ApiError(status, message.into(), false)
 }
 fn source_json_internal_error() -> Response {
     (
@@ -817,9 +823,17 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
     parts.headers.remove(header::CONTENT_LENGTH);
     Response::from_parts(parts, Body::from(html))
 }
+#[track_caller]
 fn db_err(e: sqlx::Error) -> ApiError {
-    eprintln!("database error: {e}");
-    err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    // SQLx exposes MySQL's SQLSTATE, not its numeric 1213 error number.
+    let deadlock =
+        matches!(&e, sqlx::Error::Database(error) if error.code().as_deref() == Some("40001"));
+    eprintln!("database error at {}: {e}", std::panic::Location::caller());
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Database error".into(),
+        deadlock,
+    )
 }
 fn bad(message: &str) -> ApiError {
     err(StatusCode::UNPROCESSABLE_ENTITY, message)
@@ -1554,7 +1568,7 @@ async fn principal(app: &App, headers: &HeaderMap, slug: &str) -> Result<Princip
         return Err(if headers.contains_key("x-rizzy-json-request") {
             err(StatusCode::FORBIDDEN, "Account access required")
         } else {
-            ApiError(StatusCode::FOUND, "/session/menu".into())
+            ApiError(StatusCode::FOUND, "/session/menu".into(), false)
         });
     }
     Ok(Principal {
@@ -5514,7 +5528,11 @@ async fn identity_auth(app: &App, headers: &HeaderMap) -> Result<(String, String
         if authorization.contains("Bearer") {
             token_denied()
         } else {
-            ApiError(StatusCode::FOUND, format!("{}/session/new", base(headers)))
+            ApiError(
+                StatusCode::FOUND,
+                format!("{}/session/new", base(headers)),
+                false,
+            )
         }
     })?;
     if !headers.contains_key("x-rizzy-json-request") {
@@ -12108,76 +12126,90 @@ async fn create_card(
         .unwrap_or_else(|| clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
     let last_active_at =
         timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
-    let writer = app.write_lock.lock().await;
-    let mut tx = begin_accessible_board_write(&app, &p, &board_id).await?;
-    let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
-    sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
-    rich_text_records::sync(
-        &mut tx,
-        &p.account_id,
-        "Card",
-        &id,
-        "description",
-        "",
-        &description,
-        &timestamp,
-    )
-    .await?;
-    if v.get("description").and_then(Value::as_str) == Some("") {
-        rich_text_records::ensure(
-            &mut tx,
-            &p.account_id,
-            "Card",
-            &id,
-            "description",
-            &timestamp,
-        )
-        .await?;
-    }
-    storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
-    storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
-    sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
-        .bind(crate::id())
-        .bind(&id)
-        .bind(&p.user_id)
-        .bind(&timestamp)
-        .bind(&timestamp)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
-        .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&id).bind(&p.user_id)
-        .bind(&id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
-    queue_webhooks(
-        &mut tx,
-        &p.account_id,
-        &board_id,
-        &event_id,
-        "card_published",
-        &timestamp,
-    )
-    .await?;
-    queue_notifications(
-        &mut tx,
-        &p,
-        &board_id,
-        &id,
-        &event_id,
-        "Card",
-        "card_published",
-        &json!({}),
-        &timestamp,
-    )
-    .await?;
-    create_new_mentions(&mut tx, &p, &board_id, &id, "Card", &id, &description).await?;
-    if app.mysql {
-        mysql_search::sync_card(&mut tx, &p.account_id, &id)
-            .await
-            .map_err(db_err)?;
-    }
-    tx.commit().await.map_err(db_err)?;
-    drop(writer);
+    let mut deadlock_retries = 0;
+    let number = loop {
+        let write: Result<i64> = async {
+            let _writer = app.write_lock.lock().await;
+            let mut tx = begin_accessible_board_write(&app, &p, &board_id).await?;
+            let number = next_card_number(&mut tx, &p.account_id, app.mysql).await?;
+            sqlx::query("INSERT INTO cards(id,account_id,board_id,creator_id,number,title,description,search_text,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+                .bind(&id).bind(&p.account_id).bind(&board_id).bind(&p.user_id).bind(number).bind(&title).bind(&description).bind(&search_text).bind(&created_at).bind(&timestamp).bind(&last_active_at).execute(&mut *tx).await.map_err(db_err)?;
+            rich_text_records::sync(
+                &mut tx,
+                &p.account_id,
+                "Card",
+                &id,
+                "description",
+                "",
+                &description,
+                &timestamp,
+            )
+            .await?;
+            if v.get("description").and_then(Value::as_str) == Some("") {
+                rich_text_records::ensure(
+                    &mut tx,
+                    &p.account_id,
+                    "Card",
+                    &id,
+                    "description",
+                    &timestamp,
+                )
+                .await?;
+            }
+            storage::attach_card_image_tx(&mut tx, &p, &id, v.get("image")).await?;
+            storage::sync_embeds_tx(&mut tx, &p, "Card", &id, &description).await?;
+            sqlx::query("INSERT INTO watches(id,card_id,user_id,watching,created_at,updated_at) VALUES(?,?,?,1,?,?)")
+                .bind(crate::id())
+                .bind(&id)
+                .bind(&p.user_id)
+                .bind(&timestamp)
+                .bind(&timestamp)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+            sqlx::query("INSERT INTO events(id,account_id,board_id,card_id,creator_id,eventable_type,eventable_id,action,particulars,created_at,updated_at) VALUES(?,?,?,?,?,'Card',?,'card_published','{}',?,?)")
+                .bind(&event_id).bind(&p.account_id).bind(&board_id).bind(&id).bind(&p.user_id)
+                .bind(&id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await.map_err(db_err)?;
+            queue_webhooks(
+                &mut tx,
+                &p.account_id,
+                &board_id,
+                &event_id,
+                "card_published",
+                &timestamp,
+            )
+            .await?;
+            queue_notifications(
+                &mut tx,
+                &p,
+                &board_id,
+                &id,
+                &event_id,
+                "Card",
+                "card_published",
+                &json!({}),
+                &timestamp,
+            )
+            .await?;
+            create_new_mentions(&mut tx, &p, &board_id, &id, "Card", &id, &description).await?;
+            if app.mysql {
+                mysql_search::sync_card(&mut tx, &p.account_id, &id)
+                    .await
+                    .map_err(db_err)?;
+            }
+            tx.commit().await.map_err(db_err)?;
+            Ok(number)
+        }
+        .await;
+        match write {
+            Ok(number) => break number,
+            Err(error) if app.mysql && error.is_retryable_deadlock() && deadlock_retries < 3 => {
+                deadlock_retries += 1;
+                tokio::time::sleep(Duration::from_millis(10 * deadlock_retries)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
     let c = card(&app, &p, &number.to_string()).await?;
     Ok(created(
         format!("/{account}/cards/{number}.json"),
@@ -14731,7 +14763,7 @@ async fn toggle_assignment(
     };
     match toggle_assignment_to(&app, &p, &c, &assignee_id).await {
         Ok(_) => {}
-        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _)) if wants_turbo_stream(&headers) => {
+        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _, _)) if wants_turbo_stream(&headers) => {
             return assignment_stream(&app, &p, &c).await;
         }
         Err(error) => return Err(error),
@@ -14759,7 +14791,7 @@ async fn toggle_self_assignment(
     let c = card(&app, &p, &number).await?;
     match toggle_assignment_to(&app, &p, &c, &p.user_id).await {
         Ok(_) => {}
-        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _)) if wants_turbo_stream(&headers) => {
+        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _, _)) if wants_turbo_stream(&headers) => {
             return assignment_stream(&app, &p, &c).await;
         }
         Err(error) => return Err(error),
