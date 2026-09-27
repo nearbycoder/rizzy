@@ -63,6 +63,12 @@ def fixture(target):
     named_card = create(f"/boards/{board_id}/cards", {"card": {"title": "Named column card"}})
     status, _, _ = request(target, f"/cards/{named_card['number']}/triage", "POST", {"column_id": column_id})
     assert status == 204, (target["name"], "triage", status)
+    postponed = create(f"/boards/{board_id}/cards", {"card": {"title": "Postponed route card"}})
+    status, _, _ = request(target, f"/cards/{postponed['number']}/not_now", "POST", {})
+    assert status == 204, (target["name"], "postponement", status)
+    closed = create(f"/boards/{board_id}/cards", {"card": {"title": "Closed route card"}})
+    status, _, _ = request(target, f"/cards/{closed['number']}/closure", "POST", {})
+    assert status == 204, (target["name"], "closure", status)
     step = create(f"/cards/{number}/steps", {"step": {"content": "First step"}})
     comment = create(f"/cards/{number}/comments", {"comment": {"body": "First comment"}})
     create(f"/cards/{number}/reactions", {"reaction": {"content": "👍"}})
@@ -112,6 +118,12 @@ def semantic(label, value):
         return [reaction["content"] for reaction in value]
     if label == "user_events":
         return value
+    if label == "boards_index":
+        return [board["name"] for board in value]
+    if label in ("cards_index", "not_now", "closed"):
+        return [card["title"] for card in value]
+    if label in ("pin", "watch", "previews"):
+        return None
     raise AssertionError(label)
 
 
@@ -121,6 +133,13 @@ def run(target):
     webhook_id, number, step_id, comment_id = (
         item[key] for key in ("webhook_id", "number", "step_id", "comment_id"))
     paths = {
+        "boards_index": "/boards",
+        "cards_index": "/cards",
+        "not_now": f"/boards/{board_id}/columns/not_now",
+        "closed": f"/boards/{board_id}/columns/closed",
+        "pin": f"/cards/{number}/pin",
+        "watch": f"/cards/{number}/watch",
+        "previews": "/cards/previews",
         "user": f"/users/{user_id}",
         "user_events": f"/users/{user_id}/events",
         "board": f"/boards/{board_id}",
@@ -143,7 +162,7 @@ def run(target):
     result = {}
     for label, path in paths.items():
         status, content_type, value = request(target, path)
-        if label != "user_events":
+        if label not in ("user_events", "pin", "watch", "previews"):
             assert status == 200, (target["name"], label, status, value)
         result[label] = (status, content_type, shape(value), semantic(label, value))
     values = {label: contract[3] for label, contract in result.items()}
@@ -157,6 +176,10 @@ def run(target):
     for label, (field, wanted) in expected.items():
         assert values[label][field] == wanted, (target["name"], label, values[label])
     assert values["board_columns"][0][0] == "Doing", (target["name"], values["board_columns"])
+    assert item["name"] in values["boards_index"], (target["name"], values["boards_index"])
+    assert "Valid route card" in values["cards_index"], (target["name"], values["cards_index"])
+    assert values["not_now"] == ["Postponed route card"], (target["name"], values["not_now"])
+    assert values["closed"] == ["Closed route card"], (target["name"], values["closed"])
     assert values["column_cards"] == ["Named column card"], (target["name"], values["column_cards"])
     assert "Valid route card" in values["board_stream"], (target["name"], values["board_stream"])
     assert values["card"]["board"] == item["name"], (target["name"], values["card"])
