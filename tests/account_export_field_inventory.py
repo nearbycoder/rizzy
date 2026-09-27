@@ -88,6 +88,7 @@ def export(target, env):
         rich_text = []
         blobs = []
         attachments = []
+        variants = []
         for name in zipped.namelist():
             if not name.startswith("data/") or not name.endswith(".json"):
                 continue
@@ -103,7 +104,9 @@ def export(target, env):
                 blobs.append(record)
             if group == "active_storage_attachments":
                 attachments.append(record)
-        return {group: sorted(keys) for group, keys in fields.items()}, counts, users, rich_text, blobs, attachments
+            if group == "active_storage_variant_records":
+                variants.append(record)
+        return {group: sorted(keys) for group, keys in fields.items()}, counts, users, rich_text, blobs, attachments, variants
 
 
 def verify_rust_user_sgids(users, source_env):
@@ -174,15 +177,21 @@ def main():
                               for blob in result[4]], key=lambda blob: blob["filename"])
                 for name, result in results.items()}
             attachment_values = {
-                name: [{key: attachment.get(key) for key in ("name", "record_type")}
-                       for attachment in result[5]] for name, result in results.items()}
+                name: sorted([{key: attachment.get(key) for key in ("name", "record_type")}
+                              for attachment in result[5]], key=lambda item: (item["name"], item["record_type"]))
+                for name, result in results.items()}
+            variant_digests = {name: sorted(variant["variation_digest"] for variant in result[6])
+                               for name, result in results.items()}
             if blob_values["fizzy"] != blob_values["rizzy"]:
                 differences.setdefault("active_storage_blobs", {})["values"] = blob_values
             if attachment_values["fizzy"] != attachment_values["rizzy"]:
                 differences.setdefault("active_storage_attachments", {})["values"] = attachment_values
+            if variant_digests["fizzy"] != variant_digests["rizzy"]:
+                differences.setdefault("active_storage_variant_records", {})["digests"] = variant_digests
             print(json.dumps({"differences": differences, "counts": {
                 name: result[1] for name, result in results.items()},
-                "blob_values": blob_values, "attachment_values": attachment_values}, indent=2))
+                "blob_values": blob_values, "attachment_values": attachment_values,
+                "variant_digests": variant_digests}, indent=2))
             if args.strict and differences:
                 raise SystemExit(1)
         finally:

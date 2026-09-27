@@ -4,6 +4,7 @@ use base64::Engine as _;
 use futures_util::StreamExt;
 use md5::Md5;
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tokio::fs;
@@ -1153,14 +1154,53 @@ pub(super) async fn purge_card_images_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
+            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
+        }
+    }
+    Ok(keys)
+}
+
+async fn purge_blob_with_variants_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    blob_id: &str,
+) -> Result<Vec<String>> {
+    let variants = sqlx::query("SELECT v.id AS variant_id,a.blob_id AS derived_id,b.storage_key AS derived_key FROM storage_variant_records v LEFT JOIN storage_attachments a ON a.record_type='ActiveStorage::VariantRecord' AND a.record_id=v.id AND a.name='image' LEFT JOIN storage_blobs b ON b.id=a.blob_id WHERE v.blob_id=?")
+        .bind(blob_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    let mut keys = Vec::new();
+    for variant in variants {
+        let variant_id: String = variant.get("variant_id");
+        let derived_id: Option<String> = variant.get("derived_id");
+        let derived_key: Option<String> = variant.get("derived_key");
+        sqlx::query("DELETE FROM storage_attachments WHERE record_type='ActiveStorage::VariantRecord' AND record_id=?")
+            .bind(&variant_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        if let Some(derived_id) = derived_id {
             sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-                .bind(&blob_id)
+                .bind(derived_id)
                 .execute(&mut **tx)
                 .await
                 .map_err(db_err)?;
-            keys.push(row.get("storage_key"));
+        }
+        if let Some(key) = derived_key {
+            keys.push(key);
         }
     }
+    let key: String = sqlx::query_scalar("SELECT storage_key FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("DELETE FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    keys.push(key);
     Ok(keys)
 }
 
@@ -1240,12 +1280,7 @@ async fn sync_embeds_tx_inner(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-                .bind(blob_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(db_err)?;
-            keys.push(row.get("storage_key"));
+            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
         }
     }
     for blob_id in wanted.difference(&current) {
@@ -1306,12 +1341,7 @@ pub(super) async fn purge_card_storage_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-                .bind(blob_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(db_err)?;
-            keys.push(row.get("storage_key"));
+            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
         }
     }
     Ok(keys)
@@ -1459,12 +1489,7 @@ pub(super) async fn purge_user_avatar_tx(
     if remaining != 0 {
         return Ok(Vec::new());
     }
-    sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-        .bind(blob_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    Ok(vec![row.get("storage_key")])
+    purge_blob_with_variants_tx(tx, &blob_id).await
 }
 
 pub(super) async fn direct_upload(
@@ -1810,6 +1835,7 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     let directory = storage_dir().join("variants").join(&key);
     let target = directory.join(format!("{signature}.{extension}"));
     if fs::metadata(&target).await.is_ok() {
+        persist_rich_text_variant(app, blob, &variation, &target).await?;
         return Ok(target);
     }
     fs::create_dir_all(&directory)
@@ -1817,7 +1843,30 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?;
     let source = storage_dir().join(&key);
     let output = target.clone();
+    let persisted_variation = variation.clone();
     tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
+        if variation.operation == "limit" && image_format == image::ImageFormat::Jpeg {
+            let (source_width, source_height) = image::ImageReader::open(&source)
+                .map_err(|error| error.to_string())?
+                .with_guessed_format()
+                .map_err(|error| error.to_string())?
+                .into_dimensions()
+                .map_err(|error| error.to_string())?;
+            let width = variation.width.min(source_width);
+            let height = variation.height.min(source_height);
+            let temporary = output.with_extension(format!("{}.tmp.{extension}", random_token()));
+            let result = std::process::Command::new("vipsthumbnail")
+                .arg(&source)
+                .arg("-s")
+                .arg(format!("{width}x{height}"))
+                .arg(format!("--output={}", temporary.display()))
+                .output();
+            if matches!(result, Ok(ref result) if result.status.success()) {
+                std::fs::rename(&temporary, &output).map_err(|error| error.to_string())?;
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&temporary);
+        }
         let picture = image::ImageReader::open(source)
             .map_err(|error| error.to_string())?
             .with_guessed_format()
@@ -1847,8 +1896,197 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     })
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?;
+    .map_err(|error| {
+        eprintln!("storage variation render failed: {error}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
+    })?;
+    persist_rich_text_variant(app, blob, &persisted_variation, &target).await?;
     Ok(target)
+}
+
+fn marshal_positive_fixnum(bytes: &mut Vec<u8>, value: u32) {
+    bytes.push(b'i');
+    if value == 0 {
+        bytes.push(0);
+    } else if value <= 122 {
+        bytes.push((value + 5) as u8);
+    } else {
+        let little_endian = value.to_le_bytes();
+        let count = little_endian
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .unwrap_or(0)
+            + 1;
+        bytes.push(count as u8);
+        bytes.extend_from_slice(&little_endian[..count]);
+    }
+}
+
+fn marshal_symbol(bytes: &mut Vec<u8>, name: &str) {
+    bytes.push(b':');
+    bytes.push((name.len() + 5) as u8);
+    bytes.extend_from_slice(name.as_bytes());
+}
+
+fn marshal_utf8_string(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&[b'I', b'"']);
+    bytes.push((value.len() + 5) as u8);
+    bytes.extend_from_slice(value.as_bytes());
+    bytes.push(6);
+    marshal_symbol(bytes, "E");
+    bytes.push(b'T');
+}
+
+fn rich_text_variation_digest(format: &str, width: u32, height: u32) -> String {
+    // ActiveStorage::Variation#digest hashes Ruby Marshal's ordered Hash:
+    // { format:, loader: { n: -1 }, resize_to_limit: [width, height] }.
+    let mut bytes = vec![4, 8, b'{', 8];
+    marshal_symbol(&mut bytes, "format");
+    marshal_utf8_string(&mut bytes, format);
+    marshal_symbol(&mut bytes, "loader");
+    bytes.extend_from_slice(&[b'{', 6]);
+    marshal_symbol(&mut bytes, "n");
+    bytes.extend_from_slice(&[b'i', 0xfa]);
+    marshal_symbol(&mut bytes, "resize_to_limit");
+    bytes.extend_from_slice(&[b'[', 7]);
+    marshal_positive_fixnum(&mut bytes, width);
+    marshal_positive_fixnum(&mut bytes, height);
+    base64::engine::general_purpose::STANDARD.encode(Sha1::digest(bytes))
+}
+
+#[cfg(test)]
+#[test]
+fn rich_text_variant_digest_matches_active_storage() {
+    assert_eq!(
+        rich_text_variation_digest("jpg", 800, 600),
+        "Bfa0r6FVi88e67+f9GyvuiguoXM="
+    );
+    assert_eq!(
+        rich_text_variation_digest("jpg", 1024, 768),
+        "LIHwrDKnUYb2o3ViE1GyFf3u2KM="
+    );
+}
+
+async fn persist_rich_text_variant(
+    app: &App,
+    blob: &DbRow,
+    variation: &Variation,
+    target: &std::path::Path,
+) -> Result<()> {
+    if variation.operation != "limit"
+        || !matches!(
+            (variation.width, variation.height),
+            (800, 600) | (1024, 768)
+        )
+        || variation.format.is_some()
+        || blob.get::<String, _>("content_type") != "image/jpeg"
+    {
+        return Ok(());
+    }
+    let blob_id: String = blob.get("id");
+    let account_id: String = blob.get("account_id");
+    let filename: String = blob.get("filename");
+    let format = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|extension| matches!(extension.as_str(), "jpg" | "jpeg"))
+        .unwrap_or_else(|| "jpg".to_owned());
+    let digest = rich_text_variation_digest(&format, variation.width, variation.height);
+    let exists: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
+    )
+    .bind(&blob_id)
+    .bind(&digest)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?;
+    if exists.is_some() {
+        return Ok(());
+    }
+    let data = fs::read(target).await.map_err(|error| {
+        eprintln!("storage variation read failed: {error}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
+    })?;
+    let (width, height) = image::image_dimensions(target).map_err(|error| {
+        eprintln!("storage variation dimensions failed: {error}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
+    })?;
+    let mut checksum = Md5::new();
+    checksum.update(&data);
+    let checksum = base64::engine::general_purpose::STANDARD.encode(checksum.finalize());
+    let derived_id = id();
+    let derived_key = random_token();
+    let record_id = id();
+    let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let variant_insert = if app.mysql {
+        "INSERT INTO storage_variant_records(id,account_id,blob_id,variation_digest) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE id=id"
+    } else {
+        "INSERT OR IGNORE INTO storage_variant_records(id,account_id,blob_id,variation_digest) VALUES(?,?,?,?)"
+    };
+    sqlx::query(variant_insert)
+        .bind(&record_id)
+        .bind(&account_id)
+        .bind(&blob_id)
+        .bind(&digest)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let owning_record: String = sqlx::query_scalar(
+        "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
+    )
+    .bind(&blob_id)
+    .bind(&digest)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    if owning_record != record_id {
+        return Ok(());
+    }
+    sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,metadata,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(&derived_id)
+        .bind(&account_id)
+        .bind(&derived_key)
+        .bind(&filename)
+        .bind("image/jpeg")
+        .bind(data.len() as i64)
+        .bind(checksum)
+        .bind(json!({"identified":true,"width":width,"height":height,"analyzed":true}).to_string())
+        .bind(app.sgid_signer.blob_signed_id(&derived_id))
+        .bind(app.sgid_signer.blob(&derived_id))
+        .bind(hash(&random_token()))
+        .bind(expires_in(60))
+        .bind(&timestamp)
+        .bind(width as i64)
+        .bind(height as i64)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'ActiveStorage::VariantRecord',?,'image',?)")
+        .bind(id())
+        .bind(&account_id)
+        .bind(&derived_id)
+        .bind(&record_id)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let derived_path = storage_dir().join(&derived_key);
+    if let Err(error) = fs::write(&derived_path, data).await {
+        let _ = fs::remove_file(&derived_path).await;
+        eprintln!("storage variation write failed: {error}");
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Image preview failed",
+        ));
+    }
+    if let Err(error) = tx.commit().await {
+        let _ = fs::remove_file(&derived_path).await;
+        return Err(db_err(error));
+    }
+    Ok(())
 }
 
 pub(super) async fn show_representation(
