@@ -2174,8 +2174,12 @@ async fn card_json(
     let board_id: String = r.get("board_id");
     let creator: String = r.get("creator_id");
     let description: String = r.get("description");
-    let (description_plain, mut description_html, has_attachments) =
+    let (description_plain, mut description_html, rendered_attachments) =
         storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
+    let has_attachments = rendered_attachments
+        || storage::embed_owners_for_cards(app, std::slice::from_ref(&id))
+            .await?
+            .contains(&id);
     if description.is_empty()
         && rich_text_records::present_ids(&app.db, "Card", "description", std::slice::from_ref(&id))
             .await?
@@ -2324,6 +2328,7 @@ async fn cards_json_batch(
         tags.sort();
     }
     let image_values = storage::image_urls_for_cards(app, p, &card_ids).await?;
+    let embed_owners = storage::embed_owners_for_cards(app, &card_ids).await?;
     let mut assignee_values: HashMap<String, Vec<String>> = HashMap::new();
     for assignment in &assignments {
         assignee_values
@@ -2337,8 +2342,9 @@ async fn cards_json_batch(
         let board_id: String = card.get("board_id");
         let number: i64 = card.get("number");
         let description: String = card.get("description");
-        let (description_plain, mut description_html, has_attachments) =
+        let (description_plain, mut description_html, rendered_attachments) =
             storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
+        let has_attachments = rendered_attachments || embed_owners.contains(&card_id);
         if description.is_empty() && !present_descriptions.contains(&card_id) {
             description_html.clear();
         }
@@ -9689,6 +9695,7 @@ async fn activity_items(
     let present_comment_bodies =
         rich_text_records::present_ids(&app.db, "Comment", "body", &empty_comment_body_ids).await?;
     let image_values = storage::image_urls_for_cards(app, p, &card_ids).await?;
+    let embed_owners = storage::embed_owners_for_cards(app, &card_ids).await?;
     let user_ids = unique_ids(
         card_rows
             .iter()
@@ -9762,8 +9769,9 @@ async fn activity_items(
         let number: i64 = c.get("number");
         let title: String = c.get("title");
         let description: String = c.get("description");
-        let (description_plain, mut description_html, has_attachments) =
+        let (description_plain, mut description_html, rendered_attachments) =
             storage::render_rich_text(app, &p.account_id, p.slug, &description).await?;
+        let has_attachments = rendered_attachments || embed_owners.contains(&id);
         if description.is_empty() && !present_descriptions.contains(&id) {
             description_html.clear();
         }
@@ -13649,7 +13657,7 @@ async fn delete_comment(
     let card_id: String = c.get("id");
     let (mut tx, _) =
         begin_card_board_write(&app, &card_id, &c.get::<String, _>("board_id")).await?;
-    let keys = storage::sync_embeds_tx(&mut tx, &p, "Comment", &comment, "").await?;
+    let keys = storage::purge_record_embeds_tx(&mut tx, &p, "Comment", &comment).await?;
     deletion_cleanup::comment(&mut tx, &p.account_id, &comment).await?;
     sqlx::query(
         "DELETE FROM events WHERE eventable_type='Comment' AND eventable_id=? AND card_id=?",

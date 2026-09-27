@@ -39,11 +39,16 @@ attachment that predates the ledger. `reconcile-storage` scans existing
 attachments and adds only the missing byte delta; `materialize-storage` drains
 pending totals. Account import now writes per-board reconciliation entries from
 its restored attachments and materializes the account total before completion;
-`tests/account_import.py` checks those values against the ZIP. On a disposable
-Fizzy server with its queue worker disabled, clearing a board description left
-the embed attachment and its ledger entry present for at least two seconds;
-Rizzy detaches immediately. The source's queued cleanup behavior, request IDs,
-periodic reconciliation, and MySQL execution of these new paths remain open.
+`tests/account_import.py` checks those values against the ZIP.
+`tests/storage_embed_update_parity.py` compares both apps through empty, null,
+plain-text, and replacement updates of card and board embeds; card detail,
+list, activity, and ledger states match in that fixture. Fizzy retains an embed
+when rich text becomes empty or null and detaches it on a nonempty edit without
+the embed. `tests/embed_parity.py` also matches rendered Action Text after
+Rizzy began using blob analysis metadata, rather than locally detected image
+dimensions, for the immediate HTML response. Request IDs, periodic
+reconciliation, other Action Text transitions, and MySQL execution of these
+new paths remain open.
 
 On the MySQL branch, `tests/mysql_search_parity.py` compared the pinned Fizzy
 MySQL adapter with Rizzy on a shared Oracle MySQL 8.4.11 server. Selected JSON

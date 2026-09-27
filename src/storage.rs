@@ -517,6 +517,19 @@ pub(super) async fn image_urls_for_cards(
         .collect())
 }
 
+pub(super) async fn embed_owners_for_cards(
+    app: &App,
+    card_ids: &[String],
+) -> Result<HashSet<String>> {
+    let rows = rows_for_ids(
+        app,
+        "SELECT DISTINCT record_id FROM storage_attachments WHERE record_type='Card' AND name IN ('embed','embeds') AND record_id IN (",
+        card_ids,
+    )
+    .await?;
+    Ok(rows.into_iter().map(|row| row.get("record_id")).collect())
+}
+
 fn human_size(bytes: i64) -> String {
     if bytes < 1024 {
         format!("{bytes} Bytes")
@@ -633,8 +646,10 @@ fn embed_html(app: &App, blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool
         ("  ", "</action-text-attachment>")
     };
     if variable_image(&content_type) {
-        let width = blob.get::<Option<i64>, _>("width").unwrap_or(0);
-        let height = blob.get::<Option<i64>, _>("height").unwrap_or(0);
+        let metadata: String = blob.get("metadata");
+        let metadata: Value = serde_json::from_str(&metadata).unwrap_or(Value::Null);
+        let width = metadata["width"].as_i64().unwrap_or(0);
+        let height = metadata["height"].as_i64().unwrap_or(0);
         let dimensions = if width > 0 && height > 0 {
             format!(" width=\"{width}\" height=\"{height}\"")
         } else {
@@ -1043,8 +1058,32 @@ pub(super) async fn sync_embeds_tx(
     record_id: &str,
     content: &str,
 ) -> Result<Vec<String>> {
+    sync_embeds_tx_inner(tx, p, record_type, record_id, content, false).await
+}
+
+pub(super) async fn purge_record_embeds_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    p: &Principal,
+    record_type: &str,
+    record_id: &str,
+) -> Result<Vec<String>> {
+    sync_embeds_tx_inner(tx, p, record_type, record_id, "", true).await
+}
+
+async fn sync_embeds_tx_inner(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    p: &Principal,
+    record_type: &str,
+    record_id: &str,
+    content: &str,
+    force_clear: bool,
+) -> Result<Vec<String>> {
     if !matches!(record_type, "Board" | "Card" | "Comment") {
         return Err(bad("Invalid embedded attachment owner"));
+    }
+    // Fizzy retains the association when Action Text is assigned empty or null.
+    if content.is_empty() && !force_clear {
+        return Ok(Vec::new());
     }
     let mut wanted = HashSet::new();
     for sgid in rich_text::attachment_sgids(content) {
