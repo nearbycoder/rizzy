@@ -330,6 +330,13 @@ host. Cache-dependent generic output, exact JSON bytes, Slack worker delivery,
 and external success and TLS paths remain open. The read-only
 `inspect-webhook` command exposes a queued Rust delivery body and content type
 for this diagnostic check without sending it.
+The paired wire test now also creates a comment event. Generic JSON matches
+every stable comment field, and Slack, Campfire, and Basecamp content matches
+after normalizing the separately generated comment ID; Basecamp content is
+decoded from its form body for that comparison. The test exposed a text-format
+link difference: Fizzy links to the card's `#comment_...` anchor, while Rizzy
+had linked to the standalone comment URL. Rizzy now uses the event link for
+those three formats, while retaining the standalone URL in generic JSON.
 
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 

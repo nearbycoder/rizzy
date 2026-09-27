@@ -1937,12 +1937,12 @@ impl WebhookFormat {
                 "board":item["board"],"creator":item["creator"]})),
             Self::Slack => webhook_wire_json(json!({"text":format!("{} <{}|Open in Fizzy>",
                 item["description"].as_str().unwrap_or(""),
-                item["eventable"]["url"].as_str().unwrap_or(""))})),
+                item["url"].as_str().unwrap_or(""))})),
             Self::Campfire | Self::Basecamp => {
                 let html = format!(
                     "{}\n<a href=\"{}\">↗︎</a>",
                     item["description"].as_str().unwrap_or(""),
-                    escape(item["eventable"]["url"].as_str().unwrap_or(""))
+                    escape(item["url"].as_str().unwrap_or(""))
                 );
                 if self == Self::Basecamp {
                     url::form_urlencoded::Serializer::new(String::new())
@@ -1974,6 +1974,7 @@ mod webhook_format_tests {
     fn event() -> Value {
         json!({"id":"event-1","action":"card_published","created_at":"2026-01-01T00:00:00Z",
             "description":"David added &quot;Tom &amp; Jerry&#39;s &lt;Great&gt; &quot;Adventure&quot;&quot;",
+            "url":"http://example.org/897362094/cards/1",
             "eventable":{"title":"Tom & Jerry's <Great> \"Adventure\"",
                 "url":"http://example.org/897362094/cards/1"},
             "board":{"id":"board-1"},"creator":{"name":"David"}})
@@ -2015,6 +2016,12 @@ mod webhook_format_tests {
         let body: Value = serde_json::from_str(&generic.body(&event)).unwrap();
         assert_eq!(body["eventable"]["title"], event["eventable"]["title"]);
         assert!(body.get("text").is_none());
+
+        let mut comment = event;
+        comment["url"] = json!("http://example.org/897362094/cards/1#comment_abc");
+        comment["eventable"]["url"] = json!("http://example.org/897362094/cards/1/comments/abc");
+        assert!(slack.body(&comment).contains("#comment_abc|Open in Fizzy"));
+        assert!(campfire.body(&comment).contains("#comment_abc\""));
     }
 }
 
