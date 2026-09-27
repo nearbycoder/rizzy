@@ -28,19 +28,23 @@ def streams(body):
     return result
 
 
-def check(name, directory):
-    env, credentials = (prepare_source(directory, 2) if name == "fizzy"
-                        else prepare_rust(directory))
-    if name == "rizzy":
-        env["RIZZY_DEV_MAGIC_LINKS"] = "1"
-    process, url = start_server(name, directory, env,
-                                sorted(os.sched_getaffinity(0))[:2])
-    try:
+def check(name, directory=None, target_override=None):
+    process = None
+    if target_override is None:
+        env, credentials = (prepare_source(directory, 2) if name == "fizzy"
+                            else prepare_rust(directory))
+        if name == "rizzy":
+            env["RIZZY_DEV_MAGIC_LINKS"] = "1"
+        process, url = start_server(name, directory, env,
+                                    sorted(os.sched_getaffinity(0))[:2])
         target = {"name": name, "url": url, "account": str(credentials["account"]),
                   "token": credentials["token"], "email": "owner@example.com",
                   "db": str(directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3")),
                   "opener": urllib.request.build_opener(
                       urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())}
+    else:
+        target = target_override
+    try:
         login(target)
         board, _ = expect(target, "/boards", "POST",
                           {"board": {"name": "Column Turbo"}}, 201)
@@ -111,7 +115,8 @@ def check(name, directory):
                 "delete": status, "unsupported_delete": unsupported_status,
                 "remaining": len(remaining_after_unsupported)}
     finally:
-        stop_server(process)
+        if process is not None:
+            stop_server(process)
 
 
 def main():

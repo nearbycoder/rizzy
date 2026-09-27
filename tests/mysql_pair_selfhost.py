@@ -34,6 +34,9 @@ from embed_parity import run as embed_run  # noqa: E402
 from card_controls_parity import check as card_controls_check  # noqa: E402
 from card_board_html_parity import check as card_board_check  # noqa: E402
 from card_edit_html_parity import check as card_edit_check  # noqa: E402
+from assignment_html_parity import check as assignment_check  # noqa: E402
+from reaction_html_parity import check as reaction_check  # noqa: E402
+from column_turbo_parity import check as column_turbo_check  # noqa: E402
 
 
 def main():
@@ -41,7 +44,8 @@ def main():
     parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
                                           "named-column", "column-cache", "column-show-cache",
                                           "draft", "card-image", "embeds", "card-controls",
-                                          "card-board", "card-edit"))
+                                          "card-board", "card-edit", "assignment", "reaction",
+                                          "column-turbo"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -128,15 +132,25 @@ def main():
             elif args.suite == "embeds":
                 source_result = embed_run(source)
                 rust_result = embed_run(rust)
-            elif args.suite in ("card-controls", "card-board", "card-edit"):
+            elif args.suite in ("card-controls", "card-board", "card-edit",
+                                 "assignment", "reaction", "column-turbo"):
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
-                check = {"card-controls": card_controls_check,
-                         "card-board": card_board_check,
-                         "card-edit": card_edit_check}[args.suite]
-                source_result = check(source)
-                rust_result = check(rust)
+                if args.suite == "column-turbo":
+                    source_result = column_turbo_check("fizzy", target_override=source)
+                    rust_result = column_turbo_check("rizzy", target_override=rust)
+                    for result in (source_result, rust_result):
+                        for key in ("create", "move_left", "move_right", "update"):
+                            result[key] = [action for action, _ in result[key]]
+                else:
+                    check = {"card-controls": card_controls_check,
+                             "card-board": card_board_check,
+                             "card-edit": card_edit_check,
+                             "assignment": assignment_check,
+                             "reaction": reaction_check}[args.suite]
+                    source_result = check(source)
+                    rust_result = check(rust)
             else:
                 source_result = core_run(source)
                 rust_result = core_run(rust)
@@ -164,7 +178,8 @@ def main():
                       f"image removal timestamp changes={source_result['delete_touch']}")
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
-            elif args.suite in ("card-controls", "card-board", "card-edit"):
+            elif args.suite in ("card-controls", "card-board", "card-edit",
+                                     "assignment", "reaction", "column-turbo"):
                 print(f"Disposable MySQL {args.suite} browser workflow matched pinned Fizzy")
             else:
                 print(f"Disposable MySQL core workflow matched pinned Fizzy: "

@@ -244,6 +244,13 @@ conditional ETags, Turbo replacement streams and JSON toggles; the board
 picker, cached response, browser and JSON moves; and the edit form, Lexxy
 editor, JSON rejection, save and reload. They cover selected transitions, not
 the complete card UI, exact markup, or every permission and side effect.
+Paired MySQL `assignment` and `reaction` runs also passed the browser pickers,
+conditional responses, card metadata and Turbo changes, self-assignment,
+card/comment reaction forms, and selected JSON mutations. The `column-turbo`
+run passed form creation, left/right reordering, rename, deletion redirect,
+and unsupported-format side effects; stream action sequences matched after
+per-app generated IDs were excluded. The SQLite column fixture still passes.
+These are selected paths, not complete interaction or permission parity.
 
 `tests/join.py` and `tests/email_change.py` now run their full existing Rust
 flows on MySQL as well as SQLite. The MySQL invite test includes a two-process

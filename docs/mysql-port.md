@@ -104,6 +104,14 @@ pass on fresh paired MySQL databases. They compare pin and watch HTML frames,
 ETags, Turbo streams and JSON toggles; the board picker and browser/JSON moves;
 and the card edit form, save, and reload. The fixtures check selected behavior
 only; exact presentation, all permissions, and concurrent edits remain open.
+Fresh paired MySQL `assignment` and `reaction` runs passed picker frames,
+cache responses, Turbo changes, self-assignment, card and comment reaction
+forms, and selected JSON mutations. The `column-turbo` run passed named-column
+form creation, position swaps, rename, deletion redirect, and unsupported
+format effects. It compares stream action order after excluding generated
+column IDs; each app's fixture still checks its stream targets. The SQLite
+column Turbo fixture passed after the harness refactor. Other multiuser and
+concurrent column operations remain to be compared.
 `tests/mysql_account_cancellation.py` checks the single-tenant cancellation
 guard, immediate access loss, day-29 retention, day-31 deletion of all
 account-scoped MySQL rows and dependent comments, file cleanup, and survival
