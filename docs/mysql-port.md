@@ -574,6 +574,14 @@ had one clean pair at 252.31 versus 26.87; Rizzy's other phase completed at
 ActiveSearch MySQL deadlock. The failed phase cannot support a throughput
 ratio. These results measure one local mixed API workflow, not full product
 parity, multi-host scaling, or maximum sustainable capacity.
+The [64-client extension](../bench/results/mysql-mixed-1000-4boards-4process-c64-20s-2026-09-27.json)
+used the same four-board, 1,000-card fixture with two reversed-order
+20-second rounds. Rizzy completed 261.16 and 267.47 workflow units/s with
+zero HTTP errors and verified record counts. Fizzy's card PATCH returned
+one HTTP 500 in each round from an ActiveSearch MySQL deadlock, so neither
+interrupted source phase supports a paired throughput ratio. This identifies
+a reliability boundary for this workload, not a maximum capacity for either
+app.
 
 The [current one-versus-four Rizzy MySQL comparison](../bench/results/mysql-rizzy-1v4-1000-4boards-c32-30s-2026-09-27.json)
 held the same release binary, 1,000-card four-board fixture, four app CPUs,
@@ -584,6 +592,13 @@ Load was near even across boards and processes. End-of-phase app PSS rose
 from 14–15 MiB to about 50 MiB, and average app CPU use from 0.70–0.71 to
 1.63–1.65 cores. The gain is evidence of one-host process scaling on this
 workload, not a cross-host or maximum-capacity result.
+The [64-client one-versus-four extension](../bench/results/mysql-rizzy-1v4-1000-4boards-c64-20s-2026-09-27.json)
+used the same binary hash as the paired run, four app CPUs, 1,000 cards on
+four boards, and two reversed-order 20-second rounds. Four processes
+completed 262.36 and 257.73 units/s versus 175.46 and 166.43 for one:
+49.5% and 54.9% higher throughput. All phases had zero HTTP errors and
+verified card, event, and comment counts. This remains a one-host process
+comparison, not multi-host or maximum-load proof.
 
 The [matched-fixture MySQL JSON read comparison](../bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 avoids that write-path failure. Fresh 1,000-card databases, the same four

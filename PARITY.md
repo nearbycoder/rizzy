@@ -326,6 +326,13 @@ phase at 251.47 without errors, while Fizzy failed a card PATCH with an
 ActiveSearch MySQL deadlock, so that second pair is invalid for throughput
 comparison. This is a local API workload with partial feature parity, not a
 whole-app, multi-host, or maximum-capacity result.
+The [64-client four-board extension](bench/results/mysql-mixed-1000-4boards-4process-c64-20s-2026-09-27.json)
+used the same pinned source and committed Rizzy binary in two reversed-order
+20-second rounds. Rizzy completed 261.16 and 267.47 workflow units/s with zero
+HTTP errors and verified counts. Fizzy returned one card-PATCH HTTP 500 in
+each round; both logs identify an ActiveSearch MySQL deadlock. Its interrupted
+phases cannot be used for a paired speed ratio. They show a reliability limit
+for this source fixture, while Rizzy completed the tested load.
 The [current one-versus-four Rizzy MySQL run](bench/results/mysql-rizzy-1v4-1000-4boards-c32-30s-2026-09-27.json)
 used the same committed release binary, four app CPUs, 32 clients, 1,000
 cards on four boards, and two reversed-order 30-second rounds. Four processes
@@ -336,6 +343,13 @@ used about 50 MiB end-of-phase app PSS versus 14–15 MiB for one, and averaged
 1.63–1.65 app CPU cores versus 0.70–0.71. This establishes process scaling
 for this local API workload; it does not establish a maximum capacity or
 multi-host operation.
+At [64 clients](bench/results/mysql-rizzy-1v4-1000-4boards-c64-20s-2026-09-27.json),
+the same release binary and four app CPUs completed two reversed-order
+20-second rounds. Four processes handled 262.36 and 257.73 units/s versus
+175.46 and 166.43 for one, gains of 49.5% and 54.9%. All four phases had
+zero HTTP errors and exact card, event, and comment counts. This extends
+one-host process-scaling evidence to the tested 64-client workload; it does
+not establish maximum sustainable concurrency or multi-host scale.
 The [matched-fixture read-only MySQL comparison](bench/results/mysql-read-matched-fixtures-1000-8-32-128-15s-2026-09-26.json)
 did complete two reversed-order rounds at 8, 32, and 128 clients with zero
 errors, unchanged counts, and matched complete sampled JSON values after
