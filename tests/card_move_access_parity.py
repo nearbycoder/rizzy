@@ -160,6 +160,18 @@ def run(target):
         watch_status, _, _ = request({**target, "token": assignee_token},
                                      f"/{account}/cards/{number}/watch", "POST", bearer=True)
         assert watch_status == 404, (target["name"], "watch after access loss", watch_status)
+        inaccessible_writes = (
+            ("card edit", f"/cards/{number}", "PATCH", {"card": {"title": "No access"}}),
+            ("tag", f"/cards/{number}/taggings", "POST", {"tag_title": "no-access"}),
+            ("assignment", f"/cards/{number}/assignments", "POST", {"assignee_id": "nonexistent"}),
+            ("step", f"/cards/{number}/steps", "POST", {"step": {"content": "No access"}}),
+            ("comment", f"/cards/{number}/comments", "POST", {"comment": {"body": "No access"}}),
+            ("reaction", f"/cards/{number}/reactions", "POST", {"reaction": {"content": "👍"}}),
+        )
+        for label, suffix, method, payload in inaccessible_writes:
+            status, _, _ = request({**target, "token": assignee_token},
+                                   f"/{account}{suffix}", method, payload, bearer=True)
+            assert status == 404, (target["name"], label, status)
         assert state(member_destination, card_id, event_id, assignee) == member_state
         return {"admin": admin_state, "member": member_state,
                 "pin_after_access_loss": pin_status,

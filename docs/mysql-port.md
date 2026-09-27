@@ -632,3 +632,14 @@ the full four-process cluster still passed its owner watch/move phase. Paired
 SQLite checks matched Fizzy's watch timestamp effects and both apps returned
 404 when the former member tried to watch after losing access. Other
 notification and broadcast effects under contention remain open.
+
+The card edit, tag, step, comment, assignment, and reaction paths now check
+the actor's access after locking the card's current board. The tag insertion
+joins the card write transaction. The private-board fixture queues an owner
+move ahead of member reaction, tag, assignment, and step requests behind a
+MySQL board lock. Two fresh runs returned 404 for each later request and
+found no new row for any of those four writes. Paired SQLite tests match
+Fizzy's post-move 404 responses for these routes, and existing tag, reaction,
+and comment timestamp comparisons still pass. The fresh MySQL core and
+four-process cluster passed; other mutation routes and access-revocation
+interleavings remain to be audited.

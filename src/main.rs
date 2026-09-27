@@ -144,6 +144,25 @@ async fn begin_card_board_write<'a>(
     }
     Err(err(StatusCode::CONFLICT, "Card moved during write"))
 }
+async fn begin_accessible_card_board_write<'a>(
+    app: &'a App,
+    p: &Principal,
+    card_id: &str,
+    board_id: &str,
+) -> Result<(sqlx::Transaction<'a, Db>, String)> {
+    let (mut tx, current_board) = begin_card_board_write(app, card_id, board_id).await?;
+    let accessible: Option<String> =
+        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+            .bind(&current_board)
+            .bind(&p.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if accessible.is_none() {
+        return Err(missing());
+    }
+    Ok((tx, current_board))
+}
 struct NotificationHtmlCacheEntry {
     version: (i64, Option<String>, i64),
     html: String,
@@ -12399,8 +12418,9 @@ async fn update_card(
         // A move can invalidate the snapshot above. Lock the current board and
         // card together so the UPDATE triggers never reach a different board
         // while this transaction holds the card row.
-        begin_card_board_write(
+        begin_accessible_card_board_write(
             &app,
+            &p,
             &c.get::<String, _>("id"),
             &c.get::<String, _>("board_id"),
         )
@@ -13546,6 +13566,10 @@ async fn toggle_tag(
     if title.is_empty() {
         return Err(bad("tag_title is required"));
     }
+    let card_id: String = c.get("id");
+    let (mut tx, _) =
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let tag_id = id();
     let insert = if app.mysql {
         "INSERT IGNORE INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)"
@@ -13557,18 +13581,15 @@ async fn toggle_tag(
         .bind(&p.account_id)
         .bind(&title)
         .bind(now())
-        .execute(&app.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
     let tag_id: String = sqlx::query_scalar("SELECT id FROM tags WHERE account_id=? AND title=?")
         .bind(&p.account_id)
         .bind(&title)
-        .fetch_one(&app.db)
+        .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;
-    let card_id: String = c.get("id");
-    let (mut tx, _) =
-        begin_card_board_write(&app, &card_id, &c.get::<String, _>("board_id")).await?;
     let exists: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM taggings WHERE card_id=? AND tag_id=?")
             .bind(&card_id)
@@ -13791,8 +13812,9 @@ async fn create_step(
     let id = id();
     let timestamp = now();
     let card_id: String = c.get("id");
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let (mut tx, _) =
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     sqlx::query(
         "INSERT INTO steps(id,card_id,content,completed,created_at,updated_at) VALUES(?,?,?,?,?,?)",
     )
@@ -13857,8 +13879,9 @@ async fn update_step(
     let completed = step_completed(v.get("completed"), previous_completed);
     let timestamp = now();
     let card_id: String = c.get("id");
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let (mut tx, _) =
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let changed = sqlx::query("UPDATE steps SET content=?,completed=?,updated_at=? WHERE id=? AND card_id=? AND (content<>? OR completed<>?)")
         .bind(&content)
         .bind(completed as i64)
@@ -13913,8 +13936,9 @@ async fn delete_step(
     p.write()?;
     let c = card(&app, &p, &number).await?;
     let card_id: String = c.get("id");
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    lock_board_for_write(&mut tx, &c.get::<String, _>("board_id"), app.mysql).await?;
+    let (mut tx, _) =
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let done = sqlx::query("DELETE FROM steps WHERE id=? AND card_id=?")
         .bind(&step)
         .bind(&card_id)
@@ -14073,8 +14097,9 @@ async fn create_comment(
     let created_at = timestamp_param(comment_input, "created_at")?
         .unwrap_or_else(|| clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
     let _writer = app.write_lock.lock().await;
-    let (mut tx, board_id) = begin_card_board_write(
+    let (mut tx, board_id) = begin_accessible_card_board_write(
         &app,
+        &p,
         &c.get::<String, _>("id"),
         &c.get::<String, _>("board_id"),
     )
@@ -14323,7 +14348,8 @@ async fn update_comment_data(
     let search_text = search_content(plain_body);
     let card_id: String = c.get("id");
     let (mut tx, board_id) =
-        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+        begin_accessible_card_board_write(app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let old_body: String =
         sqlx::query_scalar("SELECT body FROM comments WHERE id=? AND card_id=? AND creator_id=?")
             .bind(id)
@@ -14408,7 +14434,8 @@ async fn delete_comment(
     }
     let card_id: String = c.get("id");
     let (mut tx, _) =
-        begin_card_board_write(&app, &card_id, &c.get::<String, _>("board_id")).await?;
+        begin_accessible_card_board_write(&app, &p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let keys = storage::purge_record_embeds_tx(&mut tx, &p, "Comment", &comment).await?;
     deletion_cleanup::comment(&mut tx, &p.account_id, &comment).await?;
     sqlx::query(
@@ -14563,7 +14590,8 @@ async fn toggle_assignment_to(
     let card_id: String = c.get("id");
     let who = escape(&actor_name(app, p).await?);
     let (mut tx, board_id) =
-        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+        begin_accessible_card_board_write(app, p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let assignee=sqlx::query("SELECT u.id,u.name FROM users u JOIN boards b ON b.id=? WHERE u.id=? AND u.account_id=? AND u.active=1 AND u.role!='system' AND EXISTS (SELECT 1 FROM accesses x WHERE x.board_id=b.id AND x.user_id=u.id)")
         .bind(&board_id).bind(assignee_id).bind(&p.account_id).fetch_optional(&mut *tx).await.map_err(db_err)?.ok_or_else(missing)?;
     let existed: i64 =
@@ -14889,7 +14917,8 @@ async fn create_reaction(
     let id = id();
     let card_id: String = c.get("id");
     let (mut tx, _) =
-        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+        begin_accessible_card_board_write(app, p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(&id).bind(&p.account_id).bind(kind).bind(&target).bind(&p.user_id).bind(content).bind(now()).execute(&mut *tx).await.map_err(db_err)?;
     if kind == "Comment" {
@@ -14956,7 +14985,8 @@ async fn delete_reaction(
     };
     let card_id: String = c.get("id");
     let (mut tx, _) =
-        begin_card_board_write(app, &card_id, &c.get::<String, _>("board_id")).await?;
+        begin_accessible_card_board_write(app, p, &card_id, &c.get::<String, _>("board_id"))
+            .await?;
     let r=sqlx::query("SELECT reacter_id FROM reactions WHERE id=? AND account_id=? AND reactable_type=? AND reactable_id=?")
         .bind(reaction).bind(&p.account_id).bind(kind).bind(&target).fetch_optional(&mut *tx).await.map_err(db_err)?.ok_or_else(missing)?;
     if r.get::<String, _>("reacter_id") != p.user_id {

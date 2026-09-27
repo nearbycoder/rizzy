@@ -776,3 +776,14 @@ private-board MySQL fixture forced both pin/move and watch/move waits in three
 fresh runs and left neither personal row after the member lost access. The
 four-process MySQL cluster still passed its owner watch/move phase. Other
 notification, broadcast, and concurrent permission behavior remains open.
+
+Card edits, tags, steps, comments, assignments, and reactions now recheck the
+actor's access inside the locked current-board transaction. Tag creation is
+also in that transaction, so a rejected toggle leaves no new tag. The paired
+move-access fixture matched Fizzy's 404 responses for post-loss edits, tags,
+assignments, steps, comments, and reactions. Two fresh MySQL runs forced an
+owner move to wait ahead of member reaction, tag, assignment, and step writes;
+all four returned 404 after the move, with no new reaction, tag, assignment,
+or step row. Tag, reaction, and comment timestamp comparisons still matched
+Fizzy. The MySQL core and fresh four-process cluster passed. These checks
+cover selected writes and one board-move ordering, not all permission changes.
