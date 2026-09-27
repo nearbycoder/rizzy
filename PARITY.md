@@ -48,8 +48,11 @@ mention picker now emits this format; `tests/mentions.py` checks that the signed
 IDs render and create mentions and notifications. The export fixture writes a
 signed User attachment to each card, explicitly runs Fizzy's queued mention
 job, and checks that both archives contain its portable User GID and one
-mention. Blob IDs, import round trips with signed User mentions, and
-unrepresented record groups remain open.
+mention. New direct, multipart, and imported blobs use Rails-compatible signed
+IDs. `tests/blob_signed_id_reference.py` verifies a direct upload's blob ID and
+Action Text SGID with Fizzy's verifiers, then embeds the file in Rizzy. Legacy
+opaque blob IDs, import round trips with signed User mentions, and unrepresented
+record groups remain open.
 
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed

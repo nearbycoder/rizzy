@@ -13328,7 +13328,7 @@ struct CardUpdateInput {
     image: Option<storage::PendingUpload>,
 }
 
-async fn card_update_input(request: Request) -> Result<CardUpdateInput> {
+async fn card_update_input(app: &App, request: Request) -> Result<CardUpdateInput> {
     let method = request.method().clone();
     let content_type = request
         .headers()
@@ -13363,7 +13363,7 @@ async fn card_update_input(request: Request) -> Result<CardUpdateInput> {
             };
             if key == "image" {
                 if field.file_name().is_some_and(|name| !name.is_empty()) {
-                    image = Some(storage::receive_multipart_image(field).await?);
+                    image = Some(storage::receive_multipart_image(app, field).await?);
                 } else {
                     let value = field.text().await.map_err(|_| bad("Invalid card image"))?;
                     if !value.is_empty() {
@@ -13423,7 +13423,7 @@ async fn update_card(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
-    let input = card_update_input(request).await?;
+    let input = card_update_input(&app, request).await?;
     let v = nested(&input.body, "card");
     let mut title = string(v, "title").unwrap_or_else(|| c.get("title"));
     let old_title: String = c.get("title");

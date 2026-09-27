@@ -1101,8 +1101,8 @@ async fn apply_archive(
             }
         }
         let new_key = random_token();
-        let signed_id = random_token();
-        let sgid = random_token();
+        let signed_id = app.sgid_signer.blob_signed_id(blob_id);
+        let sgid = app.sgid_signer.blob(blob_id);
         let upload_hash = hash(&random_token());
         let metadata = serde_json::to_string(blob.get("metadata").unwrap_or(&json!({})))
             .map_err(|e| e.to_string())?;

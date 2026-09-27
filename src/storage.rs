@@ -971,7 +971,9 @@ pub(super) async fn attach_card_image_tx(
 }
 
 pub(super) struct PendingUpload {
+    id: String,
     pub signed_id: String,
+    attachable_sgid: String,
     key: Option<String>,
     filename: String,
     content_type: String,
@@ -995,6 +997,7 @@ impl Drop for PendingUpload {
 }
 
 pub(super) async fn receive_multipart_image(
+    app: &App,
     mut field: axum::extract::multipart::Field<'_>,
 ) -> Result<PendingUpload> {
     let filename = field
@@ -1009,8 +1012,11 @@ pub(super) async fn receive_multipart_image(
         .unwrap_or("application/octet-stream")
         .to_owned();
     let key = random_token();
+    let blob_id = id();
     let mut pending = PendingUpload {
-        signed_id: random_token(),
+        signed_id: app.sgid_signer.blob_signed_id(&blob_id),
+        attachable_sgid: app.sgid_signer.blob(&blob_id),
+        id: blob_id,
         key: Some(key.clone()),
         filename,
         content_type,
@@ -1068,9 +1074,9 @@ pub(super) async fn store_multipart_image_tx(
 ) -> Result<()> {
     let timestamp = now();
     sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(id()).bind(&p.account_id).bind(upload.key.as_deref()).bind(&upload.filename).bind(&upload.content_type)
+        .bind(&upload.id).bind(&p.account_id).bind(upload.key.as_deref()).bind(&upload.filename).bind(&upload.content_type)
         .bind(upload.byte_size)
-        .bind(&upload.checksum).bind(&upload.signed_id).bind(random_token())
+        .bind(&upload.checksum).bind(&upload.signed_id).bind(&upload.attachable_sgid)
         .bind(hash(&random_token())).bind(expires_in(60)).bind(&timestamp)
         .bind(upload.dimensions.map(|(width, _)| width)).bind(upload.dimensions.map(|(_, height)| height))
         .bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
@@ -1460,8 +1466,8 @@ pub(super) async fn direct_upload(
     }
     let id = id();
     let key = random_token();
-    let signed_id = random_token();
-    let attachable_sgid = random_token();
+    let signed_id = app.sgid_signer.blob_signed_id(&id);
+    let attachable_sgid = app.sgid_signer.blob(&id);
     let upload_token = random_token();
     let timestamp = now();
     sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")

@@ -7,30 +7,58 @@ use sha1::Sha1;
 use sha2::Sha256;
 
 pub(crate) struct Signer {
-    key: [u8; 64],
+    global_id_key: [u8; 64],
+    active_storage_key: [u8; 64],
 }
 
 impl Signer {
     pub(crate) fn new(secret_key_base: &str) -> Self {
-        let mut key = [0; 64];
+        let mut global_id_key = [0; 64];
+        let mut active_storage_key = [0; 64];
         // Rails.application.key_generator.generate_key("signed_global_ids")
         // uses 1,000 PBKDF2-HMAC-SHA256 rounds and a 64-byte output.
         pbkdf2_hmac::<Sha256>(
             secret_key_base.as_bytes(),
             b"signed_global_ids",
             1000,
-            &mut key,
+            &mut global_id_key,
         );
-        Self { key }
+        pbkdf2_hmac::<Sha256>(
+            secret_key_base.as_bytes(),
+            b"ActiveStorage",
+            1000,
+            &mut active_storage_key,
+        );
+        Self {
+            global_id_key,
+            active_storage_key,
+        }
     }
 
     pub(crate) fn user(&self, user_id: &str) -> String {
-        let envelope = json!({"_rails": {
-            "data": format!("gid://fizzy/User/{user_id}"),
-            "pur": "attachable"
-        }});
-        let encoded = URL_SAFE.encode(serde_json::to_vec(&envelope).expect("SGID envelope"));
-        let mut mac = Hmac::<Sha1>::new_from_slice(&self.key).expect("HMAC key");
+        self.sign(
+            &self.global_id_key,
+            &format!("gid://fizzy/User/{user_id}"),
+            "attachable",
+        )
+    }
+
+    pub(crate) fn blob(&self, blob_id: &str) -> String {
+        self.sign(
+            &self.global_id_key,
+            &format!("gid://fizzy/ActiveStorage::Blob/{blob_id}"),
+            "attachable",
+        )
+    }
+
+    pub(crate) fn blob_signed_id(&self, blob_id: &str) -> String {
+        self.sign(&self.active_storage_key, blob_id, "blob_id")
+    }
+
+    fn sign(&self, key: &[u8; 64], data: &str, purpose: &str) -> String {
+        let envelope = json!({"_rails": {"data": data, "pur": purpose}});
+        let encoded = URL_SAFE.encode(serde_json::to_vec(&envelope).expect("verifier envelope"));
+        let mut mac = Hmac::<Sha1>::new_from_slice(key).expect("HMAC key");
         mac.update(encoded.as_bytes());
         format!("{encoded}--{}", hex::encode(mac.finalize().into_bytes()))
     }
@@ -38,7 +66,7 @@ impl Signer {
     pub(crate) fn parse_user(&self, signed: &str) -> Option<String> {
         let (encoded, digest) = signed.rsplit_once("--")?;
         let bytes = hex::decode(digest).ok()?;
-        let mut mac = Hmac::<Sha1>::new_from_slice(&self.key).ok()?;
+        let mut mac = Hmac::<Sha1>::new_from_slice(&self.global_id_key).ok()?;
         mac.update(encoded.as_bytes());
         mac.verify_slice(&bytes).ok()?;
         let envelope: Value = serde_json::from_slice(&URL_SAFE.decode(encoded).ok()?).ok()?;
@@ -73,5 +101,13 @@ mod tests {
         let tampered = token.replacen('e', "f", 1);
         assert!(signer.parse_user(&tampered).is_none());
         assert!(signer.parse_user(&format!("{token}x")).is_none());
+        assert_eq!(
+            signer.blob("test"),
+            "eyJfcmFpbHMiOnsiZGF0YSI6ImdpZDovL2Zpenp5L0FjdGl2ZVN0b3JhZ2U6OkJsb2IvdGVzdCIsInB1ciI6ImF0dGFjaGFibGUifX0=--d8df1975d0b338192728eb82a29a4054783d89dd"
+        );
+        assert_eq!(
+            signer.blob_signed_id("test"),
+            "eyJfcmFpbHMiOnsiZGF0YSI6InRlc3QiLCJwdXIiOiJibG9iX2lkIn19--e5c891d5395c0dc305c03cd2c1777213e8dc687f"
+        );
     }
 }
