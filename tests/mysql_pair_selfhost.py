@@ -29,7 +29,7 @@ from cards_html_parity import check as all_cards_check  # noqa: E402
 from named_column_html_parity import run as named_column_run  # noqa: E402
 from column_cards_etag_parity import run as column_cache_run  # noqa: E402
 from named_column_show_etag_parity import run as column_show_cache_run  # noqa: E402
-from draft_workflow_parity import NoRedirect, run as draft_run  # noqa: E402
+from draft_workflow_parity import NoRedirect, login, run as draft_run  # noqa: E402
 from card_image_parity import run as card_image_run  # noqa: E402
 from embed_parity import run as embed_run  # noqa: E402
 from card_controls_parity import check as card_controls_check  # noqa: E402
@@ -62,6 +62,7 @@ def main():
                                           "board-views", "board-settings", "webhooks-html",
                                           "step-read", "public-page", "join-code",
                                           "user-events", "route-get", "route-get-contract",
+                                          "route-get-html",
                                           "passkeys-html",
                                           "passkeys-flow", "auth-format"))
     args = parser.parse_args()
@@ -192,10 +193,17 @@ def main():
                     target["user_id"] = next(user["id"] for user in users if user["role"] == "owner")
                 source_result = user_events_check(source)
                 rust_result = user_events_check(rust)
-            elif args.suite in ("route-get", "route-get-contract"):
-                detailed = args.suite == "route-get-contract"
-                source_result = route_get_run(source, detailed)
-                rust_result = route_get_run(rust, detailed)
+            elif args.suite in ("route-get", "route-get-contract", "route-get-html"):
+                detailed = args.suite != "route-get"
+                accept = "text/html" if args.suite == "route-get-html" else "application/json"
+                if accept == "text/html":
+                    for target in (source, rust):
+                        target["opener"] = urllib.request.build_opener(
+                            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                            NoRedirect())
+                        login(target)
+                source_result = route_get_run(source, detailed, accept)
+                rust_result = route_get_run(rust, detailed, accept)
             elif args.suite == "passkeys-html":
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
@@ -265,7 +273,7 @@ def main():
                 source_result = core_run(source)
                 rust_result = core_run(rust)
             difference = first_difference(source_result, rust_result)
-            if args.suite in ("route-get", "route-get-contract") and difference is not None:
+            if args.suite in ("route-get", "route-get-contract", "route-get-html") and difference is not None:
                 for path in source_result.keys() | rust_result.keys():
                     if source_result.get(path) != rust_result.get(path):
                         print(f"{path}: Fizzy={source_result.get(path)} "
@@ -304,7 +312,7 @@ def main():
                 print("Disposable MySQL invite-link browser and QR workflow matched pinned Fizzy")
             elif args.suite == "user-events":
                 print("Disposable MySQL user activity browser workflow matched pinned Fizzy")
-            elif args.suite in ("route-get", "route-get-contract"):
+            elif args.suite in ("route-get", "route-get-contract", "route-get-html"):
                 print(f"Disposable MySQL GET error contracts matched pinned Fizzy: "
                       f"{len(source_result)} routes")
             elif args.suite == "passkeys-html":

@@ -77,6 +77,9 @@ pub(super) async fn index(
     headers: HeaderMap,
 ) -> Result<Response> {
     principal(&app, &headers, &account).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok((StatusCode::NOT_ACCEPTABLE, Html(String::new())).into_response());
+    }
     Ok((
         StatusCode::NO_CONTENT,
         [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],

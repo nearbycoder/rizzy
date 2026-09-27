@@ -41,18 +41,17 @@ def paths():
     return sorted(found)
 
 
-def run(target, detailed=False):
+def run(target, detailed=False, accept="application/json"):
     result = {}
     route_paths = paths()
     for path in route_paths:
         scoped = f"/{target['account']}{path}" if path != "/" else f"/{target['account']}/"
-        request = urllib.request.Request(
-            target["url"] + scoped,
-            headers={"Authorization": "Bearer " + target["token"],
-                     "Accept": "application/json"},
-        )
+        headers = {"Accept": accept}
+        if accept == "application/json":
+            headers["Authorization"] = "Bearer " + target["token"]
+        request = urllib.request.Request(target["url"] + scoped, headers=headers)
         try:
-            response = OPENER.open(request, timeout=12)
+            response = target.get("opener", OPENER).open(request, timeout=12)
         except urllib.error.HTTPError as error:
             response = error
         with response:

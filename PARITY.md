@@ -927,8 +927,10 @@ of 92 distinct pinned Fizzy GET paths against Rizzy, using a JSON request and
 absent resource identifiers on fresh paired MySQL databases. All 92 matched.
 The `route-get-contract` variant also matches redirect paths and queries,
 semantic JSON error bodies, and the exact hash and length of non-JSON error
-bodies on all 92 paths. This covers routing and missing-resource behavior only;
-it does not compare successful response bodies, valid resources, HTML request
-negotiation, permissions, or side effects.
+bodies on all 92 paths. The `route-get-html` variant now matches the same
+status, content-type, redirect, and error-body contract for signed-in HTML
+requests on all 92 paths. These checks cover routing and missing-resource
+behavior only; they do not compare successful response bodies, valid resources,
+complete permissions, or side effects.
 The paired `join-code` flow also checks invalid QR signatures and absent account
 prefixes with JSON and SVG Accept headers. Full route parity remains open.

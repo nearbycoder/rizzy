@@ -775,10 +775,11 @@ fresh MySQL databases. It compares JSON-request status and content type with
 missing resource identifiers, including account-scope redirects, lookup order,
 and missing-template errors. `route-get-contract` also compares redirect
 destinations, JSON error bodies, and exact non-JSON error body digests for all
-92 paths. The paired `join-code` suite passed invite-link
+92 paths. `route-get-html` passes the same contract for signed-in HTML requests,
+including static 404 pages and empty 406 responses. The paired `join-code` suite passed invite-link
 browser behavior plus invalid QR signatures and absent-account prefixes for
 JSON and SVG requests. Successful response bodies, valid-resource routes, and
-most write paths are outside this census.
+most write paths are outside these censuses.
 The disposable paired `auth-format` suite also passed bearer-only format,
 read-token write denial, JSON suffix, and unauthenticated redirect checks on
 fresh MySQL databases.

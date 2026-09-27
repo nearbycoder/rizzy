@@ -478,6 +478,38 @@ async fn block_search_engine_indexing(request: Request, next: Next) -> Response 
     }
     response
 }
+
+async fn html_error_contract(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    // The source route declares defaults: { format: :json } for webhook deliveries.
+    let route_defaults_json = path.contains("/webhooks/") && path.ends_with("/deliveries");
+    let wants_html = request
+        .headers()
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/html"))
+        && !path.ends_with(".json")
+        && !route_defaults_json;
+    let response = next.run(request).await;
+    if !wants_html
+        || !response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("application/json"))
+    {
+        return response;
+    }
+    match response.status() {
+        StatusCode::NOT_FOUND => {
+            static_error_page(include_str!("../static/404.html"), StatusCode::NOT_FOUND)
+        }
+        StatusCode::NOT_ACCEPTABLE => {
+            (StatusCode::NOT_ACCEPTABLE, Html(String::new())).into_response()
+        }
+        _ => response,
+    }
+}
 fn authentication_redirect(response: &Response) -> bool {
     response.status() == StatusCode::FOUND
         && response
@@ -4643,6 +4675,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn(block_search_engine_indexing))
         .layer(middleware::from_fn(prevent_request_forgery))
         .layer(middleware::from_fn(mark_request_format))
+        .layer(middleware::from_fn(html_error_contract))
         .layer(middleware::from_fn(content_security_policy))
         .layer(middleware::from_fn(assign_request_id));
     let bind = env::var("RIZZY_BIND").unwrap_or_else(|_| "127.0.0.1:3007".into());
@@ -6425,6 +6458,9 @@ async fn list_users(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok((StatusCode::NOT_ACCEPTABLE, Html(String::new())).into_response());
+    }
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let scope = " FROM users WHERE account_id=? AND active=1 AND role!='system'";
@@ -7801,6 +7837,9 @@ async fn list_boards(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok((StatusCode::NOT_ACCEPTABLE, Html(String::new())).into_response());
+    }
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let scope =
@@ -9998,6 +10037,9 @@ async fn list_tags(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok((StatusCode::NOT_ACCEPTABLE, Html(String::new())).into_response());
+    }
     let page = query.page.unwrap_or(1).max(1);
     let (offset, limit) = page_window(page);
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tags WHERE account_id=?")
@@ -11425,6 +11467,9 @@ async fn list_activities(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
+    if !headers.contains_key("x-rizzy-json-request") {
+        return Ok((StatusCode::NOT_ACCEPTABLE, Html(String::new())).into_response());
+    }
     let query = parse_activity_query(raw);
     let (offset, limit) = page_window(query.page);
     let mut count = activities_query("SELECT COUNT(*)", &p, &query);
