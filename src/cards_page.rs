@@ -295,8 +295,9 @@ fn radio_option(name: &str, value: &str, label: &str, current: &str) -> String {
 
 fn quick_filter(label: &str, selected: bool, searchable: bool, choices: &str) -> String {
     format!(
-        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" hidden>{}{choices}</div></div>",
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" role=\"dialog\" aria-label=\"{}\" tabindex=\"-1\" hidden>{}{choices}</div></div>",
         if selected { " is-selected" } else { "" },
+        escape(label),
         escape(label),
         if searchable {
             "<input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter…\" autocomplete=\"off\" autocorrect=\"off\">".to_owned()
