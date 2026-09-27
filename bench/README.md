@@ -1,5 +1,15 @@
 # Comparative load runs
 
+The [current MySQL mixed-write run at 16 clients](results/mysql-mixed-etag-1000-4boards-c16-15s-2026-09-27.json)
+used fresh 1,000-card, four-board fixtures, four app CPUs, four processes or
+workers per target, and two reversed-order 15-second rounds. One paired phase
+had zero errors and verified final counts: Rizzy completed 265.36 workflows/s
+versus Fizzy's 25.03, with p95 unit latency 77.49 versus 781.09 ms. Fizzy's
+other phase failed on an ActiveSearch MySQL deadlock, so the artifact is marked
+`has_errors`. The [eight-client repeat](results/mysql-mixed-etag-1000-4boards-c8-15s-2026-09-27.json)
+had Fizzy deadlocks in both rounds and widely varying Rizzy throughput. These
+results describe a local workload and do not prove maximum or product-wide scale.
+
 The [shared-shell named-column read](results/named-column-html-100-shared-shell-2026-09-27.json)
 uses fresh 100-card fixtures, 15 visible previews, eight shared CPUs, eight
 Fizzy workers, and one release Rizzy process. Two reversed-order rounds at
