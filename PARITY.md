@@ -328,9 +328,10 @@ before rendering: a warm cache from the API request otherwise retains that
 request's local host in source webhook links instead of the configured public
 host. Rizzy now serializes generic card and comment payload fields in the
 same order as Fizzy's Jbuilder templates. The paired wire test compares their
-raw JSON after normalizing generated IDs and timestamps; escaping and field
-order match on those fixtures, so the HMAC signs the same bytes for equivalent
-records. Cache-dependent generic output, untested event variants, Slack worker
+raw JSON after normalizing generated IDs, publication keys, and timestamps;
+escaping and field order match for a card in a named column on a public board
+and for its comment, so the HMAC signs the same bytes for equivalent records.
+Cache-dependent generic output, untested event variants, Slack worker
 delivery, and external success and TLS paths remain open. The read-only
 `inspect-webhook` command exposes a queued Rust delivery body and content type
 for this diagnostic check without sending it.

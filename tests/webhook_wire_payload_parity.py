@@ -36,15 +36,16 @@ def stable(value):
     if isinstance(value, list):
         return [stable(item) for item in value]
     if isinstance(value, str):
-        value = re.sub(r"/(boards|users|comments)/[^/|<>]+", r"/\1/<generated>", value)
+        value = re.sub(r"/(boards|users|comments|columns)/[^/|<>]+", r"/\1/<generated>", value)
         return re.sub(r"#comment_[^/|<>]+", "#comment_<generated>", value)
     return value
 
 
 def stable_wire(body):
     body = re.sub(r"[0-9a-z]{25}", "<generated>", body)
-    return re.sub(r"20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d\.\d\d\dZ",
+    body = re.sub(r"20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d\.\d\d\dZ",
                   "<timestamp>", body)
+    return re.sub(r"(/public/boards/)[^\"/]+", r"\1<generated>", body)
 
 
 def api(target, path, method="GET", payload=None, expected=200):
@@ -59,8 +60,10 @@ def source_runner(target, ruby):
 
 
 def fixture(target):
-    board = api(target, "/boards", "POST", {"board": {"name": "Webhook wire"}}, 201)
+    board = api(target, "/boards", "POST", {"board": {
+        "name": "Webhook wire", "public_description": "Visible & <strong>bold</strong>"}}, 201)
     board_id = board["id"]
+    api(target, f"/boards/{board_id}/publication", "POST", expected=201)
     hooks = {}
     for name, url in HOOKS.items():
         hook = api(target, f"/boards/{board_id}/webhooks", "POST", {
@@ -73,6 +76,10 @@ def fixture(target):
     comment = api(target, f"/cards/{card['number']}/comments", "POST", {
         "comment": {"body": COMMENT}}, 201)
     assert comment["body"]["plain_text"] == COMMENT
+    column = api(target, f"/boards/{board_id}/columns", "POST", {
+        "column": {"name": "In progress"}}, 201)
+    api(target, f"/cards/{card['number']}/triage", "POST",
+        {"column_id": column["id"]}, 204)
     if target["name"] == "fizzy":
         for action in ("card_published", "comment_created"):
             ruby = ('event = Event.where(board_id: Webhook.find(' + json.dumps(hooks["generic"])
@@ -167,7 +174,7 @@ def main():
                     source_body, rust_body = source[key]["body"], rust[key]["body"]
                 assert stable(source_body) == stable(rust_body), (
                     key, stable(source_body), stable(rust_body))
-            print("PASS card webhook wire parity and stable comment payloads across four formats")
+            print("PASS card and comment webhook wire parity, including column and public board")
         finally:
             for process in processes:
                 stop_server(process)
