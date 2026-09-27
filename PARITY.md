@@ -301,7 +301,7 @@ one tracker per webhook.
 legacy webhook columns. A disposable MySQL 8.4.11 server passed partial-schema
 recovery, two-worker delivery, account import, and
 `tests/mysql_webhook_tracker_migration.py`'s legacy backfill and second restart.
-Cross-host delivery ordering and remaining payload variants are still open.
+Cross-host delivery ordering and less-common event variants are still open.
 Webhook DNS selection now pins the first public address in mixed DNS answers,
 matching the pinned Surfguard policy, and keeps an all-private answer blocked.
 The response-body limit now matches Fizzy's 100 KiB. The Rust DNS safety unit
@@ -313,8 +313,15 @@ and an event description without a viewer. Its unit test checks the format
 examples and special-character escaping recorded in the pinned source tests;
 the pinned `Webhook::Delivery` suite passed 29 tests and 67 assertions. The
 Rust worker check confirms stored content types and private-target refusals
-for generic, Campfire, and Basecamp hooks. An exact source/Rust wire-body
-comparison, Slack worker delivery, and success and TLS paths remain open.
+for generic, Campfire, and Basecamp hooks. `tests/webhook_wire_payload_parity.py`
+creates equivalent published-card deliveries in disposable production Fizzy
+and Rizzy databases and compares the complete Slack, Campfire, and Basecamp
+content types and body bytes. It found and closed the source JSON serializer's
+`\u0026` and `\u003c` escaping difference. Generic JSON has matching structure
+and selected title, board, creator, and action values in that fixture; its
+complete values and bytes, Slack worker delivery, and success and TLS paths
+remain open. The read-only `inspect-webhook` command exposes a queued Rust
+delivery body and content type for this diagnostic check without sending it.
 
 `tests/card_controls_parity.py` checks pin and watch HTML button states, conditional ETags, Turbo replacements, and JSON toggles against both servers. Rust's watch stream also updates the comment subscriber section. The main card page still uses its own controls and JavaScript rather than Fizzy's frame-driven menu and broadcasts; the complete card interaction model remains incomplete.
 

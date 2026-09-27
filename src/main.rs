@@ -1932,14 +1932,12 @@ impl WebhookFormat {
 
     fn body(self, item: &Value) -> String {
         match self {
-            Self::Generic => json!({"id":item["id"],"action":item["action"],
+            Self::Generic => webhook_wire_json(json!({"id":item["id"],"action":item["action"],
                 "created_at":item["created_at"],"eventable":item["eventable"],
-                "board":item["board"],"creator":item["creator"]})
-            .to_string(),
-            Self::Slack => json!({"text":format!("{} <{}|Open in Fizzy>",
+                "board":item["board"],"creator":item["creator"]})),
+            Self::Slack => webhook_wire_json(json!({"text":format!("{} <{}|Open in Fizzy>",
                 item["description"].as_str().unwrap_or(""),
-                item["eventable"]["url"].as_str().unwrap_or(""))})
-            .to_string(),
+                item["eventable"]["url"].as_str().unwrap_or(""))})),
             Self::Campfire | Self::Basecamp => {
                 let html = format!(
                     "{}\n<a href=\"{}\">↗︎</a>",
@@ -1956,6 +1954,16 @@ impl WebhookFormat {
             }
         }
     }
+}
+
+fn webhook_wire_json(value: Value) -> String {
+    value
+        .to_string()
+        .replace('&', "\\u0026")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }
 
 #[cfg(test)]
@@ -1996,6 +2004,7 @@ mod webhook_format_tests {
         let slack = webhook_format("https://hooks.slack.com/services/T123/B456/secret");
         assert_eq!(slack, WebhookFormat::Slack);
         assert_eq!(slack.content_type(), "application/json");
+        assert!(slack.body(&event).contains("\\u0026quot;"));
         assert_eq!(
             serde_json::from_str::<Value>(&slack.body(&event)).unwrap()["text"],
             "David added &quot;Tom &amp; Jerry&#39;s &lt;Great&gt; &quot;Adventure&quot;&quot; <http://example.org/897362094/cards/1|Open in Fizzy>"
@@ -3352,6 +3361,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         export_notify: tokio::sync::Notify::new(),
         import_notify: tokio::sync::Notify::new(),
     });
+    if env::args().nth(1).as_deref() == Some("inspect-webhook") {
+        let delivery_id = env::args()
+            .nth(2)
+            .ok_or("inspect-webhook needs a delivery ID")?;
+        let row = sqlx::query("SELECT d.*,w.url,w.signing_secret,e.creator_id,e.created_at event_created_at,a.external_account_id,a.updated_at account_updated_at FROM webhook_deliveries d JOIN webhooks w ON w.id=d.webhook_id JOIN events e ON e.id=d.event_id JOIN accounts a ON a.id=d.account_id WHERE d.id=?")
+            .bind(delivery_id).fetch_one(&app.db).await?;
+        let host = env::var("RIZZY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3007".into());
+        let (body, format) = webhook_payload(&app, &row, &host)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!(
+            "{}",
+            json!({"body":body,"content_type":format.content_type()})
+        );
+        return Ok(());
+    }
     if !mysql {
         let plain_search_backfilled: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM search_migrations WHERE key='fts_plain_v2'")
