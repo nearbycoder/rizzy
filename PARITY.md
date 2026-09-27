@@ -55,7 +55,7 @@ The differing markup and incomplete interactions preclude a one-for-one
 performance claim.
 The event renderer now follows Fizzy's event wrapper classes, related-card
 hover attributes, action-specific icon mapping, nested avatar and description
-row, and excerpt-only-for-publish-or-comment layout. The six source SVG icons
+row, and excerpt-only-for-publish-or-comment layout. The source event SVG icons
 are served as local assets. The paired media test checks the markup and icon
 bytes against the pinned source; 14 event sentences and the Home add-card flow
 still pass. Chromium showed populated Added and Updated columns, the comment
@@ -64,6 +64,20 @@ icon and media previews, and no page errors. The
 found 145,888-byte Rizzy HTML versus 216,774-byte Fizzy HTML and 6,894–7,842
 versus 316–411 requests/s over the two short concurrency levels. Other source
 layout details, media forms, and browser interactions remain incomplete.
+Chromium comparison of fresh media boards exposed a day-boundary gap: Fizzy's
+public sign-in page sets the browser timezone cookie, while Rizzy had waited
+for one to exist. Rizzy's full-page layout now sets the same cookie; a new
+browser session reported `America/Chicago` and rendered `ADDED TODAY` instead
+of the next UTC date. Home now uses Fizzy's shared-hour CSS grid and column
+dividers, source-shaped day headings and grid maximize icon, and a centered
+two-row header. In Chromium, Added and Updated time blocks occupied the same
+hour row and the page had no console errors. The
+[post-grid Home run](bench/results/home-media-html-day-grid-98-2026-09-26.json)
+showed 148,727-byte Rust versus 216,774-byte source HTML and 6,500–7,679
+versus 308–403 requests/s across 8 and 32 clients, with zero HTTP errors.
+Fizzy's footer trays, remaining header/menu behavior, exact event dimensions,
+and many visual details still differ. Browser timezone preference persistence
+and changes during a live session remain to be compared end to end.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.

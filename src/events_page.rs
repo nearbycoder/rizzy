@@ -29,6 +29,7 @@ pub(super) async fn icon(Path(filename): Path<String>) -> Response {
         "rename.svg" => include_str!("../static/event-icons/rename.svg"),
         "move.svg" => include_str!("../static/event-icons/move.svg"),
         "person.svg" => include_str!("../static/event-icons/person.svg"),
+        "grid.svg" => include_str!("../static/event-icons/grid.svg"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     (
@@ -160,10 +161,11 @@ fn view_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION.get_or_init(|| {
         hash(&format!(
-            "{}{}{}",
+            "{}{}{}{}",
             include_str!("events_page.rs"),
             include_str!("../static/events.css"),
-            include_str!("../static/events.js")
+            include_str!("../static/events.js"),
+            include_str!("../assets/timezone_cookie.html")
         ))
     })
 }
@@ -784,22 +786,33 @@ fn render_column(
     users: &HashMap<String, String>,
     media: &EventMedia,
 ) -> String {
+    let today = Utc::now().with_timezone(&tz).date_naive();
+    let day_label = if day == today {
+        "today".to_owned()
+    } else if Some(day) == today.pred_opt() {
+        "yesterday".to_owned()
+    } else {
+        day.format("%b %-d").to_string()
+    };
     let mut html = format!(
-        "<div class=\"events__column\"><h3 class=\"events__column-header\"><span>{} {}{}</span>",
+        "<div class=\"events__column\"><h3 class=\"events__column-header\"><span>{} <time datetime=\"{day}\" data-local-time-target=\"agoorweekday\"><span class=\"local-time-value\">{day_label}</span></time>{}</span>",
         column.title,
-        day.format("%b %-d"),
         if column.count > 0 {
-            format!(" ({})", column.count)
+            format!(
+                " <span class=\"font-weight-normal\">({})</span>",
+                column.count
+            )
         } else {
             String::new()
         }
     );
     if column.count > 0 {
         let filter = filter_query(params);
-        html.push_str(&format!("<a class=\"events__maximize-button\" href=\"/{account}/events/day_timeline/columns/{}?day={day}{}\" aria-label=\"Expand {} column\">Expand</a>", column.id, if filter.is_empty() { String::new() } else { format!("&{filter}") }, column.title));
+        html.push_str(&format!("<a class=\"events__maximize-button btn btn--circle txt-x-small borderless\" href=\"/{account}/events/day_timeline/columns/{}?day={day}{}\" data-turbo-frame=\"_top\"><span class=\"icon icon--grid translucent\" aria-hidden=\"true\"></span><span class=\"for-screen-reader\">Expand column</span></a>", column.id, if filter.is_empty() { String::new() } else { format!("&{filter}") }));
     }
     html.push_str("</h3>");
     let mut last_hour = None;
+    let mut timestamp_html = String::new();
     for event in &column.events {
         let created: String = event.get("created_at");
         let Ok(time) = DateTime::parse_from_rfc3339(&created) else {
@@ -809,18 +822,29 @@ fn render_column(
         let hour = local.hour();
         if last_hour != Some(hour) {
             if last_hour.is_some() {
+                html.push_str(&timestamp_html);
                 html.push_str("</div>");
             }
-            html.push_str(&format!("<div class=\"events__time-block\" style=\"grid-area: {}/{}\"><time class=\"event__timestamp\" datetime=\"{}\">{}</time>", 25-hour, column.index, escape(&created), local.format("%-I:%M %p")));
+            html.push_str(&format!(
+                "<div class=\"events__time-block\" style=\"grid-area: {}/{}\">",
+                25 - hour,
+                column.index
+            ));
+            timestamp_html = format!(
+                "<time class=\"event__timestamp txt-small translucent\" datetime=\"{}\" data-local-time-target=\"time\">{}</time>",
+                escape(&created),
+                local.format("%-I:%M %p")
+            );
             last_hour = Some(hour);
         }
         html.push_str(&render_event(event, account, viewer, users, media));
     }
     if last_hour.is_some() {
+        html.push_str(&timestamp_html);
         html.push_str("</div>");
     }
     if column.count > 100 {
-        html.push_str(&format!("<div class=\"events__column-footer\">Showing the 100 most recent ({} are hidden)</div>", column.count-100));
+        html.push_str(&format!("<div class=\"events__column-footer fill-highlight txt-x-small border-radius\" style=\"grid-column-start: {}\">Showing the 100 most recent ({} are hidden)</div>", column.index, column.count-100));
     }
     html.push_str("</div>");
     html
@@ -836,7 +860,7 @@ fn render_day(
     media: &EventMedia,
 ) -> String {
     let mut html = format!(
-        "<turbo-frame id=\"day-timeline-pagination-contents-{}\" role=\"presentation\"><section class=\"events__day\">",
+        "<turbo-frame id=\"day-timeline-pagination-contents-{}\" role=\"presentation\"><section class=\"events__day\" data-controller=\"related-element\" data-related-element-highlight-class=\"event--related\">",
         timeline.day
     );
     if timeline.columns.iter().any(|column| column.count > 0) {
@@ -1040,7 +1064,7 @@ pub(super) async fn index(
         &media,
     );
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
         include_str!("../static/events.css"),
         p.slug,
         p.slug,

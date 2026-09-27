@@ -131,7 +131,11 @@ def check(item):
     assert "icon--comment" in layout.events["comment_created"]["nested_classes"], item["name"]
     assert "event__icon" not in layout.events["card_published"]["nested_classes"], item["name"]
     if item["name"] == "rizzy":
-        for icon_name in ("assigned", "minus", "comment", "rename", "move", "person"):
+        status, _, login_html = call(item, "/session/new", bearer=False,
+                                     headers={"Accept": "text/html"})
+        assert status == 200 and b"resolvedOptions().timeZone" in login_html, (
+            status, login_html[-300:])
+        for icon_name in ("assigned", "minus", "comment", "rename", "move", "person", "grid"):
             status, headers, icon = call(item, f"/assets/events/icons/{icon_name}.svg", bearer=False)
             original = (Path(__file__).resolve().parents[1] / "upstream" / "app" /
                         "assets" / "images" / f"{icon_name}.svg").read_bytes()

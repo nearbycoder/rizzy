@@ -27,6 +27,19 @@ versus Fizzy's 316–410 and 411, with zero HTTP errors. Its warm Home cache
 remains active, and the page and application are still not one-for-one; these
 numbers remain scoped read diagnostics.
 
+The [day-grid Home repeat](results/home-media-html-day-grid-98-2026-09-26.json)
+followed the shared-hour grid, centered header, local-day labels, and timezone
+cookie changes. Fresh matched samples still showed 100 events, three columns,
+and the same selected media counts; Rizzy's page was 148,727 bytes versus
+Fizzy's 216,774. Two reversed-order five-second rounds had zero HTTP errors.
+At eight clients, Rizzy served 7,116–7,679 requests/s versus Fizzy's 308–398;
+at 32, 6,500–7,141 versus 399–403. The Python client, four assigned server
+CPUs, four Puma workers, single Rust process, and warm Rust Home cache are the
+same as the earlier run. Browser inspection confirmed the local-day cookie and
+hour-row alignment; it also showed remaining card-size and footer differences.
+This is still a short, read-only, one-host diagnostic, not a full parity or
+maximum-capacity result.
+
 The [post-storage-ledger scoped read run](results/embedded-ledger-read-100-4workers-8-32-5s-2026-09-26.json)
 used fresh 100-card SQLite fixtures, four assigned app CPUs, four Fizzy Puma
 workers, one Rust process, and a Rust load client. Two reversed-order

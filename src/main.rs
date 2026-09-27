@@ -641,6 +641,9 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
     {
         html.insert_str(body, &platform_attributes(&agent, public_layout));
     }
+    if let Some(end) = html.find("</body>") {
+        html.insert_str(end, include_str!("../assets/timezone_cookie.html"));
+    }
     let register_pwa = if successful {
         if let Some(headers) = &session_headers {
             identity_auth(&app, headers).await.is_ok()
