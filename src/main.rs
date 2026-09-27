@@ -9847,6 +9847,36 @@ fn parse_search_query(raw: Option<String>) -> SearchQuery {
     }
     query
 }
+fn search_card_number(term: &str) -> Option<i64> {
+    // ActiveRecord casts the search string to an integer for its card-number
+    // lookup before running full-text search. Ruby accepts a leading decimal
+    // run (including separators) even when other search syntax follows it.
+    let mut chars = term.trim_start().chars().peekable();
+    let negative = match chars.peek() {
+        Some('+') => {
+            chars.next();
+            false
+        }
+        Some('-') => {
+            chars.next();
+            true
+        }
+        _ => false,
+    };
+    let mut number = 0_i64;
+    let mut saw_digit = false;
+    for ch in chars {
+        if let Some(digit) = ch.to_digit(10).filter(|_| ch.is_ascii_digit()) {
+            saw_digit = true;
+            number = number.checked_mul(10)?.checked_add(i64::from(digit))?;
+        } else if ch == '_' && saw_digit {
+            continue;
+        } else {
+            break;
+        }
+    }
+    (saw_digit && !negative && number > 0).then_some(number)
+}
 fn fts_query(raw: &str) -> Option<String> {
     // Match Search::Query's sanitization and ActiveSearch's SQLite term parser.
     // A quote inside a word stays inside that term; it does not start a phrase.
@@ -9908,7 +9938,7 @@ async fn search_cards(
         return Ok(paginated(json!([]), 0, page, &uri, &headers));
     };
     let (offset, limit) = page_window(page);
-    let number = term.parse::<i64>().ok();
+    let number = search_card_number(term);
     if let Some(number) = number {
         if let Ok(row) = card(&app, &p, &number.to_string()).await {
             let items = if offset == 0 {

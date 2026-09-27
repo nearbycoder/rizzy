@@ -1,75 +1,44 @@
 use axum::response::{Html, IntoResponse, Response};
-use regex::{Regex, RegexBuilder};
+use regex::Regex;
 use sqlx::Row;
 use std::sync::OnceLock;
 
 use super::{
-    App, Principal, Result, SearchQuery, card, db_err, escape, fts_query, mysql_search, page_window,
+    App, Principal, Result, SearchQuery, card, db_err, escape, fts_query, mysql_search,
+    page_window, search_card_number,
 };
 
-fn matcher(query: &str) -> Option<Regex> {
-    let mut words: Vec<String> = query
-        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-        .filter(|word| !word.is_empty())
-        .map(regex::escape)
-        .collect();
-    words.sort_by_key(|word| std::cmp::Reverse(word.len()));
-    words.dedup();
-    if words.is_empty() {
-        None
-    } else {
-        RegexBuilder::new(&words.join("|"))
-            .case_insensitive(true)
-            .build()
-            .ok()
+fn sqlite_highlighted(value: &str) -> Option<String> {
+    const OPEN: char = '\u{e000}';
+    const CLOSE: char = '\u{e001}';
+    if !value.contains(OPEN) {
+        return None;
     }
-}
-
-fn highlighted(value: &str, pattern: Option<&Regex>) -> String {
-    let Some(pattern) = pattern else {
-        return escape(value);
-    };
-    let mut result = String::new();
-    let mut end = 0;
-    for found in pattern.find_iter(value) {
-        result.push_str(&escape(&value[end..found.start()]));
-        result.push_str("<mark class=\"circled-text\"><span></span>");
-        result.push_str(&escape(found.as_str()));
-        result.push_str("</mark>");
-        end = found.end();
-    }
-    result.push_str(&escape(&value[end..]));
-    result
-}
-
-fn excerpt(value: &str, pattern: Option<&Regex>) -> String {
-    let text = super::rich_text::plain_text(value);
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.is_empty() {
-        return String::new();
-    }
-    let Some(hit) =
-        pattern.and_then(|pattern| words.iter().position(|word| pattern.is_match(word)))
-    else {
-        let mut chars = text.chars();
-        let prefix: String = chars.by_ref().take(197).collect();
-        return if chars.next().is_some() {
-            escape(&prefix) + "..."
+    let mut html = String::new();
+    let mut fragments = value.split(OPEN);
+    html.push_str(&escape(fragments.next().unwrap_or_default()));
+    for fragment in fragments {
+        if let Some((match_text, rest)) = fragment.split_once(CLOSE) {
+            html.push_str("<mark class=\"circled-text\"><span></span>");
+            html.push_str(&escape(match_text));
+            html.push_str("</mark>");
+            html.push_str(&escape(rest));
         } else {
-            escape(&text)
-        };
-    };
-    let start = hit.saturating_sub(9);
-    let end = (hit + 11).min(words.len());
-    let mut result = String::new();
-    if start > 0 {
-        result.push_str("...");
+            html.push_str(&escape(fragment));
+        }
     }
-    result.push_str(&highlighted(&words[start..end].join(" "), pattern));
-    if end < words.len() {
-        result.push_str("...");
+    Some(html)
+}
+
+fn excerpt(value: &str) -> String {
+    let text = super::rich_text::plain_text(value);
+    let mut chars = text.chars();
+    let prefix: String = chars.by_ref().take(197).collect();
+    if chars.next().is_some() {
+        escape(&prefix) + "..."
+    } else {
+        escape(&text)
     }
-    result
 }
 
 fn mysql_matches(word: &str, stems: &[String]) -> bool {
@@ -105,7 +74,7 @@ fn mysql_excerpt(value: &str, stems: &[String]) -> String {
         return mysql_highlighted(&text, stems);
     }
     let Some(hit) = words.iter().position(|word| mysql_matches(word, stems)) else {
-        return excerpt(value, None);
+        return excerpt(value);
     };
     let start = hit.saturating_sub(10);
     let end = (start + 20).min(words.len());
@@ -148,7 +117,7 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
     html.push_str("\" autofocus><button type=\"submit\">Search</button></form><turbo-frame id=\"bar_content\">");
 
     if let Some(term) = term {
-        if let Ok(number) = term.parse::<i64>() {
+        if let Some(number) = search_card_number(term) {
             if card(app, p, &number.to_string()).await.is_ok() {
                 html.push_str("<form data-controller=\"auto-submit\" action=\"/");
                 html.push_str(&p.slug.to_string());
@@ -198,22 +167,29 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
             } else {
                 sqlx::query(
                 r"WITH hits AS (
-                   SELECT 'card' kind,c.id card_id,NULL hit_id,c.created_at hit_at FROM cards c
-                     WHERE c.rowid IN (SELECT rowid FROM card_search WHERE card_search MATCH ?)
+                   SELECT 'card' kind,c.id card_id,NULL hit_id,c.created_at hit_at,
+                          highlight(card_search,0,char(57344),char(57345)) title_hl,
+                          snippet(card_search,1,char(57344),char(57345),'...',20) content_hl
+                     FROM card_search JOIN cards c ON c.rowid=card_search.rowid
+                    WHERE card_search MATCH ?
                    UNION ALL
-                   SELECT 'comment' kind,m.card_id,m.id,m.created_at FROM comments m
-                     WHERE m.rowid IN (SELECT rowid FROM comment_search WHERE comment_search MATCH ?)
+                   SELECT 'comment' kind,m.card_id,m.id,m.created_at,NULL,
+                          snippet(comment_search,0,char(57344),char(57345),'...',20)
+                     FROM comment_search JOIN comments m ON m.rowid=comment_search.rowid
+                    WHERE comment_search MATCH ?
                  ), page_hits AS MATERIALIZED (
-                   SELECT hits.kind,hits.card_id,hits.hit_id,hits.hit_at
+                   SELECT hits.kind,hits.card_id,hits.hit_id,hits.hit_at,hits.title_hl,hits.content_hl,
+                          COALESCE(hits.hit_id,hits.card_id) sort_id
                      FROM hits JOIN cards c ON c.id=hits.card_id
                     WHERE c.account_id=? AND c.status='published'
                       AND EXISTS(SELECT 1 FROM accesses x WHERE x.board_id=c.board_id AND x.user_id=?)
-                    ORDER BY hits.hit_at DESC,hits.hit_id DESC LIMIT ? OFFSET ?
-                 ) SELECT page_hits.kind,page_hits.hit_id,c.number,c.title,c.description,b.name board_name,m.body comment_body
+                    ORDER BY hits.hit_at DESC,COALESCE(hits.hit_id,hits.card_id) DESC LIMIT ? OFFSET ?
+                 ) SELECT page_hits.kind,page_hits.hit_id,page_hits.title_hl,page_hits.content_hl,
+                          c.number,c.title,c.description,b.name board_name,m.body comment_body
                    FROM page_hits JOIN cards c ON c.id=page_hits.card_id
                    JOIN boards b ON b.id=c.board_id
                    LEFT JOIN comments m ON m.id=page_hits.hit_id
-                   ORDER BY page_hits.hit_at DESC,page_hits.hit_id DESC",
+                   ORDER BY page_hits.hit_at DESC,page_hits.sort_id DESC",
             )
             .bind(&search)
             .bind(&search)
@@ -226,7 +202,6 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 .map_err(db_err)?
             };
             next = rows.len() as i64 > limit;
-            let pattern = matcher(term);
             let mysql_stems = if app.mysql {
                 mysql_search::stem_tokens(term)
             } else {
@@ -241,6 +216,12 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 let description: String = row.get("description");
                 let comment: Option<String> = row.get("comment_body");
                 let hit_id: Option<String> = row.get("hit_id");
+                let title_hl: Option<String> = if app.mysql { None } else { row.get("title_hl") };
+                let content_hl: Option<String> = if app.mysql {
+                    None
+                } else {
+                    row.get("content_hl")
+                };
                 html.push_str("<li><a class=\"search__result\" href=\"/");
                 html.push_str(&p.slug.to_string());
                 html.push_str("/cards/");
@@ -257,7 +238,12 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 if app.mysql {
                     html.push_str(&mysql_highlighted(&title, &mysql_stems));
                 } else if kind == "card" {
-                    html.push_str(&highlighted(&title, pattern.as_ref()));
+                    html.push_str(
+                        &title_hl
+                            .as_deref()
+                            .and_then(sqlite_highlighted)
+                            .unwrap_or_else(|| escape(&title)),
+                    );
                 } else {
                     html.push_str(&escape(&title));
                 }
@@ -270,7 +256,12 @@ pub(super) async fn show(app: &App, p: &Principal, query: &SearchQuery) -> Resul
                 if app.mysql {
                     html.push_str(&mysql_excerpt(body, &mysql_stems));
                 } else {
-                    html.push_str(&excerpt(body, pattern.as_ref()));
+                    html.push_str(
+                        &content_hl
+                            .as_deref()
+                            .and_then(sqlite_highlighted)
+                            .unwrap_or_else(|| excerpt(body)),
+                    );
                 }
                 html.push_str("</div></div><div class=\"search__board\">");
                 html.push_str(&escape(&board));

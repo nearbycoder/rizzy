@@ -67,7 +67,12 @@ def main():
                         for offset, limit in ((0, 15), (15, 30), (45, 50), (95, 100))]
             assert [page["results"] for page in pages["fizzy"]] == expected
             assert [page["results"] for page in pages["rizzy"]] == expected
-            assert title_sets["fizzy"] == title_sets["rizzy"]
+            assert title_sets["fizzy"] == title_sets["rizzy"], {
+                "source_only": sorted(set(title_sets["fizzy"]) - set(title_sets["rizzy"]))[:10],
+                "rust_only": sorted(set(title_sets["rizzy"]) - set(title_sets["fizzy"]))[:10],
+                "source_count": len(title_sets["fizzy"]),
+                "rust_count": len(title_sets["rizzy"]),
+            }
             results = {"fixture": {"cards": args.cards, "comments": args.cards // 5,
                                     "page_results": expected},
                        "samples": pages, "runs": {}}
