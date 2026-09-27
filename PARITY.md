@@ -16,7 +16,7 @@ Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is com
 | Mobile client configuration and personal timezone | Parameterized Android/iOS JSON route and timezone updates | No |
 | Assignments, reactions, pins, watches | Assignee and self-assignment toggles, reactions, pin/watch JSON mutations, cacheable HTML frames, and Turbo replacement streams | No |
 | Card filters, tag listing, basic search | Saved IDs, terms, dates, closures, activity spikes, FTS5 index, and selected MySQL FULLTEXT queries on this branch | No |
-| Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, column pages, Home add-card board selection, inline board/person filter controls, and action-specific event sentences | No |
+| Activities, core event side effects, and browser day timeline | Activity JSON, account home, filtered Added/Updated/Done days, timezone grouping, day pagination, column pages, Home add-card board selection, inline board/person filter controls, action-specific event sentences, and common event media previews | No |
 | Saved filters and full text search | Plain-text FTS5 index for cards/comments; 16 MySQL search shards with selected cross-app checks on this branch; saved filter persistence, Turbo toggles, and settings refresh | No |
 | Board publication and basic public pages | ✓ | No |
 | Public board workflow and webhooks | Public pages; webhook browser management, CRUD, event queue, and generic, Slack, Campfire, and Basecamp delivery formats | No |
@@ -39,8 +39,13 @@ filter submission, option search, Escape, and the mobile popover.
 `tests/timeline_event_descriptions_parity.py` compares 14 rendered Home event
 sentences across the source's timeline action set, including assignments,
 board and collection moves, triage, comment, and automatic postponement.
-Card images, attachment previews, and the complete source event layout remain
-to be matched.
+`tests/timeline_event_media_parity.py` compares card background images, local
+image and file embeds, and remote image/video previews in the Home event cards;
+it also follows the local image and background URLs to verify the media bytes.
+The Home ETag now includes the compiled event renderer and its embedded assets,
+so a browser revalidates after a CSS or template change; this was verified by
+reloading the same session across a rebuilt Rizzy process. The complete source
+event layout and other media formats remain to be matched.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.

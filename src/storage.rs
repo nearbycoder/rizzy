@@ -586,6 +586,48 @@ fn variation_key(app: &App, operation: &str, width: u32, height: u32) -> String 
     format!("{payload}--{signature}")
 }
 
+pub(super) fn event_attachment_preview(
+    app: &App,
+    slug: i64,
+    signed_id: &str,
+    filename: &str,
+    content_type: &str,
+    metadata: &str,
+) -> String {
+    if variable_image(content_type) {
+        let variation = variation_key(app, "limit", 800, 600);
+        let url = format!(
+            "/{slug}/rails/active_storage/representations/redirect/{signed_id}/{variation}/{}",
+            encoded_filename(filename)
+        );
+        let dimensions: Value = serde_json::from_str(metadata).unwrap_or(Value::Null);
+        let size = match (dimensions["width"].as_i64(), dimensions["height"].as_i64()) {
+            (Some(width), Some(height)) if width > 0 && height > 0 => {
+                format!(" width=\"{width}\" height=\"{height}\"")
+            }
+            _ => String::new(),
+        };
+        format!(
+            "<img class=\"attachment attachment--image\" src=\"{}\"{size} alt=\"\">",
+            escape(&url)
+        )
+    } else {
+        let extension = filename
+            .rsplit_once('.')
+            .map(|(_, value)| value.to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let class_extension: String = extension
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect();
+        format!(
+            "<div class=\"attachment attachment--file attachment--{class_extension}\"><span class=\"attachment__icon\">{}</span></div>",
+            escape(&extension)
+        )
+    }
+}
+
 fn verified_variation(app: &App, key: &str) -> Result<Variation> {
     let (payload, signature) = key.rsplit_once("--").ok_or_else(missing)?;
     let expected = hmac_sha256(&app.qr_secret, &format!("storage_variation:{payload}"));

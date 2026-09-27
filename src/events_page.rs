@@ -5,17 +5,18 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
+use kuchiki::traits::TendrilSink;
 use serde_json::{Value, json};
 use sqlx::{Any as Db, QueryBuilder, Row, any::AnyRow as DbRow};
 use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
+    collections::{HashMap, HashSet},
+    sync::{Arc, OnceLock, Weak},
     time::{Duration, Instant},
 };
 
 use super::{
     App, EventsHtmlCacheEntry, Principal, Result, Shared, active_user, db_err, err, escape, hash,
-    missing, principal,
+    missing, principal, storage,
 };
 
 const ACTIONS: &str = "('card_assigned','card_unassigned','card_published','card_closed','card_reopened','card_collection_changed','card_board_changed','card_postponed','card_auto_postponed','card_triaged','card_sent_back_to_triage','comment_created')";
@@ -129,6 +130,18 @@ fn timestamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+fn view_version() -> &'static str {
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION.get_or_init(|| {
+        hash(&format!(
+            "{}{}{}",
+            include_str!("events_page.rs"),
+            include_str!("../static/events.css"),
+            include_str!("../static/events.js")
+        ))
+    })
+}
+
 async fn timeline_etag(
     app: &App,
     p: &Principal,
@@ -167,8 +180,11 @@ async fn timeline_etag(
     Ok(format!(
         "W/\"{}\"",
         hash(&format!(
-            "timeline:{}:{}:{day}:{tz}:{view}:{}:{version:?}:{user_version}:{board_versions:?}",
-            p.account_id, p.user_id, params.filter_key,
+            "timeline:{}:{}:{day}:{tz}:{view}:{}:{version:?}:{user_version}:{board_versions:?}:{}",
+            p.account_id,
+            p.user_id,
+            params.filter_key,
+            view_version(),
         ))
     ))
 }
@@ -237,7 +253,7 @@ fn column_clause(query: &mut QueryBuilder<'_, Db>, column: &str) {
     }
 }
 
-const EVENT_FIELDS: &str = "SELECT e.id,e.action,e.created_at,e.eventable_type,e.eventable_id,e.particulars,e.creator_id,c.id card_id,c.number,c.title,c.description,c.golden,b.name board_name,u.name creator_name,m.body comment_body";
+const EVENT_FIELDS: &str = "SELECT e.id,e.action,e.created_at,e.eventable_type,e.eventable_id,e.particulars,e.creator_id,c.id card_id,c.number,c.title,c.description,c.golden,c.closed,COALESCE((SELECT color FROM columns col WHERE col.id=c.column_id),'var(--color-card-default)') card_color,b.name board_name,u.name creator_name,m.body comment_body";
 
 struct Column {
     id: &'static str,
@@ -252,6 +268,88 @@ struct Timeline {
     next_day: Option<NaiveDate>,
     columns: Vec<Column>,
     tz: Tz,
+}
+
+#[derive(Default)]
+struct EventMedia {
+    backgrounds: HashMap<String, String>,
+    attachments: HashMap<(String, String), String>,
+}
+
+async fn event_media(app: &App, p: &Principal, events: &[&DbRow]) -> Result<EventMedia> {
+    let card_ids: HashSet<String> = events.iter().map(|event| event.get("card_id")).collect();
+    let mut media = EventMedia::default();
+    if card_ids.is_empty() {
+        return Ok(media);
+    }
+    let mut cards: Vec<String> = card_ids.into_iter().collect();
+    cards.sort();
+    media.backgrounds = storage::image_urls_for_cards(app, p, &cards)
+        .await?
+        .into_iter()
+        .filter_map(|(id, url)| url.as_str().map(|url| (id, url.to_owned())))
+        .collect();
+    let mut card_eventables = HashSet::new();
+    let mut comment_eventables = HashSet::new();
+    for event in events {
+        let id: String = event.get("eventable_id");
+        if event.get::<String, _>("eventable_type") == "Comment" {
+            comment_eventables.insert(id);
+        } else {
+            card_eventables.insert(id);
+        }
+    }
+    if card_eventables.is_empty() && comment_eventables.is_empty() {
+        return Ok(media);
+    }
+    let mut query = QueryBuilder::<Db>::new(
+        "SELECT a.record_type,a.record_id,b.signed_id,b.filename,b.content_type,b.metadata FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=",
+    );
+    query.push_bind(&p.account_id);
+    query.push(" AND a.name IN ('embed','embeds') AND (");
+    for (index, (kind, ids)) in [("Card", &card_eventables), ("Comment", &comment_eventables)]
+        .into_iter()
+        .filter(|(_, ids)| !ids.is_empty())
+        .enumerate()
+    {
+        if index > 0 {
+            query.push(" OR ");
+        }
+        query
+            .push("(a.record_type=")
+            .push_bind(kind)
+            .push(" AND a.record_id IN (");
+        let mut sorted: Vec<&String> = ids.iter().collect();
+        sorted.sort();
+        let mut separated = query.separated(",");
+        for id in sorted {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated("))");
+    }
+    query.push(") ORDER BY a.created_at,a.id");
+    for row in query.build().fetch_all(&app.db).await.map_err(db_err)? {
+        let key = (row.get("record_type"), row.get("record_id"));
+        let preview = storage::event_attachment_preview(
+            app,
+            p.slug,
+            &row.get::<String, _>("signed_id"),
+            &row.get::<String, _>("filename"),
+            &row.get::<String, _>("content_type"),
+            &row.get::<String, _>("metadata"),
+        );
+        media.attachments.entry(key).or_default().push_str(&preview);
+    }
+    Ok(media)
+}
+
+async fn timeline_media(app: &App, p: &Principal, timeline: &Timeline) -> Result<EventMedia> {
+    let events: Vec<&DbRow> = timeline
+        .columns
+        .iter()
+        .flat_map(|column| column.events.iter())
+        .collect();
+    event_media(app, p, &events).await
 }
 
 async fn timeline(app: &App, p: &Principal, params: &Params, tz: Tz) -> Result<Timeline> {
@@ -471,17 +569,93 @@ fn event_description(event: &DbRow, viewer: &str, users: &HashMap<String, String
     }
 }
 
+fn remote_event_media(raw: &str) -> String {
+    if !raw.contains("action-text-attachment") {
+        return String::new();
+    }
+    let document = kuchiki::parse_html().one(raw);
+    let mut images = String::new();
+    let mut videos = String::new();
+    let Ok(attachments) = document.select("action-text-attachment") else {
+        return String::new();
+    };
+    for attachment in attachments {
+        let attributes = attachment.attributes.borrow();
+        if attributes.get("sgid").is_some() {
+            continue;
+        }
+        let Some(url) = attributes.get("url") else {
+            continue;
+        };
+        let Ok(parsed) = url::Url::parse(url) else {
+            continue;
+        };
+        if !matches!(parsed.scheme(), "http" | "https") {
+            continue;
+        }
+        let content_type = attributes.get("content-type").unwrap_or("");
+        let dimensions = match (
+            attributes
+                .get("width")
+                .and_then(|value| value.parse::<u32>().ok()),
+            attributes
+                .get("height")
+                .and_then(|value| value.parse::<u32>().ok()),
+        ) {
+            (Some(width), Some(height)) if width > 0 && height > 0 => {
+                format!(" width=\"{width}\" height=\"{height}\"")
+            }
+            _ => String::new(),
+        };
+        if content_type.starts_with("image/") {
+            images.push_str(&format!(
+                "<img class=\"attachment attachment--image\" src=\"{}\"{dimensions} alt=\"\">",
+                escape(url)
+            ));
+        } else if content_type.starts_with("video/") {
+            videos.push_str(&format!(
+                "<video class=\"attachment attachment--video\" controls{dimensions}><source src=\"{}\" type=\"{}\"></video>",
+                escape(url),
+                escape(content_type)
+            ));
+        }
+    }
+    images + &videos
+}
+
 fn render_event(
     event: &DbRow,
     account: i64,
     viewer: &str,
     users: &HashMap<String, String>,
+    media: &EventMedia,
 ) -> String {
     let id: String = event.get("id");
     let action: String = event.get("action");
     let number: i64 = event.get("number");
     let board: String = event.get("board_name");
     let card_id: String = event.get("card_id");
+    let creator_id: String = event.get("creator_id");
+    let creator: String = event.get("creator_name");
+    let color: String = event.get("card_color");
+    let color = if event.get::<i64, _>("closed") != 0 {
+        "var(--color-card-complete)"
+    } else if matches!(
+        color.as_str(),
+        "var(--color-card-default)"
+            | "var(--color-card-1)"
+            | "var(--color-card-2)"
+            | "var(--color-card-3)"
+            | "var(--color-card-4)"
+            | "var(--color-card-5)"
+            | "var(--color-card-6)"
+            | "var(--color-card-7)"
+            | "var(--color-card-8)"
+    ) {
+        &color
+    } else {
+        "var(--color-card-default)"
+    };
     let comment: Option<String> = event.get("comment_body");
     let body: String = if action == "comment_created" {
         comment.as_deref().map(excerpt).unwrap_or_default()
@@ -491,6 +665,29 @@ fn render_event(
         String::new()
     };
     let description = event_description(event, viewer, users);
+    let eventable_type: String = event.get("eventable_type");
+    let eventable_id: String = event.get("eventable_id");
+    let raw = if eventable_type == "Comment" {
+        comment.as_deref().unwrap_or("")
+    } else {
+        event.get::<&str, _>("description")
+    };
+    let mut attachments = media
+        .attachments
+        .get(&(eventable_type, eventable_id))
+        .cloned()
+        .unwrap_or_default();
+    attachments.push_str(&remote_event_media(raw));
+    let attachment_html = if attachments.is_empty() {
+        String::new()
+    } else {
+        format!("<span class=\"event_attachments\">{attachments}</span>")
+    };
+    let background = media
+        .backgrounds
+        .get(&card_id)
+        .map(|url| format!("<div class=\"card__background\"><img src=\"{}\" width=\"120\" height=\"120\" alt=\"\"></div>", escape(url)))
+        .unwrap_or_default();
     let comment_fragment = if action == "comment_created" {
         format!(
             "#comment_{}",
@@ -500,7 +697,7 @@ fn render_event(
         String::new()
     };
     format!(
-        "<a id=\"timelined_event_{}\" class=\"event event--{}{}\" href=\"/{account}/cards/{number}{comment_fragment}\" data-card-id=\"{}\"><span class=\"event__board\"><span class=\"event__number\">#{number}</span> {}</span><strong class=\"event__title\">{description}</strong><span class=\"event__excerpt\">{body}</span></a>",
+        "<a id=\"timelined_event_{}\" class=\"event event--{}{}\" href=\"/{account}/cards/{number}{comment_fragment}\" data-card-id=\"{}\" style=\"--card-color:{color}\"><div class=\"card__header\"><h4 class=\"card__board\"><span class=\"card__id\"><span class=\"for-screen-reader\">Card number </span>{number}</span><span class=\"card__board-name\">{}</span></h4></div><div class=\"event__content\"><img class=\"event__avatar\" src=\"/{account}/users/{}/avatar\" alt=\"\" title=\"{}\" width=\"48\" height=\"48\"><div class=\"event__copy\"><strong class=\"event__title\">{description}</strong><span class=\"event__excerpt\">{body}</span>{attachment_html}</div></div>{background}</a>",
         escape(&id),
         escape(&action),
         if event.get::<i64, _>("golden") != 0 {
@@ -510,6 +707,8 @@ fn render_event(
         },
         escape(&card_id),
         escape(&board),
+        escape(&creator_id),
+        escape(&creator),
     )
 }
 
@@ -533,6 +732,7 @@ fn render_column(
     params: &Params,
     viewer: &str,
     users: &HashMap<String, String>,
+    media: &EventMedia,
 ) -> String {
     let mut html = format!(
         "<div class=\"events__column\"><h3 class=\"events__column-header\"><span>{} {}{}</span>",
@@ -564,7 +764,7 @@ fn render_column(
             html.push_str(&format!("<div class=\"events__time-block\" style=\"grid-area: {}/{}\"><time class=\"event__timestamp\" datetime=\"{}\">{}</time>", 25-hour, column.index, escape(&created), local.format("%-I:%M %p")));
             last_hour = Some(hour);
         }
-        html.push_str(&render_event(event, account, viewer, users));
+        html.push_str(&render_event(event, account, viewer, users, media));
     }
     if last_hour.is_some() {
         html.push_str("</div>");
@@ -583,6 +783,7 @@ fn render_day(
     pagination_path: &str,
     viewer: &str,
     users: &HashMap<String, String>,
+    media: &EventMedia,
 ) -> String {
     let mut html = format!(
         "<turbo-frame id=\"day-timeline-pagination-contents-{}\" role=\"presentation\"><section class=\"events__day\">",
@@ -599,6 +800,7 @@ fn render_day(
                 params,
                 viewer,
                 users,
+                media,
             ));
         }
         html.push_str("</div>");
@@ -672,6 +874,7 @@ pub(super) async fn index(
         }
     }
     let timeline = timeline(&app, &p, &params, tz).await?;
+    let media = timeline_media(&app, &p, &timeline).await?;
     let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE x.user_id=? AND b.account_id=? ORDER BY x.accessed_at DESC,b.id")
         .bind(&p.user_id).bind(&p.account_id).fetch_all(&app.db).await.map_err(db_err)?;
     let add_card_board = params
@@ -784,6 +987,7 @@ pub(super) async fn index(
         "events/days",
         &p.user_id,
         &event_users,
+        &media,
     );
     let html = format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"timezone\" content=\"{tz}\"><title>Home | Rizzy</title><style>{}</style></head><body><a class=\"skip\" href=\"#main\">Skip to main content</a><header class=\"header header--events\"><a class=\"brand\" href=\"/{}/my/menu\">Rizzy</a><a class=\"button\" href=\"/\">Boards</a>{add_card}<h1 class=\"header__title\"><span>{title}</span><form class=\"events__filters\" action=\"/{}/events\" method=\"get\">{board_filter}{user_filter}</form></h1><a id=\"add-board\" class=\"button\" href=\"/{}/boards/new\">Add a board <kbd>B</kbd></a></header><main id=\"main\"><div id=\"activity\" class=\"events\" data-controller=\"pagination\">{body}</div></main><script>{}</script></body></html>",
@@ -823,6 +1027,7 @@ pub(super) async fn days(
         return Ok(response);
     }
     let timeline = timeline(&app, &p, &params, tz).await?;
+    let media = timeline_media(&app, &p, &timeline).await?;
     let event_users = account_user_names(&app, &p).await?;
     Ok(cache_headers(
         Html(render_day(
@@ -832,6 +1037,7 @@ pub(super) async fn days(
             "events/days",
             &p.user_id,
             &event_users,
+            &media,
         ))
         .into_response(),
         &etag,
@@ -875,6 +1081,7 @@ pub(super) async fn user_fragment(
     params.creators = vec![id.clone()];
     params.filter_key = format!("user:{id}");
     let timeline = timeline(app, p, &params, timezone(headers)).await?;
+    let media = timeline_media(app, p, &timeline).await?;
     let event_users = account_user_names(app, p).await?;
     let heading = if p.user_id == id {
         "What have you been up to?".to_owned()
@@ -888,7 +1095,15 @@ pub(super) async fn user_fragment(
     let path = format!("users/{}/events", escape(&id));
     Ok(format!(
         "<turbo-frame id=\"user_events\"><h1>{heading}</h1><div class=\"events\" id=\"activity\" data-controller=\"pagination\">{}</div></turbo-frame>",
-        render_day(&timeline, p.slug, &params, &path, &p.user_id, &event_users)
+        render_day(
+            &timeline,
+            p.slug,
+            &params,
+            &path,
+            &p.user_id,
+            &event_users,
+            &media,
+        )
     ))
 }
 
@@ -914,10 +1129,17 @@ pub(super) async fn column(
         .iter()
         .find(|column| column.id == id)
         .ok_or_else(missing)?;
+    let media = event_media(&app, &p, &selected.events.iter().collect::<Vec<_>>()).await?;
     let event_users = account_user_names(&app, &p).await?;
     let mut events = String::new();
     for event in &selected.events {
-        events.push_str(&render_event(event, p.slug, &p.user_id, &event_users));
+        events.push_str(&render_event(
+            event,
+            p.slug,
+            &p.user_id,
+            &event_users,
+            &media,
+        ));
     }
     Ok(cache_headers(Html(format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header class=\"header\"><a href=\"/{}/\">Activity</a><h1>{} {} ({})</h1></header><main id=\"main\" class=\"events--grid\">{events}</main></body></html>",
