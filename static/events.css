@@ -82,6 +82,7 @@ button, select { font: inherit }
 .tray { position: relative; min-width: 0 }
 .tray__toggle,.bar__placeholder button { display: block; width: 100%; height: 100%; border: 0; background: transparent; color: inherit; font-size: 12px; font-weight: 700; text-transform: uppercase }
 .tray__toggle[aria-expanded="true"],.bar__placeholder button:hover,.tray__toggle:hover { color: #e7ebed }
+.tray__toggle.unread::after { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 0 1px 7px; border-radius: 50%; background: #e7bd61 }
 .tray__toggle kbd,.bar__placeholder kbd { margin-left: 5px; opacity: .6 }
 .bar { position: relative; height: 100% }
 .bar__placeholder { height: 100% }

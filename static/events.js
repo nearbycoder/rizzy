@@ -68,6 +68,7 @@ if (footer) {
   const searchDialog = document.getElementById('bar-modal');
   const searchFrame = document.getElementById('bar_content');
   let searchTimer;
+  const trayLoads = { pins: 0, notifications: 0 };
 
   function closeTray(kind) {
     trays[kind].close();
@@ -81,6 +82,7 @@ if (footer) {
     searchFrame.replaceChildren();
   }
   async function loadTray(kind) {
+    const loadId = ++trayLoads[kind];
     const frame = trays[kind].querySelector('turbo-frame');
     frame.textContent = 'Loading…';
     const path = kind === 'pins' ? `/${account}/my/pins` : `/${account}/notifications/tray`;
@@ -90,10 +92,12 @@ if (footer) {
       const page = new DOMParser().parseFromString(await response.text(), 'text/html');
       const loaded = page.getElementById(frame.id);
       if (!loaded) throw new Error('Tray content was unavailable');
+      if (loadId !== trayLoads[kind]) return;
       frame.replaceChildren(...loaded.cloneNode(true).childNodes);
       if (kind === 'pins' && !frame.querySelector('.tray__item')) frame.textContent = 'No pinned cards yet';
       if (kind === 'notifications' && !frame.querySelector('.tray__item')) frame.textContent = 'Nothing new for you';
-    } catch { frame.textContent = 'Could not load items.'; }
+      if (kind === 'notifications') toggles.notifications.classList.toggle('unread', !!frame.querySelector('.unread'));
+    } catch { if (loadId === trayLoads[kind]) frame.textContent = 'Could not load items.'; }
   }
   function toggleTray(kind) {
     if (trays[kind].open) { closeTray(kind); return; }
@@ -127,7 +131,10 @@ if (footer) {
     const read = form.querySelector('input[name="_method"]')?.value !== 'delete';
     const method = form.hasAttribute('data-notification-toggle') ? (read ? 'POST' : 'DELETE') : 'POST';
     const response = await fetch(form.action, { method, headers: { Accept: 'application/json' } });
-    if (response.ok) loadTray('notifications');
+    if (response.ok) {
+      if (!form.hasAttribute('data-notification-toggle')) closeTray('notifications');
+      loadTray('notifications');
+    }
   });
   async function showSearchResults() {
     const query = searchInput.value.trim();
@@ -166,4 +173,6 @@ if (footer) {
     if (kind === 'p' || kind === 'n') { event.preventDefault(); toggleTray(kind === 'p' ? 'pins' : 'notifications'); }
     if (kind === 'k') { event.preventDefault(); searchButton.click(); }
   });
+  loadTray('notifications');
+  window.addEventListener('focus', () => loadTray('notifications'));
 }

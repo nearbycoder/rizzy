@@ -11047,11 +11047,13 @@ async fn notification_tray(
     let etag = format!(
         "W/\"{}\"",
         hash(&format!(
-            "tray:{}:{}:{}:{include_read:?}:{version:?}:{:?}",
+            "tray:{}:{}:{}:{include_read:?}:{version:?}:{:?}:{}:{}",
             p.account_id,
             p.user_id,
             json_request,
-            etag_timezone(&headers)
+            etag_timezone(&headers),
+            include_str!("notification_page.rs"),
+            include_str!("../static/notification_cards.css")
         ))
     );
     let not_modified = headers

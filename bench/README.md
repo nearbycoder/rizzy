@@ -1,5 +1,19 @@
 # Comparative load runs
 
+The [populated-notification Home repeat](results/home-media-html-notification-tray-98-2026-09-26.json)
+and [same-binary follow-up](results/home-media-html-notification-tray-repeat-98-2026-09-26.json)
+followed the richer notification card and Home badge behavior. Both used the
+same release binary hash, 100 matched events, three columns, selected matching
+media counts, four assigned server CPUs, and two reversed-order five-second
+rounds at eight and 32 clients. Rizzy's page was 162,819 bytes versus Fizzy's
+216,774. All 16 phases had zero HTTP errors. The first run ranged from
+3,166–7,498 Rizzy requests/s versus 209–414 Fizzy; the follow-up ranged from
+3,067–3,147 versus 142–214. Both targets slowed during the first run and
+remained slower in the follow-up, so the host's changing throughput limits an
+absolute-rate comparison. Rizzy remained faster for every paired phase, but
+these warm-cache local reads do not measure notification interactions, the
+whole application, or maximum scale.
+
 The [Home footer repeat](results/home-media-html-footer-98-2026-09-26.json)
 followed the Pins, Search, and Notifications tray implementation. Fresh matched
 samples still showed 100 events, three columns, and matching selected media

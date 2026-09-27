@@ -90,10 +90,28 @@ query to the card. The
 checked the same 100 events and selected media counts on fresh fixtures, with
 zero HTTP errors in two reversed-order five-second rounds. Rizzy served
 5,626–7,460 requests/s versus Fizzy's 319–414 at 8 and 32 clients, while
-rendering 160,643 versus 216,774 HTML bytes. Live Turbo updates, populated
-notification interactions, complete keyboard behavior, and exact tray/card
-styling still need cross-app verification. This read-only run cannot establish
+rendering 160,643 versus 216,774 HTML bytes. Live Turbo updates, complete
+keyboard behavior, and exact tray/card styling still need cross-app verification.
+This read-only run cannot establish
 whole-app speed or greater maximum scale.
+
+`tests/notification_tray_html_parity.py` now creates the same watched-board
+notification on both apps, compares populated tray structure, and follows
+individual read, include-read, unread, and bulk-read transitions. The shared
+Rust notification card now renders the source's metadata groups, avatar,
+body, and mention title treatment in the Home tray and full notifications
+page. Chromium found the populated card and successfully used Mark as read and
+Clear all. The Home footer fetches notification state when it loads and on
+window focus, marks unread status on its toggle, and closes after Clear all.
+Source Action Cable broadcasts and the remaining visual and keyboard details
+are still open.
+The [latest Home read](bench/results/home-media-html-notification-tray-98-2026-09-26.json)
+and [same-binary repeat](bench/results/home-media-html-notification-tray-repeat-98-2026-09-26.json)
+still favored Rizzy in all 16 error-free phases, but both targets slowed
+substantially between runs. The measured page sizes were 162,819 and 216,774
+bytes. These short local reads do not establish whole-app speed or maximum
+capacity; the host's rate drift makes absolute throughput comparisons less
+reliable.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.
@@ -332,7 +350,7 @@ two-process drain on a disposable MySQL 8.4.11 database.
 
 `tests/notification_settings_html.py` follows the browser preferences path used in bundle mail, checks the email-frequency selector, submits the HTML form, verifies JSON updates and unsubscribe-token issuance, and checks both board involvement states through the settings page. Fizzy's settings controller suite passed 4 tests and 24 assertions on its HTML and JSON paths; its board involvement controller suite passed 2 tests and 14 assertions. Chromium clicked Rizzy's board bell in both directions, reloaded the persisted state, and reported no browser errors. Rizzy uses direct JavaScript updates instead of Fizzy's Turbo frame replacement, and its push-help panels and styling remain simpler.
 
-Card reading now returns Fizzy's Turbo response shape: reading a card removes its notification from the tray, reading without a notification returns an empty stream, and marking a card unread returns 204. `tests/notifications.py` checks those responses and their stored read state alongside JSON behavior. The pinned Fizzy card-reading controller suite passed 6 tests and 41 assertions; an isolated source fixture confirmed the exact notification-removal stream, and a live no-notification Turbo POST and DELETE returned 200 and 204 respectively. The complete notification tray presentation and broadcasts still need comparison.
+Card reading now returns Fizzy's Turbo response shape: reading a card removes its notification from the tray, reading without a notification returns an empty stream, and marking a card unread returns 204. `tests/notifications.py` checks those responses and their stored read state alongside JSON behavior. The pinned Fizzy card-reading controller suite passed 6 tests and 41 assertions; an isolated source fixture confirmed the exact notification-removal stream, and a live no-notification Turbo POST and DELETE returned 200 and 204 respectively. The populated tray structure and read controls now have a paired check; source broadcasts and exact presentation remain open.
 
 The notifications index and tray now return HTML for browser sessions and preserve their JSON routes. The browser index has unread and read lists, a 500-item unread cap, read pagination, notification controls, and the bulk-read form; individual read/unread actions return the source's remove-and-prepend Turbo stream targets. The tray now uses whole-collection ETags for HTML and JSON, returns 304 on a matching validator, and distinguishes omitted, false, and true `include_read` values as the live source does. `tests/notifications.py` checks rendered content, tray frame and ETag invalidation, pagination stream, individual transitions, bulk-read responses, and database state. The pinned source's index, tray, reading, and bulk-reading suites passed 14 tests and 92 assertions; an isolated source fixture confirmed the index markers and two-stream transitions. Chromium moved an unread notification to Previously seen, moved it back, and cleared it with Mark all as read without console errors. Rizzy uses its own simpler HTML, JavaScript stream application, and styling; source broadcasts, exact cached partials, automatic pagination loading, and full visual parity remain incomplete.
 
