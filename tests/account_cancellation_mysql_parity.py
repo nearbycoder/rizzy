@@ -207,12 +207,103 @@ def deliver_rust_cancellation_mail(target, rust_env, directory):
     mail_env = {**rust_env, "RIZZY_MAIL_FROM": "support@example.test",
                 "RIZZY_SUPPORT_EMAIL": "support@example.test",
                 "RIZZY_MAIL_CAPTURE": str(capture)}
-    for executable, expected in ((failed, "0"), (success, "2")):
+    def deliver(executable, expected):
         completed = subprocess.run([RUST, "deliver-cancellation-mail"], cwd=ROOT,
                                    env={**mail_env, "RIZZY_SENDMAIL": str(executable)},
                                    capture_output=True, text=True, check=True)
         assert status() == expected, (target["name"], "mail retry", expected, completed.stdout)
+        return completed.stdout
+    assert "Delivered 0" in deliver(failed, "0")
+    recent = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    mysql_query(target["mysql_client"], target["mysql_socket"], database,
+                f"UPDATE cancellation_mail_jobs SET status=1,claimed_at='{recent}'")
+    assert "Delivered 0" in deliver(success, "1")
+    assert not capture.exists(), "A fresh claim was stolen"
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat(
+        timespec="milliseconds").replace("+00:00", "Z")
+    mysql_query(target["mysql_client"], target["mysql_socket"], database,
+                f"UPDATE cancellation_mail_jobs SET claimed_at='{stale}'")
+    assert "Delivered 1" in deliver(success, "2")
     parsed = BytesParser(policy=policy.default).parsebytes(capture.read_bytes())
+    assert parsed.is_multipart(), parsed.get_content_type()
+    parts = {part.get_content_type(): part.get_content() for part in parsed.iter_parts()}
+    assert set(parts) == {"text/plain", "text/html"}, parts.keys()
+    return {"to": str(parsed["To"]), "subject": str(parsed["Subject"]),
+            "text": parts["text/plain"], "html": parts["text/html"]}
+
+
+def concurrent_rust_mail_delivery(target, rust_env, directory):
+    client = target["mysql_client"]
+    database = target["mysql_database"]
+    capture_dir = directory / "concurrent-mail"
+    capture_dir.mkdir()
+    sendmail = directory / "concurrent-sendmail.sh"
+    sendmail.write_text('#!/bin/sh\nfile=$(mktemp "$RIZZY_MAIL_CAPTURE_DIR/message.XXXXXX") || exit 1\ncat > "$file"\n')
+    sendmail.chmod(0o700)
+    mail_env = {**rust_env, "RIZZY_SENDMAIL": str(sendmail),
+                "RIZZY_MAIL_FROM": "support@example.test",
+                "RIZZY_SUPPORT_EMAIL": "support@example.test",
+                "RIZZY_MAIL_CAPTURE_DIR": str(capture_dir)}
+    holder = subprocess.Popen(
+        [client, "--no-defaults", "--batch", "--skip-column-names", "--unbuffered",
+         f"--socket={target['mysql_socket']}", "-uroot", f"--database={database}"],
+        env={**os.environ,
+             "LD_LIBRARY_PATH": str(Path(client).resolve().parents[1] / "lib")},
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1)
+    workers = []
+    try:
+        holder.stdin.write("START TRANSACTION; SELECT id FROM cancellation_mail_jobs FOR UPDATE;\n")
+        holder.stdin.flush()
+        ready, _, _ = select.select([holder.stdout], [], [], 5)
+        assert ready and holder.stdout.readline().strip(), "Could not lock cancellation mail job"
+        for _ in range(2):
+            workers.append(subprocess.Popen([RUST, "deliver-cancellation-mail"], cwd=ROOT,
+                                            env=mail_env, stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE, text=True))
+        waits_sql = ("SELECT COUNT(DISTINCT w.REQUESTING_THREAD_ID) "
+                     "FROM performance_schema.data_lock_waits w "
+                     "JOIN performance_schema.data_locks l "
+                     "ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                     f"WHERE l.OBJECT_SCHEMA='{database}' "
+                     "AND l.OBJECT_NAME='cancellation_mail_jobs'")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            waiting = int(mysql_query(client, target["mysql_socket"], database, waits_sql))
+            if waiting >= 2:
+                break
+            assert all(worker.poll() is None for worker in workers), (
+                "mail worker exited before row lock", [worker.poll() for worker in workers])
+            time.sleep(.05)
+        else:
+            raise AssertionError("Both mail workers did not reach the same row lock")
+        holder.stdin.write("COMMIT;\n")
+        holder.stdin.flush()
+        holder.stdin.close()
+        assert holder.wait(timeout=10) == 0, holder.stderr.read()[-2000:]
+        counts = []
+        for worker in workers:
+            stdout, stderr = worker.communicate(timeout=60)
+            assert worker.returncode == 0, (worker.returncode, stdout[-2000:], stderr[-2000:])
+            counts.append(int(re.search(r"Delivered (\d+) account cancellation emails", stdout).group(1)))
+        assert sorted(counts) == [0, 1], counts
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+        holder.wait()
+        for worker in workers:
+            if worker.poll() is None:
+                worker.kill()
+            worker.wait()
+    status = mysql_query(client, target["mysql_socket"], database,
+                         "SELECT status FROM cancellation_mail_jobs")
+    assert status == "2", status
+    files = list(capture_dir.glob("message.*"))
+    assert len(files) == 1, files
+    repeated = subprocess.run([RUST, "deliver-cancellation-mail"], cwd=ROOT,
+                              env=mail_env, capture_output=True, text=True, check=True)
+    assert "Delivered 0" in repeated.stdout and len(list(capture_dir.glob("message.*"))) == 1
+    parsed = BytesParser(policy=policy.default).parsebytes(files[0].read_bytes())
     assert parsed.is_multipart(), parsed.get_content_type()
     parts = {part.get_content_type(): part.get_content() for part in parsed.iter_parts()}
     assert set(parts) == {"text/plain", "text/html"}, parts.keys()

@@ -53,6 +53,7 @@ from passkeys_html_parity import check as passkeys_html_check  # noqa: E402
 from auth_format_parity import run as auth_format_run  # noqa: E402
 from account_cancellation_mysql_parity import (age_cancellation,  # noqa: E402
                                                concurrent_rust_incineration,
+                                               concurrent_rust_mail_delivery,
                                                deliver_rust_cancellation_mail,
                                                normalized_mail, retained_counts,
                                                run as account_cancellation_run, seed_survivor,
@@ -76,7 +77,8 @@ def main():
                                           "passkeys-flow", "auth-format", "account-cancellation",
                                           "account-cancellation-retention",
                                           "account-cancellation-concurrent",
-                                          "account-cancellation-mail"))
+                                          "account-cancellation-mail",
+                                          "account-cancellation-mail-concurrent"))
     args = parser.parse_args()
     client = os.environ.get("RIZZY_TEST_MYSQL_CLIENT", "/tmp/rizzy-mysql8/bin/mysql")
     socket = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock")
@@ -101,12 +103,14 @@ def main():
             rizzy_dir.mkdir()
             source_settings = source_env(fizzy_dir, 1, host, port, source_dbs)
             if args.suite in ("account-cancellation", "account-cancellation-retention",
-                              "account-cancellation-concurrent", "account-cancellation-mail"):
+                              "account-cancellation-concurrent", "account-cancellation-mail",
+                              "account-cancellation-mail-concurrent"):
                 source_settings["MULTI_TENANT"] = "true"
             fizzy_env, fizzy_credentials = prepare_source(fizzy_dir, 1, source_settings)
             local_rust_env = rust_env(rizzy_dir, host, port, rust_db)
             if args.suite in ("account-cancellation", "account-cancellation-retention",
-                              "account-cancellation-concurrent", "account-cancellation-mail"):
+                              "account-cancellation-concurrent", "account-cancellation-mail",
+                              "account-cancellation-mail-concurrent"):
                 local_rust_env["RIZZY_MULTI_TENANT"] = "1"
             local_rust_env["RIZZY_SEED_EMAIL"] = "mysql-pair-owner@example.test"
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
@@ -237,7 +241,8 @@ def main():
                 source_result = route_get_valid_html_run(source)
                 rust_result = route_get_valid_html_run(rust)
             elif args.suite in ("account-cancellation", "account-cancellation-retention",
-                               "account-cancellation-concurrent", "account-cancellation-mail"):
+                               "account-cancellation-concurrent", "account-cancellation-mail",
+                               "account-cancellation-mail-concurrent"):
                 for target in (source, rust):
                     target["opener"] = urllib.request.build_opener(
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
@@ -246,13 +251,16 @@ def main():
                                                "account-cancellation-concurrent")
                 source_result = account_cancellation_run(source, image=image_fixture)
                 rust_result = account_cancellation_run(rust, image=image_fixture)
-                if args.suite == "account-cancellation-mail":
+                if args.suite in ("account-cancellation-mail",
+                                  "account-cancellation-mail-concurrent"):
                     source_mail_count = mysql_query(client, socket, source["queue_database"],
                         "SELECT COUNT(*) FROM solid_queue_jobs WHERE class_name='ActionMailer::MailDeliveryJob' "
                         "AND arguments LIKE '%AccountMailer%' AND arguments LIKE '%cancellation%'")
                     assert source_mail_count == "1", ("fizzy", "queued cancellation mail", source_mail_count)
                     source_mail = source_cancellation_mail(fizzy_env)
-                    rust_mail = deliver_rust_cancellation_mail(rust, rizzy_env, rizzy_dir)
+                    rust_mail = (concurrent_rust_mail_delivery(rust, rizzy_env, rizzy_dir)
+                                 if args.suite == "account-cancellation-mail-concurrent" else
+                                 deliver_rust_cancellation_mail(rust, rizzy_env, rizzy_dir))
                     source_result["mail_to_owner"] = source_mail["to"] == [source["email"]]
                     rust_result["mail_to_owner"] = rust_mail["to"] == rust["email"]
                     source_result["mail"] = normalized_mail(source_mail, source=True)
@@ -422,6 +430,8 @@ def main():
                 print("Two concurrent Rizzy MySQL incineration workers preserved paired Fizzy deletion and file outcomes")
             elif args.suite == "account-cancellation-mail":
                 print("Queued Rizzy cancellation mail, retry, and multipart content matched pinned Fizzy")
+            elif args.suite == "account-cancellation-mail-concurrent":
+                print("Two overlapping Rizzy mail workers delivered one queued cancellation message with Fizzy-matched content")
             elif args.suite == "passkeys-html":
                 print("Disposable MySQL account-scoped passkey pages matched pinned Fizzy")
             elif args.suite == "auth-format":
