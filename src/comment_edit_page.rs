@@ -8,6 +8,7 @@ pub(super) fn comment_frame(
     creator_name: &str,
     creator_role: &str,
     created_at: &str,
+    updated_at: &str,
     content: &str,
     reactions: &str,
     editable: bool,
@@ -45,7 +46,8 @@ pub(super) fn comment_frame(
         ""
     };
     format!(
-        "<turbo-frame id=\"container_comment_{id}\"{frame_class}><article id=\"comment_{id}\" class=\"comment\" data-creator-id=\"{}\">{avatar}<div class=\"comment__content\"><div class=\"comment__author\"><h3><strong><a href=\"/{account}/users/{}\">{}</a></strong> <a class=\"comment__permalink-title\" href=\"{path}\"><time datetime=\"{}\" data-local-time-target=\"agoorweekday\" data-action=\"turbo:morph-element->local-time#refreshTarget\">&nbsp;</time>, <time datetime=\"{}\" data-local-time-target=\"time\" data-action=\"turbo:morph-element->local-time#refreshTarget\">&nbsp;</time></a></h3>{history}{edit}</div><div class=\"comment__body lexxy-content\" data-turbo-permanent>{content}</div>{reactions}</div></article></turbo-frame>",
+        "<turbo-frame id=\"container_comment_{id}\"{frame_class} data-comment-revision=\"{}\"><article id=\"comment_{id}\" class=\"comment\" data-creator-id=\"{}\">{avatar}<div class=\"comment__content\"><div class=\"comment__author\"><h3><strong><a href=\"/{account}/users/{}\">{}</a></strong> <a class=\"comment__permalink-title\" href=\"{path}\"><time datetime=\"{}\" data-local-time-target=\"agoorweekday\" data-action=\"turbo:morph-element->local-time#refreshTarget\">&nbsp;</time>, <time datetime=\"{}\" data-local-time-target=\"time\" data-action=\"turbo:morph-element->local-time#refreshTarget\">&nbsp;</time></a></h3>{history}{edit}</div><div class=\"comment__body lexxy-content\" data-turbo-permanent>{content}</div>{reactions}</div></article></turbo-frame>",
+        escape(updated_at),
         escape(creator_id),
         escape(creator_id),
         escape(creator_name),
@@ -86,6 +88,7 @@ pub(super) async fn rendered_comment_frame(
         &creator.get::<String, _>("name"),
         &creator.get::<String, _>("role"),
         &comment.get::<String, _>("created_at"),
+        &comment.get::<String, _>("updated_at"),
         &content,
         &reactions,
         creator_id == principal.user_id,

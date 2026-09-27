@@ -50,16 +50,16 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 <nav><a id="card-back-link" class="btn--back" href="/{{ACCOUNT}}/boards/{{BOARD_ID}}"><strong>Back to {{BOARD_NAME}}</strong></a></nav>
 <article class="card-perma{{IMAGE_CLASS}}" id="card">
   {{IMAGE}}
-  <button id="gold" class="side-action side-action--gold" type="button" aria-label="{{GOLD_LABEL}}" title="{{GOLD_LABEL}}">★</button>
+  <button id="gold" class="side-action side-action--gold" type="button" aria-label="{{GOLD_LABEL}}" title="{{GOLD_LABEL}}" data-method="{{GOLD_METHOD}}">★</button>
   {{IMAGE_BUTTON}}
   <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
   <div class="card__body"><div class="card__content"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div>{{STEPS}}</div>{{STAGE_RAIL}}</div>
   <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}<div class="actions">
     <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
-    <button id="watch" class="secondary side-action side-action--watch" type="button" aria-label="{{WATCH_LABEL}}" title="{{WATCH_LABEL}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4"/></svg></button>
-    <button id="pin" class="secondary side-action side-action--pin" type="button" aria-label="{{PIN_LABEL}}" title="{{PIN_LABEL}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 0-1 7 3 3v2H7v-2l3-3-1-7ZM12 15v6"/></svg></button>
+    <button id="watch" class="secondary side-action side-action--watch" type="button" aria-label="{{WATCH_LABEL}}" title="{{WATCH_LABEL}}" data-method="{{WATCH_METHOD}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4"/></svg></button>
+    <button id="pin" class="secondary side-action side-action--pin" type="button" aria-label="{{PIN_LABEL}}" title="{{PIN_LABEL}}" data-method="{{PIN_METHOD}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 0-1 7 3 3v2H7v-2l3-3-1-7ZM12 15v6"/></svg></button>
     <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
-    <button id="closure" type="button">{{CLOSURE_LABEL}}</button>
+    <button id="closure" type="button" data-method="{{CLOSURE_METHOD}}">{{CLOSURE_LABEL}}</button>
   </div></div>
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
   <dialog class="assignment-dialog" id="assignment-dialog" aria-label="Assign this card"><button type="button" class="assignment-dialog__close" aria-label="Close assignment picker">×</button><div id="assignment-dialog-content"></div><p class="error" role="alert" id="assignment-dialog-error"></p></dialog>
@@ -112,7 +112,7 @@ assignmentContent.addEventListener('submit',async event=>{const form=event.targe
 document.addEventListener('keydown',async event=>{if(event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.target.closest('input,textarea,lexxy-editor,[contenteditable="true"]'))return;if(event.key==='a'){const link=document.getElementById('assignment-link');if(link&&!link.closest('[hidden]')){event.preventDefault();link.click()}}else if(event.key==='m'){const link=document.getElementById('assignment-link');if(!link||link.closest('[hidden]'))return;event.preventDefault();try{const response=await fetch(document.getElementById('self-assignment-form').action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'}});if(!response.ok)throw Error('Could not update assignment');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target'));if(!target||!replacement)throw Error('Assignment update missing');target.replaceWith(document.importNode(replacement,true));assignmentContent.replaceChildren()}catch(error){alert(error.message)}}});
 const deleteCardDialog=document.getElementById('delete-card-dialog');document.getElementById('delete-card-open')?.addEventListener('click',()=>deleteCardDialog.showModal());document.getElementById('delete-card-cancel')?.addEventListener('click',()=>deleteCardDialog.close());deleteCardDialog?.addEventListener('click',event=>{if(event.target===deleteCardDialog)deleteCardDialog.close()});
 async function mutation(path,method,body){const r=await fetch(`/${account}/cards/${number}${path}`,{method,headers:{Accept:'application/json','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){let message=`Request failed (${r.status})`;try{const result=await r.json();message=result.message||message}catch{}throw Error(message)}return r}
-function action(button,path,method){button.addEventListener('click',async()=>{button.disabled=true;try{await mutation(path,method);location.reload()}catch(error){button.disabled=false;alert(error.message)}})}
+function action(button,path,method){button.addEventListener('click',async()=>{button.disabled=true;try{await mutation(path,button.dataset.method||method);location.reload()}catch(error){button.disabled=false;alert(error.message)}})}
 action(document.getElementById('closure'),'/closure','{{CLOSURE_METHOD}}');
 action(document.getElementById('watch'),'/watch','{{WATCH_METHOD}}');
 action(document.getElementById('pin'),'/pin','{{PIN_METHOD}}');
@@ -196,16 +196,48 @@ async function refreshLiveCard(force=false,revisionHint=null){
       document.getElementById('title').value=nextPage.getElementById('title').value;
       document.getElementById('description').value=nextPage.getElementById('description').getAttribute('value')||'';
     }
+    for(const id of ['closure','watch','pin','gold']){
+      const button=document.getElementById(id),updated=nextPage.getElementById(id);
+      if(!button||!updated)continue;
+      button.dataset.method=updated.dataset.method;
+      for(const attribute of ['aria-label','title']){
+        if(updated.hasAttribute(attribute))button.setAttribute(attribute,updated.getAttribute(attribute));
+      }
+      if(id==='closure')button.textContent=updated.textContent;
+    }
+    const status=document.querySelector('.card__header .status'),nextStatus=nextPage.querySelector('.card__header .status');
+    if(status&&!nextStatus)status.remove();
+    else if(!status&&nextStatus)document.querySelector('.card__header').append(document.importNode(nextStatus,true));
+    const stageRail=document.querySelector('.stage-rail'),nextStageRail=nextPage.querySelector('.stage-rail');
+    if(stageRail&&nextStageRail)stageRail.innerHTML=nextStageRail.innerHTML;
+    for(const [selector,preserve] of [
+      ['.card__board-label',null],
+      ['.card__header .card__tags','dialog[open]'],
+      ['.card__footer .card__meta',null],
+      ['.card__footer turbo-frame[id^="reacting_card_"]','form'],
+      ['#comments .comments__subscribers',null]
+    ]){
+      const current=document.querySelector(selector),updated=nextPage.querySelector(selector);
+      if(current&&updated&&(!preserve||!current.querySelector(preserve)))current.replaceWith(document.importNode(updated,true));
+    }
     const nextFrames=[...nextPage.querySelectorAll('#comments > turbo-frame[id^="container_comment_"]')];
     const nextIds=new Set(nextFrames.map(frame=>frame.id));
     for(const frame of [...liveCardComments.querySelectorAll(':scope > turbo-frame[id^="container_comment_"]')]){
       if(!nextIds.has(frame.id)&&!frame.querySelector('form'))frame.remove();
     }
-    const newCommentForm=liveCardComments.querySelector('.comment--new');
-    for(const frame of nextFrames){
-      if(!liveCardComments.querySelector(`:scope > turbo-frame[id="${CSS.escape(frame.id)}"]`)){
-        newCommentForm.before(document.importNode(frame,true));
+    let following=liveCardComments.querySelector('.comment--new');
+    for(const frame of nextFrames.reverse()){
+      let current=liveCardComments.querySelector(`:scope > turbo-frame[id="${CSS.escape(frame.id)}"]`);
+      if(!current){
+        current=document.importNode(frame,true);
+        following.before(current);
+      }else if(current.dataset.commentRevision!==frame.dataset.commentRevision&&!current.querySelector('form')){
+        const updated=document.importNode(frame,true);
+        current.replaceWith(updated);
+        current=updated;
       }
+      if(current.nextElementSibling!==following)following.before(current);
+      following=current;
     }
     liveCardRevision=nextRevision;
   }catch(error){console.warn('Could not refresh card',error)}finally{
