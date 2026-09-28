@@ -6,6 +6,8 @@ Rizzy is an in-progress Rust implementation of [Fizzy](https://github.com/baseca
 
 The [auto-postponement comparison](bench/results/auto-postpone-sqlite-5000-2026-09-26.json) processed 5,000 overdue cards among 10,000 cards on four SQLite boards in 0.645–0.689 seconds for Rizzy versus 68.08–68.11 seconds for the pinned Fizzy method across two reversed-order rounds. The timing excludes process startup and setup; per-card Not Now, event, comment, rich-text, and activity-time outcomes were checked. This measures that background sweep, not the whole app.
 
+A [paired MySQL mixed-workload comparison](bench/results/mysql-mixed-clean-500-4boards-c16-20s-2026-09-27.json) on four app CPUs, four processes or workers, and 16 clients measured 259.65–266.88 completed JSON read/write workflows per second for Rizzy versus 24.84–25.04 for Fizzy across two reversed-order rounds. Both apps returned zero errors and passed record-count checks. This tests the covered workflow on one host; full application parity and maximum capacity remain unverified.
+
 ## Run
 
 ```sh
