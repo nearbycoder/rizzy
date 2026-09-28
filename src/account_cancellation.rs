@@ -44,52 +44,19 @@ pub(super) async fn create(
 }
 
 async fn send_notice(email: &str, name: &str) -> Result<()> {
-    let sendmail = env::var("RIZZY_SENDMAIL").map_err(|_| {
-        err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Mail delivery is not configured",
-        )
-    })?;
-    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
-    let support = env::var("RIZZY_SUPPORT_EMAIL").unwrap_or_else(|_| "support@rizzy.local".into());
-    if !valid_email(email) || !valid_email(&support) || from.contains(['\r', '\n']) {
-        return Err(bad("Invalid mail address"));
-    }
-    let boundary = format!("rizzy-{}", id());
+    let support = mail_transport::support_address()?;
     let plain = format!(
         "Your Rizzy account \"{name}\" was cancelled.\n\nWHAT HAPPENS NOW?\n\n- No one can access the account anymore\n- Everything in the account will be deleted in about 1 month\n\nCHANGED YOUR MIND?\n\nIf you want to cancel this deletion and restore your account, send us an email to {support} as soon as possible.\n"
     );
-    let html = format!(
-        "<p>Your Rizzy account <strong>{}</strong> was cancelled.</p>\n<h2>What happens now?</h2>\n<ul><li>No one can access the account anymore</li><li>Everything in the account will be deleted in about 1 month</li></ul>\n<i>Changed your mind?</i>\n<p>If you want to cancel this deletion and restore your account, send us an email to <a href=\"mailto:{support}\">{support}</a> as soon as possible.</p>",
-        escape(name)
+    let content = format!(
+        "<p>Your Rizzy account <strong>{}</strong> was cancelled.</p>\n\n<h2>What happens now?</h2>\n\n<ul>\n  <li>No one can access the account anymore</li>\n  <li>Everything in the account will be deleted in about 1 month</li>\n</ul>\n\n<i>Changed your mind?</i>\n<p>If you want to cancel this deletion and restore your account, send us an email to <a href=\"mailto:{}\">{}</a> as soon as possible.</p>\n",
+        escape(name),
+        escape(&support),
+        escape(&support)
     );
-    let message = format!(
-        "From: {from}\r\nTo: {email}\r\nSubject: Your Rizzy account was cancelled\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n--{boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n--{boundary}--\r\n",
-        plain.replace('\n', "\r\n"),
-        html.replace('\n', "\r\n")
-    );
-    let mut child = Command::new(sendmail)
-        .arg("-t")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    };
-    stdin
-        .write_all(message.as_bytes())
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    drop(stdin);
-    if !child
-        .wait()
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?
-        .success()
-    {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    }
-    Ok(())
+    let html =
+        include_str!("../assets/notification_mail_layout.html").replace("{{content}}", &content);
+    mail_transport::send_multipart(email, "Your Rizzy account was cancelled", &plain, &html).await
 }
 
 pub(super) async fn deliver_due(app: &App) -> Result<usize> {
