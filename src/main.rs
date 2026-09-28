@@ -3177,40 +3177,42 @@ async fn claim_webhook_delivery(app: &App) -> sqlx::Result<Option<String>> {
 async fn webhook_worker(app: Arc<App>) {
     let host = env::var("RIZZY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3007".into());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
-    let mut interval = tokio::time::interval(Duration::from_millis(250));
-    let mut ticks = 0u32;
+    let mut recovered_at = tokio::time::Instant::now() - Duration::from_secs(60);
     loop {
-        interval.tick().await;
-        if ticks == 0 {
+        if recovered_at.elapsed() >= Duration::from_secs(60) {
             let stale = (Utc::now() - chrono::Duration::minutes(15))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             if let Err(error) = sqlx::query("UPDATE webhook_deliveries SET state='pending' WHERE state='in_progress' AND updated_at<?")
                 .bind(stale).execute(&app.db).await { eprintln!("webhook recovery failed: {error}"); }
+            recovered_at = tokio::time::Instant::now();
         }
-        ticks = (ticks + 1) % 240;
-        while let Ok(permit) = semaphore.clone().try_acquire_owned() {
-            let claimed = claim_webhook_delivery(&app).await;
-            match claimed {
-                Ok(Some(delivery_id)) => {
-                    let app = app.clone();
-                    let host = host.clone();
-                    tokio::spawn(async move {
-                        let _permit = permit;
-                        if let Err(error) =
-                            process_webhook_delivery(&app, &delivery_id, &host).await
-                        {
-                            eprintln!("webhook delivery {delivery_id} failed: {}", error.1);
-                            let _ = sqlx::query("UPDATE webhook_deliveries SET state='errored',response=?,updated_at=? WHERE id=?")
-                                .bind(json!({"error":"delivery_failed"}).to_string()).bind(now()).bind(&delivery_id)
-                                .execute(&app.db).await;
-                        }
-                    });
-                }
-                Ok(None) => break,
-                Err(error) => {
-                    eprintln!("webhook claim failed: {error}");
-                    break;
-                }
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("open semaphore");
+        match claim_webhook_delivery(&app).await {
+            Ok(Some(delivery_id)) => {
+                let app = app.clone();
+                let host = host.clone();
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    if let Err(error) = process_webhook_delivery(&app, &delivery_id, &host).await {
+                        eprintln!("webhook delivery {delivery_id} failed: {}", error.1);
+                        let _ = sqlx::query("UPDATE webhook_deliveries SET state='errored',response=?,updated_at=? WHERE id=?")
+                            .bind(json!({"error":"delivery_failed"}).to_string()).bind(now()).bind(&delivery_id)
+                            .execute(&app.db).await;
+                    }
+                });
+            }
+            Ok(None) => {
+                drop(permit);
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Err(error) => {
+                drop(permit);
+                eprintln!("webhook claim failed: {error}");
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
     }
