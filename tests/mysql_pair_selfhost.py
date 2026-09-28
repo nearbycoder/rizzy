@@ -473,7 +473,7 @@ def main():
                 print("Disposable MySQL card image workflow matched pinned Fizzy; "
                       f"image removal timestamp changes={source_result['delete_touch']}")
             elif args.suite == "avatar":
-                print("Disposable MySQL avatar thumbnails, immediate variants, and cleanup matched pinned Fizzy")
+                print("Disposable MySQL avatar thumbnails and immediate variants matched pinned Fizzy; Rizzy cleanup passed")
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
             elif args.suite == "board-views":

@@ -1,0 +1,79 @@
+{
+  "rizzy_commit": "4ce85823c66200f549ecc7e5bd91d52bcd30b90c",
+  "upstream_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "fixture": {
+    "format": "PNG",
+    "width": 806,
+    "height": 926,
+    "bytes": 347501
+  },
+  "server_cpus": 2,
+  "source_workers": 2,
+  "replacements_per_app_per_round": 12,
+  "rounds": [
+    {
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "fizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 64.46,
+          "p95_ms": 129.53
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 19.3,
+          "p95_ms": 28.2
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      },
+      "rizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 38.75,
+          "p95_ms": 39.49
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 1.49,
+          "p95_ms": 2.05
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      }
+    },
+    {
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "rizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 39.6,
+          "p95_ms": 40.54
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 1.56,
+          "p95_ms": 1.89
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      },
+      "fizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 67.15,
+          "p95_ms": 161.24
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 14.62,
+          "p95_ms": 30.02
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      }
+    }
+  ]
+}
