@@ -27,8 +27,10 @@ button,input{font:inherit}
 .webhook-detail__section ul{margin:0;padding-left:40px;font-size:19px}
 .webhook-detail__section li{line-height:1.35}
 .webhook-content:has(.webhook-list) .panel{text-align:center;box-shadow:0 14px 35px #0003}
+.webhook-content:has(.webhook-list li) .panel{padding-bottom:37px}
 .webhook-content:has(.webhook-list) .panel>p{margin:17px 0 20px}
 .webhook-content:has(.webhook-list) .submit{display:inline-flex;align-items:center;gap:12px;margin-top:1px;padding:8px 24px;border-radius:999px;font-size:19px}
+.webhook-content:has(.webhook-list li) .submit{margin-top:0}
 .webhook-content:has(.webhook-list) .submit::before{content:"+";font-size:31px;font-weight:400;line-height:1}
 .webhook-content form{margin:0}
 .field{display:grid;gap:8px;margin:0 0 21px}
@@ -52,10 +54,14 @@ button,input{font:inherit}
 .checks input[type=checkbox]:checked::before{transform:translateX(18px)}
 .checks input[type=checkbox]:focus-visible{outline:2px solid #87b9fa;outline-offset:2px}
 .submit,.webhook-content button[type=submit]{display:inline-block;padding:10px 16px;border:0;border-radius:8px;background:#87b9fa;color:#101b20;text-decoration:none;font-weight:700;cursor:pointer}
-.webhook-list{list-style:none;padding:0;text-align:left}
-.webhook-list li{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid #344b5b}
-.webhook-list a{color:#87b9fa;text-decoration:none}
-.webhook-list button{background:#69423e;color:#fff}
+.webhook-list{list-style:none;margin:0;padding:0;text-align:left}
+.webhook-list:has(li){margin-bottom:18px}
+.webhook-list li{display:flex;align-items:center;gap:12px;min-height:30px;margin:0;padding:0}
+.webhook-list a{min-width:0;overflow:hidden;color:#f4f5f6;font-size:21px;font-weight:800;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}
+.webhook-list a:hover{text-decoration:underline}
+.webhook-row__separator{flex:1;min-width:16px;margin:0;border:0;border-top:1px dashed #63717a}
+.webhook-content .webhook-list button[type=submit]{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:#ff9368;color:#101b20;font-size:25px;font-weight:700;line-height:1}
+.webhook-content .webhook-list button[type=submit] span{display:block;transform:translateY(-2px)}
 .url{overflow-wrap:anywhere}
 .error{color:#ffae9d}
 @media(max-width:700px){#header{height:100px;padding:12px 18px 0}.webhook-header{inset:50px 18px auto}.webhook-header>a{left:0;font-size:14px}.webhook-header h1{font-size:22px}#main{padding:0 14px 86px}.webhook-content .panel{padding:24px}}

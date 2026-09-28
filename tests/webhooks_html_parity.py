@@ -70,6 +70,8 @@ def check(target):
 
         status, _, page = request(target, base, accept="text/html")
         assert status == 200 and name.encode() in page and detail.encode() in page, (target["name"], "populated index", status)
+        for marker in (b"<hr", f"Remove {name}".encode(), b"Are you sure you want to permanently remove this webhook?"):
+            assert marker in page, (target["name"], "populated webhook row", marker)
         status, _, page = request(target, detail, accept="text/html")
         assert status == 200 and name.encode() in page and payload_url.encode() in page, (target["name"], "show", status)
         assert_shell(target, page)

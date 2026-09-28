@@ -209,7 +209,7 @@ pub(super) fn index(
         let id: String = row.get("id");
         let name: String = row.get("name");
         let path = format!("{base}/webhooks/{}", escape(&id));
-        entries.push_str(&format!("<li><a href=\"{path}\"><strong>{}</strong></a><form method=\"post\" action=\"{path}\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\" aria-label=\"Remove {}\" onclick=\"return confirm('Remove this webhook?')\">Remove</button></form></li>",escape(&name),escape(&name)));
+        entries.push_str(&format!("<li><a href=\"{path}\"><strong>{}</strong></a><hr class=\"webhook-row__separator\" aria-hidden=\"true\"><form method=\"post\" action=\"{path}\" data-confirm=\"Are you sure you want to permanently remove this webhook?\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\" aria-label=\"Remove {}\"><span aria-hidden=\"true\">−</span></button></form></li>",escape(&name),escape(&name)));
     }
     let intro = if rows.is_empty() {
         "<p>Webhooks can notify another application when something happens in this Rizzy board. You’ll choose which events to subscribe to and provide a URL to receive the data.</p><p>For example, you could create a webhook that posts to a Campfire chat in Basecamp when new cards are added to Rizzy.</p>"
@@ -233,7 +233,7 @@ pub(super) fn index(
         String::new()
     };
     let content = format!(
-        "<section class=\"panel\">{intro}<ul class=\"webhook-list\">{entries}</ul><nav class=\"pagination\">{before}{after}</nav><a class=\"submit\" href=\"{base}/webhooks/new\">Set up a new webhook</a></section>"
+        "<section class=\"panel\">{intro}<ul class=\"webhook-list\">{entries}</ul><nav class=\"pagination\">{before}{after}</nav><a class=\"submit\" href=\"{base}/webhooks/new\">Set up a new webhook</a></section><script>document.querySelectorAll('.webhook-list form[data-confirm]').forEach(form=>form.addEventListener('submit',event=>{{if(!window.confirm(form.dataset.confirm))event.preventDefault()}}))</script>"
     );
     page(account, "Webhooks", &content, &base, board_name, true, None)
 }
