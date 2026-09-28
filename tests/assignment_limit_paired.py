@@ -34,7 +34,7 @@ def clone(table, row, **changes):
     return f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})", tuple(values.values())
 
 
-def add_people_and_assignments(target, board_id, card_id):
+def add_people_and_assignments(target, board_id, card_id, last_name="Member 099"):
     with sqlite3.connect(target["db"]) as db:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
@@ -55,7 +55,8 @@ def add_people_and_assignments(target, board_id, card_id):
             db.execute(*clone("identities", identity, id=identity_id,
                               email_address=f"assignment-{index:03d}-{uuid.uuid4().hex}@example.test"))
             db.execute(*clone("users", owner, id=user_id, identity_id=identity_id,
-                              name=f"Member {index:03d}", role="member"))
+                              name=last_name if index == 99 else f"Member {index:03d}",
+                              role="member"))
             access_changes = {"user_id": user_id, "involvement": "access_only"}
             if "id" in access.keys():
                 access_changes["id"] = access_id
