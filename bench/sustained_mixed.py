@@ -60,8 +60,10 @@ def rust_env(directory):
 
 def prepare_source(directory, workers, env=None):
     env = env or source_env(directory, workers)
-    subprocess.run(["bin/rails", "db:prepare"], cwd=SOURCE, env=env,
-                   capture_output=True, text=True, check=True)
+    prepared = subprocess.run(["bin/rails", "db:prepare"], cwd=SOURCE, env=env,
+                              capture_output=True, text=True)
+    if prepared.returncode:
+        raise RuntimeError(f"Fizzy database setup failed: {prepared.stderr[-2000:]}")
     script = '''require "json"
       identity = Identity.create!(email_address: "owner@example.com")
       account = Account.create_with_owner(
@@ -70,14 +72,19 @@ def prepare_source(directory, workers, env=None):
       token = identity.access_tokens.create!(description: "Benchmark", permission: "write")
       puts JSON.generate({ account: account.external_account_id, token: token.token })'''
     result = subprocess.run(["bin/rails", "runner", script], cwd=SOURCE, env=env,
-                            capture_output=True, text=True, check=True)
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"Fizzy account setup failed: {result.stderr[-2000:]}")
     return env, json.loads(result.stdout)
 
 
 def prepare_rust(directory, env=None):
     env = env or rust_env(directory)
     seeded = subprocess.run([RUST, "seed"], cwd=ROOT, env=env,
-                            capture_output=True, text=True, check=True).stdout
+                            capture_output=True, text=True)
+    if seeded.returncode:
+        raise RuntimeError(f"Rizzy database setup failed: {seeded.stderr[-2000:]}")
+    seeded = seeded.stdout
     return env, {"account": re.search(r"Account: (\d+)", seeded).group(1),
                  "token": re.search(r"Bearer token: (\w+)", seeded).group(1)}
 
