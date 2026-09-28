@@ -75,6 +75,7 @@ mod rich_text_records;
 mod search_page;
 mod session_transfer;
 mod signed_global_id;
+mod signup_name;
 mod signup_page;
 mod signup_seed;
 mod storage;
@@ -6319,7 +6320,19 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
     let slug = account_sequence::next(&app.db, app.mysql)
         .await
         .map_err(db_err)?;
-    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let mut tx = if app.mysql {
+        app.db.begin().await
+    } else {
+        app.db.begin_with("BEGIN IMMEDIATE").await
+    }
+    .map_err(db_err)?;
+    if app.mysql {
+        sqlx::query("SELECT id FROM identities WHERE id=? FOR UPDATE")
+            .bind(&identity_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     if let Some(token) = cookie_value(&headers, "session_token") {
         sqlx::query("UPDATE sessions SET signup_pending=0 WHERE token_hash=? AND identity_id=?")
             .bind(hash(&token))
@@ -6332,8 +6345,14 @@ async fn complete_signup(State(app): Shared, headers: HeaderMap, body: Bytes) ->
     let user_id = id();
     let system_id = id();
     let timestamp = now();
-    let first = name.split_whitespace().next().unwrap_or("New");
-    let account_name = format!("{first}'s Rizzy");
+    let existing_names: Vec<String> = sqlx::query_scalar(
+        "SELECT a.name FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=?",
+    )
+    .bind(&identity_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    let account_name = signup_name::generate(&name, &existing_names);
     sqlx::query("INSERT INTO accounts(id,external_account_id,name,created_at) VALUES(?,?,?,?)")
         .bind(&account_id)
         .bind(slug)
