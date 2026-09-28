@@ -1,5 +1,25 @@
 # Comparative load runs
 
+The [real-worker webhook publish benchmark](webhook_publish_delivery.py) starts
+Fizzy's Solid Queue worker and Rizzy's integrated worker, then concurrently
+publishes 200 cards to a board with one subscribed webhook. It waits for all
+200 deliveries and verifies unique card numbers, card/event/delivery counts,
+sampled completed JSON responses, and zero HTTP errors. The blocked loopback
+destination exercises private-target rejection without outbound network time.
+An [initial clean run](results/webhook-publish-delivery-200-c8-2026-09-28.json)
+found Rizzy's eight-per-250-ms claim cadence limited completion to 34.9–38.2
+deliveries/s versus Fizzy's 41.8–44.0. After refilling worker slots as soon as
+they open, clean [8-client](results/webhook-publish-delivery-refill-200-c8-2026-09-28.json),
+[32-client](results/webhook-publish-delivery-refill-200-c32-2026-09-28.json),
+and [64-client](results/webhook-publish-delivery-refill-200-c64-2026-09-28.json)
+two-round repeats completed at 681–742 Rizzy versus 42–44 Fizzy deliveries/s
+with no HTTP errors. Both apps used four server CPU affinity slots; Fizzy ran
+three Puma workers and one Solid Queue worker, while Rizzy ran one process
+with an eight-slot worker. These are fixed-batch completion rates, not a
+steady-state maximum or successful outbound delivery throughput. Reproduce
+with `python3 bench/webhook_publish_delivery.py --cards 200 --clients 8
+--rounds 2 --server-cpus 4 --deadline 120` and repeat at 32 and 64 clients.
+
 The [200-delivery webhook JSON run](results/webhook-deliveries-read-200-2026-09-28.json)
 uses fresh paired SQLite fixtures and checks the complete decoded 100-row fourth
 page, equal compact JSON size, and exact card/event/delivery counts before
