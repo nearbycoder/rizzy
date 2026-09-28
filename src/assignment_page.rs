@@ -53,17 +53,21 @@ pub(super) async fn picker(app: &App, p: &Principal, card: &DbRow) -> Result<Str
         let name: String = user.get("name");
         let label = if user_id == p.user_id { "Me" } else { &name };
         let selected = user.get::<i64, _>("assigned") != 0;
+        let limited = user_id != p.user_id && !selected;
         options.push_str(&format!(
-            "<li class=\"popup__item\" data-filter-target=\"item\" aria-checked=\"{}\"><form method=\"post\" action=\"/{account}/cards/{number}/assignments?assignee_id={}\"><button class=\"popup__btn btn\" type=\"submit\">{}<span class=\"checked\" aria-hidden=\"true\">{}</span></button></form></li>",
+            "<li class=\"popup__item\" data-filter-target=\"item\" data-navigable-list-target=\"item\"{} aria-checked=\"{}\"{}><form method=\"post\" action=\"/{account}/cards/{number}/assignments?assignee_id={}\"><button class=\"popup__btn btn\" type=\"submit\">{}<span class=\"checked\" aria-hidden=\"true\">{}</span></button></form></li>",
+            if limited { " data-assignment-limit-target=\"unassigned\"" } else { "" },
             selected,
+            if limited && count >= 100 { " hidden" } else { "" },
             escape(&user_id),
             escape(label),
             if selected { "✓" } else { "" }
         ));
     }
     Ok(format!(
-        "<turbo-frame id=\"assignment_card_{}\"><div class=\"assignment-picker\" data-assignment-limit-count-value=\"{count}\" data-assignment-limit-limit-value=\"100\"><strong class=\"popup__title\">Assign this to…</strong><input type=\"search\" id=\"user-search\" placeholder=\"Filter…\" aria-label=\"Filter people\" autofocus><ul class=\"popup__list\">{options}</ul><div class=\"popup__footer\">Maximum 100 assignees</div></div></turbo-frame>",
-        escape(&card_id)
+        "<turbo-frame id=\"assignment_card_{}\"><div class=\"assignment-picker\" data-controller=\"filter navigable-list assignment-limit\" data-assignment-limit-count-value=\"{count}\" data-assignment-limit-limit-value=\"100\"><strong class=\"popup__title\">Assign this to…</strong><input type=\"search\" id=\"user-search\" placeholder=\"Filter…\" aria-label=\"Filter people\" autofocus><ul class=\"popup__list\" data-filter-target=\"list\">{options}</ul><div class=\"popup__footer\"{} data-assignment-limit-target=\"limitMessage\">Maximum 100 assignees</div></div></turbo-frame>",
+        escape(&card_id),
+        if count < 100 { " hidden" } else { "" }
     ))
 }
 

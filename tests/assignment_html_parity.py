@@ -55,6 +55,7 @@ def check(target):
         assert status == 200 and headers.get("ETag"), (target["name"], "picker", status)
         for marker in (b"turbo-frame", b"Assign this to", b"Filter", b"Me", b"Maximum 100 assignees"):
             assert marker in body, (target["name"], marker)
+        assert re.search(rb'<div class="popup__footer" hidden data-assignment-limit-target="limitMessage">', body), (target["name"], "premature assignment limit warning")
         assert b'aria-checked="false"' in body
         status, _, _ = request({**target,"extra_headers":{"If-None-Match":headers["ETag"]}},
                                path + "/new", accept="text/html")
@@ -85,12 +86,17 @@ def check(target):
         assert status == 200 and re.search(rb'aria-checked="true"', body)
         status, _, _ = request(target, f"/{account}/cards/{number}/self_assignment", "POST", b"", bearer=True)
         assert status == 204
+        status, html_headers, html_body = request(target, path + f"?assignee_id={owner_id}",
+                                                  "POST", b"", accept="text/html", csrf=csrf)
+        assert status == 406, (target["name"], "plain HTML assignment", status)
+        status, _, raw = request(target, f"/{account}/cards/{number}", bearer=True)
+        assert status == 200 and [user["id"] for user in json.loads(raw)["assignees"]] == [owner_id], (target["name"], "plain HTML assignment side effect", status, raw[:200])
         status, _, _ = request(target, f"/{account}/cards/{number}/closure", "POST", b"", bearer=True)
         assert status == 204
         status, _, closed_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200
         assert re.search(rb'id="assignees_card_' + card_id.encode() + rb'".{0,400}? hidden>', closed_html, re.S), target["name"]
-        return {"picker":200,"cache":304,"json_picker":406,"toggle":204,"turbo_toggle":200,"self_assignment":200,"closed_picker_hidden":True}
+        return {"picker":200,"cache":304,"json_picker":406,"toggle":204,"turbo_toggle":200,"self_assignment":200,"html_assignment":(406,html_headers.get_content_type(),html_body),"closed_picker_hidden":True}
     finally:
         for board_id in boards:
             status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
