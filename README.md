@@ -76,6 +76,7 @@ python3 tests/filters.py
 python3 tests/filter_results.py
 python3 tests/stalled.py
 python3 tests/card_timestamps.py
+python3 tests/card_timestamp_invalid_parity.py
 python3 tests/card_params_parity.py
 python3 tests/email_change.py
 python3 tests/client_settings.py

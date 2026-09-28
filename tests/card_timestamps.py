@@ -40,9 +40,10 @@ def main():
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT created_at,last_active_at FROM cards WHERE id=?", (restored["id"],)).fetchone() == (
                     date.replace("Z", "000Z"), active.replace("Z", "000Z"))
-            call(port, path, "POST", {"card": {"title": "Invalid", "created_at": "not-a-time"}}, bearer=token, status=422)
+            invalid, _ = call(port, path, "POST", {"card": {"title": "Invalid", "created_at": "not-a-time"}}, bearer=token, status=201)
+            assert invalid["created_at"] == invalid["last_active_at"]
             with sqlite3.connect(database) as db:
-                assert db.execute("SELECT COUNT(*) FROM cards WHERE board_id=?", (board["id"],)).fetchone()[0] == 3
+                assert db.execute("SELECT COUNT(*) FROM cards WHERE board_id=?", (board["id"],)).fetchone()[0] == 4
         finally:
             stop(server)
     print("card timestamp checks passed")

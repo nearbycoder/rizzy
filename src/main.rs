@@ -304,6 +304,9 @@ impl IntoResponse for ApiError {
         if self.0 == StatusCode::BAD_REQUEST && self.1 == "Bad Request" {
             return (self.0, Json(json!({"status":400,"error":"Bad Request"}))).into_response();
         }
+        if self.0 == StatusCode::INTERNAL_SERVER_ERROR && self.1 == "Internal Server Error" {
+            return source_json_internal_error();
+        }
         (self.0, Json(json!({"message": self.1}))).into_response()
     }
 }
@@ -1738,6 +1741,53 @@ fn timestamp_param(v: &Value, key: &str) -> Result<Option<String>> {
             .map_err(|_| bad(&format!("Invalid {key}"))),
         Some(_) => Err(bad(&format!("Invalid {key}"))),
     }
+}
+fn card_timestamp_param(v: &Value, key: &str, creating: bool) -> Result<Option<String>> {
+    match v.get(key) {
+        None => Ok(None),
+        Some(Value::Null) if creating => Ok(None),
+        Some(Value::Null) => Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+        )),
+        Some(Value::String(raw)) => match parse_card_timestamp(raw) {
+            Some(value) => Ok(Some(value)),
+            None if creating => Ok(None),
+            None => Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+            )),
+        },
+        Some(Value::Array(_) | Value::Object(_)) => Ok(None),
+        Some(_) => Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+        )),
+    }
+}
+fn parse_card_timestamp(raw: &str) -> Option<String> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|date| date.with_timezone(&Utc))
+        .ok()
+        .or_else(|| {
+            let raw = raw.strip_suffix(" UTC").unwrap_or(raw);
+            [
+                "%Y-%m-%d %H:%M:%S%.f",
+                "%Y-%m-%dT%H:%M:%S%.f",
+                "%Y/%m/%d %H:%M:%S%.f",
+                "%B %-d, %Y %H:%M",
+            ]
+            .iter()
+            .find_map(|format| chrono::NaiveDateTime::parse_from_str(raw, format).ok())
+            .map(|date| date.and_utc())
+            .or_else(|| {
+                chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+                    .ok()
+                    .and_then(|date| date.and_hms_opt(0, 0, 0))
+                    .map(|date| date.and_utc())
+            })
+        })?;
+    Some(parsed.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
 }
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -13039,10 +13089,10 @@ async fn create_card(
     let id = id();
     let clock = Utc::now();
     let timestamp = clock.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let created_at = timestamp_param(v, "created_at")?
+    let created_at = card_timestamp_param(v, "created_at", true)?
         .unwrap_or_else(|| clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
     let last_active_at =
-        timestamp_param(v, "last_active_at")?.unwrap_or_else(|| created_at.clone());
+        card_timestamp_param(v, "last_active_at", true)?.unwrap_or_else(|| created_at.clone());
     let mut deadlock_retries = 0;
     let number = loop {
         let write: Result<i64> = async {
@@ -13596,8 +13646,8 @@ async fn update_card(
     } else {
         None
     };
-    let requested_created_at = timestamp_param(v, "created_at")?;
-    let custom_last_active_at = timestamp_param(v, "last_active_at")?;
+    let requested_created_at = card_timestamp_param(v, "created_at", false)?;
+    let custom_last_active_at = card_timestamp_param(v, "last_active_at", false)?;
     let title_change_actor = if requested_title.is_some() {
         Some((
             escape(&actor_name(&app, &p).await?),
