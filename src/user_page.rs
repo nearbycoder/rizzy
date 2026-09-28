@@ -19,6 +19,10 @@ fn page(title: &str, account: i64, content: String) -> Html<String> {
             include_str!("../static/events.css").to_owned(),
         ),
         ("EVENTS_JS", include_str!("../static/events.js").to_owned()),
+        (
+            "FOOTER",
+            include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &account.to_string()),
+        ),
     ]);
     Html(render_template(TEMPLATE, &values))
 }
@@ -53,13 +57,21 @@ pub(super) async fn show(
         "<p>Unverified</p><p>A sign-in code has been sent to this email address, but the user has not yet logged in to confirm their identity.</p>".to_owned()
     };
     let sign_out = if self_profile {
-        "<button class=\"button button--secondary\" type=\"button\" id=\"sign-out\">Sign out of Rizzy on this device</button>"
+        "<form method=\"post\" action=\"/session\" id=\"sign-out-form\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button class=\"btn txt-x-small\" type=\"submit\">Sign out of Rizzy on this device</button></form>"
     } else {
         ""
     };
+    let passkeys = if self_profile {
+        format!(
+            "<a class=\"btn txt-x-small\" href=\"/{}/my/passkeys\">Manage passkeys</a>",
+            principal.slug
+        )
+    } else {
+        String::new()
+    };
     let developer = if self_profile {
         format!(
-            "<section class=\"profile-card\"><h2>Developer</h2><p>Manage <a href=\"/{}/my/access_tokens\">personal access tokens</a> used with the Rizzy developer API.</p></section>",
+            "<section class=\"settings__section\"><h2 class=\"divider\">Developer</h2><p>Manage <a href=\"/{}/my/access_tokens\">personal access tokens</a> used with the Rizzy developer API.</p></section>",
             principal.slug
         )
     } else {
@@ -81,8 +93,38 @@ pub(super) async fn show(
             String::new()
         };
         format!(
-            "<section class=\"profile-card\"><h2>Devices</h2><p><a class=\"button button--secondary\" href=\"/{}/my/passkeys\">Manage passkeys</a></p><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
-            principal.slug, principal.slug
+            "<section class=\"settings__section\"><h2 class=\"divider\">Devices</h2><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
+            principal.slug
+        )
+    } else {
+        String::new()
+    };
+    let export = if self_profile {
+        format!(
+            "<section class=\"settings__section\"><h2 class=\"divider\">Export your data</h2><p>Download an archive of your Rizzy data.</p><details><summary>Begin export...</summary><p>This will generate a ZIP archive of all cards you have access to.</p><p>We’ll email you a link to download the file when it’s ready. The link will expire after 24 hours.</p><form method=\"post\" action=\"{path}/data_exports\"><button type=\"submit\">Start export</button></form></details></section>"
+        )
+    } else {
+        String::new()
+    };
+    let theme = if self_profile {
+        "<section class=\"settings__section\"><h2 class=\"divider\">Appearance</h2><div class=\"theme-switcher\"><label class=\"theme-switcher__btn\">Always light<input type=\"radio\" name=\"theme\" value=\"light\"></label><label class=\"theme-switcher__btn\">Always dark<input type=\"radio\" name=\"theme\" value=\"dark\"></label><label class=\"theme-switcher__btn\">Same as OS<input type=\"radio\" name=\"theme\" value=\"auto\"></label></div></section>"
+    } else {
+        ""
+    };
+    let card_links = if user.get::<Option<String>, _>("verified_at").is_some() {
+        let person = if self_profile {
+            "me".to_owned()
+        } else {
+            name.split_whitespace().next().unwrap_or(&name).to_owned()
+        };
+        format!(
+            "<div class=\"profile-card__links\"><a href=\"/{}/cards?assignee_ids%5B%5D={}&amp;sorted_by=newest\">Which cards are assigned to {}?</a><a href=\"/{}/cards?creator_ids%5B%5D={}&amp;sorted_by=newest\">Which cards were added by {}?</a></div>",
+            principal.slug,
+            escape(&id),
+            escape(&person),
+            principal.slug,
+            escape(&id),
+            escape(&person)
         )
     } else {
         String::new()
@@ -92,8 +134,15 @@ pub(super) async fn show(
     } else {
         String::new()
     };
+    let settings_panel = if self_profile {
+        format!(
+            "<div class=\"settings__panel panel shadow profile-card profile-card--sections\">{theme}{devices}{developer}{export}</div>"
+        )
+    } else {
+        String::new()
+    };
     let content = format!(
-        "<div class=\"profile-card\"><div class=\"profile-card__actions\">{edit}</div><img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><h1>{}</h1><div class=\"profile-email\">{email_html}</div>{sign_out}</div>{devices}{developer}{timeline}",
+        "<div class=\"settings settings--profile\"><div class=\"settings__panel panel shadow txt-align-center profile-card\"><div class=\"profile-card__actions\">{edit}</div><img class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><h1>{}</h1><div class=\"profile-email\">{email_html}</div>{card_links}<div class=\"profile-card__session\">{passkeys}{sign_out}</div></div>{settings_panel}</div>{timeline}",
         escape(&name),
         escape(&name)
     );
@@ -114,12 +163,12 @@ pub(super) fn edit(
         .map(|message| format!("<p class=\"form-error\">{}</p>", escape(message)))
         .unwrap_or_default();
     let remove_avatar = if has_avatar {
-        "<button type=\"button\" id=\"remove-avatar\" class=\"button button--secondary\">Remove avatar</button>"
+        "<button type=\"submit\" form=\"avatar-delete-form\" id=\"remove-avatar\" class=\"button button--secondary\">Remove avatar</button>"
     } else {
         ""
     };
     let content = format!(
-        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><div class=\"profile-avatar-controls\"><label class=\"profile-avatar-upload\"><img id=\"avatar-preview\" class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><input id=\"avatar-file\" type=\"file\" name=\"user[avatar]\" accept=\"image/jpeg,image/png,image/gif,image/webp\" data-direct-upload-url=\"/{}/rails/active_storage/direct_uploads\"><span>Choose avatar</span></label>{remove_avatar}</div><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form></div><script type=\"module\">import {{ start }} from '/assets/lexxy/activestorage.esm.js'; start(); const input=document.getElementById('avatar-file'); const preview=document.getElementById('avatar-preview'); let temporary; input.addEventListener('change',()=>{{if(temporary)URL.revokeObjectURL(temporary); if(input.files[0]){{temporary=URL.createObjectURL(input.files[0]);preview.src=temporary}}}}); document.getElementById('remove-avatar')?.addEventListener('click',async()=>{{if(!confirm('Are you sure you want to remove your avatar? This cannot be undone.'))return;const response=await fetch('{path}/avatar',{{method:'DELETE',headers:{{Accept:'application/json'}}}});if(response.ok)location.href='{path}';else alert('Could not remove avatar')}});</script>",
+        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><div class=\"profile-avatar-controls\"><label class=\"profile-avatar-upload\"><img id=\"avatar-preview\" class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><input id=\"avatar-file\" type=\"file\" name=\"user[avatar]\" accept=\"image/jpeg,image/png,image/gif,image/webp\" data-direct-upload-url=\"/{}/rails/active_storage/direct_uploads\"><span>Choose avatar</span></label>{remove_avatar}</div><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" name=\"user[email_address]\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form><form id=\"avatar-delete-form\" method=\"post\" action=\"{path}/avatar\"><input type=\"hidden\" name=\"_method\" value=\"delete\"></form></div><script type=\"module\">import {{ start }} from '/assets/lexxy/activestorage.esm.js'; start(); const input=document.getElementById('avatar-file'); const preview=document.getElementById('avatar-preview'); let temporary; input.addEventListener('change',()=>{{if(temporary)URL.revokeObjectURL(temporary); if(input.files[0]){{temporary=URL.createObjectURL(input.files[0]);preview.src=temporary}}}}); document.getElementById('avatar-delete-form')?.addEventListener('submit',async event=>{{event.preventDefault();if(!confirm('Are you sure you want to remove your avatar? This cannot be undone.'))return;const response=await fetch('{path}/avatar',{{method:'DELETE',headers:{{Accept:'application/json'}}}});if(response.ok)location.href='{path}';else alert('Could not remove avatar')}});</script>",
         escape(&name),
         principal.slug,
         escape(&name),

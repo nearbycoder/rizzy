@@ -2,6 +2,18 @@
 
 Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is complete only when its route behavior, JSON and HTML response, permissions, side effects, and upstream tests are reproduced. A check means an initial implementation exists; it does not establish one-for-one parity.
 
+`tests/user_profile_forms_paired.py` compares the complete owner profile and
+edit form inventories on fresh paired apps. It uploads an avatar to each owner,
+submits the browser POST delete form, checks the attachment count changes from
+one to zero and the avatar falls back to initials, then submits the browser
+POST sign-out form and checks its redirect and access loss. The profile now
+has appearance, devices, developer, and data-export sections plus assigned
+and added card links. Chromium loaded both Rust pages, opened search, followed
+an assigned-cards link, switched light and dark themes, retained the dark
+choice after navigation, and reported no console errors. Exact styling, the
+shared header, native behavior, and remaining profile interactions still
+differ from Fizzy.
+
 The notification settings browser page now uses the shared signed-in shell and
 Fizzy's header, two settings panels, board involvement frames and forms, push
 status and help disclosure, and email frequency form structure. A disposable

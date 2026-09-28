@@ -5037,7 +5037,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/users/{id}/edit", get(edit_user))
         .route(
             "/{account}/users/{id}/avatar",
-            get(storage::show_avatar).delete(storage::delete_avatar),
+            get(storage::show_avatar)
+                .post(storage::avatar_form_method)
+                .delete(storage::delete_avatar),
         )
         .route("/{account}/users/{id}/events", get(events_page::user_events))
         .route(
@@ -5752,6 +5754,26 @@ async fn request_magic_link(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response> {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+        && url::form_urlencoded::parse(&body)
+            .any(|(key, value)| key == "_method" && value.eq_ignore_ascii_case("delete"))
+    {
+        let location = format!("{}/session/new", base(&headers));
+        let mut response = logout_session(State(app), headers).await?;
+        *response.status_mut() = StatusCode::FOUND;
+        response.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_str(&location).map_err(|_| bad("Invalid redirect"))?,
+        );
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        return Ok(response);
+    }
     let (body, form) = session_body(&headers, &body)?;
     let mut response = request_magic_link_inner(&app, peer, headers, body, false).await?;
     if form {

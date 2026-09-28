@@ -3101,6 +3101,25 @@ pub(super) async fn delete_avatar(
     }
 }
 
+pub(super) async fn avatar_form_method(
+    State(app): Shared,
+    Path((account, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    if !form
+        || !url::form_urlencoded::parse(&body)
+            .any(|(key, value)| key == "_method" && value.eq_ignore_ascii_case("delete"))
+    {
+        return Err(missing());
+    }
+    delete_avatar(State(app), Path((account, user_id)), headers).await
+}
+
 pub(super) async fn delete_image(
     State(app): Shared,
     Path((account, number)): Path<(String, String)>,
