@@ -1742,7 +1742,12 @@ fn timestamp_param(v: &Value, key: &str) -> Result<Option<String>> {
         Some(_) => Err(bad(&format!("Invalid {key}"))),
     }
 }
-fn card_timestamp_param(v: &Value, key: &str, creating: bool) -> Result<Option<String>> {
+fn card_timestamp_param(
+    v: &Value,
+    key: &str,
+    creating: bool,
+    mysql: bool,
+) -> Result<Option<String>> {
     match v.get(key) {
         None => Ok(None),
         Some(Value::Null) if creating => Ok(None),
@@ -1759,10 +1764,13 @@ fn card_timestamp_param(v: &Value, key: &str, creating: bool) -> Result<Option<S
             )),
         },
         Some(Value::Array(_) | Value::Object(_)) => Ok(None),
-        Some(_) => Err(err(
+        Some(Value::Bool(false)) if creating => Ok(None),
+        Some(Value::Bool(_) | Value::Number(_)) if mysql => Err(err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal Server Error",
         )),
+        Some(Value::Bool(value)) => Ok(Some(if *value { "1" } else { "0" }.to_owned())),
+        Some(Value::Number(value)) => Ok(Some(value.to_string())),
     }
 }
 fn parse_card_timestamp(raw: &str) -> Option<String> {
@@ -3364,8 +3372,18 @@ async fn card_json(
     let number: i64 = r.get("number");
     let tags: Vec<String> = sqlx::query_scalar("SELECT t.title FROM tags t JOIN taggings g ON g.tag_id=t.id WHERE g.card_id=? ORDER BY t.title").bind(&id).fetch_all(&app.db).await.map_err(db_err)?;
     let b = board(app, p, &board_id).await?;
-    let created_at = json_millisecond_time(r.get::<String, _>("created_at"));
-    let last_active_at = json_millisecond_time(r.get::<String, _>("last_active_at"));
+    let created_at = r.get::<String, _>("created_at");
+    let last_active_at = r.get::<String, _>("last_active_at");
+    if parse_card_timestamp(&created_at).is_none()
+        || parse_card_timestamp(&last_active_at).is_none()
+    {
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+        ));
+    }
+    let created_at = json_millisecond_time(created_at);
+    let last_active_at = json_millisecond_time(last_active_at);
     let mut out = json!({"id":id,"number":number,"title":r.get::<String,_>("title"),"status":r.get::<String,_>("status"),"description":description_plain,"description_html":description_html,"image_url":null,"has_attachments":has_attachments,"tags":tags,"closed":r.get::<i64,_>("closed")!=0,"postponed":r.get::<i64,_>("postponed")!=0,"golden":r.get::<i64,_>("golden")!=0,"last_active_at":last_active_at,"created_at":created_at,"url":format!("{host}/{}/cards/{number}",p.slug),"board":board_json(app,p,&b,host).await?,"creator":user_json(app,p,&creator,host).await?,"assignees":[],"has_more_assignees":false,"comments_url":format!("{host}/{}/cards/{number}/comments",p.slug),"reactions_url":format!("{host}/{}/cards/{number}/reactions",p.slug)});
     out["image_url"] = storage::image_url_for_card(app, p, &id).await?;
     let assigned = sqlx::query(
@@ -3413,6 +3431,15 @@ async fn cards_json_batch(
 ) -> Result<Vec<Value>> {
     if cards.is_empty() {
         return Ok(Vec::new());
+    }
+    if cards.iter().any(|card| {
+        parse_card_timestamp(&card.get::<String, _>("created_at")).is_none()
+            || parse_card_timestamp(&card.get::<String, _>("last_active_at")).is_none()
+    }) {
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+        ));
     }
     let card_ids = unique_ids(cards.iter().map(|c| c.get::<String, _>("id")));
     let empty_description_ids = unique_ids(
@@ -13089,10 +13116,10 @@ async fn create_card(
     let id = id();
     let clock = Utc::now();
     let timestamp = clock.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let created_at = card_timestamp_param(v, "created_at", true)?
+    let created_at = card_timestamp_param(v, "created_at", true, app.mysql)?
         .unwrap_or_else(|| clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
-    let last_active_at =
-        card_timestamp_param(v, "last_active_at", true)?.unwrap_or_else(|| created_at.clone());
+    let last_active_at = card_timestamp_param(v, "last_active_at", true, app.mysql)?
+        .unwrap_or_else(|| created_at.clone());
     let mut deadlock_retries = 0;
     let number = loop {
         let write: Result<i64> = async {
@@ -13646,8 +13673,8 @@ async fn update_card(
     } else {
         None
     };
-    let requested_created_at = card_timestamp_param(v, "created_at", false)?;
-    let custom_last_active_at = card_timestamp_param(v, "last_active_at", false)?;
+    let requested_created_at = card_timestamp_param(v, "created_at", false, app.mysql)?;
+    let custom_last_active_at = card_timestamp_param(v, "last_active_at", false, app.mysql)?;
     let title_change_actor = if requested_title.is_some() {
         Some((
             escape(&actor_name(&app, &p).await?),

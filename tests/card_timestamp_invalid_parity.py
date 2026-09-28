@@ -33,7 +33,7 @@ VALID_CASES = (
 def request(target, path, method, payload):
     req = urllib.request.Request(
         f"{target['url']}/{target['account']}{path}",
-        data=json.dumps(payload).encode(), method=method,
+        data=json.dumps(payload).encode() if payload is not None else None, method=method,
         headers={"Authorization": "Bearer " + target["token"],
                  "Accept": "application/json", "Content-Type": "application/json"},
     )

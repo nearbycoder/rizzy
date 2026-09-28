@@ -79,6 +79,7 @@ python3 tests/filter_results.py
 python3 tests/stalled.py
 python3 tests/card_timestamps.py
 python3 tests/card_timestamp_invalid_parity.py
+python3 tests/card_timestamp_scalar_parity.py
 python3 tests/card_params_parity.py
 python3 tests/email_change.py
 python3 tests/client_settings.py
@@ -102,6 +103,8 @@ python3 tests/account_export_field_inventory.py --image-variant --image-format w
 python3 tests/storage_variant_cleanup.py
 python3 tests/storage_variant_concurrency.py
 python3 tests/notification_source_migration.py
+# With a local MySQL test server and a socket-authenticated root account:
+python3 tests/mysql_card_timestamp_scalar_parity.py
 # With both servers and their FIZZY_* / RIZZY_* credentials set:
 python3 tests/parity.py
 python3 tests/prompt_parity.py
