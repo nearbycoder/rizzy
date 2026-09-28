@@ -417,7 +417,26 @@ whole move transaction, returns the destination card, and commits exactly one
 board-change event and one system comment. The paired SQLite rollback and
 chained-move checks, MySQL failure rollback, and two-process same-card move
 race still pass after the bounded retry. Other MySQL deadlock patterns,
-sustained move load, and cross-host failure handling remain open.
+longer sustained move load, and cross-host failure handling remain open.
+The [8-client](bench/results/card-move-mysql-c8-2round-2026-09-28.json),
+[32-client](bench/results/card-move-mysql-c32-2round-2026-09-28.json), and
+[64-client](bench/results/card-move-mysql-c64-2round-2026-09-28.json)
+MySQL board-move benchmarks used fresh equal fixtures and two reversed-order
+eight-second rounds per level. Each client repeatedly moved its own card
+between two boards. The source used three Puma workers with Solid Queue in
+Puma; Rizzy used four processes. Both shared four server CPUs and MySQL 8.4.11
+with a 400-connection limit, while the load client used four other CPUs. A
+sampled complete JSON response matched after normalizing generated values;
+every phase had zero HTTP errors, the expected final card boards and exact
+move-event/system-comment counts, and no failed or pending source jobs after
+queue drain. Rizzy completed 173–176, 291–292, and 358–367 moves/s at 8,
+32, and 64 clients, versus Fizzy's 24.6–24.7, 28.7–29.4, and 31.1–31.2.
+The paired ratios ranged from 7.0 to 11.8 times. At 64 clients, p95 request
+latency was 257–259 ms for Rizzy versus 2,621–2,761 ms for Fizzy. All four
+Rust processes handled moves. This verifies faster local board-move HTTP
+throughput under the checked response and database effects. It does not
+establish equivalent Turbo/Action Cable broadcasts, all asynchronous effects,
+maximum sustainable capacity, multi-host scale, or whole-app speed.
 `tests/storage_materialization.py` checks concurrent materialization, exact
 account and board totals, idempotency, board cleanup, and reconciliation of an
 attachment that predates the ledger. `reconcile-storage` scans existing

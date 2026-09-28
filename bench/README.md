@@ -1,5 +1,23 @@
 # Comparative load runs
 
+The [MySQL card board-move benchmark](card_move_mysql.py) uses fresh paired
+fixtures, checks a complete sampled JSON response, and verifies final card
+boards, move-event and system-comment counts, zero HTTP errors, and a drained
+Fizzy queue with no failed jobs. Two reversed-order eight-second rounds at
+[8 clients](results/card-move-mysql-c8-2round-2026-09-28.json),
+[32 clients](results/card-move-mysql-c32-2round-2026-09-28.json), and
+[64 clients](results/card-move-mysql-c64-2round-2026-09-28.json) measured
+173–367 moves/s for Rizzy versus 24.6–31.2 for Fizzy, with paired ratios of
+7.0–11.8×. Both shared four server CPUs and a MySQL 8.4.11 instance with
+400 connections; Fizzy used three Puma workers with Solid Queue in Puma and
+Rizzy used four processes. The load client used four other CPUs. This checks
+one local HTTP and database path, not broadcast equivalence, sustained maximum
+capacity, multi-host scale, or whole-app speed. Reproduce with
+`python3 bench/card_move_mysql.py --clients 8 --seconds 8 --rounds 2`
+against a disposable local MySQL instance, then repeat at 32 and 64 clients.
+Pass `--mysql-socket` and `--mysql-port` if its defaults differ. The script
+temporarily raises `max_connections` to 400 and restores it afterward.
+
 The [real-worker webhook publish benchmark](webhook_publish_delivery.py) starts
 Fizzy's Solid Queue worker and Rizzy's integrated worker, then concurrently
 publishes 200 cards to a board with one subscribed webhook. It waits for all
