@@ -868,6 +868,16 @@ also queues its embed. `tests/embed_parity.py` and the two-process variant
 test drain the queue before asserting eventual file cleanup. Concurrent purge
 claims for shared embeds remain unverified.
 
+The [two-round JPEG embed-removal comparison](bench/results/embed-removal-deferred-2round-2026-09-27.json)
+timed 12 last-attachment removals per app per round, reversing app order on
+fresh SQLite accounts with two server CPUs and paused purge workers. Rizzy's
+median PATCH latency was 0.73–0.82 ms versus Fizzy's 27.34–31.75 ms. Both
+queued all 14 originals including warmups, retained 28 derived variants,
+returned the same JSON field names, and agreed on the removed description and
+attachment state; the Rust response was about 20 bytes shorter. This is a
+single-client request latency comparison for one operation, not evidence of
+maximum throughput or whole-app scale.
+
 Fresh `tests/mysql_pair_selfhost.py card-image` and `embeds` runs now matched
 the pinned Fizzy app on disposable MySQL databases. The image test also read
 both databases around removal: card and board update times changed while the
