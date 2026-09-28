@@ -94,6 +94,14 @@ def main():
             original = headers["ETag"]
             status, headers, raw = request(first, token, path, etag=original, cookie=cookie)
             assert status == 304 and headers["ETag"] == original and not raw
+            expanded_path = path + "?expand_all=true"
+            status, headers, raw = request(first, token, expanded_path, etag=original, cookie=cookie)
+            assert status == 200 and b'board-filter is-expanded' in raw and headers["ETag"] != original
+            expanded_etag = headers["ETag"]
+            status, _, raw = request(first, token, expanded_path, etag=expanded_etag, cookie=cookie)
+            assert status == 304 and not raw
+            status, _, raw = request(first, token, path, etag=expanded_etag, cookie=cookie)
+            assert status == 200 and b'board-filter is-expanded' not in raw
             status, _, _ = request(second, token, path, "PATCH",
                                    {"board": {"name": "Renamed ETag board"}})
             assert status == 200, status

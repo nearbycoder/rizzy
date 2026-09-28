@@ -31,6 +31,14 @@ fn percentile(sorted: &[f64], fraction: f64) -> Option<f64> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = required("LOAD_URL")?.trim_end_matches('/').to_owned();
+    let roots: Vec<String> = match env::var("LOAD_URLS_JSON") {
+        Ok(value) => serde_json::from_str(&value)?,
+        Err(env::VarError::NotPresent) => vec![root],
+        Err(error) => return Err(error.into()),
+    };
+    if roots.is_empty() || roots.iter().any(|url| url.is_empty()) {
+        return Err("LOAD_URLS_JSON must contain at least one server URL".into());
+    }
     let account = required("LOAD_ACCOUNT")?;
     let token = required("LOAD_TOKEN")?;
     let paths: Vec<String> = serde_json::from_str(&required("LOAD_PATHS_JSON")?)?;
@@ -42,10 +50,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if concurrency == 0 || !duration.is_finite() || duration <= 0.0 {
         return Err("LOAD_CONCURRENCY and LOAD_SECONDS must be positive".into());
     }
-    let urls: Arc<Vec<String>> = Arc::new(
-        paths
+    let urls: Arc<Vec<Vec<String>>> = Arc::new(
+        roots
             .iter()
-            .map(|path| format!("{root}/{account}{path}"))
+            .map(|root| {
+                paths
+                    .iter()
+                    .map(|path| format!("{}/{account}{path}", root.trim_end_matches('/')))
+                    .collect()
+            })
             .collect(),
     );
     let client = Client::builder()
@@ -67,13 +80,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut samples = Vec::new();
             let mut errors = BTreeMap::<String, u64>::new();
             let mut bytes_read = 0_u64;
-            let mut path_requests = vec![0_u64; urls.len()];
-            let mut path_bytes = vec![0_u64; urls.len()];
+            let mut path_requests = vec![0_u64; urls[0].len()];
+            let mut path_bytes = vec![0_u64; urls[0].len()];
+            let mut server_requests = vec![0_u64; urls.len()];
             while Instant::now() < deadline {
-                let path_index = sequence.fetch_add(1, Ordering::Relaxed) % urls.len();
+                let request_index = sequence.fetch_add(1, Ordering::Relaxed);
+                let path_index = request_index % urls[0].len();
+                let server_index = request_index / urls[0].len() % urls.len();
                 let began = Instant::now();
                 let result = client
-                    .get(&urls[path_index])
+                    .get(&urls[server_index][path_index])
                     .bearer_auth(token.as_str())
                     .header(reqwest::header::ACCEPT, "application/json")
                     .send()
@@ -85,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 bytes_read += body.len() as u64;
                                 path_requests[path_index] += 1;
                                 path_bytes[path_index] += body.len() as u64;
+                                server_requests[server_index] += 1;
                                 samples.push(began.elapsed().as_secs_f64());
                             }
                             Err(error) => {
@@ -112,16 +129,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            (samples, errors, bytes_read, path_requests, path_bytes)
+            (
+                samples,
+                errors,
+                bytes_read,
+                path_requests,
+                path_bytes,
+                server_requests,
+            )
         }));
     }
     let mut samples = Vec::new();
     let mut errors = BTreeMap::<String, u64>::new();
     let mut bytes_read = 0_u64;
-    let mut path_requests = vec![0_u64; urls.len()];
-    let mut path_bytes = vec![0_u64; urls.len()];
+    let mut path_requests = vec![0_u64; urls[0].len()];
+    let mut path_bytes = vec![0_u64; urls[0].len()];
+    let mut server_requests = vec![0_u64; urls.len()];
     for task in tasks {
-        let (latencies, failures, bytes, counts, sizes) = task.await?;
+        let (latencies, failures, bytes, counts, sizes, servers) = task.await?;
         samples.extend(latencies);
         bytes_read += bytes;
         for (index, count) in counts.into_iter().enumerate() {
@@ -129,6 +154,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         for (index, size) in sizes.into_iter().enumerate() {
             path_bytes[index] += size;
+        }
+        for (index, count) in servers.into_iter().enumerate() {
+            server_requests[index] += count;
         }
         for (key, value) in failures {
             *errors.entry(key).or_default() += value;
@@ -148,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "response_bytes": bytes_read,
         "path_requests": path_requests,
         "path_response_bytes": path_bytes,
+        "server_requests": server_requests,
     });
     println!("{}", serde_json::to_string(&output)?);
     Ok(())

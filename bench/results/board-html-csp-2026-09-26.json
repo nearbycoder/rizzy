@@ -1,0 +1,116 @@
+{
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "172aba5bc4a498ecff8104cb95be987eec9957ae",
+  "rizzy_binary_sha256": "152d73a2eafa40e4aec6ea1b67f2f7288998831a10061923cc5f5ada3a9be83e",
+  "server_cpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "fizzy_workers": 2,
+  "cards": 100,
+  "seconds_per_run": 5.0,
+  "runs": [
+    {
+      "round": 1,
+      "target": "fizzy",
+      "concurrency": 8,
+      "seconds": 5.11,
+      "requests": 394,
+      "errors": {},
+      "rps": 77.1,
+      "p50_ms": 97.15,
+      "p95_ms": 201.05,
+      "p99_ms": 285.54
+    },
+    {
+      "round": 1,
+      "target": "rizzy",
+      "concurrency": 8,
+      "seconds": 5.0,
+      "requests": 28536,
+      "errors": {},
+      "rps": 5705.3,
+      "p50_ms": 1.33,
+      "p95_ms": 2.13,
+      "p99_ms": 2.6
+    },
+    {
+      "round": 1,
+      "target": "fizzy",
+      "concurrency": 32,
+      "seconds": 5.41,
+      "requests": 472,
+      "errors": {},
+      "rps": 87.2,
+      "p50_ms": 364.29,
+      "p95_ms": 437.79,
+      "p99_ms": 461.37
+    },
+    {
+      "round": 1,
+      "target": "rizzy",
+      "concurrency": 32,
+      "seconds": 5.0,
+      "requests": 28813,
+      "errors": {},
+      "rps": 5757.2,
+      "p50_ms": 5.18,
+      "p95_ms": 9.13,
+      "p99_ms": 11.65
+    },
+    {
+      "round": 2,
+      "target": "rizzy",
+      "concurrency": 8,
+      "seconds": 5.0,
+      "requests": 26101,
+      "errors": {},
+      "rps": 5219.0,
+      "p50_ms": 1.43,
+      "p95_ms": 2.44,
+      "p99_ms": 3.12
+    },
+    {
+      "round": 2,
+      "target": "fizzy",
+      "concurrency": 8,
+      "seconds": 5.09,
+      "requests": 449,
+      "errors": {},
+      "rps": 88.2,
+      "p50_ms": 88.6,
+      "p95_ms": 127.93,
+      "p99_ms": 150.73
+    },
+    {
+      "round": 2,
+      "target": "rizzy",
+      "concurrency": 32,
+      "seconds": 5.0,
+      "requests": 29239,
+      "errors": {},
+      "rps": 5843.0,
+      "p50_ms": 5.02,
+      "p95_ms": 9.18,
+      "p99_ms": 11.99
+    },
+    {
+      "round": 2,
+      "target": "fizzy",
+      "concurrency": 32,
+      "seconds": 5.35,
+      "requests": 476,
+      "errors": {},
+      "rps": 89.0,
+      "p50_ms": 359.7,
+      "p95_ms": 439.37,
+      "p99_ms": 453.74
+    }
+  ],
+  "sample_html_bytes": {
+    "fizzy": 158028,
+    "rizzy": 50541
+  }
+}

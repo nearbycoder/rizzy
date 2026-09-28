@@ -28,12 +28,17 @@ fn label(action: &str) -> &str {
 
 fn page(account: i64, board_id: &str, title: &str, content: &str) -> Html<String> {
     let base = format!("/{account}/boards/{}", escape(board_id));
-    Html(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></header><main>{content}</main></body></html>",
-        escape(title),
+    signed_in_shell_html(
+        account,
+        title,
+        &format!("<div class=\"webhook-content\">{content}</div>"),
+        "",
         include_str!("../static/webhooks.css"),
-        escape(title)
-    ))
+        &format!(
+            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></nav>",
+            escape(title)
+        ),
+    )
 }
 
 fn actions(selected: &[String]) -> String {
@@ -57,7 +62,7 @@ fn actions(selected: &[String]) -> String {
 fn form(
     account: i64,
     board_id: &str,
-    webhook: Option<&SqliteRow>,
+    webhook: Option<&DbRow>,
     error: Option<&str>,
     submitted: Option<(&str, &str, &[String])>,
 ) -> Html<String> {
@@ -112,12 +117,12 @@ pub(super) async fn new(
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.account_admin()?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(form(p.slug, &board_id, None, None, None))
 }
 
@@ -126,20 +131,20 @@ pub(super) async fn edit(
     Path((account, board_id, webhook_id)): Path<(String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.account_admin()?;
     let webhook = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(form(p.slug, &board_id, Some(&webhook), None, None))
 }
 
 pub(super) fn invalid_form(
     account: i64,
     board_id: &str,
-    webhook: Option<&SqliteRow>,
+    webhook: Option<&DbRow>,
     error: &str,
     name: &str,
     url: &str,
@@ -157,7 +162,7 @@ pub(super) fn invalid_form(
 pub(super) fn index(
     account: i64,
     board_id: &str,
-    rows: &[SqliteRow],
+    rows: &[DbRow],
     page_number: i64,
     total: i64,
     offset: i64,
@@ -201,8 +206,8 @@ pub(super) fn index(
 pub(super) fn show(
     account: i64,
     board_id: &str,
-    row: &SqliteRow,
-    deliveries: &[SqliteRow],
+    row: &DbRow,
+    deliveries: &[DbRow],
 ) -> Html<String> {
     let id: String = row.get("id");
     let path = format!(

@@ -127,7 +127,9 @@ def main():
             rows, _ = call(port, base, bearer=token)
             assert isinstance(rows, list) and len(rows) == 15
             board_page = html(f"/{account}/boards/{board_id}?terms%5B%5D=Grid+item+16")
-            assert f'href="/{account}/cards">All cards</a>' in board_page
+            assert 'data-open-menu' in board_page
+            menu = html(f"/{account}/my/menu")
+            assert f'href="/{account}/cards?assignee_ids%5B%5D=' in menu
             assert f'<div class="card__background"><img src="{card_image_url}"' in board_page
             assert f'src="{avatar_url}"' in board_page
         finally:

@@ -1,0 +1,265 @@
+{
+  "fixture": {
+    "cards": 1000,
+    "comments": 200,
+    "page_results": [
+      15,
+      30,
+      50,
+      100
+    ]
+  },
+  "samples": {
+    "fizzy": [
+      {
+        "page": 1,
+        "results": 15,
+        "html_bytes": 56285
+      },
+      {
+        "page": 2,
+        "results": 30,
+        "html_bytes": 67650
+      },
+      {
+        "page": 3,
+        "results": 50,
+        "html_bytes": 82806
+      },
+      {
+        "page": 4,
+        "results": 100,
+        "html_bytes": 119994
+      }
+    ],
+    "rizzy": [
+      {
+        "page": 1,
+        "results": 15,
+        "html_bytes": 18594
+      },
+      {
+        "page": 2,
+        "results": 30,
+        "html_bytes": 29095
+      },
+      {
+        "page": 3,
+        "results": 50,
+        "html_bytes": 43099
+      },
+      {
+        "page": 4,
+        "results": 100,
+        "html_bytes": 77506
+      }
+    ]
+  },
+  "runs": {
+    "first_page": {
+      "fizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 682,
+          "errors": {},
+          "rps": 338.6,
+          "p50_ms": 20.36,
+          "p95_ms": 41.67,
+          "p99_ms": 55.45,
+          "round": 1
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.1,
+          "requests": 743,
+          "errors": {},
+          "rps": 353.2,
+          "p50_ms": 83.56,
+          "p95_ms": 147.9,
+          "p99_ms": 180.27,
+          "round": 1
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.02,
+          "requests": 739,
+          "errors": {},
+          "rps": 366.0,
+          "p50_ms": 19.8,
+          "p95_ms": 36.03,
+          "p99_ms": 44.15,
+          "round": 2
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.11,
+          "requests": 828,
+          "errors": {},
+          "rps": 393.3,
+          "p50_ms": 75.02,
+          "p95_ms": 130.57,
+          "p99_ms": 160.31,
+          "round": 2
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 984,
+          "errors": {},
+          "rps": 489.0,
+          "p50_ms": 15.97,
+          "p95_ms": 20.32,
+          "p99_ms": 21.69,
+          "round": 1
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.05,
+          "requests": 957,
+          "errors": {},
+          "rps": 467.7,
+          "p50_ms": 68.38,
+          "p95_ms": 79.62,
+          "p99_ms": 85.27,
+          "round": 1
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 979,
+          "errors": {},
+          "rps": 487.4,
+          "p50_ms": 16.1,
+          "p95_ms": 19.9,
+          "p99_ms": 21.22,
+          "round": 2
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.05,
+          "requests": 957,
+          "errors": {},
+          "rps": 467.9,
+          "p50_ms": 68.01,
+          "p95_ms": 84.76,
+          "p99_ms": 102.86,
+          "round": 2
+        }
+      ]
+    },
+    "fourth_page": {
+      "fizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.04,
+          "requests": 441,
+          "errors": {},
+          "rps": 215.9,
+          "p50_ms": 31.72,
+          "p95_ms": 64.71,
+          "p99_ms": 76.86,
+          "round": 1
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.21,
+          "requests": 493,
+          "errors": {},
+          "rps": 222.7,
+          "p50_ms": 128.11,
+          "p95_ms": 224.97,
+          "p99_ms": 271.75,
+          "round": 1
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.03,
+          "requests": 459,
+          "errors": {},
+          "rps": 226.0,
+          "p50_ms": 31.58,
+          "p95_ms": 54.82,
+          "p99_ms": 66.06,
+          "round": 2
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.14,
+          "requests": 516,
+          "errors": {},
+          "rps": 241.1,
+          "p50_ms": 121.36,
+          "p95_ms": 216.03,
+          "p99_ms": 259.5,
+          "round": 2
+        }
+      ],
+      "rizzy": [
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 597,
+          "errors": {},
+          "rps": 296.8,
+          "p50_ms": 26.74,
+          "p95_ms": 29.67,
+          "p99_ms": 31.83,
+          "round": 1
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.07,
+          "requests": 564,
+          "errors": {},
+          "rps": 272.2,
+          "p50_ms": 123.53,
+          "p95_ms": 147.02,
+          "p99_ms": 178.32,
+          "round": 1
+        },
+        {
+          "concurrency": 8,
+          "seconds": 2.01,
+          "requests": 608,
+          "errors": {},
+          "rps": 303.0,
+          "p50_ms": 26.28,
+          "p95_ms": 29.29,
+          "p99_ms": 31.67,
+          "round": 2
+        },
+        {
+          "concurrency": 32,
+          "seconds": 2.09,
+          "requests": 611,
+          "errors": {},
+          "rps": 292.5,
+          "p50_ms": 107.11,
+          "p95_ms": 152.97,
+          "p99_ms": 165.4,
+          "round": 2
+        }
+      ]
+    }
+  },
+  "environment": {
+    "fizzy_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+    "rizzy_sha256": "7eb35d01705a9eccc393a1a59140ad6fde2ecab593bf3eeb0d98519444eca7a8",
+    "shared_cpu_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "fizzy_workers": 8,
+    "rizzy_processes": 1,
+    "rounds": 2
+  }
+}

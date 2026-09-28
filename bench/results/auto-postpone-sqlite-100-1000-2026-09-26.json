@@ -1,0 +1,142 @@
+{
+  "source_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rust_commit": "8b0d7133218b507cc50725c9670877e67f10da64",
+  "rust_worktree_dirty_at_run": true,
+  "cpu_affinity": [
+    0,
+    1
+  ],
+  "database": "SQLite",
+  "timing": "sweep body only",
+  "fixture": "four boards, half inherited 30-day and half overridden 7-day; equal overdue and recent published cards inserted directly",
+  "runs": [
+    {
+      "cards_due": 100,
+      "cards_recent": 100,
+      "boards": 4,
+      "round": 1,
+      "app": "fizzy",
+      "seconds": 1.952268,
+      "cards_per_second": 51.22,
+      "counts": {
+        "not_now": 100,
+        "events": 100,
+        "system_comments": 100,
+        "recent_remaining": 100,
+        "cards_verified": 200
+      }
+    },
+    {
+      "cards_due": 100,
+      "cards_recent": 100,
+      "boards": 4,
+      "round": 1,
+      "app": "rizzy",
+      "seconds": 0.011635,
+      "cards_per_second": 8594.76,
+      "counts": {
+        "not_now": 100,
+        "events": 100,
+        "system_comments": 100,
+        "recent_remaining": 100,
+        "cards_verified": 200
+      }
+    },
+    {
+      "cards_due": 100,
+      "cards_recent": 100,
+      "boards": 4,
+      "round": 2,
+      "app": "rizzy",
+      "seconds": 0.011807,
+      "cards_per_second": 8469.55,
+      "counts": {
+        "not_now": 100,
+        "events": 100,
+        "system_comments": 100,
+        "recent_remaining": 100,
+        "cards_verified": 200
+      }
+    },
+    {
+      "cards_due": 100,
+      "cards_recent": 100,
+      "boards": 4,
+      "round": 2,
+      "app": "fizzy",
+      "seconds": 1.931385,
+      "cards_per_second": 51.78,
+      "counts": {
+        "not_now": 100,
+        "events": 100,
+        "system_comments": 100,
+        "recent_remaining": 100,
+        "cards_verified": 200
+      }
+    },
+    {
+      "cards_due": 1000,
+      "cards_recent": 1000,
+      "boards": 4,
+      "round": 1,
+      "app": "fizzy",
+      "seconds": 14.180305,
+      "cards_per_second": 70.52,
+      "counts": {
+        "not_now": 1000,
+        "events": 1000,
+        "system_comments": 1000,
+        "recent_remaining": 1000,
+        "cards_verified": 2000
+      }
+    },
+    {
+      "cards_due": 1000,
+      "cards_recent": 1000,
+      "boards": 4,
+      "round": 1,
+      "app": "rizzy",
+      "seconds": 0.119935,
+      "cards_per_second": 8337.85,
+      "counts": {
+        "not_now": 1000,
+        "events": 1000,
+        "system_comments": 1000,
+        "recent_remaining": 1000,
+        "cards_verified": 2000
+      }
+    },
+    {
+      "cards_due": 1000,
+      "cards_recent": 1000,
+      "boards": 4,
+      "round": 2,
+      "app": "rizzy",
+      "seconds": 0.121108,
+      "cards_per_second": 8257.09,
+      "counts": {
+        "not_now": 1000,
+        "events": 1000,
+        "system_comments": 1000,
+        "recent_remaining": 1000,
+        "cards_verified": 2000
+      }
+    },
+    {
+      "cards_due": 1000,
+      "cards_recent": 1000,
+      "boards": 4,
+      "round": 2,
+      "app": "fizzy",
+      "seconds": 14.232998,
+      "cards_per_second": 70.26,
+      "counts": {
+        "not_now": 1000,
+        "events": 1000,
+        "system_comments": 1000,
+        "recent_remaining": 1000,
+        "cards_verified": 2000
+      }
+    }
+  ]
+}

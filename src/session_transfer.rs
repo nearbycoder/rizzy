@@ -72,9 +72,36 @@ pub(super) async fn show(Path(token): Path<String>) -> Html<String> {
 pub(super) async fn qr_code(
     State(app): Shared,
     Path((account, token)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> Result<Response> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
-    let (payload, signature) = token.rsplit_once("--").ok_or_else(missing)?;
+    let account_exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
+            .bind(slug)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    if account_exists == 0 {
+        return Ok((
+            StatusCode::FOUND,
+            [(header::LOCATION, "/session/menu")],
+            Html(String::new()),
+        )
+            .into_response());
+    }
+    let invalid_link = || {
+        if headers.contains_key("x-rizzy-json-request") {
+            source_json_internal_error()
+        } else {
+            static_error_page(
+                include_str!("../static/500.html"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    };
+    let Some((payload, signature)) = token.rsplit_once("--") else {
+        return Ok(invalid_link());
+    };
     let expected = hmac_sha256(&app.qr_secret, &format!("qr_code:{payload}"));
     if signature.len() != expected.len()
         || signature
@@ -85,28 +112,20 @@ pub(super) async fn qr_code(
             })
             != 0
     {
-        return Err(missing());
+        return Ok(invalid_link());
     }
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|_| missing())?;
-    let signed: Value = serde_json::from_slice(&decoded).map_err(|_| missing())?;
+    let Ok(decoded) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) else {
+        return Ok(invalid_link());
+    };
+    let Ok(signed): std::result::Result<Value, _> = serde_json::from_slice(&decoded) else {
+        return Ok(invalid_link());
+    };
     if signed.get("account").and_then(Value::as_i64) != Some(slug) {
-        return Err(missing());
+        return Ok(invalid_link());
     }
-    let url = signed
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(missing)?;
-    let account_exists: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE external_account_id=?")
-            .bind(slug)
-            .fetch_one(&app.db)
-            .await
-            .map_err(db_err)?;
-    if account_exists == 0 {
-        return Err(missing());
-    }
+    let Some(url) = signed.get("url").and_then(Value::as_str) else {
+        return Ok(invalid_link());
+    };
     let qr = QrCode::encode_text(&url, QrCodeEcc::Medium)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "Link too long for QR code"))?;
     let size = qr.size();
@@ -139,21 +158,46 @@ pub(super) async fn redeem(
     headers: HeaderMap,
 ) -> Result<Response> {
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let transfer = sqlx::query(
-        "DELETE FROM identity_transfers WHERE token=? AND created_at>=? RETURNING identity_id",
-    )
-    .bind(&token)
-    .bind(active_cutoff())
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_err)?;
-    let Some(transfer) = transfer else {
+    let cutoff = active_cutoff();
+    let identity_id: Option<String> = if app.mysql {
+        let found = sqlx::query_scalar(
+            "SELECT identity_id FROM identity_transfers WHERE token=? AND created_at>=? FOR UPDATE",
+        )
+        .bind(&token)
+        .bind(&cutoff)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if found.is_some() {
+            let deleted =
+                sqlx::query("DELETE FROM identity_transfers WHERE token=? AND created_at>=?")
+                    .bind(&token)
+                    .bind(&cutoff)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+            if deleted.rows_affected() == 0 {
+                return Ok(StatusCode::BAD_REQUEST.into_response());
+            }
+        }
+        found
+    } else {
+        sqlx::query_scalar(
+            "DELETE FROM identity_transfers WHERE token=? AND created_at>=? RETURNING identity_id",
+        )
+        .bind(&token)
+        .bind(&cutoff)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+    };
+    let Some(identity_id) = identity_id else {
         return Ok(StatusCode::BAD_REQUEST.into_response());
     };
     let session = random_token();
     sqlx::query("INSERT INTO sessions(id,identity_id,token_hash,user_agent,signup_pending,created_at) VALUES(?,?,?,?,0,?)")
         .bind(id())
-        .bind(transfer.get::<String, _>("identity_id"))
+        .bind(identity_id)
         .bind(hash(&session))
         .bind(headers.get(header::USER_AGENT).and_then(|value| value.to_str().ok()))
         .bind(now())

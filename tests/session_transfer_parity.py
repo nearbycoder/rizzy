@@ -105,20 +105,26 @@ def rust_expiry_and_race(target):
     expired = generate()
     expired_qr = verify_qr(target, user_id, expired)
     token = expired.rsplit("/", 1)[-1]
-    db_path = os.environ["RIZZY_DB_PATH"]
-    with sqlite3.connect(db_path) as db:
-        db.execute("UPDATE identity_transfers SET created_at=? WHERE token=?",
-                   ((datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(timespec="milliseconds").replace("+00:00", "Z"), token))
+    expired_at = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(
+        timespec="milliseconds").replace("+00:00", "Z")
+    if os.environ.get("RIZZY_TEST_MYSQL_URL"):
+        from mysql_core import mysql_scalar
+        mysql_scalar(os.environ["RIZZY_TEST_MYSQL_URL"],
+                     f"UPDATE identity_transfers SET created_at='{expired_at}' WHERE token='{token}'")
+    else:
+        with sqlite3.connect(os.environ["RIZZY_DB_PATH"]) as db:
+            db.execute("UPDATE identity_transfers SET created_at=? WHERE token=?",
+                       (expired_at, token))
     status, _, _ = request({**target, "opener": opener()}, expired, "PUT", b"", accept="text/html")
     assert status == 400, ("expired", status)
     status, _, _ = request(target, expired_qr, accept="image/svg+xml")
     assert status == 200, ("expired transfer QR", status)
     changed = expired_qr[:-1] + ("a" if expired_qr[-1] != "a" else "b")
     status, _, _ = request(target, changed, accept="image/svg+xml")
-    assert status == 404, ("tampered QR", status)
+    assert status == 500, ("tampered QR", status)
     other_account = expired_qr.replace(f"/{account}/qr_codes/", "/999999/qr_codes/", 1)
     status, _, _ = request(target, other_account, accept="image/svg+xml")
-    assert status == 404, ("cross-account QR", status)
+    assert status == 302, ("cross-account QR", status)
     race = generate()
 
     def redeem_once(_):
@@ -145,7 +151,7 @@ def main():
                         "db": fizzy_db, "opener": opener()})
     source, rust = (run(target) for target in targets)
     assert source == rust, (source, rust)
-    if os.environ.get("RIZZY_DB_PATH"):
+    if os.environ.get("RIZZY_DB_PATH") or os.environ.get("RIZZY_TEST_MYSQL_URL"):
         rust_expiry_and_race(targets[1])
     print("Session transfer parity matched: generate, revoke, show, PUT/PATCH redeem, replay; Rust expiry and concurrent single use checked")
 

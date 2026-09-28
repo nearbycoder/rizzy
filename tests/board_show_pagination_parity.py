@@ -125,8 +125,7 @@ def main():
                 target = {"name": name, "url": url,
                           "account": str(credentials["account"]),
                           "token": credentials["token"],
-                          "email": ("mixed-benchmark@example.com" if name == "fizzy"
-                                    else "owner@example.com"),
+                          "email": "owner@example.com",
                           "db": str(directory / ("db.sqlite3" if name == "fizzy"
                                                  else "rizzy.sqlite3"))}
                 board, paths, _ = fixture(target, 20)

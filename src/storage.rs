@@ -3,10 +3,12 @@ use axum::{body::Body, http::Request};
 use base64::Engine as _;
 use futures_util::StreamExt;
 use md5::Md5;
+use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
 pub(super) fn storage_dir() -> PathBuf {
@@ -38,6 +40,471 @@ fn image_url(p: &Principal, signed_id: &str, filename: &str) -> String {
         p.slug,
         encoded_filename(filename)
     )
+}
+
+async fn mark_blob_attached(tx: &mut sqlx::Transaction<'_, Db>, blob_id: &str) -> Result<()> {
+    let blob = sqlx::query("SELECT content_type,metadata FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    let content_type: String = blob.get("content_type");
+    let raw: String = blob.get("metadata");
+    let mut metadata: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+    let fields = metadata
+        .as_object_mut()
+        .ok_or_else(|| bad("Invalid blob metadata"))?;
+    fields.insert("identified".into(), json!(true));
+    // Active Storage's NullAnalyzer runs inline on first attachment. Media
+    // analyzers run later and fill dimensions or duration asynchronously.
+    if !["image/", "video/", "audio/"]
+        .iter()
+        .any(|prefix| content_type.starts_with(prefix))
+    {
+        fields.insert("analyzed".into(), json!(true));
+    }
+    let updated = metadata.to_string();
+    if updated != raw {
+        sqlx::query("UPDATE storage_blobs SET metadata=? WHERE id=?")
+            .bind(updated)
+            .bind(blob_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+async fn record_storage_entry_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    board_id: &str,
+    record_type: &str,
+    record_id: &str,
+    blob_id: Option<&str>,
+    delta: i64,
+    operation: &str,
+    user_id: Option<&str>,
+    request_id: Option<&str>,
+) -> Result<()> {
+    if delta == 0 {
+        return Ok(());
+    }
+    sqlx::query("INSERT INTO storage_entries(id,account_id,blob_id,board_id,created_at,delta,operation,recordable_id,recordable_type,user_id,request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(id())
+        .bind(account_id)
+        .bind(blob_id)
+        .bind(board_id)
+        .bind(now())
+        .bind(delta)
+        .bind(operation)
+        .bind(record_id)
+        .bind(record_type)
+        .bind(user_id)
+        .bind(request_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    Ok(())
+}
+
+async fn record_attachment_change_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    record_type: &str,
+    record_id: &str,
+    blob_id: &str,
+    operation: &str,
+    user_id: Option<&str>,
+    request_id: Option<&str>,
+) -> Result<()> {
+    let board_query = match record_type {
+        "Board" => "SELECT id FROM boards WHERE id=? AND account_id=?",
+        "Card" => "SELECT board_id FROM cards WHERE id=? AND account_id=?",
+        "Comment" => {
+            "SELECT c.board_id FROM comments m JOIN cards c ON c.id=m.card_id WHERE m.id=? AND c.account_id=?"
+        }
+        _ => return Ok(()),
+    };
+    let board_id: String = sqlx::query_scalar(board_query)
+        .bind(record_id)
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    if operation == "attach" {
+        mark_blob_attached(tx, blob_id).await?;
+    }
+    let bytes: i64 =
+        sqlx::query_scalar("SELECT byte_size FROM storage_blobs WHERE id=? AND account_id=?")
+            .bind(blob_id)
+            .bind(account_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    record_storage_entry_tx(
+        tx,
+        account_id,
+        &board_id,
+        record_type,
+        record_id,
+        Some(blob_id),
+        if operation == "detach" { -bytes } else { bytes },
+        operation,
+        user_id,
+        request_id,
+    )
+    .await
+}
+
+pub(super) async fn record_board_transfer_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    mysql: bool,
+    account_id: &str,
+    card_id: &str,
+    old_board_id: &str,
+    new_board_id: &str,
+    user_id: &str,
+    request_id: &str,
+) -> Result<()> {
+    let sum = if mysql {
+        "CAST(SUM(b.byte_size) AS SIGNED)"
+    } else {
+        "SUM(b.byte_size)"
+    };
+    let query = format!(
+        "SELECT a.record_type,a.record_id,{sum} AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id=?) OR (a.record_type='Comment' AND a.record_id IN (SELECT id FROM comments WHERE card_id=?))) GROUP BY a.record_type,a.record_id"
+    );
+    let rows = sqlx::query(&query)
+        .bind(account_id)
+        .bind(card_id)
+        .bind(card_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    for row in rows {
+        let record_type: String = row.get("record_type");
+        let record_id: String = row.get("record_id");
+        let bytes: i64 = row.get("bytes");
+        record_storage_entry_tx(
+            tx,
+            account_id,
+            old_board_id,
+            &record_type,
+            &record_id,
+            None,
+            -bytes,
+            "transfer_out",
+            Some(user_id),
+            Some(request_id),
+        )
+        .await?;
+        record_storage_entry_tx(
+            tx,
+            account_id,
+            new_board_id,
+            &record_type,
+            &record_id,
+            None,
+            bytes,
+            "transfer_in",
+            Some(user_id),
+            Some(request_id),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn materialize_owner(
+    app: &App,
+    account_id: &str,
+    owner_type: &str,
+    owner_id: &str,
+) -> Result<bool> {
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    if owner_type == "Board" {
+        let exists: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM boards WHERE id=? AND account_id=?)")
+                .bind(owner_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if exists == 0 {
+            return Ok(false);
+        }
+    }
+    let insert = if app.mysql {
+        "INSERT IGNORE INTO storage_totals(id,account_id,owner_id,owner_type,created_at,updated_at) VALUES(?,?,?,?,?,?)"
+    } else {
+        "INSERT OR IGNORE INTO storage_totals(id,account_id,owner_id,owner_type,created_at,updated_at) VALUES(?,?,?,?,?,?)"
+    };
+    let stamp = now();
+    sqlx::query(insert)
+        .bind(id())
+        .bind(account_id)
+        .bind(owner_id)
+        .bind(owner_type)
+        .bind(&stamp)
+        .bind(&stamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let total_query = if app.mysql {
+        "SELECT id,last_entry_id,bytes_stored FROM storage_totals WHERE owner_type=? AND owner_id=? FOR UPDATE"
+    } else {
+        "SELECT id,last_entry_id,bytes_stored FROM storage_totals WHERE owner_type=? AND owner_id=?"
+    };
+    let Some(total) = sqlx::query(total_query)
+        .bind(owner_type)
+        .bind(owner_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+    else {
+        return Ok(false);
+    };
+    let cursor: Option<String> = total.get("last_entry_id");
+    let pending_query = match (owner_type, app.mysql) {
+        ("Account", true) => {
+            "SELECT MAX(id) AS latest,CAST(COALESCE(SUM(delta),0) AS SIGNED) AS delta FROM storage_entries WHERE account_id=? AND id>?"
+        }
+        ("Account", false) => {
+            "SELECT MAX(id) AS latest,COALESCE(SUM(delta),0) AS delta FROM storage_entries WHERE account_id=? AND id>?"
+        }
+        (_, true) => {
+            "SELECT MAX(id) AS latest,CAST(COALESCE(SUM(delta),0) AS SIGNED) AS delta FROM storage_entries WHERE board_id=? AND id>?"
+        }
+        (_, false) => {
+            "SELECT MAX(id) AS latest,COALESCE(SUM(delta),0) AS delta FROM storage_entries WHERE board_id=? AND id>?"
+        }
+    };
+    let pending = sqlx::query(pending_query)
+        .bind(owner_id)
+        .bind(cursor.as_deref().unwrap_or(""))
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let latest: Option<String> = pending.get("latest");
+    if let Some(latest) = latest {
+        let delta: i64 = pending.get("delta");
+        sqlx::query(
+            "UPDATE storage_totals SET bytes_stored=?,last_entry_id=?,updated_at=? WHERE id=?",
+        )
+        .bind(total.get::<i64, _>("bytes_stored") + delta)
+        .bind(latest)
+        .bind(now())
+        .bind(total.get::<String, _>("id"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(true)
+}
+
+pub(super) async fn materialize_pending(app: &App) -> Result<usize> {
+    let owners = sqlx::query(
+        "SELECT DISTINCT e.account_id,'Account' AS owner_type,e.account_id AS owner_id FROM storage_entries e LEFT JOIN storage_totals t ON t.owner_type='Account' AND t.owner_id=e.account_id WHERE e.id>COALESCE(t.last_entry_id,'') UNION SELECT DISTINCT e.account_id,'Board' AS owner_type,e.board_id AS owner_id FROM storage_entries e JOIN boards b ON b.id=e.board_id LEFT JOIN storage_totals t ON t.owner_type='Board' AND t.owner_id=e.board_id WHERE e.board_id IS NOT NULL AND e.id>COALESCE(t.last_entry_id,'') LIMIT 100",
+    )
+    .fetch_all(&app.db)
+    .await
+    .map_err(db_err)?;
+    let mut count = 0;
+    for owner in owners {
+        if materialize_owner(
+            app,
+            &owner.get::<String, _>("account_id"),
+            &owner.get::<String, _>("owner_type"),
+            &owner.get::<String, _>("owner_id"),
+        )
+        .await?
+        {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+pub(super) async fn materialize_worker(app: Arc<App>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        interval.tick().await;
+        if let Err(error) = materialize_pending(&app).await {
+            eprintln!("storage materialization failed: {}", error.1);
+        }
+    }
+}
+
+async fn reconcile_owner(app: &App, account_id: &str, board_id: Option<&str>) -> Result<bool> {
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    if let Some(board_id) = board_id {
+        lock_board_for_write(&mut tx, board_id, app.mysql).await?;
+        let exists: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM boards WHERE id=? AND account_id=?)")
+                .bind(board_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if exists == 0 {
+            return Ok(false);
+        }
+    }
+    let cursor_sql = if board_id.is_some() {
+        "SELECT MAX(id) FROM storage_entries WHERE board_id=?"
+    } else {
+        "SELECT MAX(id) FROM storage_entries WHERE account_id=?"
+    };
+    let owner_id = board_id.unwrap_or(account_id);
+    let cursor_before: Option<String> = sqlx::query_scalar(cursor_sql)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let sum = if app.mysql {
+        "CAST(COALESCE(SUM(b.byte_size),0) AS SIGNED)"
+    } else {
+        "COALESCE(SUM(b.byte_size),0)"
+    };
+    let scope = if board_id.is_some() {
+        "((a.record_type='Card' AND c.board_id=?) OR (a.record_type='Comment' AND mc.board_id=?) OR (a.record_type='Board' AND a.record_id=?))"
+    } else {
+        "((a.record_type='Card' AND c.account_id=?) OR (a.record_type='Comment' AND mc.account_id=?) OR (a.record_type='Board' AND bd.account_id=?))"
+    };
+    let real_sql = format!(
+        "SELECT {sum} FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id LEFT JOIN cards c ON a.record_type='Card' AND c.id=a.record_id LEFT JOIN comments m ON a.record_type='Comment' AND m.id=a.record_id LEFT JOIN cards mc ON mc.id=m.card_id LEFT JOIN boards bd ON a.record_type='Board' AND bd.id=a.record_id WHERE a.account_id=? AND {scope}"
+    );
+    let real_bytes: i64 = sqlx::query_scalar(&real_sql)
+        .bind(account_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let cursor_after: Option<String> = sqlx::query_scalar(cursor_sql)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    if cursor_before != cursor_after {
+        return Ok(false);
+    }
+    let ledger_scope = if board_id.is_some() {
+        "board_id"
+    } else {
+        "account_id"
+    };
+    let ledger_sum = if app.mysql {
+        "CAST(COALESCE(SUM(delta),0) AS SIGNED)"
+    } else {
+        "COALESCE(SUM(delta),0)"
+    };
+    let ledger_sql = format!("SELECT {ledger_sum} FROM storage_entries WHERE {ledger_scope}=?");
+    let ledger_bytes: i64 = sqlx::query_scalar(&ledger_sql)
+        .bind(owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let delta = real_bytes - ledger_bytes;
+    if delta != 0 {
+        sqlx::query("INSERT INTO storage_entries(id,account_id,board_id,created_at,delta,operation) VALUES(?,?,?,?,?,'reconcile')")
+            .bind(id())
+            .bind(account_id)
+            .bind(board_id)
+            .bind(now())
+            .bind(delta)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(delta != 0)
+}
+
+pub(super) async fn reconcile_all(app: &App) -> Result<usize> {
+    let boards = sqlx::query("SELECT account_id,id FROM boards ORDER BY account_id,id")
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut changed = 0;
+    for board in boards {
+        changed += reconcile_owner(
+            app,
+            &board.get::<String, _>("account_id"),
+            Some(&board.get::<String, _>("id")),
+        )
+        .await? as usize;
+    }
+    let accounts = sqlx::query("SELECT id FROM accounts ORDER BY id")
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    for account in accounts {
+        changed += reconcile_owner(app, &account.get::<String, _>("id"), None).await? as usize;
+    }
+    Ok(changed)
+}
+
+pub(super) async fn reconcile_imported_storage_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    mysql: bool,
+) -> Result<()> {
+    let sum = if mysql {
+        "CAST(SUM(bytes) AS SIGNED)"
+    } else {
+        "SUM(bytes)"
+    };
+    let query = format!(
+        "SELECT board_id,{sum} AS bytes FROM (SELECT CASE a.record_type WHEN 'Card' THEN c.board_id WHEN 'Comment' THEN mc.board_id WHEN 'Board' THEN bd.id END AS board_id,b.byte_size AS bytes FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id LEFT JOIN cards c ON a.record_type='Card' AND c.id=a.record_id LEFT JOIN comments m ON a.record_type='Comment' AND m.id=a.record_id LEFT JOIN cards mc ON mc.id=m.card_id LEFT JOIN boards bd ON a.record_type='Board' AND bd.id=a.record_id WHERE a.account_id=?) attached WHERE board_id IS NOT NULL GROUP BY board_id"
+    );
+    let boards = sqlx::query(&query)
+        .bind(account_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    for board in boards {
+        let bytes: i64 = board.get("bytes");
+        if bytes != 0 {
+            sqlx::query("INSERT INTO storage_entries(id,account_id,board_id,created_at,delta,operation) VALUES(?,?,?,?,?,'reconcile')")
+                .bind(id())
+                .bind(account_id)
+                .bind(board.get::<String, _>("board_id"))
+                .bind(now())
+                .bind(bytes)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
+        }
+    }
+    let sum = if mysql {
+        "CAST(COALESCE(SUM(delta),0) AS SIGNED)"
+    } else {
+        "COALESCE(SUM(delta),0)"
+    };
+    let total = sqlx::query(&format!(
+        "SELECT MAX(id) AS last_entry_id,{sum} AS bytes_stored FROM storage_entries WHERE account_id=?"
+    ))
+    .bind(account_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_err)?;
+    let stamp = now();
+    sqlx::query("INSERT INTO storage_totals(id,account_id,owner_id,owner_type,bytes_stored,last_entry_id,created_at,updated_at) VALUES(?,?,?,'Account',?,?,?,?)")
+        .bind(id())
+        .bind(account_id)
+        .bind(account_id)
+        .bind(total.get::<i64, _>("bytes_stored"))
+        .bind(total.get::<Option<String>, _>("last_entry_id"))
+        .bind(&stamp)
+        .bind(&stamp)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    Ok(())
 }
 
 pub(super) fn public_image_path(slug: i64, signed_id: &str, filename: &str) -> String {
@@ -103,6 +570,19 @@ pub(super) async fn image_urls_for_cards(
         .collect())
 }
 
+pub(super) async fn embed_owners_for_cards(
+    app: &App,
+    card_ids: &[String],
+) -> Result<HashSet<String>> {
+    let rows = rows_for_ids(
+        app,
+        "SELECT DISTINCT record_id FROM storage_attachments WHERE record_type='Card' AND name IN ('embed','embeds') AND record_id IN (",
+        card_ids,
+    )
+    .await?;
+    Ok(rows.into_iter().map(|row| row.get("record_id")).collect())
+}
+
 fn human_size(bytes: i64) -> String {
     if bytes < 1024 {
         format!("{bytes} Bytes")
@@ -130,7 +610,104 @@ fn variable_image(content_type: &str) -> bool {
     )
 }
 
-fn embed_html(blob: &SqliteRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Variation {
+    operation: String,
+    width: u32,
+    height: u32,
+    format: Option<String>,
+}
+
+fn variation_key(app: &App, operation: &str, width: u32, height: u32) -> String {
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&Variation {
+            operation: operation.to_owned(),
+            width,
+            height,
+            format: None,
+        })
+        .expect("static variation"),
+    );
+    let signature = hmac_sha256(&app.qr_secret, &format!("storage_variation:{payload}"));
+    format!("{payload}--{signature}")
+}
+
+pub(super) fn event_attachment_preview(
+    app: &App,
+    slug: i64,
+    signed_id: &str,
+    filename: &str,
+    content_type: &str,
+    metadata: &str,
+) -> String {
+    if variable_image(content_type) {
+        let variation = variation_key(app, "limit", 800, 600);
+        let url = format!(
+            "/{slug}/rails/active_storage/representations/redirect/{signed_id}/{variation}/{}",
+            encoded_filename(filename)
+        );
+        let dimensions: Value = serde_json::from_str(metadata).unwrap_or(Value::Null);
+        let size = match (dimensions["width"].as_i64(), dimensions["height"].as_i64()) {
+            (Some(width), Some(height)) if width > 0 && height > 0 => {
+                format!(" width=\"{width}\" height=\"{height}\"")
+            }
+            _ => String::new(),
+        };
+        format!(
+            "<img class=\"attachment attachment--image\" src=\"{}\"{size} alt=\"\">",
+            escape(&url)
+        )
+    } else {
+        let extension = filename
+            .rsplit_once('.')
+            .map(|(_, value)| value.to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let class_extension: String = extension
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect();
+        format!(
+            "<div class=\"attachment attachment--file attachment--{class_extension}\"><span class=\"attachment__icon\">{}</span></div>",
+            escape(&extension)
+        )
+    }
+}
+
+fn verified_variation(app: &App, key: &str) -> Result<Variation> {
+    let (payload, signature) = key.rsplit_once("--").ok_or_else(missing)?;
+    let expected = hmac_sha256(&app.qr_secret, &format!("storage_variation:{payload}"));
+    if signature.len() != expected.len()
+        || signature
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            })
+            != 0
+    {
+        return Err(missing());
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|_| missing())?;
+    let variation: Variation = serde_json::from_slice(&bytes).map_err(|_| missing())?;
+    if !matches!(variation.operation.as_str(), "limit" | "fill")
+        || variation.width == 0
+        || variation.height == 0
+        || variation.width > 4096
+        || variation.height > 4096
+        || !matches!(
+            variation.format.as_deref(),
+            None | Some("jpeg" | "png" | "gif" | "webp")
+        )
+    {
+        return Err(missing());
+    }
+    Ok(variation)
+}
+
+fn embed_html(app: &App, blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool) -> String {
     let filename: String = blob.get("filename");
     let content_type: String = blob.get("content_type");
     let size: i64 = blob.get("byte_size");
@@ -139,8 +716,9 @@ fn embed_html(blob: &SqliteRow, sgid: &str, slug: i64, in_paragraph: bool) -> St
         "/{slug}/rails/active_storage/blobs/redirect/{signed_id}/{}",
         encoded_filename(&filename)
     );
+    let variation = variation_key(app, "limit", 1024, 768);
     let variant = format!(
-        "/{slug}/rails/active_storage/representations/redirect/{signed_id}/preview/{}",
+        "/{slug}/rails/active_storage/representations/redirect/{signed_id}/{variation}/{}",
         encoded_filename(&filename)
     );
     let safe_name = escape(&filename);
@@ -163,8 +741,10 @@ fn embed_html(blob: &SqliteRow, sgid: &str, slug: i64, in_paragraph: bool) -> St
         ("  ", "</action-text-attachment>")
     };
     if variable_image(&content_type) {
-        let width = blob.get::<Option<i64>, _>("width").unwrap_or(0);
-        let height = blob.get::<Option<i64>, _>("height").unwrap_or(0);
+        let metadata: String = blob.get("metadata");
+        let metadata: Value = serde_json::from_str(&metadata).unwrap_or(Value::Null);
+        let width = metadata["width"].as_i64().unwrap_or(0);
+        let height = metadata["height"].as_i64().unwrap_or(0);
         let dimensions = if width > 0 && height > 0 {
             format!(" width=\"{width}\" height=\"{height}\"")
         } else {
@@ -283,20 +863,30 @@ pub(super) async fn render_rich_text(
             .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
         if let Some(blob) = blob {
             let filename: String = blob.get("filename");
+            if variable_image(&blob.get::<String, _>("content_type")) {
+                for (width, height) in [(800, 600), (1024, 768)] {
+                    let key = variation_key(app, "limit", width, height);
+                    ensure_variation(app, &blob, &key).await?;
+                }
+            }
             plain_input.push_str(&format!("[{}]", filename));
             replacements.push((
                 token.clone(),
-                embed_html(&blob, value, slug, true),
-                embed_html(&blob, value, slug, false),
+                embed_html(app, &blob, value, slug, true),
+                embed_html(app, &blob, value, slug, false),
             ));
             attached = true;
         } else {
             let mut user = sqlx::query("SELECT u.name FROM user_attachables s JOIN users u ON u.id=s.user_id WHERE s.sgid=? AND s.account_id=?")
                 .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
             if user.is_none() {
-                if let Some(user_id) = value.strip_prefix("gid://fizzy/User/") {
+                if let Some(user_id) = app
+                    .sgid_signer
+                    .parse_user(value)
+                    .or_else(|| value.strip_prefix("gid://fizzy/User/").map(str::to_owned))
+                {
                     user = sqlx::query("SELECT name FROM users WHERE id=? AND account_id=?")
-                        .bind(user_id)
+                        .bind(&user_id)
                         .bind(account_id)
                         .fetch_optional(&app.db)
                         .await
@@ -350,7 +940,7 @@ pub(super) async fn render_rich_text(
 }
 
 pub(super) async fn attach_card_image_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     card_id: &str,
     value: Option<&Value>,
@@ -389,17 +979,38 @@ pub(super) async fn attach_card_image_tx(
     if existing == blob_id {
         return Ok(Vec::new());
     }
-    let keys = purge_card_images_tx(tx, &p.account_id, Some(card_id), None).await?;
+    let keys = purge_card_images_tx(
+        tx,
+        &p.account_id,
+        Some(card_id),
+        None,
+        Some(&p.user_id),
+        Some(&p.request_id),
+    )
+    .await?;
     if let Some(blob_id) = blob_id {
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'Card',?,'image',?)")
-            .bind(id()).bind(&p.account_id).bind(blob_id).bind(card_id).bind(now())
+            .bind(id()).bind(&p.account_id).bind(&blob_id).bind(card_id).bind(now())
             .execute(&mut **tx).await.map_err(db_err)?;
+        record_attachment_change_tx(
+            tx,
+            &p.account_id,
+            "Card",
+            card_id,
+            &blob_id,
+            "attach",
+            Some(&p.user_id),
+            Some(&p.request_id),
+        )
+        .await?;
     }
     Ok(keys)
 }
 
 pub(super) struct PendingUpload {
+    id: String,
     pub signed_id: String,
+    attachable_sgid: String,
     key: Option<String>,
     filename: String,
     content_type: String,
@@ -423,6 +1034,7 @@ impl Drop for PendingUpload {
 }
 
 pub(super) async fn receive_multipart_image(
+    app: &App,
     mut field: axum::extract::multipart::Field<'_>,
 ) -> Result<PendingUpload> {
     let filename = field
@@ -437,8 +1049,11 @@ pub(super) async fn receive_multipart_image(
         .unwrap_or("application/octet-stream")
         .to_owned();
     let key = random_token();
+    let blob_id = id();
     let mut pending = PendingUpload {
-        signed_id: random_token(),
+        signed_id: app.sgid_signer.blob_signed_id(&blob_id),
+        attachable_sgid: app.sgid_signer.blob(&blob_id),
+        id: blob_id,
         key: Some(key.clone()),
         filename,
         content_type,
@@ -490,15 +1105,15 @@ pub(super) async fn receive_multipart_image(
 }
 
 pub(super) async fn store_multipart_image_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     upload: &PendingUpload,
 ) -> Result<()> {
     let timestamp = now();
     sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(id()).bind(&p.account_id).bind(upload.key.as_deref()).bind(&upload.filename).bind(&upload.content_type)
+        .bind(&upload.id).bind(&p.account_id).bind(upload.key.as_deref()).bind(&upload.filename).bind(&upload.content_type)
         .bind(upload.byte_size)
-        .bind(&upload.checksum).bind(&upload.signed_id).bind(random_token())
+        .bind(&upload.checksum).bind(&upload.signed_id).bind(&upload.attachable_sgid)
         .bind(hash(&random_token())).bind(expires_in(60)).bind(&timestamp)
         .bind(upload.dimensions.map(|(width, _)| width)).bind(upload.dimensions.map(|(_, height)| height))
         .bind(&timestamp).execute(&mut **tx).await.map_err(db_err)?;
@@ -506,12 +1121,14 @@ pub(super) async fn store_multipart_image_tx(
 }
 
 pub(super) async fn purge_card_images_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     card_id: Option<&str>,
     board_id: Option<&str>,
+    user_id: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let rows = sqlx::query("SELECT a.id AS attachment_id,b.id AS blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id JOIN cards c ON c.id=a.record_id WHERE a.record_type='Card' AND a.name='image' AND c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?)")
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.record_id,b.id AS blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id JOIN cards c ON c.id=a.record_id WHERE a.record_type='Card' AND a.name='image' AND c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?)")
         .bind(account_id)
         .bind(card_id).bind(card_id)
         .bind(board_id).bind(board_id)
@@ -520,6 +1137,11 @@ pub(super) async fn purge_card_images_tx(
     for row in rows {
         let attachment_id: String = row.get("attachment_id");
         let blob_id: String = row.get("blob_id");
+        let record_id: String = row.get("record_id");
+        record_attachment_change_tx(
+            tx, account_id, "Card", &record_id, &blob_id, "detach", user_id, request_id,
+        )
+        .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
             .bind(&attachment_id)
             .execute(&mut **tx)
@@ -532,26 +1154,89 @@ pub(super) async fn purge_card_images_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-                .bind(&blob_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(db_err)?;
-            keys.push(row.get("storage_key"));
+            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
         }
     }
     Ok(keys)
 }
 
+async fn purge_blob_with_variants_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    blob_id: &str,
+) -> Result<Vec<String>> {
+    let variants = sqlx::query("SELECT v.id AS variant_id,a.blob_id AS derived_id,b.storage_key AS derived_key FROM storage_variant_records v LEFT JOIN storage_attachments a ON a.record_type='ActiveStorage::VariantRecord' AND a.record_id=v.id AND a.name='image' LEFT JOIN storage_blobs b ON b.id=a.blob_id WHERE v.blob_id=?")
+        .bind(blob_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    let mut keys = Vec::new();
+    for variant in variants {
+        let variant_id: String = variant.get("variant_id");
+        let derived_id: Option<String> = variant.get("derived_id");
+        let derived_key: Option<String> = variant.get("derived_key");
+        sqlx::query("DELETE FROM storage_attachments WHERE record_type='ActiveStorage::VariantRecord' AND record_id=?")
+            .bind(&variant_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        if let Some(derived_id) = derived_id {
+            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
+                .bind(derived_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
+        }
+        if let Some(key) = derived_key {
+            keys.push(key);
+        }
+    }
+    let key: String = sqlx::query_scalar("SELECT storage_key FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("DELETE FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    keys.push(key);
+    Ok(keys)
+}
+
 pub(super) async fn sync_embeds_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     record_type: &str,
     record_id: &str,
     content: &str,
 ) -> Result<Vec<String>> {
-    if !matches!(record_type, "Card" | "Comment") {
+    sync_embeds_tx_inner(tx, p, record_type, record_id, content, false).await
+}
+
+pub(super) async fn purge_record_embeds_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    p: &Principal,
+    record_type: &str,
+    record_id: &str,
+) -> Result<Vec<String>> {
+    sync_embeds_tx_inner(tx, p, record_type, record_id, "", true).await
+}
+
+async fn sync_embeds_tx_inner(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    p: &Principal,
+    record_type: &str,
+    record_id: &str,
+    content: &str,
+    force_clear: bool,
+) -> Result<Vec<String>> {
+    if !matches!(record_type, "Board" | "Card" | "Comment") {
         return Err(bad("Invalid embedded attachment owner"));
+    }
+    // Fizzy retains the association when Action Text is assigned empty or null.
+    if content.is_empty() && !force_clear {
+        return Ok(Vec::new());
     }
     let mut wanted = HashSet::new();
     for sgid in rich_text::attachment_sgids(content) {
@@ -561,7 +1246,7 @@ pub(super) async fn sync_embeds_tx(
             wanted.insert(blob);
         }
     }
-    let existing = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type=? AND a.record_id=? AND a.name='embed' AND a.account_id=?")
+    let existing = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type=? AND a.record_id=? AND a.name IN ('embed','embeds') AND a.account_id=?")
         .bind(record_type).bind(record_id).bind(&p.account_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
     let mut current = HashSet::new();
@@ -572,6 +1257,17 @@ pub(super) async fn sync_embeds_tx(
             current.insert(blob_id);
             continue;
         }
+        record_attachment_change_tx(
+            tx,
+            &p.account_id,
+            record_type,
+            record_id,
+            &blob_id,
+            "detach",
+            Some(&p.user_id),
+            Some(&p.request_id),
+        )
+        .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
             .bind(row.get::<String, _>("attachment_id"))
             .execute(&mut **tx)
@@ -584,35 +1280,55 @@ pub(super) async fn sync_embeds_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-                .bind(blob_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(db_err)?;
-            keys.push(row.get("storage_key"));
+            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
         }
     }
     for blob_id in wanted.difference(&current) {
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,?,?,'embed',?)")
             .bind(id()).bind(&p.account_id).bind(blob_id).bind(record_type).bind(record_id).bind(now())
             .execute(&mut **tx).await.map_err(db_err)?;
+        record_attachment_change_tx(
+            tx,
+            &p.account_id,
+            record_type,
+            record_id,
+            blob_id,
+            "attach",
+            Some(&p.user_id),
+            Some(&p.request_id),
+        )
+        .await?;
     }
     Ok(keys)
 }
 
 pub(super) async fn purge_card_storage_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     card_id: Option<&str>,
     board_id: Option<&str>,
+    user_id: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))))")
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))) OR (a.record_type='Board' AND a.record_id=? AND ? IS NOT NULL))")
         .bind(account_id).bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
         .bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
+        .bind(board_id).bind(board_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
     let mut keys = Vec::new();
     for row in rows {
         let blob_id: String = row.get("blob_id");
+        record_attachment_change_tx(
+            tx,
+            account_id,
+            &row.get::<String, _>("record_type"),
+            &row.get::<String, _>("record_id"),
+            &blob_id,
+            "detach",
+            user_id,
+            request_id,
+        )
+        .await?;
         sqlx::query("DELETE FROM storage_attachments WHERE id=?")
             .bind(row.get::<String, _>("attachment_id"))
             .execute(&mut **tx)
@@ -625,12 +1341,7 @@ pub(super) async fn purge_card_storage_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-                .bind(blob_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(db_err)?;
-            keys.push(row.get("storage_key"));
+            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
         }
     }
     Ok(keys)
@@ -638,6 +1349,11 @@ pub(super) async fn purge_card_storage_tx(
 
 pub(super) async fn remove_files(keys: Vec<String>) {
     for key in keys {
+        if let Err(error) = fs::remove_dir_all(storage_dir().join("variants").join(&key)).await {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("storage variant cleanup failed for {key}: {error}");
+            }
+        }
         for path in [
             storage_dir().join(&key),
             storage_dir().join(format!("{key}.thumb")),
@@ -720,7 +1436,7 @@ pub(super) async fn prepare_user_avatar(
 }
 
 pub(super) async fn attach_user_avatar_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
     user_id: &str,
     blob_id: Option<&str>,
@@ -742,12 +1458,13 @@ pub(super) async fn attach_user_avatar_tx(
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'User',?,'avatar',?)")
             .bind(id()).bind(&p.account_id).bind(blob_id).bind(user_id).bind(now())
             .execute(&mut **tx).await.map_err(db_err)?;
+        mark_blob_attached(tx, blob_id).await?;
     }
     Ok(keys)
 }
 
 pub(super) async fn purge_user_avatar_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     user_id: &str,
 ) -> Result<Vec<String>> {
@@ -772,12 +1489,7 @@ pub(super) async fn purge_user_avatar_tx(
     if remaining != 0 {
         return Ok(Vec::new());
     }
-    sqlx::query("DELETE FROM storage_blobs WHERE id=?")
-        .bind(blob_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    Ok(vec![row.get("storage_key")])
+    purge_blob_with_variants_tx(tx, &blob_id).await
 }
 
 pub(super) async fn direct_upload(
@@ -816,8 +1528,8 @@ pub(super) async fn direct_upload(
     }
     let id = id();
     let key = random_token();
-    let signed_id = random_token();
-    let attachable_sgid = random_token();
+    let signed_id = app.sgid_signer.blob_signed_id(&id);
+    let attachable_sgid = app.sgid_signer.blob(&id);
     let upload_token = random_token();
     let timestamp = now();
     sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -940,27 +1652,18 @@ async fn storage_user_id(app: &App, headers: &HeaderMap, account_id: &str) -> Re
         .ok_or_else(|| err(StatusCode::FORBIDDEN, "Account access required"))
 }
 
-pub(super) async fn show_blob(
-    State(app): Shared,
-    Path((account, signed_id, _filename)): Path<(String, String, String)>,
-    Query(query): Query<HashMap<String, String>>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Result<Response> {
+async fn authorized_blob(
+    app: &App,
+    account: &str,
+    signed_id: &str,
+    headers: &HeaderMap,
+) -> Result<(DbRow, bool)> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
     let blob = sqlx::query("SELECT b.* FROM storage_blobs b JOIN accounts a ON a.id=b.account_id WHERE b.signed_id=? AND a.external_account_id=?")
-        .bind(&signed_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+        .bind(signed_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
     if blob.get::<Option<String>, _>("uploaded_at").is_none() {
         return Err(missing());
     }
-    let variant = if uri.path().contains("/representations/redirect/") {
-        if !variable_image(&blob.get::<String, _>("content_type")) {
-            return Err(missing());
-        }
-        "large"
-    } else {
-        "original"
-    };
     let account_id: String = blob.get("account_id");
     let attachments =
         sqlx::query("SELECT record_type,record_id FROM storage_attachments WHERE blob_id=?")
@@ -1005,7 +1708,7 @@ pub(super) async fn show_blob(
         }
     }
     if !public {
-        let user_id = storage_user_id(&app, &headers, &account_id).await?;
+        let user_id = storage_user_id(app, headers, &account_id).await?;
         let mut accessible = attachments.is_empty();
         for card in &cards {
             let access: i64 =
@@ -1024,6 +1727,25 @@ pub(super) async fn show_blob(
             return Err(err(StatusCode::FORBIDDEN, "Blob access required"));
         }
     }
+    Ok((blob, public))
+}
+
+pub(super) async fn show_blob(
+    State(app): Shared,
+    Path((account, signed_id, _filename)): Path<(String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, _) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    let variant = if uri.path().contains("/representations/redirect/") {
+        if !variable_image(&blob.get::<String, _>("content_type")) {
+            return Err(missing());
+        }
+        "large"
+    } else {
+        "original"
+    };
     let token = random_token();
     let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
         "attachment"
@@ -1086,6 +1808,404 @@ async fn ensure_large_variant(key: &str, content_type: &str) -> Result<PathBuf> 
     Ok(target)
 }
 
+async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Result<PathBuf> {
+    let variation = verified_variation(app, variation_key)?;
+    let declared: String = blob.get("content_type");
+    if !variable_image(&declared) {
+        return Err(missing());
+    }
+    let format = variation
+        .format
+        .as_deref()
+        .unwrap_or(match declared.as_str() {
+            "image/png" => "png",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            _ => "jpeg",
+        });
+    let image_format = match format {
+        "png" => image::ImageFormat::Png,
+        "gif" => image::ImageFormat::Gif,
+        "webp" => image::ImageFormat::WebP,
+        _ => image::ImageFormat::Jpeg,
+    };
+    let extension = if format == "jpeg" { "jpg" } else { format }.to_owned();
+    let key: String = blob.get("storage_key");
+    let signature = variation_key.rsplit_once("--").ok_or_else(missing)?.1;
+    let directory = storage_dir().join("variants").join(&key);
+    let target = directory.join(format!("{signature}.{extension}"));
+    if fs::metadata(&target).await.is_ok() {
+        persist_rich_text_variant(app, blob, &variation, &target).await?;
+        return Ok(target);
+    }
+    fs::create_dir_all(&directory)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?;
+    let source = storage_dir().join(&key);
+    let output = target.clone();
+    let persisted_variation = variation.clone();
+    tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
+        if variation.operation == "limit"
+            && matches!(
+                image_format,
+                image::ImageFormat::Jpeg
+                    | image::ImageFormat::Png
+                    | image::ImageFormat::Gif
+                    | image::ImageFormat::WebP
+            )
+        {
+            let temporary = output.with_extension(format!("{}.tmp.{extension}", random_token()));
+            let source_argument = if matches!(
+                image_format,
+                image::ImageFormat::Gif | image::ImageFormat::WebP
+            ) {
+                format!("{}[n=-1]", source.display())
+            } else {
+                source.display().to_string()
+            };
+            let result = std::process::Command::new("vips")
+                .arg("thumbnail_image")
+                .arg(source_argument)
+                .arg(&temporary)
+                .arg(variation.width.to_string())
+                .arg("--height")
+                .arg(variation.height.to_string())
+                .arg("--size")
+                .arg("down")
+                .output();
+            if matches!(result, Ok(ref result) if result.status.success()) {
+                std::fs::rename(&temporary, &output).map_err(|error| error.to_string())?;
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&temporary);
+        }
+        let picture = image::ImageReader::open(source)
+            .map_err(|error| error.to_string())?
+            .with_guessed_format()
+            .map_err(|error| error.to_string())?
+            .decode()
+            .map_err(|error| error.to_string())?;
+        let picture = if variation.operation == "fill" {
+            picture.resize_to_fill(
+                variation.width,
+                variation.height,
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else if picture.width() > variation.width || picture.height() > variation.height {
+            picture.resize(
+                variation.width,
+                variation.height,
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else {
+            picture
+        };
+        let temporary = output.with_extension(format!("{extension}.{}.tmp", random_token()));
+        picture
+            .save_with_format(&temporary, image_format)
+            .map_err(|error| error.to_string())?;
+        std::fs::rename(temporary, output).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed"))?
+    .map_err(|error| {
+        eprintln!("storage variation render failed: {error}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
+    })?;
+    persist_rich_text_variant(app, blob, &persisted_variation, &target).await?;
+    Ok(target)
+}
+
+fn marshal_positive_fixnum(bytes: &mut Vec<u8>, value: u32) {
+    bytes.push(b'i');
+    if value == 0 {
+        bytes.push(0);
+    } else if value <= 122 {
+        bytes.push((value + 5) as u8);
+    } else {
+        let little_endian = value.to_le_bytes();
+        let count = little_endian
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .unwrap_or(0)
+            + 1;
+        bytes.push(count as u8);
+        bytes.extend_from_slice(&little_endian[..count]);
+    }
+}
+
+fn marshal_symbol(bytes: &mut Vec<u8>, name: &str) {
+    bytes.push(b':');
+    bytes.push((name.len() + 5) as u8);
+    bytes.extend_from_slice(name.as_bytes());
+}
+
+fn marshal_utf8_string(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&[b'I', b'"']);
+    bytes.push((value.len() + 5) as u8);
+    bytes.extend_from_slice(value.as_bytes());
+    bytes.push(6);
+    marshal_symbol(bytes, "E");
+    bytes.push(b'T');
+}
+
+fn rich_text_variation_digest(format: &str, width: u32, height: u32) -> String {
+    // ActiveStorage::Variation#digest hashes Ruby Marshal's ordered Hash:
+    // { format:, loader: { n: -1 }, resize_to_limit: [width, height] }.
+    let mut bytes = vec![4, 8, b'{', 8];
+    marshal_symbol(&mut bytes, "format");
+    marshal_utf8_string(&mut bytes, format);
+    marshal_symbol(&mut bytes, "loader");
+    bytes.extend_from_slice(&[b'{', 6]);
+    marshal_symbol(&mut bytes, "n");
+    bytes.extend_from_slice(&[b'i', 0xfa]);
+    marshal_symbol(&mut bytes, "resize_to_limit");
+    bytes.extend_from_slice(&[b'[', 7]);
+    marshal_positive_fixnum(&mut bytes, width);
+    marshal_positive_fixnum(&mut bytes, height);
+    base64::engine::general_purpose::STANDARD.encode(Sha1::digest(bytes))
+}
+
+#[cfg(test)]
+#[test]
+fn rich_text_variant_digest_matches_active_storage() {
+    assert_eq!(
+        rich_text_variation_digest("jpg", 800, 600),
+        "Bfa0r6FVi88e67+f9GyvuiguoXM="
+    );
+    assert_eq!(
+        rich_text_variation_digest("jpg", 1024, 768),
+        "LIHwrDKnUYb2o3ViE1GyFf3u2KM="
+    );
+    assert_eq!(
+        rich_text_variation_digest("png", 800, 600),
+        "sTXCDOhTAja1egabPbhk57Bmknk="
+    );
+    assert_eq!(
+        rich_text_variation_digest("png", 1024, 768),
+        "xYwHDalWgkJKHCx/iFVLItrYKVs="
+    );
+    assert_eq!(
+        rich_text_variation_digest("gif", 800, 600),
+        "sgSbEMr4AmMgi7vYqCUl0FYGbUM="
+    );
+    assert_eq!(
+        rich_text_variation_digest("gif", 1024, 768),
+        "Gx9RxwCTekwUv/8TWWggIa3dhJw="
+    );
+    assert_eq!(
+        rich_text_variation_digest("webp", 800, 600),
+        "nQMzcKoeueeKiUDLkd2iCYMRfqQ="
+    );
+    assert_eq!(
+        rich_text_variation_digest("webp", 1024, 768),
+        "Cs6+3rIJB3PFkf2MUJyPdWF7fhM="
+    );
+}
+
+async fn persist_rich_text_variant(
+    app: &App,
+    blob: &DbRow,
+    variation: &Variation,
+    target: &std::path::Path,
+) -> Result<()> {
+    if variation.operation != "limit"
+        || !matches!(
+            (variation.width, variation.height),
+            (800, 600) | (1024, 768)
+        )
+        || variation.format.is_some()
+    {
+        return Ok(());
+    }
+    let content_type: String = blob.get("content_type");
+    if !matches!(
+        content_type.as_str(),
+        "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+    ) {
+        return Ok(());
+    }
+    let blob_id: String = blob.get("id");
+    let account_id: String = blob.get("account_id");
+    let filename: String = blob.get("filename");
+    let format = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|extension| {
+            matches!(
+                (content_type.as_str(), extension.as_str()),
+                ("image/jpeg", "jpg" | "jpeg")
+                    | ("image/png", "png")
+                    | ("image/gif", "gif")
+                    | ("image/webp", "webp")
+            )
+        })
+        .unwrap_or_else(|| {
+            match content_type.as_str() {
+                "image/png" => "png",
+                "image/gif" => "gif",
+                "image/webp" => "webp",
+                _ => "jpg",
+            }
+            .to_owned()
+        });
+    let digest = rich_text_variation_digest(&format, variation.width, variation.height);
+    let exists: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
+    )
+    .bind(&blob_id)
+    .bind(&digest)
+    .fetch_optional(&app.db)
+    .await
+    .map_err(db_err)?;
+    if exists.is_some() {
+        return Ok(());
+    }
+    let data = fs::read(target).await.map_err(|error| {
+        eprintln!("storage variation read failed: {error}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
+    })?;
+    let (width, height) = image::image_dimensions(target).map_err(|error| {
+        eprintln!("storage variation dimensions failed: {error}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
+    })?;
+    let mut checksum = Md5::new();
+    checksum.update(&data);
+    let checksum = base64::engine::general_purpose::STANDARD.encode(checksum.finalize());
+    let derived_id = id();
+    let derived_key = random_token();
+    let record_id = id();
+    let timestamp = now();
+    let mut tx = app.db.begin().await.map_err(db_err)?;
+    let variant_insert = if app.mysql {
+        "INSERT INTO storage_variant_records(id,account_id,blob_id,variation_digest) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE id=id"
+    } else {
+        "INSERT OR IGNORE INTO storage_variant_records(id,account_id,blob_id,variation_digest) VALUES(?,?,?,?)"
+    };
+    sqlx::query(variant_insert)
+        .bind(&record_id)
+        .bind(&account_id)
+        .bind(&blob_id)
+        .bind(&digest)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let owning_record: String = sqlx::query_scalar(
+        "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
+    )
+    .bind(&blob_id)
+    .bind(&digest)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    if owning_record != record_id {
+        return Ok(());
+    }
+    sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,metadata,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(&derived_id)
+        .bind(&account_id)
+        .bind(&derived_key)
+        .bind(&filename)
+        .bind(&content_type)
+        .bind(data.len() as i64)
+        .bind(checksum)
+        .bind(json!({"identified":true,"width":width,"height":height,"analyzed":true}).to_string())
+        .bind(app.sgid_signer.blob_signed_id(&derived_id))
+        .bind(app.sgid_signer.blob(&derived_id))
+        .bind(hash(&random_token()))
+        .bind(expires_in(60))
+        .bind(&timestamp)
+        .bind(width as i64)
+        .bind(height as i64)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'ActiveStorage::VariantRecord',?,'image',?)")
+        .bind(id())
+        .bind(&account_id)
+        .bind(&derived_id)
+        .bind(&record_id)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let derived_path = storage_dir().join(&derived_key);
+    if let Err(error) = fs::write(&derived_path, data).await {
+        let _ = fs::remove_file(&derived_path).await;
+        eprintln!("storage variation write failed: {error}");
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Image preview failed",
+        ));
+    }
+    if let Err(error) = tx.commit().await {
+        let _ = fs::remove_file(&derived_path).await;
+        return Err(db_err(error));
+    }
+    Ok(())
+}
+
+pub(super) async fn show_representation(
+    State(app): Shared,
+    Path((account, signed_id, variation_key, _filename)): Path<(String, String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, _) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    ensure_variation(&app, &blob, &variation_key).await?;
+    let token = random_token();
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    sqlx::query("INSERT INTO storage_download_tokens(token_hash,blob_id,disposition,variant,expires_at) VALUES(?,?,?,?,?)")
+        .bind(hash(&token))
+        .bind(blob.get::<String, _>("id"))
+        .bind(disposition)
+        .bind(format!("v:{variation_key}"))
+        .bind(expires_in(5))
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    let filename: String = blob.get("filename");
+    let location = format!(
+        "{}/{account}/rails/active_storage/disk/{token}/{}",
+        base(&headers),
+        encoded_filename(&filename)
+    );
+    Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
+}
+
+pub(super) async fn proxy_representation(
+    State(app): Shared,
+    Path((account, signed_id, variation_key, _filename)): Path<(String, String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, public) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    serve_blob_file(
+        &app,
+        &blob,
+        &format!("v:{variation_key}"),
+        disposition,
+        None,
+        if public {
+            "max-age=3155695200, public, immutable"
+        } else {
+            "max-age=3155695200, private, immutable"
+        },
+    )
+    .await
+}
+
 pub(super) async fn download_file(
     State(app): Shared,
     Path((account, token, _filename)): Path<(String, String, String)>,
@@ -1093,16 +2213,82 @@ pub(super) async fn download_file(
     let slug: i64 = account.parse().map_err(|_| missing())?;
     let blob = sqlx::query("SELECT b.*,t.disposition,t.variant FROM storage_download_tokens t JOIN storage_blobs b ON b.id=t.blob_id JOIN accounts a ON a.id=b.account_id WHERE t.token_hash=? AND a.external_account_id=? AND t.expires_at>=?")
         .bind(hash(&token)).bind(slug).bind(now()).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    let variant: String = blob.get("variant");
+    let disposition: String = blob.get("disposition");
+    serve_blob_file(
+        &app,
+        &blob,
+        &variant,
+        &disposition,
+        None,
+        "public, max-age=300",
+    )
+    .await
+}
+
+pub(super) async fn proxy_blob(
+    State(app): Shared,
+    Path((account, signed_id, _filename)): Path<(String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let (blob, public) = authorized_blob(&app, &account, &signed_id, &headers).await?;
+    let disposition = if query.get("disposition").map(String::as_str) == Some("attachment") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    let mut response = serve_blob_file(
+        &app,
+        &blob,
+        "original",
+        disposition,
+        headers
+            .get(header::RANGE)
+            .and_then(|value| value.to_str().ok()),
+        if public {
+            "max-age=3155695200, public, immutable"
+        } else {
+            "max-age=3155695200, private, immutable"
+        },
+    )
+    .await?;
+    response
+        .headers_mut()
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    Ok(response)
+}
+
+async fn serve_blob_file(
+    app: &App,
+    blob: &DbRow,
+    variant: &str,
+    requested_disposition: &str,
+    range_header: Option<&str>,
+    cache_control: &str,
+) -> Result<Response> {
     let key: String = blob.get("storage_key");
     let declared: String = blob.get("content_type");
-    let variant: String = blob.get("variant");
-    let path = if variant == "large" {
+    let path = if let Some(variation_key) = variant.strip_prefix("v:") {
+        ensure_variation(app, blob, variation_key).await?
+    } else if variant == "large" {
         ensure_large_variant(&key, &declared).await?
     } else {
         storage_dir().join(&key)
     };
-    let file = fs::File::open(&path).await.map_err(|_| missing())?;
+    let mut file = fs::File::open(&path).await.map_err(|_| missing())?;
     let length = file.metadata().await.map_err(|_| missing())?.len();
+    let declared = if let Some(key) = variant.strip_prefix("v:") {
+        match verified_variation(app, key)?.format.as_deref() {
+            Some("jpeg") => "image/jpeg".to_owned(),
+            Some("png") => "image/png".to_owned(),
+            Some("gif") => "image/gif".to_owned(),
+            Some("webp") => "image/webp".to_owned(),
+            _ => declared,
+        }
+    } else {
+        declared
+    };
     let lowercase = declared.to_ascii_lowercase();
     let dangerous = !declared.is_ascii()
         || lowercase.starts_with("text/html")
@@ -1117,7 +2303,59 @@ pub(super) async fn download_file(
     } else {
         declared.as_str()
     };
-    let mut response = Body::from_stream(ReaderStream::new(file)).into_response();
+    let range = if let Some(value) = range_header {
+        let Some(spec) = value.strip_prefix("bytes=") else {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        };
+        if spec.contains(',') || length == 0 {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        }
+        let Some((start, end)) = spec.split_once('-') else {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        };
+        let range = if start.is_empty() {
+            let suffix = end.parse::<u64>().ok().filter(|size| *size > 0);
+            suffix.map(|size| (length.saturating_sub(size), length - 1))
+        } else {
+            let start = start.parse::<u64>().ok().filter(|start| *start < length);
+            let end = if end.is_empty() {
+                Some(length - 1)
+            } else {
+                end.parse::<u64>().ok().map(|end| end.min(length - 1))
+            };
+            start.zip(end).filter(|(start, end)| start <= end)
+        };
+        let Some(range) = range else {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        };
+        if range.1 - range.0 + 1 > 5 * 1024 * 1024 {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        }
+        Some(range)
+    } else {
+        None
+    };
+    let mut response = if let Some((start, end)) = range {
+        file.seek(std::io::SeekFrom::Start(start))
+            .await
+            .map_err(|_| missing())?;
+        let mut bytes =
+            vec![
+                0;
+                usize::try_from(end - start + 1)
+                    .map_err(|_| err(StatusCode::RANGE_NOT_SATISFIABLE, "Range too large"))?
+            ];
+        file.read_exact(&mut bytes).await.map_err(|_| missing())?;
+        let mut response = (StatusCode::PARTIAL_CONTENT, bytes).into_response();
+        response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            HeaderValue::from_str(&format!("bytes {start}-{end}/{length}"))
+                .expect("valid byte range"),
+        );
+        response
+    } else {
+        Body::from_stream(ReaderStream::new(file)).into_response()
+    };
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_str(content_type)
@@ -1125,11 +2363,16 @@ pub(super) async fn download_file(
     );
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=300"),
+        HeaderValue::from_str(cache_control).expect("static cache control"),
     );
     response.headers_mut().insert(
         header::CONTENT_LENGTH,
-        HeaderValue::from_str(&length.to_string()).expect("nonnegative blob size"),
+        HeaderValue::from_str(
+            &range
+                .map_or(length, |(start, end)| end - start + 1)
+                .to_string(),
+        )
+        .expect("nonnegative blob size"),
     );
     let filename: String = blob.get("filename");
     let safe_filename: String = filename
@@ -1144,7 +2387,7 @@ pub(super) async fn download_file(
         .collect();
     let disposition = format!(
         "{}; filename=\"{}\"",
-        if dangerous || blob.get::<String, _>("disposition") == "attachment" {
+        if dangerous || requested_disposition == "attachment" {
             "attachment"
         } else {
             "inline"
@@ -1189,8 +2432,9 @@ pub(super) async fn show_avatar(
     if let Some(avatar) = avatar {
         let signed_id: String = avatar.get("signed_id");
         let filename: String = avatar.get("filename");
+        let variation = variation_key(&app, "fill", 256, 256);
         let location = format!(
-            "{}/{account}/rails/active_storage/representations/redirect/{signed_id}/thumb/{}?disposition=inline",
+            "{}/{account}/rails/active_storage/representations/redirect/{signed_id}/{variation}/{}?disposition=inline",
             base(&headers),
             encoded_filename(&filename)
         );
@@ -1368,8 +2612,30 @@ pub(super) async fn delete_image(
     p.write()?;
     let card = card(&app, &p, &number).await?;
     let card_id: String = card.get("id");
-    let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = purge_card_images_tx(&mut tx, &p.account_id, Some(&card_id), None).await?;
+    let (mut tx, _) =
+        begin_card_board_write(&app, &card_id, &card.get::<String, _>("board_id")).await?;
+    let attached: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE record_type='Card' AND name='image' AND record_id=?")
+        .bind(&card_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let keys = purge_card_images_tx(
+        &mut tx,
+        &p.account_id,
+        Some(&card_id),
+        None,
+        Some(&p.user_id),
+        Some(&p.request_id),
+    )
+    .await?;
+    if attached != 0 {
+        sqlx::query("UPDATE cards SET updated_at=? WHERE id=?")
+            .bind(now())
+            .bind(&card_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     remove_files(keys).await;
     if headers.contains_key("x-rizzy-json-request") {

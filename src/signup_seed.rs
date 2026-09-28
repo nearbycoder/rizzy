@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Any as Db, Transaction};
 
 use super::{id, rich_text, search_content};
 
@@ -10,7 +10,7 @@ struct PlaygroundCard {
 }
 
 pub(super) async fn playground(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     owner_id: &str,
     created_at: &str,

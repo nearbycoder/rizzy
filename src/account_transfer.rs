@@ -26,13 +26,13 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "user_settings",
-        query: "SELECT r.id,r.account_id,COALESCE(n.bundle_email_frequency,'every_few_hours') bundle_email_frequency,r.created_at,t.timezone_name,r.updated_at,r.user_id FROM user_settings_records r JOIN users u ON u.id=r.user_id LEFT JOIN notification_settings n ON n.user_id=r.user_id LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.account_id=? AND u.role!='system' ORDER BY r.user_id",
+        query: "SELECT r.id,r.account_id,COALESCE(n.bundle_email_frequency,'every_few_hours') bundle_email_frequency,r.created_at,t.timezone_name,r.updated_at,r.user_id FROM user_settings_records r JOIN users u ON u.id=r.user_id LEFT JOIN notification_settings n ON n.user_id=r.user_id LEFT JOIN user_timezones t ON t.user_id=r.user_id WHERE r.account_id=? ORDER BY r.user_id",
         booleans: &[],
         json_fields: &[],
     },
     RecordSet {
         directory: "tags",
-        query: "SELECT id,account_id,created_at,title,created_at updated_at FROM tags WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,created_at,title,COALESCE(NULLIF(updated_at,''),created_at) updated_at FROM tags WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
@@ -56,7 +56,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "board_publications",
-        query: "SELECT id,account_id,board_id,created_at,key,updated_at FROM board_publications WHERE account_id=? ORDER BY board_id",
+        query: "SELECT id,account_id,board_id,created_at,`key`,updated_at FROM board_publications WHERE account_id=? ORDER BY board_id",
         booleans: &[],
         json_fields: &[],
     },
@@ -92,13 +92,13 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "assignments",
-        query: "SELECT id,account_id,assignee_id,assigner_id,card_id,created_at,created_at updated_at FROM assignments WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,assignee_id,assigner_id,card_id,created_at,updated_at FROM assignments WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
     RecordSet {
         directory: "taggings",
-        query: "SELECT NULL id,c.account_id,t.card_id,c.created_at,t.tag_id,c.created_at updated_at FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=? ORDER BY t.card_id,t.tag_id",
+        query: "SELECT t.id,c.account_id,t.card_id,t.created_at,t.tag_id,t.updated_at FROM taggings t JOIN cards c ON c.id=t.card_id WHERE c.account_id=? ORDER BY t.card_id,t.tag_id",
         booleans: &[],
         json_fields: &[],
     },
@@ -134,13 +134,13 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "pins",
-        query: "SELECT id,account_id,card_id,created_at,created_at updated_at,user_id FROM pins WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,card_id,created_at,COALESCE(NULLIF(updated_at,''),created_at) updated_at,user_id FROM pins WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
     RecordSet {
         directory: "reactions",
-        query: "SELECT id,account_id,content,created_at,reactable_id,reactable_type,reacter_id,created_at updated_at FROM reactions WHERE account_id=? ORDER BY id",
+        query: "SELECT id,account_id,content,created_at,reactable_id,reactable_type,reacter_id,COALESCE(NULLIF(updated_at,''),created_at) updated_at FROM reactions WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
@@ -158,7 +158,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "webhook_delinquency_trackers",
-        query: "SELECT NULL id,account_id,consecutive_failures_count,created_at,first_failure_at,updated_at,id webhook_id FROM webhooks WHERE account_id=? AND consecutive_failures_count>0 ORDER BY id",
+        query: "SELECT id,account_id,consecutive_failures_count,created_at,first_failure_at,updated_at,webhook_id FROM webhook_delinquency_trackers WHERE account_id=? ORDER BY id",
         booleans: &[],
         json_fields: &[],
     },
@@ -188,7 +188,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "active_storage_blobs",
-        query: "SELECT id,account_id,byte_size,checksum,content_type,created_at,filename,storage_key key,metadata FROM storage_blobs WHERE account_id=? AND uploaded_at IS NOT NULL ORDER BY id",
+        query: "SELECT b.id,b.account_id,b.byte_size,b.checksum,b.content_type,b.created_at,b.filename,b.storage_key AS `key`,b.metadata FROM storage_blobs b WHERE b.account_id=? AND NOT EXISTS (SELECT 1 FROM storage_attachments a WHERE a.account_id=b.account_id AND a.blob_id=b.id AND a.record_type IN ('Export','Account::Import')) ORDER BY b.id",
         booleans: &[],
         json_fields: &["metadata"],
     },
@@ -200,7 +200,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
     RecordSet {
         directory: "active_storage_attachments",
-        query: "SELECT id,account_id,blob_id,created_at,name,record_id,record_type FROM storage_attachments WHERE account_id=? ORDER BY id",
+        query: "SELECT a.id,a.account_id,a.blob_id,a.created_at,CASE WHEN r.id IS NOT NULL THEN 'embeds' ELSE a.name END name,CASE WHEN r.id IS NOT NULL THEN r.id ELSE a.record_id END record_id,CASE WHEN r.id IS NOT NULL THEN 'ActionText::RichText' ELSE a.record_type END record_type FROM storage_attachments a LEFT JOIN rich_text_records r ON a.name IN ('embed','embeds') AND r.account_id=a.account_id AND r.record_type=a.record_type AND r.record_id=a.record_id AND r.name=CASE WHEN a.record_type='Comment' THEN 'body' ELSE 'description' END WHERE a.account_id=? AND a.record_type NOT IN ('Export','Account::Import') ORDER BY a.id",
         booleans: &[],
         json_fields: &[],
     },
@@ -212,7 +212,7 @@ const RECORD_SETS: &[RecordSet] = &[
     },
 ];
 
-fn row_value(row: &SqliteRow, record_set: &RecordSet) -> BuildResult<Value> {
+fn row_value(row: &DbRow, record_set: &RecordSet) -> BuildResult<Value> {
     let mut object = serde_json::Map::new();
     for (index, column) in row.columns().iter().enumerate() {
         let name = column.name();
@@ -220,13 +220,19 @@ fn row_value(row: &SqliteRow, record_set: &RecordSet) -> BuildResult<Value> {
         let value = if raw.is_null() {
             Value::Null
         } else if record_set.booleans.contains(&name) {
-            json!(row.try_get::<i64, _>(index)? != 0)
+            json!(if raw.type_info().name() == "BOOLEAN" {
+                row.try_get::<bool, _>(index)?
+            } else {
+                row.try_get::<i64, _>(index)? != 0
+            })
         } else if record_set.json_fields.contains(&name) {
             serde_json::from_str(&row.try_get::<String, _>(index)?)?
         } else {
             match raw.type_info().name() {
-                "INTEGER" => json!(row.try_get::<i64, _>(index)?),
-                "REAL" => json!(row.try_get::<f64, _>(index)?),
+                "SMALLINT" | "INTEGER" | "BIGINT" => json!(row.try_get::<i64, _>(index)?),
+                "REAL" => json!(row.try_get::<f32, _>(index)? as f64),
+                "DOUBLE" => json!(row.try_get::<f64, _>(index)?),
+                "BOOLEAN" => json!(row.try_get::<bool, _>(index)?),
                 _ => json!(row.try_get::<String, _>(index)?),
             }
         };
@@ -281,6 +287,10 @@ async fn emit_record_set(
     let mut rows = query.fetch(&app.db);
     while let Some(row) = rows.try_next().await? {
         let mut value = row_value(&row, record_set)?;
+        if record_set.directory == "users" {
+            let user_id = value["id"].as_str().ok_or("missing user ID")?;
+            value["attachable_sgid"] = json!(app.sgid_signer.user(user_id));
+        }
         if record_set.directory == "action_text_rich_texts" {
             if let Some(body) = value["body"].as_str() {
                 value["body"] = if body.trim().is_empty() {
@@ -343,7 +353,7 @@ async fn emit_account(
     Ok(())
 }
 
-pub(crate) async fn build(app: &App, export: &SqliteRow) -> BuildResult<()> {
+pub(crate) async fn build(app: &App, export: &DbRow) -> BuildResult<()> {
     let export_id: String = export.get("id");
     let account_id: String = export.get("account_id");
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
@@ -362,6 +372,7 @@ pub(crate) async fn build(app: &App, export: &SqliteRow) -> BuildResult<()> {
             let user_id: String = user.get("user_id");
             let gid = format!("gid://fizzy/User/{user_id}");
             blob_ids.insert(user.get("sgid"), gid.clone());
+            blob_ids.insert(app.sgid_signer.user(&user_id), gid.clone());
             blob_ids.insert(gid.clone(), gid);
         }
         for record_set in RECORD_SETS {
@@ -369,7 +380,7 @@ pub(crate) async fn build(app: &App, export: &SqliteRow) -> BuildResult<()> {
             sqlx::query("UPDATE exports SET updated_at=? WHERE id=?")
                 .bind(now()).bind(&export_id).execute(&app.db).await?;
         }
-        let mut blobs = sqlx::query("SELECT storage_key FROM storage_blobs WHERE account_id=? AND uploaded_at IS NOT NULL ORDER BY id")
+        let mut blobs = sqlx::query("SELECT b.storage_key FROM storage_blobs b WHERE b.account_id=? AND NOT EXISTS (SELECT 1 FROM storage_attachments a WHERE a.account_id=b.account_id AND a.blob_id=b.id AND a.record_type IN ('Export','Account::Import')) ORDER BY b.id")
             .bind(&account_id).fetch(&app.db);
         while let Some(blob) = blobs.try_next().await? {
             let key: String = blob.get("storage_key");

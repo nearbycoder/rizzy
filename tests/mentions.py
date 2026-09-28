@@ -51,7 +51,8 @@ def main():
             global_items = re.findall(r'<lexxy-prompt-item search="([^"]+)" sgid="([^"]+)">', global_html)
             board_items = re.findall(r'<lexxy-prompt-item search="([^"]+)" sgid="([^"]+)">', board_html)
             assert len(global_items) == 3 and len(board_items) == 2, (global_items, board_items)
-            assert all(re.fullmatch(r"[0-9a-f]{64}", sgid) for _, sgid in global_items)
+            assert all(re.fullmatch(r"[A-Za-z0-9_-]+={0,2}--[0-9a-f]{40}", sgid)
+                       for _, sgid in global_items)
             assert set(board_items).issubset(set(global_items))
             sgids = {search.split()[0]: sgid for search, sgid in global_items}
             assert "Outside" not in {search.split()[0] for search, _ in board_items}

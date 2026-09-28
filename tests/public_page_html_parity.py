@@ -127,7 +127,9 @@ def run(target, suffix):
         assert card_html.count('class="step"') == 2
         assert "First task" in card_html and "Second task" in card_html
         rendered_steps = re.findall(r'<li class="step".*?</li>', card_html, re.S)
-        assert "checked" in rendered_steps[0] and "checked" not in rendered_steps[1]
+        step_states = [("First task" if "First task" in step else "Second task",
+                        "checked" in step) for step in rendered_steps]
+        assert sorted(step_states) == [("First task", True), ("Second task", False)], step_states
         assert maybe["title"] in meta(card_html, "og:title")
         assert "Body bold" in meta(card_html, "og:description")
         assert meta(card_html, "og:url").endswith(card_path)

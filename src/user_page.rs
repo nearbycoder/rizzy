@@ -1,5 +1,5 @@
 use axum::{http::HeaderMap, response::Html};
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
 use super::{
@@ -26,7 +26,7 @@ fn page(title: &str, account: i64, content: String) -> Html<String> {
 pub(super) async fn show(
     app: &App,
     principal: &Principal,
-    user: &SqliteRow,
+    user: &DbRow,
     headers: &HeaderMap,
 ) -> Result<Html<String>> {
     let id: String = user.get("id");
@@ -81,8 +81,8 @@ pub(super) async fn show(
             String::new()
         };
         format!(
-            "<section class=\"profile-card\"><h2>Devices</h2><p><a class=\"button button--secondary\" href=\"/my/passkeys\">Manage passkeys</a></p><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
-            principal.slug
+            "<section class=\"profile-card\"><h2>Devices</h2><p><a class=\"button button--secondary\" href=\"/{}/my/passkeys\">Manage passkeys</a></p><p id=\"session_transfer_label\">Single-use link to automatically log in on another device.</p>{current}<form method=\"post\" action=\"/{}/transfer_token\"><button class=\"button\" type=\"submit\">Generate a new auto-login link</button></form></section>",
+            principal.slug, principal.slug
         )
     } else {
         String::new()
@@ -102,7 +102,7 @@ pub(super) async fn show(
 
 pub(super) fn edit(
     principal: &Principal,
-    user: &SqliteRow,
+    user: &DbRow,
     email: &str,
     error: Option<&str>,
     has_avatar: bool,

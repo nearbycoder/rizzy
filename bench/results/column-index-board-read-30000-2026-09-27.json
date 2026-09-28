@@ -1,0 +1,275 @@
+{
+  "cards": 30000,
+  "cpus": [
+    0,
+    1
+  ],
+  "seconds": 2.0,
+  "rounds": 2,
+  "binary_sha256": "d0501cde8a6a1d32125a1bfd8e313a716b4f096f2ae24db196e47eeebf6510fd",
+  "revision": "93ec569d7d80933010e5b7d161a5f94f775d9297",
+  "runs": [
+    {
+      "round": 1,
+      "index": "wide",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 460,
+      "errors": {},
+      "rps": 229.9,
+      "p50_ms": 4.25,
+      "p95_ms": 4.99,
+      "p99_ms": 5.42
+    },
+    {
+      "round": 1,
+      "index": "wide",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 8,
+      "seconds": 2.01,
+      "requests": 760,
+      "errors": {},
+      "rps": 377.7,
+      "p50_ms": 21.08,
+      "p95_ms": 28.76,
+      "p99_ms": 32.66
+    },
+    {
+      "round": 1,
+      "index": "wide",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 2440,
+      "errors": {},
+      "rps": 1219.4,
+      "p50_ms": 0.78,
+      "p95_ms": 1.11,
+      "p99_ms": 1.35
+    },
+    {
+      "round": 1,
+      "index": "wide",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 8,
+      "seconds": 2.0,
+      "requests": 4374,
+      "errors": {},
+      "rps": 2183.8,
+      "p50_ms": 3.52,
+      "p95_ms": 5.83,
+      "p99_ms": 7.06
+    },
+    {
+      "round": 1,
+      "index": "nonnull",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 178,
+      "errors": {},
+      "rps": 88.9,
+      "p50_ms": 11.39,
+      "p95_ms": 12.48,
+      "p99_ms": 13.42
+    },
+    {
+      "round": 1,
+      "index": "nonnull",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 8,
+      "seconds": 2.02,
+      "requests": 341,
+      "errors": {},
+      "rps": 168.7,
+      "p50_ms": 46.49,
+      "p95_ms": 62.95,
+      "p99_ms": 69.19
+    },
+    {
+      "round": 1,
+      "index": "nonnull",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 2294,
+      "errors": {},
+      "rps": 1146.4,
+      "p50_ms": 0.83,
+      "p95_ms": 1.13,
+      "p99_ms": 1.66
+    },
+    {
+      "round": 1,
+      "index": "nonnull",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 8,
+      "seconds": 2.0,
+      "requests": 4413,
+      "errors": {},
+      "rps": 2203.9,
+      "p50_ms": 3.54,
+      "p95_ms": 5.53,
+      "p99_ms": 6.77
+    },
+    {
+      "round": 2,
+      "index": "nonnull",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 186,
+      "errors": {},
+      "rps": 92.9,
+      "p50_ms": 10.72,
+      "p95_ms": 12.14,
+      "p99_ms": 13.03
+    },
+    {
+      "round": 2,
+      "index": "nonnull",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 8,
+      "seconds": 2.02,
+      "requests": 349,
+      "errors": {},
+      "rps": 172.8,
+      "p50_ms": 46.21,
+      "p95_ms": 58.92,
+      "p99_ms": 65.29
+    },
+    {
+      "round": 2,
+      "index": "nonnull",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 2283,
+      "errors": {},
+      "rps": 1141.0,
+      "p50_ms": 0.82,
+      "p95_ms": 1.12,
+      "p99_ms": 1.9
+    },
+    {
+      "round": 2,
+      "index": "nonnull",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 8,
+      "seconds": 2.0,
+      "requests": 4318,
+      "errors": {},
+      "rps": 2155.1,
+      "p50_ms": 3.61,
+      "p95_ms": 5.68,
+      "p99_ms": 6.77
+    },
+    {
+      "round": 2,
+      "index": "wide",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 462,
+      "errors": {},
+      "rps": 230.5,
+      "p50_ms": 4.26,
+      "p95_ms": 4.83,
+      "p99_ms": 6.39
+    },
+    {
+      "round": 2,
+      "index": "wide",
+      "page": "board",
+      "html_bytes": 97995,
+      "concurrency": 8,
+      "seconds": 2.01,
+      "requests": 747,
+      "errors": {},
+      "rps": 371.0,
+      "p50_ms": 21.32,
+      "p95_ms": 28.24,
+      "p99_ms": 33.71
+    },
+    {
+      "round": 2,
+      "index": "wide",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 1,
+      "seconds": 2.0,
+      "requests": 2362,
+      "errors": {},
+      "rps": 1180.3,
+      "p50_ms": 0.79,
+      "p95_ms": 1.14,
+      "p99_ms": 1.51
+    },
+    {
+      "round": 2,
+      "index": "wide",
+      "page": "named_column",
+      "html_bytes": 59752,
+      "concurrency": 8,
+      "seconds": 2.0,
+      "requests": 4402,
+      "errors": {},
+      "rps": 2196.2,
+      "p50_ms": 3.57,
+      "p95_ms": 5.56,
+      "p99_ms": 6.63
+    }
+  ],
+  "median": {
+    "wide": {
+      "board_c1": {
+        "rps": 230.2,
+        "p95_ms": 4.91
+      },
+      "board_c8": {
+        "rps": 374.35,
+        "p95_ms": 28.5
+      },
+      "named_column_c1": {
+        "rps": 1199.85,
+        "p95_ms": 1.125
+      },
+      "named_column_c8": {
+        "rps": 2190.0,
+        "p95_ms": 5.695
+      }
+    },
+    "nonnull": {
+      "board_c1": {
+        "rps": 90.9,
+        "p95_ms": 12.31
+      },
+      "board_c8": {
+        "rps": 170.75,
+        "p95_ms": 60.935
+      },
+      "named_column_c1": {
+        "rps": 1143.7,
+        "p95_ms": 1.125
+      },
+      "named_column_c8": {
+        "rps": 2179.5,
+        "p95_ms": 5.605
+      }
+    }
+  }
+}

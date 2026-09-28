@@ -5,11 +5,11 @@ pub(super) async fn new(
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let card = card(&app, &p, &number).await?;
     if headers.contains_key("x-rizzy-json-request") || wants_turbo_stream(&headers) {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
-    let card = card(&app, &p, &number).await?;
     let frame = picker(&app, &p, &card).await?;
     let meta = meta(&app, &p, &card).await?;
     let page = format!(
@@ -35,7 +35,7 @@ pub(super) async fn new(
     Ok(response)
 }
 
-pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result<String> {
+pub(super) async fn picker(app: &App, p: &Principal, card: &DbRow) -> Result<String> {
     let account = p.slug;
     let number: i64 = card.get("number");
     let card_id: String = card.get("id");
@@ -67,7 +67,7 @@ pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result
     ))
 }
 
-pub(super) async fn meta(app: &App, p: &Principal, card: &SqliteRow) -> Result<String> {
+pub(super) async fn meta(app: &App, p: &Principal, card: &DbRow) -> Result<String> {
     let card_id: String = card.get("id");
     let creator_id: String = card.get("creator_id");
     let number: i64 = card.get("number");

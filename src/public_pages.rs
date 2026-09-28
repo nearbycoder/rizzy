@@ -92,7 +92,7 @@ pub(super) async fn board(
         .into_iter()
         .map(|row| (row.get("column_id"), row.get("count")))
         .collect();
-    let (not_now, closed): (i64, i64) = sqlx::query_as("SELECT COUNT(*) FILTER (WHERE postponed=1 AND closed=0),COUNT(*) FILTER (WHERE closed=1) FROM cards WHERE board_id=? AND status='published'")
+    let (not_now, closed): (i64, i64) = sqlx::query_as("SELECT COUNT(CASE WHEN postponed=1 AND closed=0 THEN 1 END),COUNT(CASE WHEN closed=1 THEN 1 END) FROM cards WHERE board_id=? AND status='published'")
         .bind(&board_id).fetch_one(&app.db).await.map_err(db_err)?;
     let prefix = format!("/{account}/public/boards/{}", escape(&key));
     let mut content = format!(

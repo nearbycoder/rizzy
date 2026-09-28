@@ -47,7 +47,7 @@ async fn cards_for_view(
     column_id: Option<&str>,
     page: i64,
     public: bool,
-) -> Result<(Vec<SqliteRow>, i64)> {
+) -> Result<(Vec<DbRow>, i64)> {
     let (offset, limit) = page_window(page);
     let published = if public && matches!(view, View::Closed) {
         " AND c.status='published'"
@@ -97,7 +97,7 @@ struct PublicPreviewMeta {
 
 async fn public_preview_metadata(
     app: &App,
-    cards: &[SqliteRow],
+    cards: &[DbRow],
     slug: i64,
 ) -> Result<HashMap<String, PublicPreviewMeta>> {
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
@@ -228,7 +228,7 @@ pub(super) fn public_html_title(title: &str) -> String {
 fn render_public_preview(
     account: &str,
     key: &str,
-    card: &SqliteRow,
+    card: &DbRow,
     meta: &PublicPreviewMeta,
     columns: &[(String, String)],
 ) -> String {
@@ -385,6 +385,10 @@ async fn private_view(
     if headers.contains_key("x-rizzy-card-fragment") {
         return Ok(Html(cards_page::previews(app, &p, &rows).await?).into_response());
     }
+    let etag = card_page_etag(&rows);
+    if let Some(response) = cached_card_page(&etag, total, page, uri, headers) {
+        return Ok(response);
+    }
     let wants_json = uri.path().ends_with(".json")
         || headers
             .get(header::ACCEPT)
@@ -392,7 +396,12 @@ async fn private_view(
             .is_some_and(|v| v.contains("json"));
     if wants_json {
         let cards = cards_json_batch(app, &p, &rows, &base(headers)).await?;
-        return Ok(paginated(json!(cards), total, page, uri, headers));
+        let mut response = paginated(json!(cards), total, page, uri, headers);
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+        return Ok(with_card_page_headers(response, &etag));
     }
     let title = view.title(None);
     let mut body = format!(
@@ -408,7 +417,10 @@ async fn private_view(
         ));
     }
     body.push_str("</ul></div></section>");
-    Ok(public_page(&title, &body).into_response())
+    Ok(with_card_page_headers(
+        public_page(&title, &body).into_response(),
+        &etag,
+    ))
 }
 
 pub(super) async fn private_stream(

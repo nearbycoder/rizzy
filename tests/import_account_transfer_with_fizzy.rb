@@ -30,6 +30,7 @@ raise "Watch missing" unless Watch.where(account_id: account.id, card_id: card.i
 raise "Reaction missing" unless Reaction.where(account_id: account.id, reactable_id: card.id).exists?
 raise "Board publication missing" unless Board::Publication.where(account_id: account.id).exists?
 raise "Webhook missing" unless Webhook.where(account_id: account.id).exists?
+raise "Webhook tracker missing" unless Webhook::DelinquencyTracker.where(account_id: account.id).count == Webhook.where(account_id: account.id).count
 raise "No imported storage blobs" unless ActiveStorage::Blob.where(account_id: account.id).exists?
 ActiveStorage::Blob.where(account_id: account.id).find_each do |blob|
   raise "Missing imported file #{blob.id}" if blob.download.empty?

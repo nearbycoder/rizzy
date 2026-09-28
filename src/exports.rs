@@ -99,7 +99,7 @@ fn export_rich_text(raw: &str, blobs: &HashMap<String, &ExportBlob>) -> String {
     inner
 }
 
-fn export_view(row: &SqliteRow, host: &str, slug: i64) -> Value {
+fn export_view(row: &DbRow, host: &str, slug: i64) -> Value {
     let id: String = row.get("id");
     let mut value = json!({
         "id": id,
@@ -204,12 +204,14 @@ pub(super) async fn show_user(
     .await
     .map_err(db_err)?;
     if json_request(&headers, &export_id) {
-        return Ok(Json(export_view(
-            &row.ok_or_else(missing)?,
-            &base(&headers),
-            p.slug,
-        ))
-        .into_response());
+        let Some(row) = row else {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
+        };
+        return Ok(Json(export_view(&row, &base(&headers), p.slug)).into_response());
     }
     let completed = row
         .as_ref()
@@ -290,12 +292,14 @@ pub(super) async fn show_account(
     .await
     .map_err(db_err)?;
     if json_request(&headers, &export_id) {
-        return Ok(Json(export_view(
-            &row.ok_or_else(missing)?,
-            &base(&headers),
-            p.slug,
-        ))
-        .into_response());
+        let Some(row) = row else {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
+        };
+        return Ok(Json(export_view(&row, &base(&headers), p.slug)).into_response());
     }
     let completed = row
         .as_ref()
@@ -352,7 +356,7 @@ pub(super) async fn download(
 
 async fn export_card(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(Value, Vec<ExportBlob>), sqlx::Error> {
     let card_id: String = row.get("id");
     let number: i64 = row.get("number");
@@ -473,7 +477,7 @@ pub(crate) fn write_archive(
 
 async fn build_user(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let export_id: String = row.get("id");
     let account_id: String = row.get("account_id");
@@ -513,7 +517,7 @@ async fn build_user(
     Ok(())
 }
 
-async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
+async fn send_completion_email(app: &App, row: &DbRow) -> Result<()> {
     let Ok(sendmail) = env::var("RIZZY_SENDMAIL") else {
         return Ok(());
     };
@@ -570,7 +574,7 @@ async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
 
 async fn run_one(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match row.get::<String, _>("kind").as_str() {
         "user" => build_user(app, row).await,
@@ -601,35 +605,6 @@ pub(super) async fn worker(app: Arc<App>) {
             .await
             {
                 eprintln!("export recovery failed: {error}");
-            }
-        }
-        if timer_tick && (ticks == 1 || ticks.is_multiple_of(3600)) {
-            let expired = (Utc::now() - chrono::Duration::hours(24))
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            if let Ok(rows) = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
-                .bind(expired)
-                .fetch_all(&app.db)
-                .await
-            {
-                for row in rows {
-                    let id: String = row.get("id");
-                    let path = export_path(&id);
-                    match tokio::fs::remove_file(&path).await {
-                        Ok(()) => {
-                            let _ = sqlx::query("DELETE FROM exports WHERE id=?")
-                                .bind(id)
-                                .execute(&app.db)
-                                .await;
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            let _ = sqlx::query("DELETE FROM exports WHERE id=?")
-                                .bind(id)
-                                .execute(&app.db)
-                                .await;
-                        }
-                        Err(error) => eprintln!("export cleanup failed: {error}"),
-                    }
-                }
             }
         }
         let pending =
@@ -695,4 +670,28 @@ pub(super) async fn worker(app: Arc<App>) {
         }
         app.export_notify.notify_one();
     }
+}
+
+pub(super) async fn cleanup(app: &App) -> std::result::Result<usize, sqlx::Error> {
+    let expired = (Utc::now() - chrono::Duration::hours(24))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let rows = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
+        .bind(expired)
+        .fetch_all(&app.db)
+        .await?;
+    let mut deleted = 0;
+    for row in rows {
+        let id: String = row.get("id");
+        match tokio::fs::remove_file(export_path(&id)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(sqlx::Error::Io(error)),
+        }
+        deleted += sqlx::query("DELETE FROM exports WHERE id=?")
+            .bind(id)
+            .execute(&app.db)
+            .await?
+            .rows_affected() as usize;
+    }
+    Ok(deleted)
 }

@@ -1,5 +1,5 @@
 use axum::response::Html;
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, any::AnyRow as DbRow};
 
 use super::escape;
 
@@ -13,7 +13,7 @@ fn shell(title: &str, back: &str, content: &str) -> Html<String> {
     ))
 }
 
-pub(super) fn index(rows: &[SqliteRow], root: &str, back: &str) -> Html<String> {
+pub(super) fn index(rows: &[DbRow], root: &str, back: &str) -> Html<String> {
     let mut content = String::new();
     if rows.is_empty() {
         content.push_str("<p>Personal access tokens can be used like a password to access the Rizzy developer API. You can have as many tokens as you need and revoke access to each one at any time.</p>");

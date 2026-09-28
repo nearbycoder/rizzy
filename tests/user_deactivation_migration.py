@@ -25,9 +25,13 @@ def main():
         with sqlite3.connect(db_path) as db:
             db.executescript(old_schema)
             db.execute("INSERT INTO accounts(id,external_account_id,name,created_at) VALUES('account',1,'Existing',?)", (stamp,))
-            for identity, email in (("owner-identity", "owner@example.test"), ("member-identity", "member@example.test")):
+            for identity, email in (("owner-identity", "owner@example.test"),
+                                    ("member-identity", "member@example.test"),
+                                    ("system-identity", "system+account@rizzy.invalid")):
                 db.execute("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)", (identity, email, stamp))
-            for user, identity, role in (("owner", "owner-identity", "owner"), ("old-member", "member-identity", "member")):
+            for user, identity, role in (("owner", "owner-identity", "owner"),
+                                         ("old-member", "member-identity", "member"),
+                                         ("system-user", "system-identity", "system")):
                 db.execute("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,'account',?,?,?,?)", (user, identity, user, role, stamp))
             db.execute("INSERT INTO boards(id,account_id,creator_id,name,created_at,updated_at) VALUES('board','account','owner','Everyone',?,?)", (stamp, stamp))
             db.execute("INSERT INTO accesses(board_id,user_id) VALUES('board','old-member')")
@@ -63,6 +67,9 @@ def main():
                 column = next(row for row in db.execute("PRAGMA table_info(users)") if row[1] == "identity_id")
                 assert column[3] == 0, column
                 assert db.execute("SELECT created_at,updated_at FROM users WHERE id='old-member'").fetchone() == (stamp, stamp)
+                assert db.execute("SELECT identity_id,updated_at FROM users WHERE id='system-user'").fetchone() == (None, stamp)
+                assert db.execute("SELECT COUNT(*) FROM identities WHERE id='system-identity'").fetchone()[0] == 0
+                assert db.execute("SELECT value FROM app_secrets WHERE name='system_identity_detached_v1'").fetchone() == ("done",)
                 assert db.execute("SELECT sgid FROM user_attachables WHERE user_id='old-member'").fetchone()[0] == old_sgid
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             invite, _ = call(port, "/1/account/join_code", bearer="owner-token")
@@ -90,6 +97,8 @@ def main():
         try:
             with sqlite3.connect(db_path) as db:
                 assert db.execute("SELECT COUNT(*) FROM users WHERE identity_id='member-identity' AND active=1").fetchone()[0] == 1
+                assert db.execute("SELECT identity_id,updated_at FROM users WHERE id='system-user'").fetchone() == (None, stamp)
+                assert db.execute("SELECT COUNT(*) FROM identities WHERE id='system-identity'").fetchone()[0] == 0
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         finally:
             stop(server)

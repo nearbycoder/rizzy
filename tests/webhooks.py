@@ -73,12 +73,20 @@ def main():
             call(port, detail_path, "DELETE", bearer=owner_token, status=204)
             call(port, detail_path, bearer=owner_token, status=404)
             blocked, _ = call(port, path, "POST", {"webhook": {"name": "Private target", "url": "http://127.0.0.1:1/hook", "subscribed_actions": ["card_published"]}}, bearer=owner_token, status=201)
+            formats = {}
+            for name, url, content_type in (
+                ("Campfire", "http://127.0.0.1:1/rooms/123/456-room-name/messages", "text/html"),
+                ("Basecamp", "http://127.0.0.1:1/123/integrations/webhook/buckets/456/chats/789/lines", "application/x-www-form-urlencoded"),
+            ):
+                hook, _ = call(port, path, "POST", {"webhook": {"name": name, "url": url,
+                    "subscribed_actions": ["card_published"]}}, bearer=owner_token, status=201)
+                formats[name] = (hook["id"], content_type)
             call(port, f"/{account}/boards/{board_id}/cards", "POST", {"card": {"title": "Blocked destination"}}, bearer=owner_token, status=201)
             blocked_path = path + "/" + blocked["id"] + "/deliveries"
             queued, _ = call(port, blocked_path, bearer=owner_token)
             assert len(queued) == 1 and queued[0]["state"] == "pending"
             with sqlite3.connect(database) as db:
-                db.execute("UPDATE webhooks SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE id=?", (blocked["id"],))
+                db.execute("UPDATE webhook_delinquency_trackers SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE webhook_id=?", (blocked["id"],))
             stop(server)
             worker_env = {key: value for key, value in env.items() if key != "RIZZY_DISABLE_WEBHOOK_DELIVERY"}
             port, server = start(worker_env)
@@ -91,11 +99,21 @@ def main():
             assert delivered[0]["response"] == {"code": None, "error": "private_uri"}, delivered
             assert delivered[0]["request"]["headers"]["User-Agent"] == "fizzy/1.0.0 Webhook"
             assert "X-Webhook-Signature" not in delivered[0]["request"]["headers"]
+            for name, (hook_id, content_type) in formats.items():
+                format_path = path + "/" + hook_id + "/deliveries"
+                for _ in range(50):
+                    formatted, _ = call(port, format_path, bearer=owner_token)
+                    if formatted[0]["state"] == "completed":
+                        break
+                    time.sleep(0.1)
+                assert formatted[0]["state"] == "completed", (name, formatted)
+                assert formatted[0]["response"] == {"code": None, "error": "private_uri"}, (name, formatted)
+                assert formatted[0]["request"]["headers"]["Content-Type"] == content_type, (name, formatted)
             deactivated, _ = call(port, path + "/" + blocked["id"], bearer=owner_token)
             assert deactivated["active"] is False
             with sqlite3.connect(database) as db:
-                assert db.execute("SELECT consecutive_failures_count FROM webhooks WHERE id=?", (blocked["id"],)).fetchone()[0] == 10
-            print("Webhook management and delivery passed: CRUD, subscriptions, queue recovery, private IP protection, and delinquency")
+                assert db.execute("SELECT consecutive_failures_count FROM webhook_delinquency_trackers WHERE webhook_id=?", (blocked["id"],)).fetchone()[0] == 10
+            print("Webhook management and delivery passed: CRUD, formats, subscriptions, queue recovery, private IP protection, and delinquency")
         finally:
             stop(server)
 

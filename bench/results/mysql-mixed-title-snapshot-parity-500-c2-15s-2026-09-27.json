@@ -1,0 +1,2494 @@
+{
+  "database": "MySQL",
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "source_dirty": false,
+  "rizzy_revision": "9ac801dc5f2a76791799f3188735865ad4713474",
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "baadddac28c36021521d424cd9b1b5de05685848eaf12429757620610c07c9c7",
+  "workload": "four JSON reads plus create/edit/comment/close/read per unit",
+  "initial_cards": 500,
+  "boards": 4,
+  "seconds_per_target": 15.0,
+  "clients": 2,
+  "source_puma_workers": 4,
+  "rizzy_processes": 4,
+  "server_cpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "load_generator_cpus": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "sample_parity": [
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 0"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 0"
+          }
+        ],
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 1"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 1"
+          }
+        ],
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 2"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 2"
+          }
+        ],
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 3"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 3"
+          }
+        ]
+      ],
+      "runs": {
+        "fizzy": {
+          "seconds_requested": 15.0,
+          "seconds_elapsed": 15.09,
+          "clients": 2,
+          "units_completed": 250,
+          "units_per_second": 16.57,
+          "read_requests": 1250,
+          "write_requests": 1000,
+          "p95_unit_ms": 146.77,
+          "p95_read_ms": 18.96,
+          "p95_workflow_ms": 91.13,
+          "errors": [],
+          "server_resources": {
+            "processes_end": 5,
+            "cpu_seconds": 27.68,
+            "cpu_cores_average": 1.83,
+            "pss_mib_start": 905.8,
+            "pss_mib_end": 1411.7,
+            "write_mib": 0.0
+          },
+          "units_by_board": [
+            124,
+            126,
+            0,
+            0
+          ],
+          "verified_counts": {
+            "cards": 750,
+            "events": 1500,
+            "comments": 750
+          },
+          "valid_for_throughput_comparison": true
+        },
+        "rizzy": {
+          "seconds_requested": 15.0,
+          "seconds_elapsed": 15.0,
+          "clients": 2,
+          "units_completed": 1728,
+          "units_per_second": 115.19,
+          "read_requests": 8640,
+          "write_requests": 6912,
+          "p95_unit_ms": 24.53,
+          "p95_read_ms": 11.31,
+          "p95_workflow_ms": 8.92,
+          "errors": [],
+          "server_resources": {
+            "processes_end": 4,
+            "cpu_seconds": 6.43,
+            "cpu_cores_average": 0.43,
+            "pss_mib_start": 34.0,
+            "pss_mib_end": 39.2,
+            "write_mib": 0.0
+          },
+          "units_by_process": [
+            860,
+            868,
+            0,
+            0
+          ],
+          "units_by_board": [
+            1728,
+            0,
+            0,
+            0
+          ],
+          "verified_counts": {
+            "cards": 2228,
+            "events": 7412,
+            "comments": 5184
+          },
+          "valid_for_throughput_comparison": true
+        }
+      },
+      "paired_comparable": true
+    },
+    {
+      "number": 2,
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "sample_parity": [
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 0"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 0"
+          }
+        ],
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 1"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 1"
+          }
+        ],
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 2"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 2"
+          }
+        ],
+        [
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 3"
+          },
+          {
+            "shape": {
+              "id": "str",
+              "number": "int",
+              "title": "str",
+              "status": "str",
+              "description": "str",
+              "description_html": "str",
+              "image_url": "NoneType",
+              "has_attachments": "bool",
+              "tags": [],
+              "closed": "bool",
+              "postponed": "bool",
+              "golden": "bool",
+              "last_active_at": "str",
+              "created_at": "str",
+              "url": "str",
+              "board": {
+                "id": "str",
+                "name": "str",
+                "all_access": "bool",
+                "created_at": "str",
+                "auto_postpone_period_in_days": "int",
+                "url": "str",
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              },
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              },
+              "assignees": [],
+              "has_more_assignees": "bool",
+              "comments_url": "str",
+              "reactions_url": "str",
+              "steps": []
+            },
+            "total": null,
+            "has_next": false,
+            "content": "Fixture card 0"
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "number": "int",
+                "title": "str",
+                "status": "str",
+                "description": "str",
+                "description_html": "str",
+                "image_url": "NoneType",
+                "has_attachments": "bool",
+                "tags": [],
+                "closed": "bool",
+                "postponed": "bool",
+                "golden": "bool",
+                "last_active_at": "str",
+                "created_at": "str",
+                "url": "str",
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                },
+                "assignees": [],
+                "has_more_assignees": "bool",
+                "comments_url": "str",
+                "reactions_url": "str"
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "Fixture card 124",
+              "Fixture card 123",
+              "Fixture card 122",
+              "Fixture card 121",
+              "Fixture card 120",
+              "Fixture card 119",
+              "Fixture card 118",
+              "Fixture card 117",
+              "Fixture card 116",
+              "Fixture card 115",
+              "Fixture card 114",
+              "Fixture card 113",
+              "Fixture card 112",
+              "Fixture card 111",
+              "Fixture card 110"
+            ]
+          },
+          {
+            "shape": [
+              {
+                "id": "str",
+                "action": "str",
+                "created_at": "str",
+                "description": "str",
+                "particulars": {},
+                "url": "str",
+                "eventable_type": "str",
+                "eventable": {
+                  "id": "str",
+                  "number": "int",
+                  "title": "str",
+                  "status": "str",
+                  "description": "str",
+                  "description_html": "str",
+                  "image_url": "NoneType",
+                  "has_attachments": "bool",
+                  "tags": [],
+                  "closed": "bool",
+                  "postponed": "bool",
+                  "golden": "bool",
+                  "last_active_at": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "board": {
+                    "id": "str",
+                    "name": "str",
+                    "all_access": "bool",
+                    "created_at": "str",
+                    "auto_postpone_period_in_days": "int",
+                    "url": "str",
+                    "creator": {
+                      "id": "str",
+                      "name": "str",
+                      "role": "str",
+                      "active": "bool",
+                      "email_address": "str",
+                      "created_at": "str",
+                      "url": "str",
+                      "avatar_url": "str"
+                    }
+                  },
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  },
+                  "assignees": [],
+                  "has_more_assignees": "bool",
+                  "comments_url": "str",
+                  "reactions_url": "str"
+                },
+                "board": {
+                  "id": "str",
+                  "name": "str",
+                  "all_access": "bool",
+                  "created_at": "str",
+                  "auto_postpone_period_in_days": "int",
+                  "url": "str",
+                  "creator": {
+                    "id": "str",
+                    "name": "str",
+                    "role": "str",
+                    "active": "bool",
+                    "email_address": "str",
+                    "created_at": "str",
+                    "url": "str",
+                    "avatar_url": "str"
+                  }
+                },
+                "creator": {
+                  "id": "str",
+                  "name": "str",
+                  "role": "str",
+                  "active": "bool",
+                  "email_address": "str",
+                  "created_at": "str",
+                  "url": "str",
+                  "avatar_url": "str"
+                }
+              }
+            ],
+            "total": 125,
+            "has_next": true,
+            "content": [
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published",
+              "card_published"
+            ]
+          },
+          {
+            "shape": {
+              "id": "str",
+              "name": "str",
+              "all_access": "bool",
+              "created_at": "str",
+              "auto_postpone_period_in_days": "int",
+              "url": "str",
+              "creator": {
+                "id": "str",
+                "name": "str",
+                "role": "str",
+                "active": "bool",
+                "email_address": "str",
+                "created_at": "str",
+                "url": "str",
+                "avatar_url": "str"
+              }
+            },
+            "total": 125,
+            "has_next": true,
+            "content": "Mixed workload 3"
+          }
+        ]
+      ],
+      "runs": {
+        "rizzy": {
+          "seconds_requested": 15.0,
+          "seconds_elapsed": 15.02,
+          "clients": 2,
+          "units_completed": 1732,
+          "units_per_second": 115.34,
+          "read_requests": 8660,
+          "write_requests": 6928,
+          "p95_unit_ms": 24.08,
+          "p95_read_ms": 11.07,
+          "p95_workflow_ms": 8.81,
+          "errors": [],
+          "server_resources": {
+            "processes_end": 4,
+            "cpu_seconds": 6.38,
+            "cpu_cores_average": 0.42,
+            "pss_mib_start": 33.4,
+            "pss_mib_end": 39.2,
+            "write_mib": 0.0
+          },
+          "units_by_process": [
+            869,
+            863,
+            0,
+            0
+          ],
+          "units_by_board": [
+            1732,
+            0,
+            0,
+            0
+          ],
+          "verified_counts": {
+            "cards": 2232,
+            "events": 7428,
+            "comments": 5196
+          },
+          "valid_for_throughput_comparison": true
+        },
+        "fizzy": {
+          "seconds_requested": 15.0,
+          "seconds_elapsed": 15.05,
+          "clients": 2,
+          "units_completed": 257,
+          "units_per_second": 17.08,
+          "read_requests": 1285,
+          "write_requests": 1028,
+          "p95_unit_ms": 139.31,
+          "p95_read_ms": 18.45,
+          "p95_workflow_ms": 88.84,
+          "errors": [],
+          "server_resources": {
+            "processes_end": 5,
+            "cpu_seconds": 27.32,
+            "cpu_cores_average": 1.82,
+            "pss_mib_start": 905.2,
+            "pss_mib_end": 1413.1,
+            "write_mib": 0.0
+          },
+          "units_by_board": [
+            129,
+            128,
+            0,
+            0
+          ],
+          "verified_counts": {
+            "cards": 757,
+            "events": 1528,
+            "comments": 771
+          },
+          "valid_for_throughput_comparison": true
+        }
+      },
+      "paired_comparable": true
+    }
+  ],
+  "status": "complete"
+}

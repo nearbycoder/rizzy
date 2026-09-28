@@ -69,6 +69,8 @@ def main():
                 assert db.execute("SELECT name,auto_postpone_period_in_days,entropy_override FROM boards").fetchone() == ("Playground", 365, 1)
                 assert db.execute("SELECT number,title FROM cards ORDER BY number LIMIT 1").fetchone() == (1, "Finally, watch this Fizzy orientation video")
                 assert db.execute("SELECT involvement FROM accesses").fetchone()[0] == "watching"
+                assert db.execute("SELECT identity_id FROM users WHERE role='system'").fetchone() == (None,)
+                assert db.execute("SELECT COUNT(*) FROM identities WHERE email_address LIKE 'system+%@rizzy.invalid'").fetchone()[0] == 0
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             reference = json.loads((ROOT / "static/signup_playground.json").read_text())
             assert len(reference) == 11

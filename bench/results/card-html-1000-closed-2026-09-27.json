@@ -1,0 +1,100 @@
+{
+  "fixture_cards": 1000,
+  "card_state": "closed",
+  "sample_parity": {
+    "fizzy": {
+      "steps": 2,
+      "comments": 1,
+      "tag": true,
+      "inactivity_notice": false,
+      "completion_message": true,
+      "card_reactions": 1,
+      "comment_reactions": 1,
+      "html_bytes": 73107
+    },
+    "rizzy": {
+      "steps": 2,
+      "comments": 1,
+      "tag": true,
+      "inactivity_notice": false,
+      "completion_message": true,
+      "card_reactions": 1,
+      "comment_reactions": 1,
+      "html_bytes": 107907
+    }
+  },
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 2.02,
+        "requests": 727,
+        "errors": {},
+        "rps": 359.9,
+        "p50_ms": 17.72,
+        "p95_ms": 42.25,
+        "p99_ms": 66.45
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.1,
+        "requests": 997,
+        "errors": {},
+        "rps": 474.3,
+        "p50_ms": 58.86,
+        "p95_ms": 128.5,
+        "p99_ms": 178.35
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 8,
+        "seconds": 2.0,
+        "requests": 11445,
+        "errors": {},
+        "rps": 5718.8,
+        "p50_ms": 1.34,
+        "p95_ms": 1.96,
+        "p99_ms": 2.31
+      },
+      {
+        "concurrency": 32,
+        "seconds": 2.0,
+        "requests": 11516,
+        "errors": {},
+        "rps": 5747.7,
+        "p50_ms": 5.24,
+        "p95_ms": 9.05,
+        "p99_ms": 12.07
+      }
+    ]
+  },
+  "comparison": [
+    {
+      "concurrency": 8,
+      "rps_ratio_rizzy_over_fizzy": 15.89,
+      "p95_ratio_fizzy_over_rizzy": 21.556
+    },
+    {
+      "concurrency": 32,
+      "rps_ratio_rizzy_over_fizzy": 12.118,
+      "p95_ratio_fizzy_over_rizzy": 14.199
+    }
+  ],
+  "environment": {
+    "fizzy_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+    "rizzy_sha256": "9be15f46fa51e2bd5d1851b2e259616cecca7a3b1fb02c254210b8ff8206fc54",
+    "shared_cpu_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "fizzy_workers": 8,
+    "rizzy_processes": 1
+  }
+}
