@@ -5296,7 +5296,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/reactions/{reaction}",
-            axum::routing::delete(delete_card_reaction),
+            post(delete_card_reaction_form).delete(delete_card_reaction),
         )
         .route(
             "/{account}/cards/{number}/steps",
@@ -5340,7 +5340,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/comments/{comment}/reactions/{reaction}",
-            axum::routing::delete(delete_comment_reaction),
+            post(delete_comment_reaction_form).delete(delete_comment_reaction),
         )
         .fallback(static_not_found)
         .method_not_allowed_fallback(unsupported_method)
@@ -16794,6 +16794,19 @@ async fn delete_card_reaction(
     let c = card(&app, &p, &n).await?;
     delete_reaction(&app, &p, &c, None, &r, &h).await
 }
+async fn delete_card_reaction_form(
+    State(app): Shared,
+    Path((a, n, r)): Path<(String, String, String)>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    if !form_deletes(&h, &body) {
+        return Err(missing());
+    }
+    let p = principal(&app, &h, &a).await?;
+    let c = card(&app, &p, &n).await?;
+    delete_reaction(&app, &p, &c, None, &r, &h).await
+}
 async fn list_comment_reactions(
     State(app): Shared,
     Path((a, n, comment)): Path<(String, String, String)>,
@@ -16832,6 +16845,19 @@ async fn delete_comment_reaction(
     Path((a, n, comment, reaction)): Path<(String, String, String, String)>,
     h: HeaderMap,
 ) -> Result<Response> {
+    let p = principal(&app, &h, &a).await?;
+    let c = card(&app, &p, &n).await?;
+    delete_reaction(&app, &p, &c, Some(&comment), &reaction, &h).await
+}
+async fn delete_comment_reaction_form(
+    State(app): Shared,
+    Path((a, n, comment, reaction)): Path<(String, String, String, String)>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    if !form_deletes(&h, &body) {
+        return Err(missing());
+    }
     let p = principal(&app, &h, &a).await?;
     let c = card(&app, &p, &n).await?;
     delete_reaction(&app, &p, &c, Some(&comment), &reaction, &h).await

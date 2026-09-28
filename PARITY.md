@@ -54,7 +54,7 @@ canceled deletion. The [Fizzy desktop](docs/visual-baselines/fizzy-board-setting
 [Rizzy mobile](docs/visual-baselines/rizzy-board-settings-390.png) screenshots
 record the remaining visual differences. Fizzy's draggable knob behavior,
 published rich-text editor, avatars and icons, and exact presentation still
-differ. On the populated card page, Fizzy has 14 forms and Rizzy 12. Pin and
+differ. On the populated card page, Fizzy has 14 forms and Rizzy 13. Pin and
 watch use POST forms with delete method overrides, and
 `tests/card_controls_paired.py` compares their card-page presence, cached
 frames, Turbo replacements, and JSON actions against fresh pinned Fizzy.
@@ -62,8 +62,10 @@ Golden Ticket and completion now use POST forms with delete overrides.
 `tests/card_flag_forms_paired.py` compares those forms, the four create/destroy
 Turbo target sets, and JSON actions on fresh paired apps. Chromium toggled all
 four card controls; the Golden Ticket and completion checks also passed at
-390 pixels. The source's separate reaction-delete form and second closure
-form remain absent. The direct step edit page still lacks the source's hidden
+390 pixels. Card and comment reactions now render POST delete-override forms;
+fresh paired HTTP and browser checks cover their deletion. The remaining card
+form is inside Fizzy's embedded closure-restoration Turbo Stream, which Rizzy
+does not yet render. The direct step edit page still lacks the source's hidden
 completed field. The inventory remains diagnostic for those interactions and
 the remaining markup differences.
 
@@ -783,7 +785,7 @@ The card dialog and standalone tag picker now share a keyboard controller: openi
 
 `tests/tag_title_edge_parity.py` compares eleven JSON tag-title inputs on fresh paired accounts, checking HTTP status and stored tag titles after each request. Fizzy removes only one leading `#` after trimming the input, preserves following spaces, accepts a single `#` as an empty stored title, rejects a second leading `#` with 422, and rejects missing or blank parameters with 400. Rizzy now matches those cases; the normal tag picker/Turbo suite and account export fixture still pass. This does not cover every parameter type or error body.
 
-`tests/reaction_html_parity.py` compares card and comment HTML reaction lists and forms, emoji choices, JSON creation, Turbo creation and removal streams, and the source's plain HTML creation side effect: the reaction is saved before the route responds 406. The pinned Fizzy card and comment reaction controller suites passed 15 tests and 77 assertions. Rizzy renders card and comment reactions in one batched card-page query and applies both Turbo mutations in place. Chromium added and deleted a card reaction and a comment reaction without navigation or console errors. Rizzy's standalone new form and reaction presentation remain simpler than Fizzy's. The local source returns 500 for reaction `new.json` and Turbo-format index requests because those renders lack templates; those broken formats remain outside the cross-app check.
+`tests/reaction_html_parity.py` compares card and comment HTML reaction lists and forms, emoji choices, JSON creation, Turbo creation and removal streams, and the source's plain HTML creation side effect: the reaction is saved before the route responds 406. The pinned Fizzy card and comment reaction controller suites passed 15 tests and 77 assertions. Rizzy renders card and comment reactions in one batched card-page query and applies both Turbo mutations in place. `tests/reaction_delete_forms_paired.py` now compares the source's card and comment delete forms, POST delete overrides, Turbo removal, and record deletion; `tests/reaction_delete_browser_paired.py` reveals and deletes both types in each browser without leaving the card page. Rizzy's standalone new form and reaction presentation remain simpler than Fizzy's. The local source returns 500 for reaction `new.json` and Turbo-format index requests because those renders lack templates; those broken formats remain outside the cross-app check.
 
 `tests/reaction_touch_parity.py` now checks the stored timestamp effects of adding and removing both card and comment reactions on fresh SQLite databases against pinned Fizzy. Creation advances the card and board `updated_at` values and the card `last_active_at`; deletion advances only `updated_at`. Comment reactions also advance the comment's `updated_at` on both paths. Rizzy applies those touches in one board-first transaction. The MySQL core flow checks the same four effects, and the four-process cluster test checks 200 reaction deletions racing title edits. These checks do not establish every reaction validation, event, or visual behavior.
 
