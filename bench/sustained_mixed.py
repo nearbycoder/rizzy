@@ -234,7 +234,9 @@ def run_load(target, board_id, paths, seconds, clients):
         urls = target.get("urls")
         worker_target = {**target, "url": urls[worker_index % len(urls)]} if urls else target
         boards = board_id if isinstance(board_id, list) else [board_id]
-        board_index = (worker_index // (len(urls) if urls else 1)) % len(boards)
+        # Keep each client's board fixed across targets even when they use a
+        # different number of server processes.
+        board_index = worker_index % len(boards)
         worker_board = boards[board_index]
         worker_paths = paths[board_index] if isinstance(board_id, list) else paths
         while time.monotonic() < deadline and not stop.is_set():
@@ -278,6 +280,7 @@ def run_load(target, board_id, paths, seconds, clients):
             sum(len(worker[0]) for worker in workers if worker[4] == index)
             for index in range(len(target["urls"]))]
     if isinstance(board_id, list):
+        result["client_board_indexes"] = [worker[5] for worker in workers]
         result["units_by_board"] = [
             sum(len(worker[0]) for worker in workers if worker[5] == index)
             for index in range(len(board_id))]

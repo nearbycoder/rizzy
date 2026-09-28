@@ -180,6 +180,8 @@ def run_pair(args, server_cpus, order):
                       f"{len(sample['errors'])} errors, "
                       f"comparable={sample['valid_for_throughput_comparison']}",
                       file=sys.stderr, flush=True)
+            if result["runs"]["fizzy"]["client_board_indexes"] != result["runs"]["rizzy"]["client_board_indexes"]:
+                raise AssertionError("client-to-board assignment differs between targets")
             if not result["paired_comparable"]:
                 failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
                 result["diagnostics"] = {}
