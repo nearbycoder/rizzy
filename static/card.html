@@ -88,7 +88,7 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 .card-perma__closure-message .local-time-value{font-weight:700}
 .card-perma__closure-message--completed{position:relative;z-index:4;display:flex;align-items:center;justify-content:center;gap:7px;max-width:none;color:#d6dee2}
 .card-perma__closure-message--completed button{padding:0;border:0;background:none;color:inherit;font-weight:inherit;text-decoration:underline}
-.display-contents,#gold-action-form,#closure-action-form,#watch-action-form,#pin-action-form,.actions>[id^="watch_button"],.actions>[id^="pin_button"]{display:contents}
+.display-contents,#gold-action-form,#closure-action-form,#watch-action-form,#pin-action-form,turbo-frame[id^="watch_card_"],turbo-frame[id^="pin_card_"],.actions>[id^="watch_button"],.actions>[id^="pin_button"]{display:contents}
 #undo-closure-form{display:inline}
 .card-perma__notch .actions>form>button:not(.side-action){border-color:#53718e;background:#243b50;color:#e0ecf4}
 .card-perma.is-closed{background:transparent}
@@ -181,8 +181,7 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   {{IMAGE_BUTTON}}
   <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
   <div class="card__body"><div class="card__content"><turbo-frame id="edit_card_{{CARD_ID}}">{{CLOSURE_RESTORE_STREAM}}<h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div></turbo-frame>{{STEPS}}</div>{{STAGE_RAIL}}{{STAMP}}</div>
-  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div>
-  <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
+  <div class="card__footer">{{ASSIGNMENT_META}}<form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>{{REACTIONS}}</div>
   <div class="card-perma__actions card-perma__actions--right display-contents">{{WATCH_FORM}}{{PIN_FORM}}</div>
   {{CLOSURE_TOGGLE}}
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
@@ -238,6 +237,8 @@ async function submitCardControlForm(form,button){
     const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});
     if(!response.ok)throw Error(`Request failed (${response.status})`);
     if(refreshCard){await refreshLiveCard(true);return}
+    if(form.id==='watch-action-form')cardControlEpoch.watch++;
+    else if(form.id==='pin-action-form')cardControlEpoch.pin++;
     const page=new DOMParser().parseFromString(await response.text(),'text/html');
     for(const stream of page.querySelectorAll('turbo-stream[target]')){
       const target=document.getElementById(stream.getAttribute('target'));
@@ -426,6 +427,22 @@ const liveCardComments=document.getElementById('comments');
 let liveCardRevision=document.body.dataset.cardRevision;
 let liveCardRefreshing=false;
 let liveCardPendingRevision=null;
+const cardControlEpoch={watch:0,pin:0};
+async function refreshCardControlFrame(kind){
+  const frame=document.getElementById(`${kind}_card_{{CARD_ID}}`);
+  if(!frame?.getAttribute('src'))return;
+  const epoch=++cardControlEpoch[kind];
+  try{
+    const response=await fetch(frame.getAttribute('src'),{headers:{Accept:'text/html','Turbo-Frame':frame.id},cache:'no-store'});
+    if(!response.ok)throw Error(`Could not load ${kind} control (${response.status})`);
+    const page=new DOMParser().parseFromString(await response.text(),'text/html');
+    const updated=page.getElementById(frame.id)?.firstElementChild;
+    if(epoch!==cardControlEpoch[kind]||!frame.isConnected||!updated)return;
+    const current=frame.firstElementChild;
+    if(current?.outerHTML!==updated.outerHTML)frame.replaceChildren(document.importNode(updated,true));
+  }catch(error){console.warn(`Could not refresh ${kind} control`,error)}
+}
+void Promise.all(['watch','pin'].map(refreshCardControlFrame));
 async function refreshLiveCard(force=false,revisionHint=null){
   if(liveCardRefreshing){liveCardPendingRevision=revisionHint||'*';return}
   if(document.visibilityState==='hidden')return;
@@ -475,10 +492,7 @@ async function refreshLiveCard(force=false,revisionHint=null){
         parent?.append(document.importNode(updated,true));
       }
     }
-    for(const id of ['watch','pin']){
-      const wrapper=document.getElementById(`${id}_button_card_{{CARD_ID}}`),updated=nextPage.getElementById(`${id}_button_card_{{CARD_ID}}`);
-      if(wrapper&&updated&&wrapper.outerHTML!==updated.outerHTML)wrapper.replaceWith(document.importNode(updated,true));
-    }
+    await Promise.all(['watch','pin'].map(refreshCardControlFrame));
     const status=document.querySelector('.card__header .status'),nextStatus=nextPage.querySelector('.card__header .status');
     if(status&&!nextStatus)status.remove();
     else if(!status&&nextStatus)document.querySelector('.card__header').append(document.importNode(nextStatus,true));

@@ -78,7 +78,7 @@ def main():
                 browser(session, "cookies", "set", cookie.name, cookie.value,
                         "--url", url, "--path", cookie.path, "--httpOnly")
             browser(session, "open", url + path)
-            until(session, lambda value: value["gold"] == "POST" and value["done"] and not value["closed"], "initial")
+            until(session, lambda value: value["gold"] == "POST" and value["done"] and not value["closed"] and value["watch"] == "DELETE" and value["pin"] == "POST", "initial loaded controls")
             initial_controls = state(session)
             browser(session, "click", ".card__title-link")
             until(session, lambda value: value["editing"] and value["save"] and not value["done"] and value["watch"] == initial_controls["watch"] and value["pin"] == initial_controls["pin"], "edit controls")

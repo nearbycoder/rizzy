@@ -33,6 +33,8 @@ def check_control(target, number, kind):
         assert status == 204, (target["name"], kind, "reset", status)
     status, _, card_page = request(target, f"/{target['account']}/cards/{number}", accept="text/html")
     assert status == 200, (target["name"], kind, "card page", status)
+    frame = re.search(rb'<turbo-frame\b(?=[^>]*id="' + kind.encode() + rb'_card_[^"]+")(?=[^>]*src="' + re.escape(path.encode()) + rb'")[^>]*>', card_page)
+    assert frame, (target["name"], kind, "lazy card frame")
     form = re.search(rb'<form\b[^>]*action="' + re.escape(path.encode()) + rb'"[^>]*>(.*?)</form>',
                      card_page, re.S)
     assert form and off_label.encode() in form.group(1), (target["name"], kind, "card action form")

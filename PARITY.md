@@ -35,7 +35,7 @@ remain covered by the paired test.
 
 `tests/route_get_valid_paired.py` repeats the populated-route comparison on disposable SQLite apps. Its 36 JSON contracts match response shapes, stable field values, pagination, and selected cache/write headers. Its 59 browser contracts match status, content type, selected content markers, layout flags, and conditional response behavior. The initial fixture showed large HTML differences: Fizzy's webhook creation page was 51,748 bytes versus Rizzy's 5,203, and the card edit page was 45,595 versus 3,695. Both pages have since received closer source-shaped rendering, but the source's shared navigation, form details, and much of the presentation remain to be ported and compared structurally.
 
-`tests/html_form_inventory.py` extracts form actions, methods, and named controls
+`python3 tests/html_form_inventory.py --strict` extracts form actions, methods, and named controls
 from seven populated, signed-in pages on disposable paired apps. The board
 settings page now has six forms on each app: the main board, auto-close,
 publication, and deletion forms, plus shared-shell search and notification
@@ -72,11 +72,30 @@ unchecked value; `tests/step_edit_completed_paired.py` checks that editing a
 completed step submits it and reopens the step. The inventory remains diagnostic for those interactions and
 the remaining markup differences.
 
+The form inventory now records a form when the next one starts or the document
+ends, covering Fizzy's unclosed comment-delete form. The strict paired check
+matches the normalized action, method, and named-control sequence on all seven
+populated pages: board edit, webhook new/edit, card, card edit, step edit, and
+comment edit. The step-creation input declares `type="text"`; named submit and
+bulk-action buttons mirror Rails. Card pin and watch controls now use lazy
+frames with inactive fallback forms, then load their actual state from the
+existing per-control endpoints. The paired card-control and assignment browser
+flows still pass. This form inventory does not establish visual or complete
+interaction parity.
+
 The comment edit page now renders inside Rizzy's application shell, and the in-card editor uses the same shared controls and styling. `tests/comment_edit_html_parity.py` passed against disposable Fizzy and Rizzy servers, including page-shell markers, Turbo create/edit/delete, JSON updates, and comment side effects. A paired Chromium check confirmed that opening and saving the inline editor keeps each app on its card URL, closes the editor, and shows the saved text. The [direct Fizzy](docs/visual-baselines/fizzy-comment-edit-direct-1280.png), [direct Rizzy](docs/visual-baselines/rizzy-comment-edit-direct-1280.png), [inline Fizzy](docs/visual-baselines/fizzy-comment-edit-inline-1280.png), and [inline Rizzy](docs/visual-baselines/rizzy-comment-edit-inline-1280.png) screenshots record the current visual comparison. This verifies one comment flow, not complete card-page visual or interaction parity.
 
 The direct card edit page now uses Fizzy's full-width, borderless title and Lexxy layout instead of a separate brown panel. The [Fizzy](docs/visual-baselines/fizzy-card-edit-direct-1280.png) and [Rizzy](docs/visual-baselines/rizzy-card-edit-direct-1280.png) screenshots use the same title and description. `tests/card_edit_html_paired.py` passed against fresh SQLite apps after the change. A signed-in Chromium check also saved a title with Enter and canceled with Escape in each app; both persisted the save or discarded the edit, replaced the editor with read-only content, and kept the `/edit` URL. The paired test checks request and response contracts, while the browser check covers this direct-page interaction; broader card editing controls and visual parity remain open.
 
 The webhook index and creation pages now use a centered source-shaped header and form layout, including switch controls and the empty-list add button. The creation page's back link now targets the webhook list, the list's back link names its board, and the edit page uses its webhook name in the document title and source placeholder. `tests/webhooks_html_paired.py` passed the creation, validation, update, deletion, and navigation checks against fresh apps. Paired Chromium clicks changed all 11 event switches on and off in both apps and followed the creation page's back link to the list. [Fizzy new](docs/visual-baselines/fizzy-webhook-new-1280.png), [Rizzy new](docs/visual-baselines/rizzy-webhook-new-1280.png), [Fizzy index](docs/visual-baselines/fizzy-webhook-index-1280.png), and [Rizzy index](docs/visual-baselines/rizzy-webhook-index-1280.png) record the visual comparison. The populated detail page now places its Edit control in the header and presents the secret, subscriptions, and deliveries in source order and spacing. The paired regression checks its edit link and full signature guidance; Chromium followed the detail/edit back links and showed both subscribed actions selected. [Fizzy detail](docs/visual-baselines/fizzy-webhook-show-1280.png), [Rizzy detail](docs/visual-baselines/rizzy-webhook-show-1280.png), [Fizzy edit](docs/visual-baselines/fizzy-webhook-edit-1280.png), and [Rizzy edit](docs/visual-baselines/rizzy-webhook-edit-1280.png) record the new comparison. Populated delivery controls and the rest of the shared shell still need fuller parity checks.
+
+The new and edit webhook forms now have the same normalized action, method,
+and named-control inventory as the pinned source, including the hidden empty
+`webhook[subscribed_actions][]` value emitted by Rails when no event is checked.
+`tests/webhooks_html_paired.py` compares both complete form contracts and
+submits the empty subscription value after previously selecting an event;
+both apps persist an empty subscription list. Other browser form details and
+webhook delivery behavior remain open.
 
 The populated webhook index now renders a compact name, dashed separator, and circular minus control like Fizzy. The [Fizzy](docs/visual-baselines/fizzy-webhook-index-populated-1280.png) and [Rizzy](docs/visual-baselines/rizzy-webhook-index-populated-1280.png) screenshots record the comparison. A live browser check caught an actual confirmation bug: Rizzy's old inline click handler let a canceled removal submit. Confirmation now runs from a form submit listener. With `window.confirm` returning false, both apps retained the webhook; returning true removed it and left each database with zero webhooks. `tests/webhooks_html_paired.py` still passes CRUD and now asserts the row's separator, accessible Remove label, and source confirmation text.
 

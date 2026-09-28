@@ -75,7 +75,7 @@ fn actions(selected: &[String]) -> String {
         list.push_str(&format!("<li><label><input type=\"checkbox\" name=\"webhook[subscribed_actions][]\" value=\"{key}\"{checked}><span>{}</span></label></li>",escape(title)));
     }
     format!(
-        "<div class=\"checks\"><div class=\"checks__actions\"><button type=\"button\" data-checks=\"all\">Enable all</button> · <button type=\"button\" data-checks=\"none\">Disable all</button></div><ul>{list}</ul></div>"
+        "<div class=\"checks\"><div class=\"checks__actions\"><button type=\"button\" name=\"button\" data-checks=\"all\">Enable all</button> · <button type=\"button\" name=\"button\" data-checks=\"none\">Disable all</button></div><input type=\"hidden\" name=\"webhook[subscribed_actions][]\" value=\"\"><ul>{list}</ul></div>"
     )
 }
 
@@ -127,7 +127,7 @@ fn form(
         .map(|message| format!("<p class=\"error\" role=\"alert\">{}</p>", escape(message)))
         .unwrap_or_default();
     let content = format!(
-        "<article class=\"panel\">{error}<form method=\"post\" action=\"{action}\">{method}<div class=\"field\"><label for=\"webhook_name\">Webhook name</label><input id=\"webhook_name\" name=\"webhook[name]\" value=\"{}\" placeholder=\"{placeholder}\" required autofocus></div>{url_field}<div class=\"field\"><strong>Events</strong><small>Trigger a call to the Payload URL when:</small>{}</div><button class=\"submit\" type=\"submit\">{submit}</button></form></article><script>document.querySelectorAll('[data-checks]').forEach(button=>button.addEventListener('click',()=>document.querySelectorAll('.checks input[type=checkbox]').forEach(input=>input.checked=button.dataset.checks==='all')))</script>",
+        "<article class=\"panel\">{error}<form method=\"post\" action=\"{action}\">{method}<div class=\"field\"><label for=\"webhook_name\">Webhook name</label><input id=\"webhook_name\" type=\"text\" name=\"webhook[name]\" value=\"{}\" placeholder=\"{placeholder}\" required autofocus></div>{url_field}<div class=\"field\"><strong>Events</strong><small>Trigger a call to the Payload URL when:</small>{}</div><button class=\"submit\" type=\"submit\" name=\"button\">{submit}</button></form></article><script>document.querySelectorAll('[data-checks]').forEach(button=>button.addEventListener('click',()=>document.querySelectorAll('.checks input[type=checkbox]').forEach(input=>input.checked=button.dataset.checks==='all')))</script>",
         escape(&name),
         actions(&selected)
     );

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """List paired HTML form contracts on representative populated pages."""
 
+import argparse
 import http.cookiejar
 import os
 import re
@@ -36,9 +37,16 @@ class Forms(HTMLParser):
         self.forms = []
         self.active = None
 
+    def finish_form(self):
+        if self.active is not None:
+            action, method, fields = self.active
+            self.forms.append((action, method, tuple(fields)))
+            self.active = None
+
     def handle_starttag(self, tag, attributes):
         attrs = dict(attributes)
         if tag == "form":
+            self.finish_form()
             self.active = [normalized(attrs.get("action"), self.account),
                            attrs.get("method", "get").lower(), []]
             return
@@ -48,10 +56,12 @@ class Forms(HTMLParser):
                 self.active[2].append((tag, name, attrs.get("type", "")))
 
     def handle_endtag(self, tag):
-        if tag == "form" and self.active is not None:
-            action, method, fields = self.active
-            self.forms.append((action, method, tuple(fields)))
-            self.active = None
+        if tag == "form":
+            self.finish_form()
+
+    def close(self):
+        super().close()
+        self.finish_form()
 
 
 def collect(target):
@@ -73,11 +83,16 @@ def collect(target):
         assert status == 200, (target["name"], label, status)
         parser = Forms(target["account"])
         parser.feed(body.decode())
+        parser.close()
         result[label] = parser.forms
     return result
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--strict", action="store_true",
+                        help="fail when any normalized form contract differs")
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="rizzy-html-forms-") as temporary:
         processes = []
         targets = {}
@@ -111,6 +126,10 @@ def main():
                 for name, forms in (("Fizzy", source[label]), ("Rizzy", rust[label])):
                     for action, method, fields in forms:
                         print(f"  {name}: {method.upper()} {action} {fields}")
+            if args.strict:
+                differences = [label for label in source if source[label] != rust[label]]
+                assert not differences, f"Form contracts differ: {', '.join(differences)}"
+                print("Matched all seven populated-page form contracts")
         finally:
             for process in reversed(processes):
                 stop_server(process)

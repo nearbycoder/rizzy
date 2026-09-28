@@ -271,7 +271,7 @@ pub(super) async fn show(
         ));
     }
     if !closed {
-        step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step step--new\"><input type=\"checkbox\" class=\"checkbox\" disabled><form class=\"min-width steps__form\" id=\"step-form\" action=\"/{}/cards/{}/steps\" method=\"post\" data-controller=\"form\" data-action=\"submit-&gt;form#preventEmptySubmit submit-&gt;form#preventComposingSubmit turbo:submit-end-&gt;form#reset\"><input id=\"new-step\" name=\"step[content]\" class=\"input step__content hide-focus-ring\" placeholder=\"Add a step…\" autocomplete=\"off\" data-form-target=\"input\" data-1p-ignore=\"true\" data-action=\"compositionstart-&gt;form#compositionStart compositionend-&gt;form#compositionEnd\" aria-label=\"Add a step\"></form></li>", escape(&card_id), principal.slug, number));
+        step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step step--new\"><input type=\"checkbox\" class=\"checkbox\" disabled><form class=\"min-width steps__form\" id=\"step-form\" action=\"/{}/cards/{}/steps\" method=\"post\" data-controller=\"form\" data-action=\"submit-&gt;form#preventEmptySubmit submit-&gt;form#preventComposingSubmit turbo:submit-end-&gt;form#reset\"><input id=\"new-step\" type=\"text\" name=\"step[content]\" class=\"input step__content hide-focus-ring\" placeholder=\"Add a step…\" autocomplete=\"off\" data-form-target=\"input\" data-1p-ignore=\"true\" data-action=\"compositionstart-&gt;form#compositionStart compositionend-&gt;form#compositionEnd\" aria-label=\"Add a step\"></form></li>", escape(&card_id), principal.slug, number));
     }
     step_html.push_str("</ol></section>");
     let comments = sqlx::query("SELECT c.id,c.body,c.created_at,c.updated_at,c.creator_id,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
@@ -342,20 +342,6 @@ pub(super) async fn show(
             comment.get::<String, _>("creator_id") == principal.user_id,
         ));
     }
-    let watching: i64 = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT watching FROM watches WHERE card_id=? AND user_id=?),0)",
-    )
-    .bind(&card_id)
-    .bind(&principal.user_id)
-    .fetch_one(&app.db)
-    .await
-    .map_err(db_err)?;
-    let pinned: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pins WHERE card_id=? AND user_id=?")
-        .bind(&card_id)
-        .bind(&principal.user_id)
-        .fetch_one(&app.db)
-        .await
-        .map_err(db_err)?;
     let image_url = storage::image_url_for_card(app, principal, &card_id).await?;
     let image = image_url
         .as_str()
@@ -549,22 +535,30 @@ pub(super) async fn show(
         ),
         (
             "WATCH_FORM",
-            card_controls::button(
+            format!(
+                "<turbo-frame id=\"watch_card_{card_id}\" src=\"/{}/cards/{number}/watch\" target=\"_top\" refresh=\"morph\">{}</turbo-frame>",
                 principal.slug,
-                number,
-                &card_id,
-                card_controls::Control::Watch,
-                watching != 0,
+                card_controls::button(
+                    principal.slug,
+                    number,
+                    &card_id,
+                    card_controls::Control::Watch,
+                    false,
+                ),
             ),
         ),
         (
             "PIN_FORM",
-            card_controls::button(
+            format!(
+                "<turbo-frame id=\"pin_card_{card_id}\" src=\"/{}/cards/{number}/pin\" refresh=\"morph\">{}</turbo-frame>",
                 principal.slug,
-                number,
-                &card_id,
-                card_controls::Control::Pin,
-                pinned != 0,
+                card_controls::button(
+                    principal.slug,
+                    number,
+                    &card_id,
+                    card_controls::Control::Pin,
+                    false,
+                ),
             ),
         ),
         ("STAMP", stamp),
