@@ -24,8 +24,8 @@ SOCKET = os.environ.get("RIZZY_TEST_MYSQL_SOCKET", "/tmp/rizzy-mysql8/mysql.sock
 PORT = int(os.environ.get("MYSQL_PORT", "33080"))
 
 
-def hold_and_edit(name, target, database):
-    board, _ = expect(target, "/boards", "POST", {"board": {"name": "Partial edit race"}}, 201)
+def hold_and_edit(name, target, database, mode):
+    board, _ = expect(target, "/boards", "POST", {"board": {"name": f"{mode} edit race"}}, 201)
     card, _ = expect(target, f"/boards/{board['id']}/cards", "POST",
                      {"card": {"title": "Original title", "description": "Original body"}}, 201)
     if name == "fizzy":
@@ -55,7 +55,9 @@ def hold_and_edit(name, target, database):
         locker.stdin.write(
             "BEGIN;\n"
             f"SELECT {lock_column} FROM {lock_table} WHERE id={lock_key} FOR UPDATE;\n"
-            f"UPDATE cards SET title='Concurrent title' WHERE id={card_key};\n"
+            f"UPDATE cards SET title='Concurrent title', "
+            "created_at='2020-01-01 00:00:00', "
+            f"last_active_at='2020-01-02 03:04:05' WHERE id={card_key};\n"
             f"SELECT title FROM cards WHERE id={card_key};\n"
             "SELECT 'locked';\n")
         locker.stdin.flush()
@@ -64,8 +66,11 @@ def hold_and_edit(name, target, database):
         assert read_line(locker) == "Concurrent title"
         assert read_line(locker) == "locked"
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fields = {"description": "New body"}
+            if mode == "explicit":
+                fields["title"] = "Requested title"
             edit = pool.submit(expect, target, f"/cards/{card['number']}", "PATCH",
-                               {"card": {"description": "New body"}}, 200)
+                               {"card": fields}, 200)
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 if edit.done():
@@ -85,13 +90,44 @@ def hold_and_edit(name, target, database):
             locker.stdin.flush()
             assert read_line(locker) == "committed"
             edited, _ = edit.result(timeout=15)
-        expected_title = "Concurrent title" if name == "rizzy" else "Original title"
+        expected_title = "Requested title" if mode == "explicit" else "Original title"
         assert edited["title"] == expected_title, (name, edited)
         assert edited["description"] == "New body", (name, edited)
         final, _ = expect(target, f"/cards/{card['number']}")
         assert final["title"] == expected_title, (name, final)
         assert final["description"] == "New body", (name, final)
-        print(f"PASS: {name} final title after queued partial edit: {expected_title}")
+        actions = mysql_query(
+            CLIENT, SOCKET, database,
+            "SELECT COALESCE(GROUP_CONCAT(action ORDER BY action), '') FROM events "
+            f"WHERE eventable_type='Card' AND eventable_id={card_key}")
+        comments = mysql_query(
+            CLIENT, SOCKET, database,
+            f"SELECT COUNT(*) FROM comments WHERE card_id={card_key}")
+        timestamps = mysql_query(
+            CLIENT, SOCKET, database,
+            f"SELECT created_at,last_active_at FROM cards WHERE id={card_key}")
+        created_at, last_active_at = timestamps.split("\t")
+        if mode == "partial":
+            assert created_at.split(".")[0] == "2020-01-01 00:00:00", (name, timestamps)
+            assert last_active_at.split(".")[0] == "2020-01-02 03:04:05", (name, timestamps)
+            assert actions == "card_published", (name, actions)
+            assert comments == "0", (name, comments)
+        title_event = mysql_query(
+            CLIENT, SOCKET, database,
+            "SELECT CONCAT_WS('|', "
+            "JSON_UNQUOTE(COALESCE(JSON_EXTRACT(particulars,'$.particulars.old_title'),"
+            "JSON_EXTRACT(particulars,'$.old_title'))), "
+            "JSON_UNQUOTE(COALESCE(JSON_EXTRACT(particulars,'$.particulars.new_title'),"
+            "JSON_EXTRACT(particulars,'$.new_title')))) "
+            "FROM events WHERE action='card_title_changed' "
+            f"AND eventable_type='Card' AND eventable_id={card_key}") if mode == "explicit" else ""
+        if mode == "explicit":
+            assert actions == "card_published,card_title_changed", (name, actions)
+            assert comments == "1", (name, comments)
+            assert title_event == "Original title|Requested title", (name, title_event)
+        print(f"PASS: {name} final title after queued {mode} edit: {expected_title}; "
+              f"title_event_old={title_event!r}; "
+              f"events={actions!r}; comments={comments}; timestamps={timestamps!r}")
     finally:
         if locker.poll() is None:
             locker.stdin.close()
@@ -135,7 +171,8 @@ def main():
                 processes.append(process)
                 target = {"url": url, "account": str(credentials["account"]),
                           "token": credentials["token"]}
-                hold_and_edit(name, target, database)
+                for mode in ("partial", "explicit"):
+                    hold_and_edit(name, target, database, mode)
     finally:
         for process in processes:
             stop_server(process)

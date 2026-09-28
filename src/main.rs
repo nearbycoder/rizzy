@@ -13546,6 +13546,7 @@ async fn update_card(
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;
+    let original_title: String = c.get("title");
     let input = card_update_input(&app, request).await?;
     let v = nested(&input.body, "card");
     let requested_title = string(v, "title");
@@ -13606,9 +13607,10 @@ async fn update_card(
                     .await
                     .map_err(db_err)?;
             }
-            // The first card read authorizes this request, but can be stale by the
-            // time a concurrent edit releases the row lock. Resolve absent fields
-            // against the locked row on every attempt, including deadlock retries.
+            // The first card read authorizes this request. Fizzy can save its
+            // pre-lock title when a concurrent edit changes it, even if this
+            // request only supplies a description. The other absent fields use
+            // the locked row, including on a deadlock retry.
             let current = if let Some(current) = locked_card {
                 current
             } else {
@@ -13623,9 +13625,11 @@ async fn update_card(
                     .await
                     .map_err(db_err)?
             };
-            let old_title: String = current.get("title");
+            let locked_title: String = current.get("title");
             let status: String = current.get("status");
-            let mut title = requested_title.clone().unwrap_or_else(|| old_title.clone());
+            let mut title = requested_title
+                .clone()
+                .unwrap_or_else(|| original_title.clone());
             if status == "published" && title.trim().is_empty() {
                 title = "Untitled".into();
             }
@@ -13637,12 +13641,15 @@ async fn update_card(
                 .unwrap_or_else(|| current.get("created_at"));
             let last_active_at = custom_last_active_at.clone()
                 .unwrap_or_else(|| current.get("last_active_at"));
-            let title_change = if status == "published" && title != old_title && !old_title.is_empty() {
+            let title_change = if status == "published"
+                && title != original_title
+                && !original_title.is_empty()
+            {
                 let (who, system) = title_change_actor.as_ref()
                     .ok_or_else(|| err(StatusCode::CONFLICT, "Card changed during write"))?;
                 let body = format!(
                     "{who} <strong>changed the title</strong> from “{}” to “{}”.",
-                    escape(&old_title),
+                    escape(&original_title),
                     escape(&title)
                 );
                 let content = search_content(rich_text::plain_text(&body));
@@ -13667,7 +13674,7 @@ async fn update_card(
             } else {
                 false
             };
-            let changed = title != old_title
+            let changed = title != locked_title
                 || description != current.get::<String, _>("description")
                 || search_text != current.get::<String, _>("search_text")
                 || created_at != current.get::<String, _>("created_at")
@@ -13749,7 +13756,7 @@ async fn update_card(
             }
             if let Some((system, body, content)) = &title_change {
                 let event_timestamp = now();
-                let particulars = json!({"old_title":&old_title,"new_title":&title});
+                let particulars = json!({"old_title":&original_title,"new_title":&title});
                 insert_event_tx(
                     &app,
                     &mut tx,
