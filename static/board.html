@@ -95,13 +95,14 @@ h1 { margin: 0; font-size: clamp(28px,4vw,42px); letter-spacing: -.045em }
 <main class="board" id="main">
   <div class="board__header"><div class="board__actions board__actions--start">{{WEBHOOKS_LINK}}</div><h1>{{BOARD_NAME}}</h1><div class="board__actions board__actions--end">{{SETTINGS_LINK}}</div></div>
   {{FILTER_FORM}}
-  <div class="board-stage">{{COLUMNS}}{{ADD_COLUMN}}</div>
+  <turbo-frame id="cards_container"><div class="board-stage">{{COLUMNS}}{{ADD_COLUMN}}</div></turbo-frame>
 </main>
 {{SHELL_FOOTER}}
 <script>
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
 relativeDates();
 const boardColumns=document.querySelector('.card-columns');
+const boardStage=document.querySelector('.board-stage');
 const boardSections=()=>[...boardColumns.querySelectorAll(':scope > .cards')];
 const expandedColumnKey=`rizzy-expanded-column:${document.body.dataset.board}`;
 const desktopColumns=()=>window.matchMedia('(min-width: 640px)').matches;
@@ -122,22 +123,57 @@ function toggleColumn(column){
   }else expandColumn(column);
 }
 boardColumns.addEventListener('click',event=>{const toggle=event.target.closest('.cards__toggle');if(toggle)toggleColumn(toggle.closest('.cards'))});
-document.querySelector('.board-tools__watch-toggle')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const response=await fetch(`/${document.body.dataset.account}/boards/${document.body.dataset.board}/involvement`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({involvement:button.dataset.involvement})});if(!response.ok)throw Error('Could not update watching');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
-const filterForm=document.querySelector('.board-filter');let filterTimer;filterForm?.querySelector('input[type=search]')?.addEventListener('input',()=>{clearTimeout(filterTimer);filterTimer=setTimeout(()=>filterForm.requestSubmit(),400)});filterForm?.addEventListener('change',event=>{const field=event.target;if(field.matches('input[name="assignment_status"]')&&field.checked)filterForm.querySelectorAll('input[name="assignee_ids[]"]').forEach(input=>input.checked=false);else if(field.matches('input[name="assignee_ids[]"]')&&field.checked)filterForm.querySelector('input[name="assignment_status"]').checked=false;if(field.matches('select,input[type=checkbox],input[type=radio]'))filterForm.requestSubmit()});
-const filterToggle=filterForm?.querySelector('.filter-more__toggle');
+boardStage.addEventListener('click',async event=>{const button=event.target.closest('.board-tools__watch-toggle');if(!button)return;button.disabled=true;try{const response=await fetch(`/${document.body.dataset.account}/boards/${document.body.dataset.board}/involvement`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({involvement:button.dataset.involvement})});if(!response.ok)throw Error('Could not update watching');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
+const filterForm=document.querySelector('.board-filter');let filterTimer,filterRequest,filterVersion=0;
+function cancelFilterRequest(){filterVersion++;filterRequest?.abort()}
+async function navigateBoardFilter(url,{historyMode='push'}={}){
+  cancelFilterRequest();const version=filterVersion,controller=new AbortController();filterRequest=controller;
+  try{
+    const response=await fetch(url,{headers:{Accept:'text/html'},signal:controller.signal});
+    if(!response.ok)throw Error(`Filter request failed: ${response.status}`);
+    const next=new DOMParser().parseFromString(await response.text(),'text/html');
+    const nextForm=next.querySelector('.board-filter'),nextStage=next.querySelector('.board-stage'),nextColumns=nextStage?.querySelector('.card-columns');
+    if(!nextForm||!nextStage||!nextColumns)throw Error('Missing board filter content');
+    if(version!==filterVersion)return;
+    const active=document.activeElement,restoreSearch=active?.matches('.board-filter input[type=search]'),cursor=restoreSearch?active.selectionStart:null;
+    lazyColumns.disconnect();
+    filterForm.className=nextForm.className;filterForm.action=nextForm.action;filterForm.innerHTML=nextForm.innerHTML;
+    boardColumns.className=nextColumns.className;
+    for(const attribute of [...boardColumns.attributes])if(attribute.name!=='class')boardColumns.removeAttribute(attribute.name);
+    for(const attribute of nextColumns.attributes)if(attribute.name!=='class')boardColumns.setAttribute(attribute.name,attribute.value);
+    boardColumns.innerHTML=nextColumns.innerHTML;
+    boardStage.replaceChildren(boardColumns,...[...nextStage.children].filter(child=>child!==nextColumns));
+    updateMoveButtons();
+    boardColumns.querySelectorAll('.cards__more[data-page="1"]').forEach(button=>lazyColumns.observe(button));
+    const expanded=boardSections().find(column=>column.id===localStorage.getItem(expandedColumnKey));
+    if(expanded)expandColumn(expanded,false);
+    document.title=next.title;
+    if(historyMode==='push')history.pushState(null,'',url);
+    relativeDates();
+    if(restoreSearch){const search=filterForm.querySelector('input[type=search]');search?.focus();if(cursor!==null)search?.setSelectionRange(cursor,cursor)}
+  }catch(error){if(error.name==='AbortError')return;console.error(error);location.assign(url)}
+  finally{if(filterRequest===controller)filterRequest=null}
+}
+filterForm?.addEventListener('submit',event=>{const url=new URL(filterForm.action);url.search=new URLSearchParams(new FormData(filterForm)).toString();if(url.pathname!==location.pathname)return;event.preventDefault();clearTimeout(filterTimer);navigateBoardFilter(url.href)});
+filterForm?.addEventListener('input',event=>{if(!event.target.matches('input[type=search]:not(.quick-filter__search)'))return;cancelFilterRequest();clearTimeout(filterTimer);filterTimer=setTimeout(()=>filterForm.requestSubmit(),400)});
+filterForm?.addEventListener('change',event=>{const field=event.target;cancelFilterRequest();if(field.matches('input[name="assignment_status"]')&&field.checked)filterForm.querySelectorAll('input[name="assignee_ids[]"]').forEach(input=>input.checked=false);else if(field.matches('input[name="assignee_ids[]"]')&&field.checked)filterForm.querySelector('input[name="assignment_status"]').checked=false;if(field.matches('select,input[type=checkbox],input[type=radio]'))filterForm.requestSubmit()});
+filterForm?.addEventListener('click',event=>{const clear=event.target.closest('a.filter-clear[href]');if(!clear)return;event.preventDefault();navigateBoardFilter(clear.href)});
+boardStage.addEventListener('click',event=>{const link=event.target.closest('.cards--grid > a[href]');if(!link||new URL(link.href).pathname!==location.pathname)return;event.preventDefault();navigateBoardFilter(link.href)});
+addEventListener('popstate',()=>{if(location.pathname!==filterForm.action.replace(location.origin,'')){location.reload();return}clearTimeout(filterTimer);navigateBoardFilter(location.href,{historyMode:'none'})});
+const filterToggle=()=>filterForm?.querySelector('.filter-more__toggle');
 function normalizeFilterText(value){return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
 let filterOptionSequence=0;
 function selectQuickFilterChoice(popup,choice){popup.querySelectorAll('.filter-choice[aria-selected]').forEach(item=>item.removeAttribute('aria-selected'));const search=popup.querySelector('.quick-filter__search');if(choice){choice.setAttribute('aria-selected','true');choice.id||=`quick-filter-option-${++filterOptionSequence}`;choice.scrollIntoView({block:'nearest'});if(search)search.setAttribute('aria-activedescendant',choice.id)}else search?.removeAttribute('aria-activedescendant')}
 function visibleQuickFilterChoices(popup){return [...popup.querySelectorAll('.filter-choice:not([hidden])')]}
 filterForm?.addEventListener('input',event=>{const search=event.target.closest('.quick-filter__search');if(!search)return;const popup=search.closest('.quick-filter__popup'),term=normalizeFilterText(search.value);popup.querySelectorAll('.filter-choice').forEach(choice=>{choice.hidden=!normalizeFilterText(choice.textContent).includes(term)});selectQuickFilterChoice(popup,visibleQuickFilterChoices(popup)[0])});
 function closeQuickFilters(except=null){filterForm?.querySelectorAll('.quick-filter').forEach(filter=>{if(filter===except)return;const popup=filter.querySelector('.quick-filter__popup');popup.hidden=true;const search=popup.querySelector('.quick-filter__search');if(search)search.value='';popup.querySelectorAll('.filter-choice').forEach(choice=>choice.hidden=false);selectQuickFilterChoice(popup,null);filter.querySelector('.quick-filter__toggle').setAttribute('aria-expanded','false')})}
-function setFilterOpen(open){if(!filterToggle||!filterForm)return;filterForm.classList.toggle('is-expanded',open);filterForm.querySelector('input[name="expand_all"]').disabled=!open;filterToggle.setAttribute('aria-expanded',String(open));const label=open?'Collapse filter options':'Expand filter options';filterToggle.setAttribute('aria-label',label);filterToggle.title=label;if(!open)closeQuickFilters()}
-filterToggle?.addEventListener('click',()=>setFilterOpen(!filterForm.classList.contains('is-expanded')));
+function setFilterOpen(open){if(!filterToggle()||!filterForm)return;filterForm.classList.toggle('is-expanded',open);filterForm.querySelector('input[name="expand_all"]').disabled=!open;filterToggle().setAttribute('aria-expanded',String(open));const label=open?'Collapse filter options':'Expand filter options';filterToggle().setAttribute('aria-label',label);filterToggle().title=label;if(!open)closeQuickFilters()}
+filterForm?.addEventListener('click',event=>{if(event.target.closest('.filter-more__toggle'))setFilterOpen(!filterForm.classList.contains('is-expanded'))});
 filterForm?.addEventListener('click',event=>{const boardChoice=event.target.closest('[data-board-filter-id]');if(boardChoice){const id=boardChoice.dataset.boardFilterId;filterForm.querySelector('[data-board-scope]')?.remove();const existing=[...filterForm.querySelectorAll('[data-board-filter-selection]')].find(field=>field.value===id);if(existing)existing.remove();else{const field=document.createElement('input');field.type='hidden';field.name='board_ids[]';field.value=id;field.dataset.boardFilterSelection='';filterForm.append(field)}filterForm.action=`/${document.body.dataset.account}/cards`;filterForm.requestSubmit();return}const toggle=event.target.closest('.quick-filter__toggle');if(!toggle)return;const filter=toggle.closest('.quick-filter'),popup=filter.querySelector('.quick-filter__popup'),open=popup.hidden;closeQuickFilters(filter);popup.hidden=!open;toggle.setAttribute('aria-expanded',String(open));if(open){const box=toggle.getBoundingClientRect();popup.style.left=`${Math.max(12,Math.min(box.left,innerWidth-popup.offsetWidth-12))}px`;popup.style.top=`${Math.min(box.bottom+6,innerHeight-popup.offsetHeight-12)}px`;selectQuickFilterChoice(popup,visibleQuickFilterChoices(popup)[0]);(popup.querySelector('.quick-filter__search')||popup).focus()}else selectQuickFilterChoice(popup,null)});
-filterForm?.addEventListener('keydown',event=>{const popup=event.target.closest('.quick-filter__popup');if(popup&&!popup.hidden){const choices=visibleQuickFilterChoices(popup),current=choices.findIndex(choice=>choice.getAttribute('aria-selected')==='true');if((event.key==='ArrowDown'||event.key==='ArrowUp')&&!event.shiftKey&&!event.metaKey&&!event.ctrlKey){const next=event.key==='ArrowDown'?Math.min(current+1,choices.length-1):Math.max(current-1,0);if(choices[next])selectQuickFilterChoice(popup,choices[next]);event.preventDefault();return}if(event.key==='Enter'&&!event.isComposing&&choices[current]){event.preventDefault();choices[current].click();return}}if(event.key==='Escape'){const open=filterForm.querySelector('.quick-filter__toggle[aria-expanded=true]');if(open){closeQuickFilters();open.focus()}else if(filterForm.classList.contains('is-expanded')){setFilterOpen(false);filterToggle.focus()}}});
+filterForm?.addEventListener('keydown',event=>{const popup=event.target.closest('.quick-filter__popup');if(popup&&!popup.hidden){const choices=visibleQuickFilterChoices(popup),current=choices.findIndex(choice=>choice.getAttribute('aria-selected')==='true');if((event.key==='ArrowDown'||event.key==='ArrowUp')&&!event.shiftKey&&!event.metaKey&&!event.ctrlKey){const next=event.key==='ArrowDown'?Math.min(current+1,choices.length-1):Math.max(current-1,0);if(choices[next])selectQuickFilterChoice(popup,choices[next]);event.preventDefault();return}if(event.key==='Enter'&&!event.isComposing&&choices[current]){event.preventDefault();choices[current].click();return}}if(event.key==='Escape'){const open=filterForm.querySelector('.quick-filter__toggle[aria-expanded=true]');if(open){closeQuickFilters();open.focus()}else if(filterForm.classList.contains('is-expanded')){setFilterOpen(false);filterToggle().focus()}}});
 document.addEventListener('click',event=>{if(!event.target.closest('.quick-filter'))closeQuickFilters()});
-const newColumnDialog=document.getElementById('new-column-dialog');
-document.getElementById('add-column')?.addEventListener('click',()=>{newColumnDialog.showModal();newColumnDialog.querySelector('input[name=name]').focus()});
+const newColumnDialog=()=>document.getElementById('new-column-dialog');
+boardStage.addEventListener('click',event=>{if(!event.target.closest('#add-column'))return;newColumnDialog().showModal();newColumnDialog().querySelector('input[name=name]').focus()});
 document.addEventListener('click',event=>{const button=event.target.closest('.column-dialog [data-close-dialog]');if(button)button.closest('dialog').close()});
 const namedColumns=()=>[...boardColumns.querySelectorAll(':scope > .cards--doing[data-column-id]')];
 function updateMoveButtons(){const columns=namedColumns();columns.forEach((column,index)=>{column.querySelector('[data-column-action=left]').disabled=index===0;column.querySelector('[data-column-action=right]').disabled=index===columns.length-1})}
@@ -183,7 +219,7 @@ document.addEventListener('submit',async event=>{
     const replacement=stream?.querySelector('template')?.content.firstElementChild;
     if(!replacement?.matches('.cards'))throw Error('Column update missing');
     const next=document.importNode(replacement,true);
-    if(isNew){boardColumns.insertBefore(next,boardColumns.querySelector('#closed-cards'));newColumnDialog.close();form.reset()}
+    if(isNew){boardColumns.insertBefore(next,boardColumns.querySelector('#closed-cards'));newColumnDialog().close();form.reset()}
     else{
       const current=form.closest('.cards'),expanded=current.classList.contains('is-expanded');
       const oldList=current.querySelector('.cards__list'),newList=next.querySelector('.cards__list');
