@@ -26,7 +26,10 @@ def revision(path):
 
 
 def dirty(path):
-    return bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=path))
+    changes = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"],
+                                      cwd=path, text=True).splitlines()
+    return any(not (change.startswith("?? bench/results/webhook-publish-delivery-")
+                    and change.endswith(".json")) for change in changes)
 
 
 def counts(database):
