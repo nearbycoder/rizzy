@@ -55,6 +55,7 @@ mod comment_edit_page;
 mod deletion_cleanup;
 mod events_page;
 mod exports;
+mod import_mail;
 mod imports;
 mod join_code_page;
 mod magic_mail;

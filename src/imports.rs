@@ -1332,7 +1332,11 @@ pub(super) async fn worker(app: Arc<App>) {
             continue;
         }
         match restore(&app, &import_id, &account_id).await {
-            Ok(()) => {}
+            Ok(()) => {
+                if let Err(error) = import_mail::send(&app, &import_id, true, None).await {
+                    eprintln!("import completion email failed: {}", error.1);
+                }
+            }
             Err(error) => {
                 eprintln!("import {import_id} failed: {error}");
                 let reason = if error.contains("UNIQUE constraint")
@@ -1343,7 +1347,7 @@ pub(super) async fn worker(app: Arc<App>) {
                 } else {
                     "invalid_export"
                 };
-                let _ = sqlx::query(
+                let recorded = sqlx::query(
                     "UPDATE imports SET status='failed',failure_reason=?,updated_at=? WHERE id=?",
                 )
                 .bind(reason)
@@ -1351,6 +1355,13 @@ pub(super) async fn worker(app: Arc<App>) {
                 .bind(&import_id)
                 .execute(&app.db)
                 .await;
+                if recorded.is_ok_and(|result| result.rows_affected() == 1) {
+                    if let Err(error) =
+                        import_mail::send(&app, &import_id, false, Some(reason)).await
+                    {
+                        eprintln!("import failure email failed: {}", error.1);
+                    }
+                }
             }
         }
         app.import_notify.notify_one();
