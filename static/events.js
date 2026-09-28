@@ -61,7 +61,7 @@ timelineFilters?.addEventListener('keydown', event => {
 });
 
 document.addEventListener('keydown', event => {
-  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey ||
+  if (event.defaultPrevented || event.repeat || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey ||
       event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
   if (event.key.toLowerCase() === 'c') {
     const form = document.getElementById('add-card');
@@ -149,7 +149,7 @@ if (menuTrigger && menuDialog) {
     if (menuDialog.open && !menuDialog.contains(event.target) && !menuTrigger.contains(event.target)) closeMenu();
   });
   document.addEventListener('keydown', event => {
-    if (event.repeat || event.altKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (event.defaultPrevented || event.repeat || event.shiftKey || event.altKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     if (event.key.toLowerCase() !== 'j') return;
     event.preventDefault();
     if (menuDialog.open) closeMenu(); else openMenu();
@@ -271,7 +271,7 @@ if (footer) {
       for (const kind of Object.keys(trays)) if (trays[kind].open) closeTray(kind);
       return;
     }
-    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (event.defaultPrevented || event.repeat || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     const kind = event.key.toLowerCase();
     if (kind === 'p' || kind === 'n') { event.preventDefault(); toggleTray(kind === 'p' ? 'pins' : 'notifications'); }
     if (kind === 'k') { event.preventDefault(); searchButton.click(); }

@@ -35,6 +35,10 @@ def state(session):
       editing:!!document.querySelector('form[id^="edit_form_card_"]'),
       save:!!document.querySelector('[id^="card_closure_toggle_card_"] button[form^="edit_form_card_"]'),
       move:!!document.getElementById('choose-column'),
+      pinTray:!!document.getElementById('pin-tray')?.open,
+      notificationTray:!!document.getElementById('notification-tray')?.open,
+      tagDialog:!!document.querySelector('.tag-dialog')?.open,
+      focusTagTrigger:document.activeElement === document.querySelector('.card__tag-picker-button'),
       title:document.querySelector('.card__title-link')?.textContent.trim()
     }))()"""))
 
@@ -102,12 +106,26 @@ def main():
             until(session, lambda value: value["gold"] == "POST", "Golden Ticket hotkey off")
             browser(session, "press", "Shift+n")
             until(session, lambda value: value["watch"] == "POST", "watch hotkey off")
+            assert not state(session)["notificationTray"], "Shift+n also opened the notification tray"
             browser(session, "press", "Shift+n")
             until(session, lambda value: value["watch"] == "DELETE", "watch hotkey on")
             browser(session, "press", "Shift+p")
             until(session, lambda value: value["pin"] == "DELETE", "pin hotkey on")
+            assert not state(session)["pinTray"], "Shift+p also opened the pin tray"
             browser(session, "press", "Shift+p")
             until(session, lambda value: value["pin"] == "POST", "pin hotkey off")
+            browser(session, "press", "p")
+            until(session, lambda value: value["pinTray"], "unmodified pin-tray hotkey")
+            browser(session, "press", "p")
+            until(session, lambda value: not value["pinTray"], "close pin tray with hotkey")
+            browser(session, "press", "n")
+            until(session, lambda value: value["notificationTray"], "unmodified notification-tray hotkey")
+            browser(session, "press", "n")
+            until(session, lambda value: not value["notificationTray"], "close notification tray with hotkey")
+            browser(session, "press", "t")
+            until(session, lambda value: value["tagDialog"], "tag picker hotkey")
+            browser(session, "press", "Escape")
+            until(session, lambda value: not value["tagDialog"] and value["focusTagTrigger"], "close tag picker and restore focus")
             browser(session, "press", "d")
             until(session, lambda value: value["closed"] and value["undo"], "complete hotkey")
             browser(session, "click", "#undo-closure")

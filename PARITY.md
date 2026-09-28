@@ -69,13 +69,20 @@ the replaceable closure area. Its browser handler shows Save changes while
 editing, then restores completion and move after cancel or save;
 `tests/card_flag_browser.py` checks those flows.
 
-The card page now handles Fizzy's `e`, `d`, `Shift+g`, `Shift+n`, and `Shift+p`
+The card page now handles Fizzy's `e`, `d`, `t`, `Shift+g`, `Shift+n`, and `Shift+p`
 shortcuts. The browser check exercises each shortcut, confirms editing ignores
 one while a title field has focus, and repeats edit/cancel after a save. That
 last sequence exposed a stale Save changes control; live refresh now restores
 the closure controls from the current card response. These checks cover the
 Rust browser flow and source-declared shortcut mappings, not every source
 keyboard interaction.
+The shared shell now ignores Shift for its unmodified card creation, board
+creation, menu, search, pin-tray, and notification-tray shortcuts. A disposable
+pinned Fizzy browser check confirmed that `Shift+n` and `Shift+p` leave both
+trays closed. Rizzy's card browser check now asserts those shifted keys only
+toggle their card controls, while plain `n` and `p` still toggle the trays.
+Closing the tag picker returns focus to its trigger so a following card
+shortcut works after Escape.
 
 The direct step edit form now includes the source's hidden
 unchecked value; `tests/step_edit_completed_paired.py` checks that editing a
