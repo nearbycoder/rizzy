@@ -16054,7 +16054,11 @@ async fn toggle_assignment(
         Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _, _))
             if headers.contains_key("x-rizzy-json-request") =>
         {
-            return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response());
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
         }
         Err(error) => return Err(error),
     }
@@ -16079,6 +16083,15 @@ async fn toggle_self_assignment(
         Ok(_) => {}
         Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _, _)) if wants_turbo_stream(&headers) => {
             return assignment_stream(&app, &p, &c).await;
+        }
+        Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, _, _))
+            if headers.contains_key("x-rizzy-json-request") =>
+        {
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
         }
         Err(error) => return Err(error),
     }

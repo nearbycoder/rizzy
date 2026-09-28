@@ -587,6 +587,10 @@ pub(super) async fn show(
         include_str!("../static/tag_picker_keyboard.js").into(),
     );
     values.insert(
+        "ASSIGNMENT_LIMIT_SCRIPT",
+        include_str!("../static/assignment_limit.js").into(),
+    );
+    values.insert(
         "CARD_EDIT_DRAFT_SCRIPT",
         include_str!("../static/card_edit_draft.js").into(),
     );
