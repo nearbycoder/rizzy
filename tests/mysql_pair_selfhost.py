@@ -31,6 +31,7 @@ from column_cards_etag_parity import run as column_cache_run  # noqa: E402
 from named_column_show_etag_parity import run as column_show_cache_run  # noqa: E402
 from draft_workflow_parity import NoRedirect, login, run as draft_run  # noqa: E402
 from card_image_parity import IMAGE, run as card_image_run  # noqa: E402
+from card_image_purge_parity import run as card_image_purge_run  # noqa: E402
 from avatar_parity import run as avatar_run  # noqa: E402
 from avatar_purge_parity import run as avatar_purge_run  # noqa: E402
 from embed_parity import run as embed_run  # noqa: E402
@@ -76,7 +77,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
                                           "named-column", "column-cache", "column-show-cache",
-                                          "draft", "card-image", "avatar", "avatar-purge", "embeds", "card-controls",
+                                          "draft", "card-image", "card-image-purge", "avatar", "avatar-purge", "embeds", "card-controls",
                                           "card-board", "card-edit", "assignment", "reaction",
                                           "column-turbo", "card-previews", "account-card",
                                           "board-views", "board-settings", "webhooks-html",
@@ -130,7 +131,7 @@ def main():
                 "owner@example.com" if args.suite == "route-get-valid"
                 else "mysql-pair-owner@example.test")
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
-            if args.suite == "avatar-purge":
+            if args.suite in ("avatar-purge", "card-image-purge"):
                 local_rust_env["RIZZY_DISABLE_STORAGE_PURGE"] = "1"
             rizzy_env, rizzy_credentials = prepare_rust(rizzy_dir, local_rust_env)
             cpus = sorted(os.sched_getaffinity(0))[:2]
@@ -192,6 +193,12 @@ def main():
             elif args.suite == "card-image":
                 source_result = card_image_run(source)
                 rust_result = card_image_run(rust)
+            elif args.suite == "card-image-purge":
+                source["env"] = fizzy_env
+                rust["env"] = rizzy_env
+                rust["storage"] = rizzy_dir / "storage"
+                source_result = card_image_purge_run(source)
+                rust_result = card_image_purge_run(rust)
             elif args.suite == "avatar":
                 for target in (source, rust):
                     target["mysql_socket"] = socket
@@ -482,6 +489,8 @@ def main():
             elif args.suite == "card-image":
                 print("Disposable MySQL card image workflow matched pinned Fizzy; "
                       f"image removal timestamp changes={source_result['delete_touch']}")
+            elif args.suite == "card-image-purge":
+                print("Disposable MySQL deferred card-image purge matched pinned Fizzy")
             elif args.suite == "avatar":
                 print("Disposable MySQL avatar thumbnails and immediate variants matched pinned Fizzy")
             elif args.suite == "avatar-purge":

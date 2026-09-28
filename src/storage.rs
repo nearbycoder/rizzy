@@ -1144,7 +1144,7 @@ pub(super) async fn purge_card_images_tx(
         .bind(card_id).bind(card_id)
         .bind(board_id).bind(board_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
-    let mut keys = Vec::new();
+    let keys = Vec::new();
     for row in rows {
         let attachment_id: String = row.get("attachment_id");
         let blob_id: String = row.get("blob_id");
@@ -1165,7 +1165,7 @@ pub(super) async fn purge_card_images_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
+            enqueue_blob_purge_tx(tx, account_id, &blob_id).await?;
         }
     }
     Ok(keys)
@@ -1377,7 +1377,7 @@ pub(super) async fn purge_card_storage_tx(
     user_id: Option<&str>,
     request_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))) OR (a.record_type='Board' AND a.record_id=? AND ? IS NOT NULL))")
+    let rows = sqlx::query("SELECT a.id AS attachment_id,a.blob_id,a.record_type,a.record_id,a.name AS attachment_name,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.account_id=? AND ((a.record_type='Card' AND a.record_id IN (SELECT id FROM cards WHERE account_id=? AND (? IS NULL OR id=?) AND (? IS NULL OR board_id=?))) OR (a.record_type='Comment' AND a.record_id IN (SELECT m.id FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.board_id=?))) OR (a.record_type='Board' AND a.record_id=? AND ? IS NOT NULL))")
         .bind(account_id).bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
         .bind(account_id).bind(card_id).bind(card_id).bind(board_id).bind(board_id)
         .bind(board_id).bind(board_id)
@@ -1408,7 +1408,13 @@ pub(super) async fn purge_card_storage_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
+            if row.get::<String, _>("record_type") == "Card"
+                && row.get::<String, _>("attachment_name") == "image"
+            {
+                enqueue_blob_purge_tx(tx, account_id, &blob_id).await?;
+            } else {
+                keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
+            }
         }
     }
     Ok(keys)

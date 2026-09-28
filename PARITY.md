@@ -848,7 +848,15 @@ reusable. The separate Rust cluster fixture covers same-board publication;
 source comparison for concurrent publication and the full browser interaction
 surface remain open.
 
-`tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after image replacement and card or board deletion. `tests/embed_parity.py` compares uploaded image and plain-file embeds in card descriptions and comments, placeholder handling, attachment status, normalized rendered HTML, private/public blob access, download disposition, preview generation, and cleanup after card, comment, and board deletion. Fizzy's signed URL and representation token formats are not reproduced; image preview bytes also differ from its libvips encoding. The signup Playground renders its source-hosted video and image attachments. General remote embeds, other media forms, and exact browser upload presentation remain incomplete.
+`tests/card_image_parity.py` compares the card background image path against both servers: authorized direct-upload metadata, checksum-backed file transfer, attachment during creation or update, duplicate-use denial, private and public blob access, retrieved bytes and content type, and image removal. `tests/storage_cleanup.py` checks that Rizzy removes blob records and bytes after draining queued purges for image replacement and card or board deletion. `tests/embed_parity.py` compares uploaded image and plain-file embeds in card descriptions and comments, placeholder handling, attachment status, normalized rendered HTML, private/public blob access, download disposition, preview generation, and cleanup after card, comment, and board deletion. Fizzy's signed URL and representation token formats are not reproduced; image preview bytes also differ from its libvips encoding. The signup Playground renders its source-hosted video and image attachments. General remote embeds, other media forms, and exact browser upload presentation remain incomplete.
+
+`tests/card_image_purge_parity.py` compares deferred cleanup after image
+replacement, explicit removal, card deletion, and board deletion on fresh paired SQLite
+databases, including queued-job state before draining and file bytes after.
+`tests/storage_cleanup.py` also checks Rizzy's queued cleanup after card
+deletion. `tests/mysql_pair_selfhost.py card-image-purge` passed the same
+paired deferred cleanup cases on disposable MySQL databases. Concurrent
+card-image purge paths remain to be checked.
 
 Fresh `tests/mysql_pair_selfhost.py card-image` and `embeds` runs now matched
 the pinned Fizzy app on disposable MySQL databases. The image test also read
