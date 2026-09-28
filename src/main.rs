@@ -9577,7 +9577,7 @@ async fn list_webhook_deliveries(
         let eventable_id: String = row.get("eventable_id");
         let eventable_url = if eventable_type == "Comment" {
             format!(
-                "{host}/{account}/cards/{}/comments/{eventable_id}",
+                "{host}/{account}/cards/{}#comment_{eventable_id}",
                 row.get::<i64, _>("number")
             )
         } else {
@@ -9585,7 +9585,17 @@ async fn list_webhook_deliveries(
         };
         let request: Option<Value> = row
             .get::<Option<String>, _>("request")
-            .and_then(|s| serde_json::from_str(&s).ok());
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|stored| {
+                stored
+                    .get("headers")
+                    .and_then(Value::as_object)
+                    .map(|headers| {
+                        let mut headers = headers.clone();
+                        headers.remove("X-Webhook-Signature");
+                        json!({"headers": headers})
+                    })
+            });
         let response: Option<Value> = row
             .get::<Option<String>, _>("response")
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
@@ -11655,8 +11665,8 @@ async fn activity_items(
             "description":description_plain,"description_html":description_html,"image_url":image_values.get(&id).cloned().unwrap_or(Value::Null),
             "has_attachments":has_attachments,"tags":tags.get(&id).cloned().unwrap_or_default(),
             "closed":c.get::<i64,_>("closed")!=0,"postponed":c.get::<i64,_>("postponed")!=0,
-            "golden":c.get::<i64,_>("golden")!=0,"last_active_at":c.get::<String,_>("last_active_at"),
-            "created_at":c.get::<String,_>("created_at"),"url":format!("{host}/{}/cards/{number}",p.slug),
+            "golden":c.get::<i64,_>("golden")!=0,"last_active_at":json_millisecond_time(c.get::<String,_>("last_active_at")),
+            "created_at":json_millisecond_time(c.get::<String,_>("created_at")),"url":format!("{host}/{}/cards/{number}",p.slug),
             "board":boards.get(&board_id).cloned().ok_or_else(missing)?,
             "creator":users.get(&creator_id).cloned().ok_or_else(missing)?,
             "assignees":assignees,"has_more_assignees":assigned.len()>5,
@@ -11691,7 +11701,7 @@ async fn activity_items(
             .ok_or_else(missing)?;
         comments.insert(
             id.clone(),
-            json!({"id":id,"created_at":created,"updated_at":updated,
+            json!({"id":id,"created_at":json_millisecond_time(created),"updated_at":json_millisecond_time(updated),
             "body":{"plain_text":body_plain,"html":body_html},"creator":creator,
             "card":{"id":card_id,"url":format!("{host}/{}/cards/{number}",p.slug)},
             "reactions_url":format!("{host}/{}/cards/{number}/comments/{id}/reactions",p.slug),
@@ -11718,7 +11728,7 @@ async fn activity_items(
         };
         items.push(
             json!({"id":e.get::<String,_>("id"),"action":e.get::<String,_>("action"),
-            "created_at":e.get::<String,_>("created_at"),
+            "created_at":json_millisecond_time(e.get::<String,_>("created_at")),
             "description":activity_description(viewer_id,e,title,particulars,&users),"particulars":particulars,
             "url":url,"eventable_type":eventable_type,"eventable":eventable,
             "board":boards.get(&board_id).cloned().ok_or_else(missing)?,

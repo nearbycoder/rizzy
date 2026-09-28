@@ -39,6 +39,22 @@ def update_delivery(target, delivery_id, state, code):
                        (state, response, delivery_id))
 
 
+def update_request(target, delivery_id):
+    request_data = {"headers": {"User-Agent": "fizzy/1.0.0 Webhook",
+                                "X-Webhook-Signature": "private signature"},
+                    "body": "private request body"}
+    if target["name"] == "fizzy":
+        source_runner(target, "Webhook::Delivery.find(" + json.dumps(delivery_id) +
+                      ').update_columns(request: { headers: { "User-Agent" => '
+                      '"fizzy/1.0.0 Webhook", "X-Webhook-Signature" => '
+                      '"private signature" }, body: "private request body" }, '
+                      'updated_at: Time.current)')
+    else:
+        with sqlite3.connect(target["db"]) as db:
+            db.execute("UPDATE webhook_deliveries SET request=? WHERE id=?",
+                       (json.dumps(request_data), delivery_id))
+
+
 def row(target, path, delivery_id):
     status, _, body = request(target, f"/{target['account']}{path}", accept="text/html")
     assert status == 200, (target["name"], "show", status)
@@ -59,10 +75,10 @@ def check(target):
     try:
         webhook = api(target, f"/boards/{board_id}/webhooks", "POST", {
             "webhook": {"name": "Delivery HTML", "url": "https://example.com/hook",
-                        "subscribed_actions": ["card_published"]}}, 201)
+                        "subscribed_actions": ["card_published", "comment_created"]}}, 201)
         webhook_id = webhook["id"]
-        api(target, f"/boards/{board_id}/cards", "POST",
-            {"card": {"title": "Triggers delivery"}}, 201)
+        card = api(target, f"/boards/{board_id}/cards", "POST",
+                   {"card": {"title": "Triggers delivery"}}, 201)
         if target["name"] == "fizzy":
             source_runner(target, 'Event::WebhookDispatchJob.perform_now('
                           'Event.where(board_id: Webhook.find(' + json.dumps(webhook_id) +
@@ -81,7 +97,29 @@ def check(target):
                 target["name"], actual)
             assert actual["subtle"], (target["name"], actual)
             results.append(actual)
-        return results
+        update_request(target, delivery_id)
+        delivery = api(target, path + "/deliveries")[0]
+        assert delivery["request"] == {"headers": {"User-Agent": "fizzy/1.0.0 Webhook"}}, (
+            target["name"], delivery["request"])
+        comment = api(target, f"/cards/{card['number']}/comments", "POST",
+                      {"comment": {"body": "Webhook comment"}}, 201)
+        if target["name"] == "fizzy":
+            source_runner(target, 'Event::WebhookDispatchJob.perform_now('
+                          'Event.where(board_id: Webhook.find(' + json.dumps(webhook_id) +
+                          ').board_id, action: "comment_created").order(created_at: :desc).first)')
+        deliveries = api(target, path + "/deliveries")
+        assert len(deliveries) == 2, (target["name"], deliveries)
+        comment_delivery = next(item for item in deliveries if item["event"]["action"] ==
+                                "comment_created")
+        event = comment_delivery["event"]
+        assert comment_delivery["state"] == "pending", (target["name"], comment_delivery)
+        assert comment_delivery["request"] is None and comment_delivery["response"] is None
+        assert event["creator"]["name"] == "Owner", (target["name"], event)
+        assert event["eventable"]["type"] == "Comment" and event["eventable"]["id"] == comment["id"]
+        assert event["eventable"]["url"].endswith(
+            f"/{target['account']}/cards/{card['number']}#comment_{comment['id']}"), (
+                target["name"], event)
+        return {"states": results, "comment_event": event["action"]}
     finally:
         api(target, f"/boards/{board_id}", "DELETE", expected=204)
 
@@ -113,7 +151,7 @@ def main():
                               NoRedirect())}
                 results[name] = check(target)
             assert results["fizzy"] == results["rizzy"], results
-            print("PASS webhook delivery HTML pending, successful, failed, and errored states")
+            print("PASS webhook delivery HTML states, sanitized JSON, and comment event JSON")
         finally:
             for process in reversed(processes):
                 stop_server(process)

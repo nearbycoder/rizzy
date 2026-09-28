@@ -4,6 +4,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +43,15 @@ def check(name, directory, cpus):
             "card": {"created_at": changed, "last_active_at": later}}, 200)
         assert (updated["created_at"], updated["last_active_at"]) == (
             "2024-01-15T10:30:00.123Z", "2024-01-15T10:30:00.654Z")
+        query = urllib.parse.urlencode({"board_ids[]": board["id"]})
+        activities, _ = expect(target, f"/activities?{query}", "GET", None, 200)
+        by_action = {event["action"]: event for event in activities}
+        published = by_action["card_published"]["eventable"]
+        commented = by_action["comment_created"]["eventable"]
+        assert (published["created_at"], published["last_active_at"],
+                commented["created_at"]) == (
+            "2024-01-15T10:30:00.123Z", "2024-01-15T10:30:00.654Z",
+            "2024-01-15T10:30:00.123Z"), (name, published, commented)
         database = directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3")
         with sqlite3.connect(database) as db:
             row = db.execute("SELECT created_at,last_active_at FROM cards WHERE number=?",
