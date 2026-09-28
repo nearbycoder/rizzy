@@ -66,11 +66,12 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 .steps .step>form:has(input:checked)+.step__content{text-decoration:line-through;opacity:.7}
 .steps>turbo-frame{display:block}
 .steps .step>form{margin:0}
-.steps .step__editor{display:flex;align-items:center;gap:8px;width:100%}
-.steps .step__editor input[type=text]{flex:1;min-width:0;width:auto;margin:0;padding:3px 6px;border-radius:3px}
-.steps .step__editor button{padding:3px 8px;font-size:13px}
-.steps .step__editor button[data-step-cancel]{background:#243b50;border-color:#53718e;color:#e0ecf4}
-.steps .step__editor button[data-step-delete]{margin-left:auto;background:#4e2929;border-color:#994c4c;color:#ffe5e5}
+.steps turbo-frame>.flex{display:flex;align-items:center;gap:8px}
+.steps form.step{display:flex;align-items:center;gap:8px;min-width:0}
+.steps form.step input[type=text]{flex:1;min-width:0;width:auto;margin:0;padding:3px 6px;border-radius:3px}
+.steps form.step button,.steps form.button_to button{padding:3px 8px;font-size:13px}
+.steps form.button_to button{background:#4e2929;border-color:#994c4c;color:#ffe5e5}
+.steps .for-screen-reader{position:absolute;clip:rect(0,0,0,0);width:1px;height:1px;overflow:hidden}
 </style>
 <style>
 #edit-mobile{display:none}
@@ -243,34 +244,101 @@ async function chooseStage(button){if(button.disabled||button.getAttribute('aria
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 document.querySelector('.stage-rail').addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 const stepRoot=document.querySelector('.card__content');
-const stepEdits=new Map();
-function closeStepEditor(li){const id=li.dataset.stepId,original=stepEdits.get(id);if(original)li.replaceWith(original);stepEdits.delete(id);void refreshLiveCard(true)}
+function frameFromStepPage(html,id){
+  const page=new DOMParser().parseFromString(html,'text/html');
+  return [...page.querySelectorAll(`turbo-frame[id="${CSS.escape(id)}"]`)].at(-1);
+}
+function applyStepStream(html){
+  const page=new DOMParser().parseFromString(html,'text/html');
+  let applied=false;
+  for(const stream of page.querySelectorAll('turbo-stream')){
+    const target=document.getElementById(stream.getAttribute('target'));
+    if(!target)continue;
+    const action=stream.getAttribute('action');
+    if(action==='remove'){target.remove();applied=true;continue}
+    const content=stream.querySelector('template')?.content.cloneNode(true);
+    if(!content)continue;
+    if(action==='replace'){target.replaceWith(content);applied=true}
+    else if(action==='before'){target.before(content);applied=true}
+  }
+  return applied;
+}
+async function closeStepEditor(frame){
+  const response=await fetch(frame.querySelector('[data-form-target="cancel"]').href,{headers:{Accept:'text/html'}});
+  if(!response.ok)throw Error('Could not cancel step edit');
+  const replacement=frameFromStepPage(await response.text(),frame.id);
+  if(!replacement)throw Error('Step response has no frame');
+  frame.replaceWith(replacement);
+}
 stepRoot.addEventListener('click',async event=>{
   const link=event.target.closest('a[data-step-edit]');
-  if(link){
-    event.preventDefault();
-    const li=link.closest('li[data-step-id]'),id=li.dataset.stepId;
-    if(stepEdits.has(id))return;
-    stepEdits.set(id,li.cloneNode(true));
-    const form=document.createElement('form');form.className='step__editor';form.dataset.stepEditForm='';
-    const check=document.createElement('input');check.type='checkbox';check.disabled=true;check.checked=li.querySelector('input[type=checkbox]').checked;
-    const input=document.createElement('input');input.type='text';input.name='content';input.required=true;input.autocomplete='off';input.setAttribute('aria-label','Step content');input.value=link.textContent;
-    const save=document.createElement('button');save.type='submit';save.textContent='Save';save.setAttribute('aria-label','Save changes');
-    const cancel=document.createElement('button');cancel.type='button';cancel.dataset.stepCancel='';cancel.textContent='Cancel';cancel.setAttribute('aria-label','Cancel changes');
-    const remove=document.createElement('button');remove.type='button';remove.dataset.stepDelete='';remove.textContent='Delete';remove.setAttribute('aria-label','Delete this step');
-    form.append(check,input,save,cancel,remove);li.replaceChildren(form);input.focus();input.select();return;
-  }
-  const cancel=event.target.closest('[data-step-cancel]');
-  if(cancel){closeStepEditor(cancel.closest('li[data-step-id]'));return}
-  const remove=event.target.closest('[data-step-delete]');
-  if(!remove)return;
-  const li=remove.closest('li[data-step-id]'),id=li.dataset.stepId;remove.disabled=true;
-  try{const response=await fetch(`/${account}/cards/${number}/steps/${id}`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not delete step');stepEdits.delete(id);(li.closest('turbo-frame')||li).remove();void refreshLiveCard(true)}catch(error){remove.disabled=false;alert(error.message)}
+  if(!link)return;
+  event.preventDefault();
+  const frame=link.closest('turbo-frame');
+  if(!frame)return;
+  try{
+    const response=await fetch(link.href,{headers:{Accept:'text/html'}});
+    if(!response.ok)throw Error('Could not edit step');
+    const replacement=frameFromStepPage(await response.text(),frame.id);
+    if(!replacement)throw Error('Step editor response has no frame');
+    replacement.querySelector('form:has(input[name="step[content]"])').dataset.stepEditor='';
+    replacement.querySelector('form:has(input[name="_method"][value="delete"])').dataset.stepDeleteForm='';
+    frame.replaceWith(replacement);
+    const input=replacement.querySelector('input[name="step[content]"]');
+    input.focus();input.select();
+  }catch(error){alert(error.message)}
 });
-stepRoot.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.target.closest('[data-step-edit-form]')){event.preventDefault();closeStepEditor(event.target.closest('li[data-step-id]'))}});
-stepRoot.addEventListener('change',async event=>{const checkbox=event.target.closest('input[data-step-id]');if(!checkbox)return;checkbox.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${checkbox.dataset.stepId}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{completed:checkbox.checked}})});if(!response.ok)throw Error('Could not update step');checkbox.closest('li').classList.toggle('is-completed',checkbox.checked)}catch(error){checkbox.checked=!checkbox.checked;alert(error.message)}finally{checkbox.disabled=false}});
-stepRoot.addEventListener('submit',async event=>{if(!event.target.matches('[data-step-edit-form]'))return;event.preventDefault();const form=event.target,li=form.closest('li[data-step-id]'),id=li.dataset.stepId,content=form.elements.content.value.trim();if(!content)return;const save=form.querySelector('button[type=submit]');save.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${id}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not save step');closeStepEditor(li)}catch(error){save.disabled=false;alert(error.message)}});
-stepRoot.addEventListener('submit',async event=>{if(event.target.id!=='step-form')return;event.preventDefault();const input=event.target.querySelector('#new-step'),content=input.value.trim();if(!content)return;input.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not add step');location.reload()}catch(error){input.disabled=false;alert(error.message)}});
+stepRoot.addEventListener('keydown',event=>{
+  if(event.key!=='Escape'||!event.target.closest('[data-step-editor]'))return;
+  event.preventDefault();
+  void closeStepEditor(event.target.closest('turbo-frame')).catch(error=>alert(error.message));
+});
+stepRoot.addEventListener('change',async event=>{
+  const checkbox=event.target.closest('input[data-step-id]');
+  if(!checkbox)return;
+  const form=checkbox.form,body=new URLSearchParams(new FormData(form));
+  checkbox.disabled=true;
+  try{
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body});
+    if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not update step');
+    void refreshLiveCard(true);
+  }catch(error){checkbox.checked=!checkbox.checked;checkbox.disabled=false;alert(error.message)}
+});
+stepRoot.addEventListener('submit',async event=>{
+  const form=event.target;
+  if(!form.matches('[data-step-editor],[data-step-delete-form]'))return;
+  event.preventDefault();
+  if(form.matches('[data-step-editor]')&&!form.querySelector('input[name="step[content]"]').value.trim())return;
+  const button=form.querySelector('button[type=submit]');
+  button.disabled=true;
+  try{
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:new URLSearchParams(new FormData(form))});
+    if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not save step');
+    void refreshLiveCard(true);
+  }catch(error){button.disabled=false;alert(error.message)}
+});
+let stepComposing=false;
+stepRoot.addEventListener('compositionstart',event=>{if(event.target.id==='new-step')stepComposing=true});
+stepRoot.addEventListener('compositionend',event=>{if(event.target.id==='new-step')stepComposing=false});
+stepRoot.addEventListener('submit',async event=>{
+  if(event.target.id!=='step-form')return;
+  event.preventDefault();
+  const form=event.target,input=form.querySelector('#new-step');
+  if(stepComposing)return;
+  if(!input.value.trim()){
+    input.setCustomValidity('Please fill out this field');input.reportValidity();
+    input.addEventListener('input',()=>input.setCustomValidity(''),{once:true});
+    return;
+  }
+  input.disabled=true;
+  try{
+    const body=new URLSearchParams({"step[content]":input.value});
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body});
+    if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not add step');
+    input.value='';input.disabled=false;input.focus();
+    void refreshLiveCard(true);
+  }catch(error){input.disabled=false;alert(error.message)}
+});
 
 const commentList=document.getElementById('comments');
 const commentTimezone=document.querySelector('meta[name="timezone"]')?.content;
@@ -380,15 +448,16 @@ async function refreshLiveCard(force=false,revisionHint=null){
       const draft=stepSection.querySelector('#new-step'),draftValue=draft?.value||'';
       const draftFocused=document.activeElement===draft,focusedStep=document.activeElement?.dataset?.stepId;
       const cursorStart=draftFocused?draft.selectionStart:null,cursorEnd=draftFocused?draft.selectionEnd:null;
-      const editFocus=document.activeElement?.closest('[data-step-edit-form]')?document.activeElement:null;
+      const editFocus=document.activeElement?.closest('[data-step-editor]')?document.activeElement:null;
       const editCursorStart=editFocus?.tagName==='INPUT'&&editFocus.type==='text'?editFocus.selectionStart:null;
       const editCursorEnd=editCursorStart===null?null:editFocus.selectionEnd;
-      const openEdits=[...stepSection.querySelectorAll('li[data-step-id]')].filter(li=>li.querySelector('[data-step-edit-form]'));
+      const openEdits=[...stepSection.querySelectorAll('turbo-frame[id^="step_"]')].filter(frame=>frame.querySelector('[data-step-editor]'));
       stepSection.innerHTML=nextStepSection.innerHTML;
       for(const editor of openEdits){
-        const replacement=stepSection.querySelector(`li[data-step-id="${CSS.escape(editor.dataset.stepId)}"]`);
+        const replacement=stepSection.querySelector(`turbo-frame[id="${CSS.escape(editor.id)}"]`);
         if(replacement)replacement.replaceWith(editor);
-        else (stepSection.querySelector('#new-step')?.closest('li')||stepSection.querySelector('ol')).append(editor);
+        else if(stepSection.querySelector('#new-step'))stepSection.querySelector('#new-step').closest('li').before(editor);
+        else stepSection.querySelector('ol').append(editor);
       }
       const replacement=stepSection.querySelector('#new-step');
       if(replacement){replacement.value=draftValue;if(draftFocused){replacement.focus();replacement.setSelectionRange(cursorStart,cursorEnd)}}
