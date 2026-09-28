@@ -9272,10 +9272,17 @@ async fn list_webhooks(
     let rows=sqlx::query("SELECT * FROM webhooks WHERE board_id=? AND account_id=? ORDER BY name ASC,id DESC LIMIT ? OFFSET ?")
         .bind(&board_id).bind(&p.account_id).bind(limit).bind(offset).fetch_all(&app.db).await.map_err(db_err)?;
     if !headers.contains_key("x-rizzy-json-request") {
-        return Ok(
-            webhook_page::index(p.slug, &board_id, &rows, page, total, offset, limit)
-                .into_response(),
-        );
+        return Ok(webhook_page::index(
+            p.slug,
+            &board_id,
+            &b.get::<String, _>("name"),
+            &rows,
+            page,
+            total,
+            offset,
+            limit,
+        )
+        .into_response());
     }
     let host = base(&headers);
     let mut out = Vec::new();

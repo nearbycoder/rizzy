@@ -26,8 +26,19 @@ fn label(action: &str) -> &str {
         .unwrap_or(action)
 }
 
-fn page(account: i64, board_id: &str, title: &str, content: &str) -> Html<String> {
-    let base = format!("/{account}/boards/{}", escape(board_id));
+fn page(
+    account: i64,
+    title: &str,
+    content: &str,
+    back_path: &str,
+    back_label: &str,
+    show_header_title: bool,
+) -> Html<String> {
+    let heading = if show_header_title {
+        format!("<h1>{}</h1>", escape(title))
+    } else {
+        String::new()
+    };
     signed_in_shell_html(
         account,
         title,
@@ -35,8 +46,8 @@ fn page(account: i64, board_id: &str, title: &str, content: &str) -> Html<String
         "",
         include_str!("../static/webhooks.css"),
         &format!(
-            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></nav>",
-            escape(title)
+            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{back_path}\">Back to {}</a>{heading}</nav>",
+            escape(back_label)
         ),
     )
 }
@@ -67,32 +78,34 @@ fn form(
     submitted: Option<(&str, &str, &[String])>,
 ) -> Html<String> {
     let base = format!("/{account}/boards/{}/webhooks", escape(board_id));
-    let (title, mut name, mut url, mut selected, action, method, submit) = if let Some(row) =
-        webhook
-    {
-        let id: String = row.get("id");
-        let selected: Vec<String> =
-            serde_json::from_str(&row.get::<String, _>("subscribed_actions")).unwrap_or_default();
-        (
-            "Edit Webhook",
-            row.get::<String, _>("name"),
-            None,
-            selected,
-            format!("{base}/{}", escape(&id)),
-            "<input type=\"hidden\" name=\"_method\" value=\"put\">",
-            "Save Changes",
-        )
-    } else {
-        (
-            "Set up a Webhook",
-            String::new(),
-            Some(String::new()),
-            Vec::new(),
-            base.clone(),
-            "",
-            "Create Webhook",
-        )
-    };
+    let (title, mut name, mut url, mut selected, action, method, submit, placeholder) =
+        if let Some(row) = webhook {
+            let id: String = row.get("id");
+            let selected: Vec<String> =
+                serde_json::from_str(&row.get::<String, _>("subscribed_actions"))
+                    .unwrap_or_default();
+            (
+                row.get::<String, _>("name"),
+                row.get::<String, _>("name"),
+                None,
+                selected,
+                format!("{base}/{}", escape(&id)),
+                "<input type=\"hidden\" name=\"_method\" value=\"put\">",
+                "Save Changes",
+                "Name your Webhook…",
+            )
+        } else {
+            (
+                "Set up a Webhook".to_owned(),
+                String::new(),
+                Some(String::new()),
+                Vec::new(),
+                base.clone(),
+                "",
+                "Create Webhook",
+                "Name this Webhook…",
+            )
+        };
     if let Some((submitted_name, submitted_url, submitted_actions)) = submitted {
         name = submitted_name.to_owned();
         if url.is_some() {
@@ -105,11 +118,23 @@ fn form(
         .map(|message| format!("<p class=\"error\" role=\"alert\">{}</p>", escape(message)))
         .unwrap_or_default();
     let content = format!(
-        "<article class=\"panel\">{error}<form method=\"post\" action=\"{action}\">{method}<div class=\"field\"><label for=\"webhook_name\">Webhook name</label><input id=\"webhook_name\" name=\"webhook[name]\" value=\"{}\" placeholder=\"Name this Webhook…\" required autofocus></div>{url_field}<div class=\"field\"><strong>Events</strong><small>Trigger a call to the Payload URL when:</small>{}</div><button class=\"submit\" type=\"submit\">{submit}</button></form></article><script>document.querySelectorAll('[data-checks]').forEach(button=>button.addEventListener('click',()=>document.querySelectorAll('.checks input[type=checkbox]').forEach(input=>input.checked=button.dataset.checks==='all')))</script>",
+        "<article class=\"panel\">{error}<form method=\"post\" action=\"{action}\">{method}<div class=\"field\"><label for=\"webhook_name\">Webhook name</label><input id=\"webhook_name\" name=\"webhook[name]\" value=\"{}\" placeholder=\"{placeholder}\" required autofocus></div>{url_field}<div class=\"field\"><strong>Events</strong><small>Trigger a call to the Payload URL when:</small>{}</div><button class=\"submit\" type=\"submit\">{submit}</button></form></article><script>document.querySelectorAll('[data-checks]').forEach(button=>button.addEventListener('click',()=>document.querySelectorAll('.checks input[type=checkbox]').forEach(input=>input.checked=button.dataset.checks==='all')))</script>",
         escape(&name),
         actions(&selected)
     );
-    page(account, board_id, title, &content)
+    let (back_path, back_label, show_header_title) = if let Some(row) = webhook {
+        (action, row.get::<String, _>("name"), false)
+    } else {
+        (base, "Webhooks".to_owned(), true)
+    };
+    page(
+        account,
+        &title,
+        &content,
+        &back_path,
+        &back_label,
+        show_header_title,
+    )
 }
 
 pub(super) async fn new(
@@ -162,6 +187,7 @@ pub(super) fn invalid_form(
 pub(super) fn index(
     account: i64,
     board_id: &str,
+    board_name: &str,
     rows: &[DbRow],
     page_number: i64,
     total: i64,
@@ -200,7 +226,7 @@ pub(super) fn index(
     let content = format!(
         "<section class=\"panel\">{intro}<ul class=\"webhook-list\">{entries}</ul><nav class=\"pagination\">{before}{after}</nav><a class=\"submit\" href=\"{base}/webhooks/new\">Set up a new webhook</a></section>"
     );
-    page(account, board_id, "Webhooks", &content)
+    page(account, "Webhooks", &content, &base, board_name, true)
 }
 
 pub(super) fn show(
@@ -259,5 +285,12 @@ pub(super) fn show(
         escape(&url),
         escape(&secret)
     );
-    page(account, board_id, &name, &content)
+    page(
+        account,
+        &name,
+        &content,
+        &format!("/{account}/boards/{}/webhooks", escape(board_id)),
+        "Webhooks",
+        false,
+    )
 }

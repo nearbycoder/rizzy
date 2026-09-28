@@ -52,6 +52,7 @@ def check(target):
         status, _, page = request(target, base + "/new", accept="text/html")
         assert status == 200 and b"Payload URL" in page and b"Enable all" in page, (target["name"], "new form", status)
         assert_shell(target, page)
+        assert b"Back to Webhooks" in page and f'href="{base}"'.encode() in page, (target["name"], "new form navigation")
         csrf = csrf_token(page)
 
         status, _, page = request(target, base, "POST", form(**{"webhook[name]":"", "webhook[url]":"invalid-url"}), accept="text/html", csrf=csrf)
@@ -77,6 +78,7 @@ def check(target):
         status, _, page = request(target, detail + "/edit", accept="text/html")
         assert status == 200 and b"Save Changes" in page and name.encode() in page, (target["name"], "edit form", status)
         assert_shell(target, page)
+        assert f"<title>{name} | ".encode() in page and b"Name your Webhook" in page, (target["name"], "edit title and placeholder")
         assert b'name="webhook[url]"' not in page, (target["name"], "url should not be editable")
         csrf = csrf_token(page)
         status, _, page = request(target, detail, "POST", form(**{"_method":"put", "webhook[name]":""}), accept="text/html", csrf=csrf)
