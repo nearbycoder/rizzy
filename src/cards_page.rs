@@ -645,14 +645,6 @@ pub(super) async fn show(
                 .replace("{{ACCOUNT}}", &principal.slug.to_string()),
         ),
         ("SHELL_SCRIPT", include_str!("../static/events.js").into()),
-        (
-            "FILTER_SAVED_VIEW_STYLES",
-            include_str!("../static/filter_saved_view.css").into(),
-        ),
-        (
-            "FILTER_SAVED_VIEW_SCRIPT",
-            include_str!("../static/filter_saved_view.js").into(),
-        ),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))
 }
