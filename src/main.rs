@@ -7652,6 +7652,10 @@ async fn update_user(
     } else {
         None
     };
+    let avatar_blob = avatar
+        .as_ref()
+        .and_then(Option::as_deref)
+        .map(str::to_owned);
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query("UPDATE users SET name=? WHERE id=?")
         .bind(name)
@@ -7666,6 +7670,9 @@ async fn update_user(
     };
     tx.commit().await.map_err(db_err)?;
     storage::remove_files(removed).await;
+    if let Some(blob_id) = avatar_blob {
+        storage::process_user_avatar_variant(&app, &blob_id).await?;
+    }
     if form {
         Ok((
             StatusCode::FOUND,

@@ -31,6 +31,7 @@ from column_cards_etag_parity import run as column_cache_run  # noqa: E402
 from named_column_show_etag_parity import run as column_show_cache_run  # noqa: E402
 from draft_workflow_parity import NoRedirect, login, run as draft_run  # noqa: E402
 from card_image_parity import IMAGE, run as card_image_run  # noqa: E402
+from avatar_parity import run as avatar_run  # noqa: E402
 from embed_parity import run as embed_run  # noqa: E402
 from card_controls_parity import check as card_controls_check  # noqa: E402
 from card_board_html_parity import check as card_board_check  # noqa: E402
@@ -74,7 +75,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
                                           "named-column", "column-cache", "column-show-cache",
-                                          "draft", "card-image", "embeds", "card-controls",
+                                          "draft", "card-image", "avatar", "embeds", "card-controls",
                                           "card-board", "card-edit", "assignment", "reaction",
                                           "column-turbo", "card-previews", "account-card",
                                           "board-views", "board-settings", "webhooks-html",
@@ -188,6 +189,12 @@ def main():
             elif args.suite == "card-image":
                 source_result = card_image_run(source)
                 rust_result = card_image_run(rust)
+            elif args.suite == "avatar":
+                for target in (source, rust):
+                    target["mysql_socket"] = socket
+                rust["storage"] = rizzy_dir / "storage"
+                source_result = avatar_run(source)
+                rust_result = avatar_run(rust)
             elif args.suite == "embeds":
                 source_result = embed_run(source)
                 rust_result = embed_run(rust)
@@ -465,6 +472,8 @@ def main():
             elif args.suite == "card-image":
                 print("Disposable MySQL card image workflow matched pinned Fizzy; "
                       f"image removal timestamp changes={source_result['delete_touch']}")
+            elif args.suite == "avatar":
+                print("Disposable MySQL avatar thumbnails, immediate variants, and cleanup matched pinned Fizzy")
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
             elif args.suite == "board-views":

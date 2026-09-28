@@ -1847,6 +1847,7 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     let target = directory.join(format!("{signature}.{extension}"));
     if fs::metadata(&target).await.is_ok() {
         persist_rich_text_variant(app, blob, &variation, &target).await?;
+        persist_avatar_variant(app, blob, &variation, &target).await?;
         return Ok(target);
     }
     fs::create_dir_all(&directory)
@@ -1856,7 +1857,7 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     let output = target.clone();
     let persisted_variation = variation.clone();
     tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
-        if variation.operation == "limit"
+        if matches!(variation.operation.as_str(), "limit" | "fill")
             && matches!(
                 image_format,
                 image::ImageFormat::Jpeg
@@ -1866,24 +1867,29 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
             )
         {
             let temporary = output.with_extension(format!("{}.tmp.{extension}", random_token()));
-            let source_argument = if matches!(
-                image_format,
-                image::ImageFormat::Gif | image::ImageFormat::WebP
-            ) {
+            let source_argument = if variation.operation == "limit"
+                && matches!(
+                    image_format,
+                    image::ImageFormat::Gif | image::ImageFormat::WebP
+                ) {
                 format!("{}[n=-1]", source.display())
             } else {
                 source.display().to_string()
             };
-            let result = std::process::Command::new("vips")
+            let mut command = std::process::Command::new("vips");
+            command
                 .arg("thumbnail_image")
                 .arg(source_argument)
                 .arg(&temporary)
                 .arg(variation.width.to_string())
                 .arg("--height")
-                .arg(variation.height.to_string())
-                .arg("--size")
-                .arg("down")
-                .output();
+                .arg(variation.height.to_string());
+            if variation.operation == "fill" {
+                command.arg("--crop").arg("centre");
+            } else {
+                command.arg("--size").arg("down");
+            }
+            let result = command.output();
             if matches!(result, Ok(ref result) if result.status.success()) {
                 std::fs::rename(&temporary, &output).map_err(|error| error.to_string())?;
                 return Ok(());
@@ -1924,7 +1930,19 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
         err(StatusCode::INTERNAL_SERVER_ERROR, "Image preview failed")
     })?;
     persist_rich_text_variant(app, blob, &persisted_variation, &target).await?;
+    persist_avatar_variant(app, blob, &persisted_variation, &target).await?;
     Ok(target)
+}
+
+pub(super) async fn process_user_avatar_variant(app: &App, blob_id: &str) -> Result<()> {
+    let blob = sqlx::query("SELECT * FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    let key = variation_key(app, "fill", 256, 256);
+    ensure_variation(app, &blob, &key).await?;
+    Ok(())
 }
 
 fn marshal_positive_fixnum(bytes: &mut Vec<u8>, value: u32) {
@@ -1977,6 +1995,40 @@ fn rich_text_variation_digest(format: &str, width: u32, height: u32) -> String {
     base64::engine::general_purpose::STANDARD.encode(Sha1::digest(bytes))
 }
 
+fn avatar_variation_digest(format: &str) -> String {
+    // ActiveStorage::Variation#digest for
+    // { format: format, resize_to_fill: [256, 256] }.
+    let mut bytes = vec![4, 8, b'{', 7];
+    marshal_symbol(&mut bytes, "format");
+    marshal_utf8_string(&mut bytes, format);
+    marshal_symbol(&mut bytes, "resize_to_fill");
+    bytes.extend_from_slice(&[b'[', 7]);
+    marshal_positive_fixnum(&mut bytes, 256);
+    marshal_positive_fixnum(&mut bytes, 256);
+    base64::engine::general_purpose::STANDARD.encode(Sha1::digest(bytes))
+}
+
+#[cfg(test)]
+#[test]
+fn avatar_variant_digest_matches_active_storage() {
+    assert_eq!(
+        avatar_variation_digest("jpg"),
+        "QCHtwKaNWtgBrxkcWm+AKwElcC4="
+    );
+    assert_eq!(
+        avatar_variation_digest("png"),
+        "Ul0XHozM8YT3OtF7o1bEa1I7itc="
+    );
+    assert_eq!(
+        avatar_variation_digest("gif"),
+        "jv+O+AdtkSYeg5C+IHiR/97I5NI="
+    );
+    assert_eq!(
+        avatar_variation_digest("webp"),
+        "+6T9y7mPFOY1C9jjOyjmh065U5o="
+    );
+}
+
 #[cfg(test)]
 #[test]
 fn rich_text_variant_digest_matches_active_storage() {
@@ -2014,6 +2066,31 @@ fn rich_text_variant_digest_matches_active_storage() {
     );
 }
 
+fn blob_variant_format(filename: &str, content_type: &str) -> String {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|extension| {
+            matches!(
+                (content_type, extension.as_str()),
+                ("image/jpeg", "jpg" | "jpeg")
+                    | ("image/png", "png")
+                    | ("image/gif", "gif")
+                    | ("image/webp", "webp")
+            )
+        })
+        .unwrap_or_else(|| {
+            match content_type {
+                "image/png" => "png",
+                "image/gif" => "gif",
+                "image/webp" => "webp",
+                _ => "jpg",
+            }
+            .to_owned()
+        })
+}
+
 async fn persist_rich_text_variant(
     app: &App,
     blob: &DbRow,
@@ -2036,32 +2113,49 @@ async fn persist_rich_text_variant(
     ) {
         return Ok(());
     }
+    let filename: String = blob.get("filename");
+    let format = blob_variant_format(&filename, &content_type);
+    let digest = rich_text_variation_digest(&format, variation.width, variation.height);
+    persist_variant_record(app, blob, &digest, target).await
+}
+
+async fn persist_avatar_variant(
+    app: &App,
+    blob: &DbRow,
+    variation: &Variation,
+    target: &std::path::Path,
+) -> Result<()> {
+    if variation.operation != "fill"
+        || (variation.width, variation.height) != (256, 256)
+        || variation.format.is_some()
+    {
+        return Ok(());
+    }
+    let blob_id: String = blob.get("id");
+    let attached: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE blob_id=? AND record_type='User' AND name='avatar'")
+        .bind(&blob_id)
+        .fetch_one(&app.db)
+        .await
+        .map_err(db_err)?;
+    if attached == 0 {
+        return Ok(());
+    }
+    let filename: String = blob.get("filename");
+    let content_type: String = blob.get("content_type");
+    let digest = avatar_variation_digest(&blob_variant_format(&filename, &content_type));
+    persist_variant_record(app, blob, &digest, target).await
+}
+
+async fn persist_variant_record(
+    app: &App,
+    blob: &DbRow,
+    digest: &str,
+    target: &std::path::Path,
+) -> Result<()> {
     let blob_id: String = blob.get("id");
     let account_id: String = blob.get("account_id");
     let filename: String = blob.get("filename");
-    let format = std::path::Path::new(&filename)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .filter(|extension| {
-            matches!(
-                (content_type.as_str(), extension.as_str()),
-                ("image/jpeg", "jpg" | "jpeg")
-                    | ("image/png", "png")
-                    | ("image/gif", "gif")
-                    | ("image/webp", "webp")
-            )
-        })
-        .unwrap_or_else(|| {
-            match content_type.as_str() {
-                "image/png" => "png",
-                "image/gif" => "gif",
-                "image/webp" => "webp",
-                _ => "jpg",
-            }
-            .to_owned()
-        });
-    let digest = rich_text_variation_digest(&format, variation.width, variation.height);
+    let content_type: String = blob.get("content_type");
     let exists: Option<String> = sqlx::query_scalar(
         "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
     )
