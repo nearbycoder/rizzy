@@ -6,18 +6,21 @@ All benchmark schemas have unique rzbench_ names and are dropped at the end.
 """
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
 from sustained_mixed import (ROOT, RUST, SOURCE, RUBY, first_difference, fixture,
-                             preflight, prepare_rust, prepare_source, run_load,
+                             preflight, prepare_rust, prepare_source, read_four, run_load,
                              start_server, stop_server)
+from card_workflow import workflow
 
 
 def mysql_admin(client, socket, statement):
@@ -90,6 +93,38 @@ def verify_counts(client, socket, database, initial_cards, units, boards=1):
     return actual
 
 
+def warmup_fixed_units(target, board_ids, paths, units, clients):
+    """Run the same number of complete read/write units on each target."""
+    boards = board_ids if isinstance(board_ids, list) else [board_ids]
+    urls = target.get("urls")
+    started = time.monotonic()
+
+    def run(index):
+        worker_target = {**target, "url": urls[index % len(urls)]} if urls else target
+        process_index = index % len(urls) if urls else 0
+        board_index = index % len(boards)
+        worker_paths = paths[board_index] if isinstance(board_ids, list) else paths
+        try:
+            read_four(worker_target, worker_paths)
+            workflow(worker_target, boards[board_index], 1_000_000 + index)
+            return board_index, process_index, None
+        except Exception as error:
+            return board_index, process_index, f"{type(error).__name__}: {str(error)[:180]}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(clients, max(units, 1))) as pool:
+        outcomes = list(pool.map(run, range(units)))
+    completed = [(board, process) for board, process, error in outcomes if error is None]
+    result = {"units_requested": units, "units_completed": len(completed),
+            "seconds_elapsed": round(time.monotonic() - started, 2),
+            "errors": [error for _, _, error in outcomes if error is not None][:10],
+            "units_by_board": [sum(board == index for board, _ in completed)
+                               for index in range(len(boards))]}
+    if urls:
+        result["units_by_process"] = [sum(process == index for _, process in completed)
+                                      for index in range(len(urls))]
+    return result
+
+
 def run_pair(args, server_cpus, order):
     prefix = "rzbench_" + uuid.uuid4().hex[:12]
     source_dbs = {role: prefix + "_f" + suffix for role, suffix in
@@ -151,14 +186,34 @@ def run_pair(args, server_cpus, order):
                 raise AssertionError("workflow shapes: " + difference)
             if difference := first_difference(samples["fizzy"], samples["rizzy"]):
                 raise AssertionError("fixture: " + difference)
-            result = {"sample_parity": samples["fizzy"], "runs": {},
+            result = {"sample_parity": samples["fizzy"], "warmups": {}, "runs": {},
                       "paired_comparable": True}
             for name in order:
+                active_name = name + " warmup"
+                database = source_dbs[""] if name == "fizzy" else rust_db
+                warmup = warmup_fixed_units(targets[name], boards[name], paths[name],
+                                            args.warmup_units, args.clients)
+                result["warmups"][name] = warmup
+                if args.warmup_units:
+                    print(f"{name} warmup: {warmup['units_completed']}/{args.warmup_units} "
+                          f"units, {len(warmup['errors'])} errors", file=sys.stderr, flush=True)
+                if warmup["errors"]:
+                    warmup["observed_counts"] = observed_counts(
+                        args.mysql_client, args.mysql_socket, database, args.boards)
+                    result["paired_comparable"] = False
+                    break
+                try:
+                    warmup["verified_counts"] = verify_counts(
+                        args.mysql_client, args.mysql_socket, database, args.cards,
+                        warmup["units_completed"], args.boards)
+                except AssertionError as error:
+                    warmup["count_verification_error"] = str(error)
+                    result["paired_comparable"] = False
+                    break
                 active_name = name + " load"
                 sample = run_load(targets[name], boards[name], paths[name],
                                   args.seconds, args.clients)
                 result["runs"][name] = sample
-                database = source_dbs[""] if name == "fizzy" else rust_db
                 if sample["errors"]:
                     sample["observed_counts"] = observed_counts(
                         args.mysql_client, args.mysql_socket, database, args.boards)
@@ -168,7 +223,7 @@ def run_pair(args, server_cpus, order):
                     try:
                         sample["verified_counts"] = verify_counts(
                             args.mysql_client, args.mysql_socket, database, args.cards,
-                            sample["units_completed"], args.boards)
+                            warmup["units_completed"] + sample["units_completed"], args.boards)
                         sample["valid_for_throughput_comparison"] = True
                     except AssertionError as error:
                         sample["count_verification_error"] = str(error)
@@ -180,8 +235,12 @@ def run_pair(args, server_cpus, order):
                       f"{len(sample['errors'])} errors, "
                       f"comparable={sample['valid_for_throughput_comparison']}",
                       file=sys.stderr, flush=True)
-            if result["runs"]["fizzy"]["client_board_indexes"] != result["runs"]["rizzy"]["client_board_indexes"]:
+            if len(result["runs"]) == 2 and result["runs"]["fizzy"]["client_board_indexes"] != result["runs"]["rizzy"]["client_board_indexes"]:
                 raise AssertionError("client-to-board assignment differs between targets")
+            if (len(result["warmups"]) == 2
+                    and all(not warmup["errors"] for warmup in result["warmups"].values())
+                    and result["warmups"]["fizzy"]["units_by_board"] != result["warmups"]["rizzy"]["units_by_board"]):
+                raise AssertionError("warmup board assignment differs between targets")
             if not result["paired_comparable"]:
                 failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
                 result["diagnostics"] = {}
@@ -227,6 +286,7 @@ def main():
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--server-cpus", type=int, default=4)
     parser.add_argument("--rizzy-processes", type=int, default=1)
+    parser.add_argument("--warmup-units", type=int, default=0)
     parser.add_argument("--mysql-client", default="/tmp/rizzy-mysql8/bin/mysql")
     parser.add_argument("--mysql-socket", default="/tmp/rizzy-mysql8/mysql.sock")
     parser.add_argument("--mysql-host", default="127.0.0.1")
@@ -236,6 +296,8 @@ def main():
     if min(args.seconds, args.clients, args.cards, args.boards, args.rounds,
            args.server_cpus, args.rizzy_processes) <= 0:
         parser.error("all numeric arguments must be positive")
+    if args.warmup_units < 0:
+        parser.error("warmup units must be nonnegative")
     if args.cards % args.boards:
         parser.error("cards must be divisible by boards")
     available = sorted(os.sched_getaffinity(0))
@@ -258,6 +320,7 @@ def main():
               "workload": "four JSON reads plus create/edit/comment/close/read per unit",
               "initial_cards": args.cards, "boards": args.boards,
               "seconds_per_target": args.seconds,
+              "warmup_units_per_target": args.warmup_units,
               "clients": args.clients, "source_puma_workers": args.server_cpus,
               "rizzy_processes": args.rizzy_processes,
               "server_cpus": server_cpus,
