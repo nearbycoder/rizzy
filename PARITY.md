@@ -166,7 +166,12 @@ match for the fixture, including the User `attachable_sgid`
 field. The test also passes each Rizzy User SGID to Fizzy's signed GlobalID
 parser with a shared signing secret and checks the decoded User ID. Rizzy's
 mention picker now emits this format; `tests/mentions.py` checks that the signed
-IDs render and create mentions and notifications. The export fixture writes a
+IDs render and create mentions and notifications.
+`tests/mention_attachment_flag_paired.py` confirms that a rendered User mention
+does not set the card's `has_attachments` flag on either app. The rendered mention
+HTML still differs: Fizzy includes an avatar image and full name, while Rizzy
+currently uses a span and first name.
+The export fixture writes a
 signed User attachment to each card, explicitly runs Fizzy's queued mention
 job, and checks that both archives contain its portable User GID and one
 mention. New direct, multipart, and imported blobs use Rails-compatible signed

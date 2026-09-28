@@ -1040,7 +1040,6 @@ pub(super) async fn render_rich_text(
                     escape(first_name)
                 );
                 replacements.push((token.clone(), markup.clone(), markup));
-                attached = true;
             } else if let Some((plain, markup)) = external_attachment(attributes) {
                 if plain_input.ends_with('\n') {
                     plain_input.pop();
