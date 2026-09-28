@@ -1054,6 +1054,13 @@ still matches the source's HTML email and confirms its link. Old random-token
 links issued by earlier Rizzy builds are no longer accepted. Broader account
 states and browser presentation remain open.
 
+`tests/email_change_cluster.py` starts two Rizzy processes on one fresh SQLite
+database without `RIZZY_SECRET_KEY_BASE`. One process issues the email link;
+the other confirms it and renews the browser session; the first then reads the
+new identity and rejects replay. This checks that the persisted per-database
+signing secret works across two local processes. It does not test separate
+hosts or MySQL deployment.
+
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 
 `tests/request_forgery_parity.py` compares the pinned source's header-only forgery decisions with Rizzy on twelve JSON write cases: absent, same-origin, same-site, cross-site, invalid, and HTTPS `Sec-Fetch-Site` conditions plus correct and incorrect `Origin`. It also checks a same-origin cookie-backed form, compares the exact 422 HTML response for a cross-site form, and verifies that the source's anonymous unsubscribe action remains exempt. The pinned source forgery suite passed 4 tests and 20 assertions. Rust's local HTTP and forwarded HTTPS form probes verified allowed writes and rejection without a valid fetch-site header. `tests/board_settings_html_parity.py` still passes through browser-style form creation, update, and deletion after the middleware change. This matches the source's present `header_only` strategy on the tested paths; the broader cross-origin JavaScript response check and full reverse-proxy deployment behavior still need verification.
