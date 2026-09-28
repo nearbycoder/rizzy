@@ -34,7 +34,8 @@ def check(target):
     owner = next(user for user in json.loads(raw) if user["role"] == "owner")
     forms = {}
     pages = {}
-    for label, suffix in (("show", ""), ("edit", "/edit")):
+    for label, suffix in (("show", ""), ("edit", "/edit"),
+                          ("email_new", "/email_addresses/new")):
         status, _, raw = request(target, f"/{account}/users/{owner['id']}{suffix}",
                                  accept="text/html")
         assert status == 200, (target["name"], label, status)
@@ -92,7 +93,12 @@ def check(target):
                 tuple(marker in pages[label] for marker in (
                     b'id="global-container"', b'id="header"',
                     b'id="my_menu"', b'id="main"', b'id="footer_frames"'))
-                for label in ("show", "edit")),
+                for label in ("show", "edit", "email_new")),
+            "edit_navigation": tuple(marker in pages["edit"] for marker in (
+                b'header__actions--start', b'btn--back', b'Back to profile',
+                b'Cancel and go back', b'hidden')),
+            "email_navigation": tuple(marker in pages["email_new"] for marker in (
+                b'header__actions--start', b'btn--back', b'Back to My profile')),
             "profile_structure": tuple(marker in pages["show"] for marker in (
                 b"settings--profile", b"settings__panel", b"Appearance",
                 b"theme-switcher", b"Which cards are assigned to me?",
@@ -133,6 +139,8 @@ def main():
                 })
             assert results["fizzy"] == results["rizzy"], results
             assert all(all(page) for page in results["fizzy"]["shell_structure"]), results
+            assert all(results["fizzy"]["edit_navigation"]), results
+            assert all(results["fizzy"]["email_navigation"]), results
             assert all(results["fizzy"]["profile_structure"]), results
             assert results["fizzy"]["avatar_state"] == (302, 1, 200, 0), results
             assert results["fizzy"]["signout"] == (302, "/session/new", 302), results

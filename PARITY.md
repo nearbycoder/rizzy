@@ -17,6 +17,16 @@ Chromium opened the profile menu and loaded its navigation controls. Exact
 styling, native behavior, and remaining profile interactions still differ
 from Fizzy.
 
+The edit, email-entry, and email-sent pages now place their back link in the
+header, as the pinned templates do. On the Rust edit page, Chromium returned
+to the profile with Escape from the focused name field, followed the header
+back link with Left when focus was outside an input, and kept Left inside the
+name input for text navigation. Selecting an avatar previewed the file in the
+browser; Save changes completed the direct upload and attached one User avatar.
+The paired owner form check also compares the edit page's back control and
+hidden cancel link. The edit page's exact layout and Turbo navigation behavior
+remain open.
+
 `tests/user_profile_member_paired.py` compares another member's unverified,
 verified, and removed profile states on fresh paired apps. Unverified profiles
 show one panel and the verification message without email or timeline; verified

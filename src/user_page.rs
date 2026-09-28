@@ -9,10 +9,20 @@ use super::{
 const TEMPLATE: &str = include_str!("../static/user.html");
 
 fn page(title: &str, account: i64, content: String) -> Html<String> {
+    page_with_header(title, account, content, String::new())
+}
+
+fn page_with_header(
+    title: &str,
+    account: i64,
+    content: String,
+    header_content: String,
+) -> Html<String> {
     let values = HashMap::from([
         ("TITLE", escape(title)),
         ("ACCOUNT", account.to_string()),
         ("CONTENT", content),
+        ("HEADER_CONTENT", header_content),
         (
             "EVENTS_CSS",
             include_str!("../static/events.css").to_owned(),
@@ -28,6 +38,13 @@ fn page(title: &str, account: i64, content: String) -> Html<String> {
         ),
     ]);
     Html(render_template(TEMPLATE, &values))
+}
+
+fn header_back(path: &str, label: &str) -> String {
+    format!(
+        "<div class=\"header__actions header__actions--start\"><a class=\"btn btn--back btn--circle-mobile\" href=\"{path}\" data-header-back><span aria-hidden=\"true\">←</span><strong>Back to {label}</strong><kbd class=\"txt-x-small hide-on-touch\">ESC</kbd></a></div>",
+        label = escape(label)
+    )
 }
 
 pub(super) async fn show(
@@ -175,13 +192,18 @@ pub(super) fn edit(
         ""
     };
     let content = format!(
-        "<a href=\"{path}\">← Back to profile</a><div class=\"profile-card\"><h1>Edit your profile</h1>{error}<form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><div class=\"profile-avatar-controls\"><label class=\"profile-avatar-upload\"><img id=\"avatar-preview\" class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><input id=\"avatar-file\" type=\"file\" name=\"user[avatar]\" accept=\"image/jpeg,image/png,image/gif,image/webp\" data-direct-upload-url=\"/{}/rails/active_storage/direct_uploads\"><span>Choose avatar</span></label>{remove_avatar}</div><label>Name<input type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" name=\"user[email_address]\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\">Cancel and go back</a></div></form><form id=\"avatar-delete-form\" method=\"post\" action=\"{path}/avatar\"><input type=\"hidden\" name=\"_method\" value=\"delete\"></form></div><script type=\"module\">import {{ start }} from '/assets/lexxy/activestorage.esm.js'; start(); const input=document.getElementById('avatar-file'); const preview=document.getElementById('avatar-preview'); let temporary; input.addEventListener('change',()=>{{if(temporary)URL.revokeObjectURL(temporary); if(input.files[0]){{temporary=URL.createObjectURL(input.files[0]);preview.src=temporary}}}}); document.getElementById('avatar-delete-form')?.addEventListener('submit',async event=>{{event.preventDefault();if(!confirm('Are you sure you want to remove your avatar? This cannot be undone.'))return;const response=await fetch('{path}/avatar',{{method:'DELETE',headers:{{Accept:'application/json'}}}});if(response.ok)location.href='{path}';else alert('Could not remove avatar')}});</script>",
+        "<div class=\"profile-card\"><h1>Edit your profile</h1>{error}<form class=\"profile-form\" action=\"{path}\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><div class=\"profile-avatar-controls\"><label class=\"profile-avatar-upload\"><img id=\"avatar-preview\" class=\"profile-avatar\" src=\"{path}/avatar\" alt=\"Profile avatar for {}\"><input id=\"avatar-file\" type=\"file\" name=\"user[avatar]\" accept=\"image/jpeg,image/png,image/gif,image/webp\" data-direct-upload-url=\"/{}/rails/active_storage/direct_uploads\"><span>Choose avatar</span></label>{remove_avatar}</div><label>Name<input id=\"profile-name\" type=\"text\" name=\"user[name]\" value=\"{}\" autocomplete=\"name\" required autofocus></label><label>Email address<input type=\"email\" name=\"user[email_address]\" value=\"{}\" readonly></label><a href=\"{path}/email_addresses/new\">Change email</a><div class=\"profile-form__actions\"><button class=\"button\" type=\"submit\">Save changes</button><a href=\"{path}\" hidden>Cancel and go back</a></div></form><form id=\"avatar-delete-form\" method=\"post\" action=\"{path}/avatar\"><input type=\"hidden\" name=\"_method\" value=\"delete\"></form></div><script type=\"module\">import {{ start }} from '/assets/lexxy/activestorage.esm.js'; start(); const input=document.getElementById('avatar-file'); const preview=document.getElementById('avatar-preview'); let temporary; input.addEventListener('change',()=>{{if(temporary)URL.revokeObjectURL(temporary); if(input.files[0]){{temporary=URL.createObjectURL(input.files[0]);preview.src=temporary}}}}); document.getElementById('profile-name').addEventListener('keydown',event=>{{if(event.key==='Escape'){{event.preventDefault();location.href='{path}'}}}}); document.getElementById('avatar-delete-form')?.addEventListener('submit',async event=>{{event.preventDefault();if(!confirm('Are you sure you want to remove your avatar? This cannot be undone.'))return;const response=await fetch('{path}/avatar',{{method:'DELETE',headers:{{Accept:'application/json'}}}});if(response.ok)location.href='{path}';else alert('Could not remove avatar')}});</script>",
         escape(&name),
         principal.slug,
         escape(&name),
         escape(email)
     );
-    page("Edit your profile", principal.slug, content)
+    page_with_header(
+        "Edit your profile",
+        principal.slug,
+        content,
+        header_back(&path, "profile"),
+    )
 }
 
 pub(super) fn new_email(principal: &Principal, user_id: &str) -> Html<String> {
@@ -191,20 +213,31 @@ pub(super) fn new_email(principal: &Principal, user_id: &str) -> Html<String> {
         escape(user_id)
     );
     let content = format!(
-        "<a href=\"/{}/users/{}/edit\">← My profile</a><div class=\"profile-card\"><h1>Change your email</h1><form class=\"profile-form\" method=\"post\" action=\"{path}\"><label>New email address<input type=\"email\" name=\"email_address\" placeholder=\"New email address\" autocomplete=\"email\" required autofocus></label><p>Enter your new email address, then check your email to confirm the change.</p><button class=\"button\" type=\"submit\">Continue</button></form></div>",
-        principal.slug,
-        escape(user_id)
+        "<div class=\"profile-card\"><h1>Change your email</h1><form class=\"profile-form\" method=\"post\" action=\"{path}\"><label>New email address<input type=\"email\" name=\"email_address\" placeholder=\"New email address\" autocomplete=\"email\" required autofocus></label><p>Enter your new email address, then check your email to confirm the change.</p><button class=\"button\" type=\"submit\">Continue</button></form></div>"
     );
-    page("Change your email", principal.slug, content)
+    page_with_header(
+        "Change your email",
+        principal.slug,
+        content,
+        header_back(
+            &format!("/{}/users/{}/edit", principal.slug, escape(user_id)),
+            "My profile",
+        ),
+    )
 }
 
 pub(super) fn email_sent(principal: &Principal, user_id: &str, email: &str) -> Html<String> {
     let edit = format!("/{}/users/{}/edit", principal.slug, escape(user_id));
     let content = format!(
-        "<a href=\"{edit}\">← My profile</a><div class=\"profile-card\"><h1>Check your email</h1><p>We just sent an email to <strong>{}</strong></p><p>Hit the link in the email to confirm this is the email address you want to use with Rizzy going forward.</p><a class=\"button\" href=\"{edit}\">Done</a></div>",
+        "<div class=\"profile-card\"><h1>Check your email</h1><p>We just sent an email to <strong>{}</strong></p><p>Hit the link in the email to confirm this is the email address you want to use with Rizzy going forward.</p><a class=\"button\" href=\"{edit}\">Done</a></div>",
         escape(email)
     );
-    page("Confirm your new email address", principal.slug, content)
+    page_with_header(
+        "Confirm your new email address",
+        principal.slug,
+        content,
+        header_back(&edit, "My profile"),
+    )
 }
 
 pub(super) fn confirm_email(account: i64, user_id: &str, token: &str) -> Html<String> {
