@@ -1,4 +1,8 @@
-use axum::response::Html;
+use axum::{
+    extract::Path,
+    http::{HeaderValue, StatusCode, header},
+    response::{Html, IntoResponse, Response},
+};
 use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
@@ -9,6 +13,37 @@ use super::{
 
 const TEMPLATE: &str = include_str!("../static/card.html");
 const NEW_COMMENT: &str = include_str!("../static/new_comment.html");
+
+pub(super) async fn icon(Path(filename): Path<String>) -> Response {
+    let svg = match filename.as_str() {
+        "arrow-left.svg" => include_str!("../static/card-icons/arrow-left.svg"),
+        "bell-off.svg" => include_str!("../static/card-icons/bell-off.svg"),
+        "bell.svg" => include_str!("../static/card-icons/bell.svg"),
+        "check.svg" => include_str!("../static/card-icons/check.svg"),
+        "golden-ticket.svg" => include_str!("../static/card-icons/golden-ticket.svg"),
+        "pencil.svg" => include_str!("../static/card-icons/pencil.svg"),
+        "picture-add.svg" => include_str!("../static/card-icons/picture-add.svg"),
+        "picture-remove.svg" => include_str!("../static/card-icons/picture-remove.svg"),
+        "pinned.svg" => include_str!("../static/card-icons/pinned.svg"),
+        "tag.svg" => include_str!("../static/card-icons/tag.svg"),
+        "unpinned.svg" => include_str!("../static/card-icons/unpinned.svg"),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("image/svg+xml"),
+            ),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=300"),
+            ),
+        ],
+        svg,
+    )
+        .into_response()
+}
 
 pub(super) fn new_comment_form(principal: &Principal, card: &DbRow, first_comment: bool) -> String {
     let placeholder = if first_comment && card.get::<String, _>("creator_id") == principal.user_id {
@@ -304,12 +339,12 @@ pub(super) async fn show(
         })
         .unwrap_or_default();
     let image_button = if image_url.as_str().is_some() {
-        "<button class=\"side-action side-action--image\" id=\"remove-image\" type=\"button\" aria-label=\"Remove background image\" title=\"Remove background image\">⊠</button>".to_owned()
+        "<button class=\"side-action side-action--image\" id=\"remove-image\" type=\"button\" aria-label=\"Remove background image\" title=\"Remove background image\"><span class=\"card-icon card-icon--picture-remove\" aria-hidden=\"true\"></span></button>".to_owned()
     } else if closed {
         String::new()
     } else {
         format!(
-            "<form id=\"image-upload-form\" action=\"/{}/cards/{number}\" method=\"post\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label class=\"side-action side-action--image\" title=\"Add background image\"><span class=\"for-screen-reader\">Add background image</span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><circle cx=\"8\" cy=\"9\" r=\"2\"/><path d=\"m3 18 6-6 4 4 3-3 5 5M18 1v6M15 4h6\"/></svg><input id=\"image-upload\" name=\"card[image]\" type=\"file\" accept=\"image/png,image/jpeg,image/jpg,image/webp\" aria-label=\"Add background image\"></label><noscript><button type=\"submit\">Save background image</button></noscript></form>",
+            "<form id=\"image-upload-form\" action=\"/{}/cards/{number}\" method=\"post\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><label class=\"side-action side-action--image\" title=\"Add background image\"><span class=\"for-screen-reader\">Add background image</span><span class=\"card-icon card-icon--picture-add\" aria-hidden=\"true\"></span><input id=\"image-upload\" name=\"card[image]\" type=\"file\" accept=\"image/png,image/jpeg,image/jpg,image/webp\" aria-label=\"Add background image\"></label><noscript><button type=\"submit\">Save background image</button></noscript></form>",
             principal.slug
         )
     };

@@ -104,7 +104,7 @@ pub(super) async fn tags(app: &App, p: &Principal, card: &DbRow) -> Result<Strin
         String::new()
     } else {
         format!(
-            "<button class=\"card__tag-picker-button\" type=\"button\" aria-label=\"Add a tag\" title=\"Add a tag\" data-tag-picker-url=\"/{}/cards/{number}/taggings/new\">#</button><dialog class=\"tag-dialog\" aria-label=\"Tag this card\"><button type=\"button\" class=\"tag-dialog__close\" aria-label=\"Close tag picker\">×</button><div class=\"tag-dialog__content\"></div><p class=\"error tag-dialog__error\" role=\"alert\"></p></dialog>",
+            "<button class=\"card__tag-picker-button\" type=\"button\" aria-label=\"Add a tag\" title=\"Add a tag\" data-tag-picker-url=\"/{}/cards/{number}/taggings/new\"><span class=\"card-icon card-icon--tag\" aria-hidden=\"true\"></span></button><dialog class=\"tag-dialog\" aria-label=\"Tag this card\"><button type=\"button\" class=\"tag-dialog__close\" aria-label=\"Close tag picker\">×</button><div class=\"tag-dialog__content\"></div><p class=\"error tag-dialog__error\" role=\"alert\"></p></dialog>",
             p.slug
         )
     };

@@ -4681,6 +4681,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/service-worker.js", get(pwa::service_worker))
         .route("/assets/pwa/{filename}", get(pwa::asset))
         .route("/assets/events/icons/{filename}", get(events_page::icon))
+        .route("/assets/card/icons/{filename}", get(card_page::icon))
         .route("/assets/menu/icons/{filename}", get(events_page::menu_icon))
         .route("/app-icon.png", get(pwa::icon))
         .route("/app-icon-192.png", get(pwa::icon))
