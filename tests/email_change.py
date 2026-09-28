@@ -1,17 +1,40 @@
 #!/usr/bin/env python3
 """Verify email changes require a fresh, one-use confirmation token."""
+import base64
 import hashlib
+import hmac
+import json
 import os
 import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import uuid
 from pathlib import Path
 
 from auth import BINARY, ROOT, cookie, start, stop
 from join import call
+
+
+SECRET = "0123456789abcdef" * 4
+
+
+def expired_email_token(user_id, old_email, new_email):
+    query = urllib.parse.urlencode({
+        "old_email_address": old_email,
+        "new_email_address": new_email,
+        "expires_in": "1800",
+    })
+    gid = f"gid://fizzy/User/{user_id}?{query}"
+    envelope = {"_rails": {"data": gid, "exp": "2025-01-01T00:00:00.000Z",
+                            "pur": "change_email_address"}}
+    serialized = json.dumps(envelope, separators=(",", ":"), ensure_ascii=False).replace("&", "\\u0026")
+    encoded = base64.urlsafe_b64encode(serialized.encode()).decode()
+    key = hashlib.pbkdf2_hmac("sha256", SECRET.encode(), b"signed_global_ids", 1000, 64)
+    digest = hmac.new(key, encoded.encode(), hashlib.sha1).hexdigest()
+    return f"{encoded}--{digest}"
 
 
 def main():
@@ -25,7 +48,7 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "email-change.sqlite3"
         env = {**os.environ, "RIZZY_DATABASE_URL": mysql_url or f"sqlite://{database}",
-               "RIZZY_SEED_EMAIL": email("owner")}
+               "RIZZY_SEED_EMAIL": email("owner"), "RIZZY_SECRET_KEY_BASE": SECRET}
         seeded = subprocess.run([BINARY, "seed"], cwd=ROOT, env=env, capture_output=True, text=True, check=True)
         account = re.search(r"Account: (\d+)", seeded.stdout).group(1)
         owner_token = re.search(r"Bearer token: (\w+)", seeded.stdout).group(1)
@@ -54,17 +77,10 @@ def main():
                     db.execute("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES('another-user',?,'another-identity','Another','member','2026-01-01T00:00:00Z')", (account_id,))
             existing, _ = call(port, request_path, "POST", {"email_address": email("another")}, bearer=owner_token, status=422)
             assert existing["error"] == "You already have a user in this account with that email address"
-            _, headers = call(port, request_path, "POST", {"email_address": email("expired")}, bearer=owner_token, status=201)
-            expired_token = headers["X-Email-Change-Token"]
+            expired_token = expired_email_token(owner_id, email("owner"), email("expired"))
             expired_path = f"/{account}/users/{owner_id}/email_addresses/{expired_token}/confirmation"
             html, _ = call(port, expired_path)
             assert "Confirm email change" in html
-            expired_hash = hashlib.sha256(expired_token.encode()).hexdigest()
-            if mysql_url:
-                mysql_scalar(mysql_url, f"UPDATE email_change_requests SET expires_at='2025-01-01T00:00:00Z' WHERE token_hash='{expired_hash}'")
-            else:
-                with sqlite3.connect(database) as db:
-                    db.execute("UPDATE email_change_requests SET expires_at='2025-01-01T00:00:00Z' WHERE token_hash=?", (expired_hash,))
             error, _ = call(port, expired_path, "POST", status=422)
             assert error["error"] == "Token is invalid or has expired"
             _, headers = call(port, request_path, "POST", {"email_address": email("new")}, bearer=owner_token, status=201)

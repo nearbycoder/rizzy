@@ -7939,7 +7939,6 @@ async fn request_email_change(
     .await?;
     let old=sqlx::query("SELECT u.identity_id,i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=? AND u.account_id=? AND u.active=1")
         .bind(&p.user_id).bind(&p.account_id).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
-    let old_identity: String = old.get("identity_id");
     if old
         .get::<String, _>("email_address")
         .eq_ignore_ascii_case(&email)
@@ -7961,23 +7960,18 @@ async fn request_email_change(
             "You already have a user in this account with that email address",
         ));
     }
-    let token = random_token();
-    sqlx::query("INSERT INTO email_change_requests(token_hash,account_id,user_id,old_identity_id,new_email_address,expires_at,created_at) VALUES(?,?,?,?,?,?,?)")
-        .bind(hash(&token)).bind(&p.account_id).bind(&p.user_id).bind(old_identity).bind(&email)
-        .bind(future_minutes(30)).bind(now()).execute(&app.db).await.map_err(db_err)?;
+    let token = app.sgid_signer.email_change(
+        &p.user_id,
+        old.get("email_address"),
+        &email,
+        Utc::now() + chrono::Duration::minutes(30),
+    );
     let link = format!(
         "{}/{}/users/{user_id}/email_addresses/{token}/confirmation",
         base(&headers),
         p.slug
     );
-    if let Err(error) = deliver_email_change(&email, &link).await {
-        sqlx::query("DELETE FROM email_change_requests WHERE token_hash=?")
-            .bind(hash(&token))
-            .execute(&app.db)
-            .await
-            .map_err(db_err)?;
-        return Err(error);
-    }
+    deliver_email_change(&email, &link).await?;
     let mut response = if form {
         user_page::email_sent(&p, &user_id, &email).into_response()
     } else {
@@ -7986,7 +7980,7 @@ async fn request_email_change(
     if dev_magic_links() {
         response.headers_mut().insert(
             "x-email-change-token",
-            HeaderValue::from_str(&token).expect("hex token"),
+            HeaderValue::from_str(&token).expect("signed token"),
         );
     }
     Ok(response)
@@ -8021,14 +8015,24 @@ async fn confirm_email_change(
         "Try again later.",
     )
     .await?;
-    let Some(request)=sqlx::query("SELECT old_identity_id,new_email_address FROM email_change_requests WHERE token_hash=? AND user_id=? AND account_id=? AND expires_at>?")
-        .bind(hash(&token)).bind(&user_id).bind(user.get::<String,_>("account_id")).bind(now())
-        .fetch_optional(&app.db).await.map_err(db_err)? else {return Ok(email_change_invalid(&headers,slug,&user_id));};
-    let old_identity: String = request.get("old_identity_id");
-    if old_identity != user.get::<String, _>("identity_id") {
+    let Some((signed_user_id, old_email, new_email)) =
+        app.sgid_signer.parse_email_change(&token, Utc::now())
+    else {
+        return Ok(email_change_invalid(&headers, slug, &user_id));
+    };
+    if signed_user_id != user_id {
         return Ok(email_change_invalid(&headers, slug, &user_id));
     }
-    let new_email: String = request.get("new_email_address");
+    let old_identity: String = user.get("identity_id");
+    let current_email: String =
+        sqlx::query_scalar("SELECT email_address FROM identities WHERE id=?")
+            .bind(&old_identity)
+            .fetch_one(&app.db)
+            .await
+            .map_err(db_err)?;
+    if current_email != old_email {
+        return Ok(email_change_invalid(&headers, slug, &user_id));
+    }
     let mut tx = app.db.begin().await.map_err(db_err)?;
     let insert_identity = if app.mysql {
         "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
@@ -8064,12 +8068,6 @@ async fn confirm_email_change(
     if changed.rows_affected() == 0 {
         return Ok(email_change_invalid(&headers, slug, &user_id));
     }
-    sqlx::query("DELETE FROM email_change_requests WHERE user_id=? AND account_id=?")
-        .bind(&user_id)
-        .bind(user.get::<String, _>("account_id"))
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
     if let Some(session) = cookie_value(&headers, "session_token") {
         sqlx::query("DELETE FROM sessions WHERE token_hash=?")
             .bind(hash(&session))
