@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Copy)]
-enum Control {
+pub(super) enum Control {
     Pin,
     Watch,
 }
@@ -42,12 +42,18 @@ async fn enabled(
     Ok(active != 0)
 }
 
-fn button(account: i64, number: i64, card_id: &str, control: Control, active: bool) -> String {
-    let (label, method, icon) = match (control, active) {
-        (Control::Pin, true) => ("Unpin this card", "delete", "◆"),
-        (Control::Pin, false) => ("Pin this card", "", "◇"),
-        (Control::Watch, true) => ("Stop watching", "delete", "◉"),
-        (Control::Watch, false) => ("Watch this", "", "◎"),
+pub(super) fn button(
+    account: i64,
+    number: i64,
+    card_id: &str,
+    control: Control,
+    active: bool,
+) -> String {
+    let (label, method) = match (control, active) {
+        (Control::Pin, true) => ("Unpin this card", "delete"),
+        (Control::Pin, false) => ("Pin this card", ""),
+        (Control::Watch, true) => ("Stop watching", "delete"),
+        (Control::Watch, false) => ("Watch this", ""),
     };
     let path = format!("/{account}/cards/{number}/{}", control.name());
     let id = escape(card_id);
@@ -57,9 +63,10 @@ fn button(account: i64, number: i64, card_id: &str, control: Control, active: bo
         format!("<input type=\"hidden\" name=\"_method\" value=\"{method}\">")
     };
     let reversed = if active { " btn--reversed" } else { "" };
+    let name = control.name();
+    let data_method = if active { "DELETE" } else { "POST" };
     format!(
-        "<div id=\"{}_button_card_{id}\"><form method=\"post\" action=\"{path}\">{method_input}<button class=\"btn btn--circle-mobile{reversed}\" type=\"submit\" aria-label=\"{label}\" title=\"{label}\">{icon}<span class=\"for-screen-reader\">{label}</span></button></form></div>",
-        control.name()
+        "<div id=\"{name}_button_card_{id}\"><form id=\"{name}-action-form\" method=\"post\" action=\"{path}\">{method_input}<button id=\"{name}\" class=\"btn btn--circle-mobile{reversed} secondary side-action side-action--{name}\" type=\"submit\" aria-label=\"{label}\" title=\"{label}\" data-method=\"{data_method}\"><span class=\"card-icon card-icon--{name}\" aria-hidden=\"true\"></span><span class=\"for-screen-reader\">{label}</span></button></form></div>"
     )
 }
 

@@ -7,8 +7,8 @@ use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
 use super::{
-    App, Principal, Result, assignment_page, board, board_views, comment_edit_page, db_err, escape,
-    reaction_page, step_frame, storage, tagging_page, wrap_html,
+    App, Principal, Result, assignment_page, board, board_views, card_controls, comment_edit_page,
+    db_err, escape, reaction_page, step_frame, storage, tagging_page, wrap_html,
 };
 
 const TEMPLATE: &str = include_str!("../static/card.html");
@@ -474,6 +474,26 @@ pub(super) async fn show(
         ),
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
+        (
+            "WATCH_FORM",
+            card_controls::button(
+                principal.slug,
+                number,
+                &card_id,
+                card_controls::Control::Watch,
+                watching != 0,
+            ),
+        ),
+        (
+            "PIN_FORM",
+            card_controls::button(
+                principal.slug,
+                number,
+                &card_id,
+                card_controls::Control::Pin,
+                pinned != 0,
+            ),
+        ),
         ("STAMP", stamp),
         ("CLOSURE_NOTICE", closure_notice),
         ("IMAGE", image),
@@ -522,22 +542,6 @@ pub(super) async fn show(
     values.insert(
         "CLOSURE_METHOD",
         if closed { "DELETE" } else { "POST" }.into(),
-    );
-    values.insert(
-        "WATCH_LABEL",
-        if watching != 0 { "Unwatch" } else { "Watch" }.into(),
-    );
-    values.insert(
-        "WATCH_METHOD",
-        if watching != 0 { "DELETE" } else { "POST" }.into(),
-    );
-    values.insert(
-        "PIN_LABEL",
-        if pinned != 0 { "Unpin" } else { "Pin" }.into(),
-    );
-    values.insert(
-        "PIN_METHOD",
-        if pinned != 0 { "DELETE" } else { "POST" }.into(),
     );
     values.insert(
         "GOLD_LABEL",

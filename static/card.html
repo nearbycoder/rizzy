@@ -181,8 +181,8 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div class="card-perma__notch">
   <div class="actions">
     <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
-    <button id="watch" class="secondary side-action side-action--watch" type="button" aria-label="{{WATCH_LABEL}}" title="{{WATCH_LABEL}}" data-method="{{WATCH_METHOD}}"><span class="card-icon card-icon--watch" aria-hidden="true"></span></button>
-    <button id="pin" class="secondary side-action side-action--pin" type="button" aria-label="{{PIN_LABEL}}" title="{{PIN_LABEL}}" data-method="{{PIN_METHOD}}"><span class="card-icon card-icon--pin" aria-hidden="true"></span></button>
+    {{WATCH_FORM}}
+    {{PIN_FORM}}
     <button id="edit-mobile" type="button" aria-label="Edit card" title="Edit card"><span class="card-icon card-icon--pencil" aria-hidden="true"></span></button>
     <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
     <button id="closure" type="button" data-method="{{CLOSURE_METHOD}}"><span class="card-icon card-icon--check" aria-hidden="true"></span>{{CLOSURE_LABEL}}</button>
@@ -237,8 +237,22 @@ async function mutation(path,method,body){const r=await fetch(`/${account}/cards
 function action(button,path,method){button.addEventListener('click',async()=>{button.disabled=true;try{await mutation(path,button.dataset.method||method);location.reload()}catch(error){button.disabled=false;alert(error.message)}})}
 action(document.getElementById('closure'),'/closure','{{CLOSURE_METHOD}}');
 cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#undo-closure');if(!button)return;button.disabled=true;try{await mutation('/closure','DELETE');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
-action(document.getElementById('watch'),'/watch','{{WATCH_METHOD}}');
-action(document.getElementById('pin'),'/pin','{{PIN_METHOD}}');
+cardRoot.addEventListener('submit',async event=>{
+  const form=event.target;
+  if(!form.matches('#watch-action-form,#pin-action-form'))return;
+  event.preventDefault();
+  const button=form.querySelector('button[type=submit]');button.disabled=true;
+  try{
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:new URLSearchParams(new FormData(form))});
+    if(!response.ok)throw Error(`Request failed (${response.status})`);
+    const page=new DOMParser().parseFromString(await response.text(),'text/html');
+    for(const stream of page.querySelectorAll('turbo-stream[target]')){
+      const target=document.getElementById(stream.getAttribute('target'));
+      const replacement=stream.querySelector('template')?.content.firstElementChild;
+      if(target&&replacement)target.replaceWith(document.importNode(replacement,true));
+    }
+  }catch(error){button.disabled=false;alert(error.message)}
+});
 action(document.getElementById('gold'),'/goldness','{{GOLD_METHOD}}');
 cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#remove-image');if(!button)return;button.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/image`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not remove image');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 const cardHeader=document.querySelector('.card__header');
