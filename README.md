@@ -82,6 +82,7 @@ python3 tests/cluster_writes.py
 python3 tests/card_live_stream.py
 python3 tests/webhooks.py
 python3 tests/notifications.py
+python3 tests/notification_pagination_paired.py
 python3 tests/mentions.py
 python3 tests/user_attachables_migration.py
 python3 tests/search.py

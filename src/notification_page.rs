@@ -82,6 +82,13 @@ pub(super) fn reading_stream(account: i64, notification: &Value, read: bool) -> 
     )
 }
 
+fn next_page(account: i64, page: i64) -> String {
+    format!(
+        "<div id=\"next_page\" data-controller=\"fetch-on-visible\" data-fetch-on-visible-url-value=\"/{account}/notifications?page={}\"></div>",
+        page + 1
+    )
+}
+
 pub(super) fn index(
     account: i64,
     unread: &[Value],
@@ -130,10 +137,7 @@ pub(super) fn index(
         )
     };
     let next = if next_limit < total_read {
-        format!(
-            "<div id=\"next_page\"><a href=\"/{account}/notifications?page={}\">Load more</a></div>",
-            page + 1
-        )
+        next_page(account, page)
     } else {
         String::new()
     };
@@ -156,10 +160,7 @@ pub(super) fn next_page_stream(account: i64, read: &[Value], page: i64, has_next
         .map(|notice| item(account, notice))
         .collect::<String>();
     let next = if has_next {
-        format!(
-            "<div id=\"next_page\"><a href=\"/{account}/notifications?page={}\">Load more</a></div>",
-            page + 1
-        )
+        next_page(account, page)
     } else {
         String::new()
     };
