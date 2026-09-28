@@ -5303,7 +5303,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}/steps/{step}",
             get(show_step)
-                .post(update_step)
+                .post(step_form_method)
                 .put(update_step)
                 .patch(update_step)
                 .delete(delete_step),
@@ -15183,10 +15183,11 @@ async fn show_step(
         row.get::<i64, _>("completed") != 0,
     );
     let path = format!("/{account}/cards/{number}/steps/{}", escape(&step_id));
-    let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Step | Rizzy</title></head><body><main>{frame}</main><script>document.querySelector('input[data-step-id]').addEventListener('change',async event => {{const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{completed:event.target.checked}}}})}});if(!response.ok) event.target.checked=!event.target.checked;}});</script></body></html>"#
+    let content = format!(
+        r#"<turbo-frame id="step_{}">{frame}</turbo-frame><script>document.querySelector('input[data-step-id]').addEventListener('change',async event => {{const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{completed:event.target.checked}}}})}});if(!response.ok) event.target.checked=!event.target.checked;}});</script>"#,
+        escape(&step_id)
     );
-    Ok(Html(html).into_response())
+    Ok(signed_in_shell_html(p.slug, "Step", &content, "", "", "").into_response())
 }
 async fn edit_step(
     State(app): Shared,
@@ -15211,10 +15212,32 @@ async fn edit_step(
         ""
     };
     let path = format!("/{account}/cards/{number}/steps/{step_id}");
-    let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Edit step | Rizzy</title></head><body><main><turbo-frame id="step_{step_id}"><div class="flex align-center gap-half"><form class="step" id="step-edit"><input type="checkbox" class="checkbox" disabled{checked}><input type="text" name="step[content]" class="input step__content step__content--edit hide-focus-ring" placeholder="Name this step…" required autofocus autocomplete="off" value="{content}"><button type="submit" class="btn btn--positive txt-xx-small">Save changes</button><a href="{path}">Cancel changes</a></form><button type="button" id="step-delete" class="btn btn--negative txt-xx-small">Delete this step</button></div></turbo-frame></main><script>document.getElementById('step-edit').addEventListener('submit',async event => {{event.preventDefault();const content=event.target.elements['step[content]'].value;const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{content}}}})}});if(response.ok) location.href='{path}';}});document.getElementById('step-delete').addEventListener('click',async () => {{const response=await fetch('{path}',{{method:'DELETE',headers:{{'Accept':'application/json'}}}});if(response.ok) location.href='/{account}/cards/{number}';}});</script></body></html>"#
+    let content = format!(
+        r#"<turbo-frame id="step_{step_id}"><div class="flex align-center gap-half"><form class="step" id="step-edit" action="{path}" method="post" data-controller="form"><input type="hidden" name="_method" value="patch"><input type="checkbox" name="step[completed]" class="checkbox" disabled{checked}><input type="text" name="step[content]" class="input step__content step__content--edit hide-focus-ring" placeholder="Name this step…" required autofocus autocomplete="off" value="{content}" data-action="keydown.esc-&gt;form#cancel focus-&gt;form#select" data-1p-ignore="true"><button type="submit" class="btn btn--positive txt-xx-small"><span aria-hidden="true">✓</span><span class="for-screen-reader">Save changes</span></button><a href="{path}" data-form-target="cancel" hidden>Cancel changes</a></form><form class="button_to" id="step-delete" action="{path}" method="post"><input type="hidden" name="_method" value="delete"><button type="submit" class="btn btn--negative txt-xx-small"><span aria-hidden="true">✕</span><span class="for-screen-reader">Delete this step</span></button></form></div></turbo-frame><script>document.getElementById('step-edit').addEventListener('submit',async event => {{event.preventDefault();const response=await fetch('{path}',{{method:'POST',headers:{{'Accept':'text/vnd.turbo-stream.html'}},body:new URLSearchParams(new FormData(event.target))}});if(response.ok) location.href='{path}';}});document.getElementById('step-edit').addEventListener('keydown',event=>{{if(event.key==='Escape'){{event.preventDefault();location.href='{path}';}}}});document.getElementById('step-edit').querySelector('input[name="step[content]"]').addEventListener('focus',event=>event.target.select());document.getElementById('step-delete').addEventListener('submit',async event => {{event.preventDefault();const response=await fetch('{path}',{{method:'POST',headers:{{'Accept':'text/vnd.turbo-stream.html'}},body:new URLSearchParams(new FormData(event.target))}});if(response.ok) location.href='/{account}/cards/{number}';}});</script>"#
     );
-    Ok(Html(html).into_response())
+    Ok(signed_in_shell_html(p.slug, "Edit step", &content, "", "", "").into_response())
+}
+async fn step_form_method(
+    state: Shared,
+    path: Path<(String, String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    if !headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+    {
+        return Err(missing());
+    }
+    let method = url::form_urlencoded::parse(&body)
+        .find(|(key, _)| key == "_method")
+        .map(|(_, value)| value.into_owned());
+    match method.as_deref() {
+        Some("patch") => update_step(state, path, Method::POST, headers, body).await,
+        Some("delete") => delete_step(state, path, headers).await,
+        _ => Err(missing()),
+    }
 }
 fn step_input(headers: &HeaderMap, body: &Bytes) -> Result<Value> {
     let form = headers

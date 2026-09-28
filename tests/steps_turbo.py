@@ -91,7 +91,25 @@ def main():
             step, _ = expect(target, f"{path}/{step_id}")
             assert step["completed"] is True
 
-            status, content_type, stream = turbo(target, f"{path}/{step_id}", "DELETE")
+            with target["opener"].open(
+                f"{target['url']}/{target['account']}{path}/{step_id}/edit", timeout=10
+            ) as response:
+                edit_page = response.read().decode()
+            assert 'id="global-container"' in edit_page
+            assert f'<turbo-frame id="step_{step_id}">' in edit_page
+            assert 'name="_method" value="patch"' in edit_page
+            assert 'name="_method" value="delete"' in edit_page
+            assert 'data-form-target="cancel" hidden' in edit_page
+            assert 'data-action="keydown.esc-&gt;form#cancel focus-&gt;form#select"' in edit_page
+
+            status, content_type, stream = turbo(
+                target, f"{path}/{step_id}", "POST",
+                b"_method=patch&step%5Bcontent%5D=Form+rename")
+            assert status == 200 and content_type.startswith("text/vnd.turbo-stream.html")
+            assert expect(target, f"{path}/{step_id}")[0]["content"] == "Form rename"
+
+            status, content_type, stream = turbo(
+                target, f"{path}/{step_id}", "POST", b"_method=delete")
             assert status == 200 and content_type.startswith("text/vnd.turbo-stream.html")
             assert f'action="remove" target="step_{step_id}"' in stream, stream
             assert expect(target, path)[0] == []
