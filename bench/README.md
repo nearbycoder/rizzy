@@ -1,5 +1,18 @@
 # Comparative load runs
 
+The [200-delivery webhook JSON run](results/webhook-deliveries-read-200-2026-09-28.json)
+uses fresh paired SQLite fixtures and checks the complete decoded 100-row fourth
+page, equal compact JSON size, and exact card/event/delivery counts before
+timing. Two reversed-order ten-second rounds on four assigned server CPUs at
+8, 32, and 64 clients completed without HTTP errors or record changes. Rizzy
+served 1,484–1,724 requests/s versus Fizzy's 202–229 (7.0–7.8×), with p95
+6.7–42.3 ms versus 56–400 ms. Four Fizzy Puma workers and one Rizzy process
+used the same four CPU affinity slots; both were near their local throughput
+plateau at 32–64 clients. This is a delivery-history JSON read result, not
+delivery write throughput, multi-host capacity, or whole-app speed. Reproduce
+with `python3 bench/webhook_deliveries_read.py --deliveries 200 --seconds 10
+--concurrency 8,32,64 --rounds 2 --server-cpus 4`.
+
 The [JPEG Action Text write diagnostic](results/image-embed-write-jpeg-40-2026-09-27.json)
 timed 40 alternating single-client card updates after each app had uploaded
 the same image bytes to distinct cards. Both generated 86 variant records

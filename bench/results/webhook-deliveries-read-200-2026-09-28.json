@@ -1,0 +1,566 @@
+{
+  "database": "SQLite",
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "dd44b3f531f679dd4b87dd278efda1f8c0412883",
+  "source_dirty": false,
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "732a5ca00717f657619fc0f596bc2b8250bc9983c33413558c03744c0f145519",
+  "load_binary_sha256": "65744e45613a87675a29edd83b28cb2db0a7cb6fe196936b61b7ddf8e8ca151b",
+  "fixture_deliveries": 200,
+  "workload": "GET webhook deliveries JSON page 4 (100 rows)",
+  "seconds_per_target_level": 10.0,
+  "concurrency": [
+    8,
+    32,
+    64
+  ],
+  "server_cpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "source_puma_workers": 4,
+  "rizzy_processes": 1,
+  "generator_cpus": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "sample_parity": {
+        "shape": [
+          {
+            "id": "str",
+            "state": "str",
+            "created_at": "str",
+            "updated_at": "str",
+            "request": "NoneType",
+            "response": "NoneType",
+            "event": {
+              "id": "str",
+              "action": "str",
+              "created_at": "str",
+              "creator": {
+                "id": "str",
+                "name": "str"
+              },
+              "eventable": {
+                "type": "str",
+                "id": "str",
+                "url": "str"
+              }
+            }
+          }
+        ],
+        "decoded_content": true,
+        "compact_json_bytes": {
+          "fizzy": 43603,
+          "rizzy": 43603
+        },
+        "total": 200
+      },
+      "baseline_counts": {
+        "fizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        },
+        "rizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        }
+      },
+      "runs": [
+        {
+          "target": "fizzy",
+          "concurrency": 8,
+          "errors": {},
+          "p50_ms": 34.45,
+          "p95_ms": 56.35,
+          "p99_ms": 67.59,
+          "path_requests": [
+            2131
+          ],
+          "path_response_bytes": [
+            92917993
+          ],
+          "requests": 2131,
+          "response_bytes": 92917993,
+          "rps": 212.3,
+          "seconds": 10.04,
+          "server_requests": [
+            2131
+          ],
+          "generator_cpu_seconds": 0.23,
+          "server_resources": {
+            "processes_peak": 5,
+            "pss_mib_start": 771.9,
+            "pss_mib_peak": 1536.2,
+            "pss_mib_end": 1455.3,
+            "cpu_seconds": 39.89,
+            "cpu_cores_average": 3.97,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "rizzy",
+          "concurrency": 8,
+          "errors": {},
+          "p50_ms": 5.33,
+          "p95_ms": 6.73,
+          "p99_ms": 8.3,
+          "path_requests": [
+            14932
+          ],
+          "path_response_bytes": [
+            651079996
+          ],
+          "requests": 14932,
+          "response_bytes": 651079996,
+          "rps": 1493.0,
+          "seconds": 10.0,
+          "server_requests": [
+            14932
+          ],
+          "generator_cpu_seconds": 0.49,
+          "server_resources": {
+            "processes_peak": 1,
+            "pss_mib_start": 26.5,
+            "pss_mib_peak": 36.0,
+            "pss_mib_end": 35.7,
+            "cpu_seconds": 37.84,
+            "cpu_cores_average": 3.78,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "fizzy",
+          "concurrency": 32,
+          "errors": {},
+          "p50_ms": 137.51,
+          "p95_ms": 199.18,
+          "p99_ms": 217.04,
+          "path_requests": [
+            2246
+          ],
+          "path_response_bytes": [
+            97932338
+          ],
+          "requests": 2246,
+          "response_bytes": 97932338,
+          "rps": 221.6,
+          "seconds": 10.14,
+          "server_requests": [
+            2246
+          ],
+          "generator_cpu_seconds": 0.2,
+          "server_resources": {
+            "processes_peak": 5,
+            "pss_mib_start": 1455.7,
+            "pss_mib_peak": 1884.5,
+            "pss_mib_end": 1868.4,
+            "cpu_seconds": 40.25,
+            "cpu_cores_average": 3.97,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "rizzy",
+          "concurrency": 32,
+          "errors": {},
+          "p50_ms": 18.38,
+          "p95_ms": 22.81,
+          "p99_ms": 25.08,
+          "path_requests": [
+            17268
+          ],
+          "path_response_bytes": [
+            752936604
+          ],
+          "requests": 17268,
+          "response_bytes": 752936604,
+          "rps": 1723.9,
+          "seconds": 10.02,
+          "server_requests": [
+            17268
+          ],
+          "generator_cpu_seconds": 0.4,
+          "server_resources": {
+            "processes_peak": 1,
+            "pss_mib_start": 35.7,
+            "pss_mib_peak": 38.5,
+            "pss_mib_end": 38.0,
+            "cpu_seconds": 38.08,
+            "cpu_cores_average": 3.8,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "fizzy",
+          "concurrency": 64,
+          "errors": {},
+          "p50_ms": 278.56,
+          "p95_ms": 399.81,
+          "p99_ms": 425.59,
+          "path_requests": [
+            2279
+          ],
+          "path_response_bytes": [
+            99371237
+          ],
+          "requests": 2279,
+          "response_bytes": 99371237,
+          "rps": 219.4,
+          "seconds": 10.39,
+          "server_requests": [
+            2279
+          ],
+          "generator_cpu_seconds": 0.26,
+          "server_resources": {
+            "processes_peak": 5,
+            "pss_mib_start": 1868.5,
+            "pss_mib_peak": 2042.3,
+            "pss_mib_end": 1928.0,
+            "cpu_seconds": 41.02,
+            "cpu_cores_average": 3.95,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "rizzy",
+          "concurrency": 64,
+          "errors": {},
+          "p50_ms": 37.18,
+          "p95_ms": 41.96,
+          "p99_ms": 44.38,
+          "path_requests": [
+            17199
+          ],
+          "path_response_bytes": [
+            749927997
+          ],
+          "requests": 17199,
+          "response_bytes": 749927997,
+          "rps": 1714.0,
+          "seconds": 10.03,
+          "server_requests": [
+            17199
+          ],
+          "generator_cpu_seconds": 0.53,
+          "server_resources": {
+            "processes_peak": 1,
+            "pss_mib_start": 38.0,
+            "pss_mib_peak": 40.8,
+            "pss_mib_end": 40.7,
+            "cpu_seconds": 38.15,
+            "cpu_cores_average": 3.8,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        }
+      ],
+      "comparable": true,
+      "final_counts": {
+        "fizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        },
+        "rizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        }
+      }
+    },
+    {
+      "number": 2,
+      "sample_parity": {
+        "shape": [
+          {
+            "id": "str",
+            "state": "str",
+            "created_at": "str",
+            "updated_at": "str",
+            "request": "NoneType",
+            "response": "NoneType",
+            "event": {
+              "id": "str",
+              "action": "str",
+              "created_at": "str",
+              "creator": {
+                "id": "str",
+                "name": "str"
+              },
+              "eventable": {
+                "type": "str",
+                "id": "str",
+                "url": "str"
+              }
+            }
+          }
+        ],
+        "decoded_content": true,
+        "compact_json_bytes": {
+          "fizzy": 43603,
+          "rizzy": 43603
+        },
+        "total": 200
+      },
+      "baseline_counts": {
+        "fizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        },
+        "rizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        }
+      },
+      "runs": [
+        {
+          "target": "rizzy",
+          "concurrency": 8,
+          "errors": {},
+          "p50_ms": 5.35,
+          "p95_ms": 6.82,
+          "p99_ms": 8.27,
+          "path_requests": [
+            14850
+          ],
+          "path_response_bytes": [
+            647504550
+          ],
+          "requests": 14850,
+          "response_bytes": 647504550,
+          "rps": 1484.5,
+          "seconds": 10.0,
+          "server_requests": [
+            14850
+          ],
+          "generator_cpu_seconds": 0.37,
+          "server_resources": {
+            "processes_peak": 1,
+            "pss_mib_start": 26.2,
+            "pss_mib_peak": 35.7,
+            "pss_mib_end": 35.3,
+            "cpu_seconds": 37.82,
+            "cpu_cores_average": 3.78,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "fizzy",
+          "concurrency": 8,
+          "errors": {},
+          "p50_ms": 18.2,
+          "p95_ms": 115.93,
+          "p99_ms": 134.16,
+          "path_requests": [
+            2030
+          ],
+          "path_response_bytes": [
+            88514090
+          ],
+          "requests": 2030,
+          "response_bytes": 88514090,
+          "rps": 201.9,
+          "seconds": 10.05,
+          "server_requests": [
+            2030
+          ],
+          "generator_cpu_seconds": 0.36,
+          "server_resources": {
+            "processes_peak": 5,
+            "pss_mib_start": 748.6,
+            "pss_mib_peak": 1148.7,
+            "pss_mib_end": 1114.1,
+            "cpu_seconds": 39.57,
+            "cpu_cores_average": 3.94,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "rizzy",
+          "concurrency": 32,
+          "errors": {},
+          "p50_ms": 18.4,
+          "p95_ms": 22.88,
+          "p99_ms": 25.05,
+          "path_requests": [
+            17245
+          ],
+          "path_response_bytes": [
+            751933735
+          ],
+          "requests": 17245,
+          "response_bytes": 751933735,
+          "rps": 1722.0,
+          "seconds": 10.01,
+          "server_requests": [
+            17245
+          ],
+          "generator_cpu_seconds": 0.53,
+          "server_resources": {
+            "processes_peak": 1,
+            "pss_mib_start": 35.3,
+            "pss_mib_peak": 38.2,
+            "pss_mib_end": 37.7,
+            "cpu_seconds": 38.04,
+            "cpu_cores_average": 3.8,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "fizzy",
+          "concurrency": 32,
+          "errors": {},
+          "p50_ms": 133.2,
+          "p95_ms": 182.96,
+          "p99_ms": 200.15,
+          "path_requests": [
+            2324
+          ],
+          "path_response_bytes": [
+            101333372
+          ],
+          "requests": 2324,
+          "response_bytes": 101333372,
+          "rps": 228.7,
+          "seconds": 10.16,
+          "server_requests": [
+            2324
+          ],
+          "generator_cpu_seconds": 0.22,
+          "server_resources": {
+            "processes_peak": 5,
+            "pss_mib_start": 1114.1,
+            "pss_mib_peak": 1802.6,
+            "pss_mib_end": 1782.8,
+            "cpu_seconds": 40.29,
+            "cpu_cores_average": 3.97,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "rizzy",
+          "concurrency": 64,
+          "errors": {},
+          "p50_ms": 37.48,
+          "p95_ms": 42.34,
+          "p99_ms": 44.82,
+          "path_requests": [
+            17048
+          ],
+          "path_response_bytes": [
+            743343944
+          ],
+          "requests": 17048,
+          "response_bytes": 743343944,
+          "rps": 1698.6,
+          "seconds": 10.04,
+          "server_requests": [
+            17048
+          ],
+          "generator_cpu_seconds": 0.58,
+          "server_resources": {
+            "processes_peak": 1,
+            "pss_mib_start": 37.7,
+            "pss_mib_peak": 40.4,
+            "pss_mib_end": 39.4,
+            "cpu_seconds": 38.08,
+            "cpu_cores_average": 3.79,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        },
+        {
+          "target": "fizzy",
+          "concurrency": 64,
+          "errors": {},
+          "p50_ms": 272.41,
+          "p95_ms": 375.47,
+          "p99_ms": 399.13,
+          "path_requests": [
+            2328
+          ],
+          "path_response_bytes": [
+            101507784
+          ],
+          "requests": 2328,
+          "response_bytes": 101507784,
+          "rps": 224.2,
+          "seconds": 10.38,
+          "server_requests": [
+            2328
+          ],
+          "generator_cpu_seconds": 0.28,
+          "server_resources": {
+            "processes_peak": 5,
+            "pss_mib_start": 1778.3,
+            "pss_mib_peak": 1884.3,
+            "pss_mib_end": 1820.9,
+            "cpu_seconds": 41.1,
+            "cpu_cores_average": 3.96,
+            "read_mib": 0.0,
+            "write_mib": 0.0
+          }
+        }
+      ],
+      "comparable": true,
+      "final_counts": {
+        "fizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        },
+        "rizzy": {
+          "cards": 200,
+          "events": 200,
+          "webhook_deliveries": 200
+        }
+      }
+    }
+  ],
+  "status": "complete"
+}
