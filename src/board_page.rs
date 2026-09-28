@@ -28,6 +28,14 @@ fn add_shell(values: &mut HashMap<&'static str, String>, account: i64) {
         include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &account.to_string()),
     );
     values.insert("SHELL_SCRIPT", include_str!("../static/events.js").into());
+    values.insert(
+        "FILTER_SAVED_VIEW_STYLES",
+        include_str!("../static/filter_saved_view.css").into(),
+    );
+    values.insert(
+        "FILTER_SAVED_VIEW_SCRIPT",
+        include_str!("../static/filter_saved_view.js").into(),
+    );
 }
 
 fn webhook_link(principal: &Principal, board_id: &str) -> String {
