@@ -1839,8 +1839,14 @@ async fn authorized_blob(
     headers: &HeaderMap,
 ) -> Result<(DbRow, bool)> {
     let slug: i64 = account.parse().map_err(|_| missing())?;
-    let blob = sqlx::query("SELECT b.* FROM storage_blobs b JOIN accounts a ON a.id=b.account_id WHERE b.signed_id=? AND a.external_account_id=?")
-        .bind(signed_id).bind(slug).fetch_optional(&app.db).await.map_err(db_err)?.ok_or_else(missing)?;
+    let blob = sqlx::query("SELECT b.*,route.id AS route_account_id FROM storage_blobs b JOIN accounts route ON route.external_account_id=? WHERE b.signed_id=?")
+        .bind(slug)
+        .bind(signed_id)
+        .fetch_optional(&app.db)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(missing)?;
+    let route_account_id: String = blob.get("route_account_id");
     if blob.get::<Option<String>, _>("uploaded_at").is_none() {
         return Err(missing());
     }
@@ -1888,8 +1894,8 @@ async fn authorized_blob(
         }
     }
     if !public {
-        let user_id = storage_user_id(app, headers, &account_id).await?;
-        let mut accessible = attachments.is_empty();
+        let user_id = storage_user_id(app, headers, &route_account_id).await?;
+        let mut accessible = attachments.is_empty() && route_account_id == account_id;
         for card in &cards {
             let access: i64 =
                 sqlx::query_scalar("SELECT COUNT(*) FROM accesses WHERE board_id=? AND user_id=?")

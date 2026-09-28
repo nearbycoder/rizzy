@@ -301,6 +301,14 @@ impl IntoResponse for ApiError {
             )
                 .into_response();
         }
+        if self.0 == StatusCode::FORBIDDEN
+            && matches!(
+                self.1.as_str(),
+                "Blob access required" | "Account access required"
+            )
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
         if self.0 == StatusCode::NOT_FOUND && self.1 == "Not found" {
             return (self.0, Json(json!({"status":404,"error":"Not Found"}))).into_response();
         }

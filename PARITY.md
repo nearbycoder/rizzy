@@ -650,6 +650,16 @@ transformation, or reproduce libvips variant bytes. Fourteen Action Mailbox
 framework routes remain unmatched. Route
 registration alone does not prove behavioral parity for any of these areas.
 
+`tests/blob_cross_account_html_paired.py` now compares the pinned source's
+unattached-blob authorization across two accounts. Both apps return an empty
+403 for the signed-in cross-account request and redirect the anonymous one;
+a published card's image remains readable through the second account path.
+The same test checks original bytes and forced download as
+`application/octet-stream` for HTML, Turbo HTML, XHTML, SVG, XML, uppercase,
+malformed, and non-ASCII declared content types. The fixture uploads as plain
+text before setting each declared type in its disposable database, so it
+verifies the serving boundary, not every direct-upload validation path.
+
 `tests/static_csp_parity.py` compares all five static error pages and the
 production 404 response byte-for-byte with Fizzy, including its locked-down
 static Content Security Policy. It also compares the default dynamic policy
