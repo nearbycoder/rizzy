@@ -12740,6 +12740,13 @@ fn filter_turbo(inner: String) -> Response {
     )
         .into_response()
 }
+const FILTER_BOOKMARK_ICON: &str = r#"<svg aria-hidden="true" viewBox="0 0 52 52" width="17" height="17" fill="currentColor"><path d="m14.5 49.6c-1.4.8-3.3.3-4.1-1.1-.3-.5-.4-1-.4-1.5v-41c0-2.2 1.8-4 4-4h24c2.2 0 4 1.8 4 4v41c0 1.7-1.3 3-3 3s-1 0-1.5-.4l-11.5-6.6zm23.5-4.3v-39.3h-24v39.3l10.8-6.1c.8-.4 1.7-.4 2.5 0l10.8 6.1z" fill-rule="evenodd"/></svg>"#;
+fn filter_delete_button(slug: i64, filter_id: &str) -> String {
+    format!(
+        "<form method=post action=\"/{slug}/filters/{}\"><input type=hidden name=_method value=delete><button class=\"filter-save-button is-saved\" type=submit aria-label=\"Delete custom view\" title=\"Delete custom view\">{FILTER_BOOKMARK_ICON}<span class=\"for-screen-reader\">Delete custom view</span></button></form>",
+        escape(filter_id)
+    )
+}
 fn filter_save_button(slug: i64, params: &Value) -> String {
     let mut inputs = String::new();
     if let Some(fields) = params.as_object() {
@@ -12764,7 +12771,7 @@ fn filter_save_button(slug: i64, params: &Value) -> String {
         }
     }
     format!(
-        "<form method=post action=\"/{slug}/filters\">{inputs}<button type=submit aria-label=\"Save custom view\">Save custom view</button></form>"
+        "<form method=post action=\"/{slug}/filters\">{inputs}<button class=\"filter-save-button\" type=submit aria-label=\"Save custom view\" title=\"Save custom view\">{FILTER_BOOKMARK_ICON}<span class=\"for-screen-reader\">Save custom view</span></button></form>"
     )
 }
 async fn refresh_filter_settings(
@@ -12821,10 +12828,7 @@ async fn refresh_filter_settings(
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
     Ok(if let Some(saved_id) = saved_id {
-        filter_turbo(format!(
-            "<form method=post action=\"/{}/filters/{}\"><input type=hidden name=_method value=delete><button type=submit aria-label=\"Delete custom view\">Delete custom view</button></form>",
-            p.slug, saved_id
-        ))
+        filter_turbo(filter_delete_button(p.slug, &saved_id))
     } else {
         let params: Value = serde_json::from_str(&fields)
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Invalid saved filter"))?;
@@ -12927,10 +12931,7 @@ async fn create_filter(
     if !wants_turbo_stream(&headers) {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    Ok(filter_turbo(format!(
-        "<form method=post action=\"/{}/filters/{}\"><input type=hidden name=_method value=delete><button type=submit aria-label=\"Delete custom view\">Delete custom view</button></form>",
-        p.slug, saved_id
-    )))
+    Ok(filter_turbo(filter_delete_button(p.slug, &saved_id)))
 }
 async fn delete_filter(
     State(app): Shared,
