@@ -518,10 +518,9 @@ async fn build_user(
 }
 
 async fn send_completion_email(app: &App, row: &DbRow) -> Result<()> {
-    let Ok(sendmail) = env::var("RIZZY_SENDMAIL") else {
+    if env::var("RIZZY_SENDMAIL").is_err() {
         return Ok(());
-    };
-    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
+    }
     let email: String = sqlx::query_scalar(
         "SELECT i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=?",
     )
@@ -529,9 +528,6 @@ async fn send_completion_email(app: &App, row: &DbRow) -> Result<()> {
     .fetch_one(&app.db)
     .await
     .map_err(db_err)?;
-    if !valid_email(&email) || from.contains(['\r', '\n']) {
-        return Err(bad("Invalid mail address"));
-    }
     let origin = env::var("RIZZY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3007".into());
     let account: i64 = sqlx::query_scalar("SELECT external_account_id FROM accounts WHERE id=?")
         .bind(row.get::<String, _>("account_id"))
@@ -545,31 +541,25 @@ async fn send_completion_email(app: &App, row: &DbRow) -> Result<()> {
     } else {
         format!("/{account}/users/{user_id}/data_exports/{export_id}")
     };
-    let message = format!(
-        "From: {from}\nTo: {email}\nSubject: Your Rizzy data export is ready for download\nContent-Type: text/plain; charset=UTF-8\n\nYour data export is ready. Download it at:\n{origin}{path}\n"
+    let url = format!("{}{path}", origin.trim_end_matches('/'));
+    let support = mail_transport::support_address()?;
+    let plain = format!(
+        "Your Rizzy data export has finished processing and is ready to download.\n\nDownload your data: {url}\n"
     );
-    let mut child = Command::new(sendmail)
-        .arg("-t")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    };
-    stdin
-        .write_all(message.as_bytes())
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    drop(stdin);
-    if !child
-        .wait()
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?
-        .success()
-    {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    }
-    Ok(())
+    let content = format!(
+        "<h1 class=\"title\">Download your Rizzy data</h1>\n<p class=\"subtitle\">Your Rizzy data export has finished processing and is ready to download.</p>\n\n<p><a href=\"{}\">Download your data</a></p>\n\n<p class=\"footer\">Need help? <a href=\"mailto:{}\">Send us an email</a>.</p>\n",
+        escape(&url),
+        escape(&support)
+    );
+    let html =
+        include_str!("../assets/notification_mail_layout.html").replace("{{content}}", &content);
+    mail_transport::send_multipart(
+        &email,
+        "Your Rizzy data export is ready for download",
+        &plain,
+        &html,
+    )
+    .await
 }
 
 async fn run_one(

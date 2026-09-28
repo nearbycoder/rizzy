@@ -58,6 +58,7 @@ mod exports;
 mod imports;
 mod join_code_page;
 mod magic_mail;
+mod mail_transport;
 mod my_menu;
 mod mysql_search;
 mod named_column_page;

@@ -113,6 +113,19 @@ def main():
         finally:
             stop(server)
 
+        no_mail_env = {**env, "RIZZY_DEV_MAGIC_LINKS": "0"}
+        no_mail_env.pop("RIZZY_SENDMAIL", None)
+        no_mail_env.pop("RIZZY_MAIL_FROM", None)
+        no_mail_env.pop("RIZZY_SUPPORT_EMAIL", None)
+        no_mail_env["RIZZY_DATABASE_URL"] = f"sqlite://{Path(temp) / 'no-mail.sqlite3'}"
+        subprocess.run([BINARY, "seed"], cwd=ROOT, env=no_mail_env,
+                       capture_output=True, text=True, check=True)
+        port, server = start(no_mail_env)
+        try:
+            call(port, "/session", "POST", {"email_address": "owner@example.com"}, status=503)
+        finally:
+            stop(server)
+
         env = {**os.environ, "RIZZY_DATABASE_URL": f"sqlite://{Path(temp) / 'fresh.sqlite3'}", "RIZZY_MULTI_TENANT": "1"}
         port, server = start(env)
         try:
