@@ -10,6 +10,8 @@ The [auto-postponement comparison](bench/results/auto-postpone-sqlite-5000-2026-
 
 A [paired MySQL mixed-workload comparison](bench/results/mysql-mixed-clean-500-4boards-c16-20s-2026-09-27.json) on four app CPUs, four processes or workers, and 16 clients measured 259.65–266.88 completed JSON read/write workflows per second for Rizzy versus 24.84–25.04 for Fizzy across two reversed-order rounds. Both apps returned zero errors and passed record-count checks. This tests the covered workflow on one host; full application parity and maximum capacity remain unverified.
 
+A [2,000-card webhook queue comparison](bench/results/webhook-publish-delivery-2000-c128-2026-09-28.json) at 128 clients measured 1,309–1,451 completed batch deliveries per second for Rizzy versus 53–57 for Fizzy, with zero HTTP errors and exact final counts in both reversed-order rounds. The destination was blocked as private by both apps, so this measures publication and queue dispatch rather than successful outbound network delivery.
+
 ## Quick start
 
 You need Rust 1.85 or newer (for the 2024 edition). From the repository root:

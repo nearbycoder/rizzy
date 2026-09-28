@@ -20,6 +20,23 @@ steady-state maximum or successful outbound delivery throughput. Reproduce
 with `python3 bench/webhook_publish_delivery.py --cards 200 --clients 8
 --rounds 2 --server-cpus 4 --deadline 120` and repeat at 32 and 64 clients.
 
+The larger clean-tree [1,000-card, 64-client](results/webhook-publish-delivery-1000-c64-2026-09-28.json)
+and [2,000-card, 128-client](results/webhook-publish-delivery-2000-c128-2026-09-28.json)
+repeats used the same four server CPUs and reversed the app order. Every phase
+had zero HTTP errors, unique card numbers, exact card/event/completed-delivery
+counts, and the sampled completed `private_uri` response shape. Rizzy cleared
+the batches at 994–1,451 completed deliveries/s versus Fizzy's 53–57, a
+matched-round 18.6–26.9× difference. Card POST p95 was 32–48 ms for Rizzy and
+793–1,163 ms for Fizzy. The metric divides the fixed batch size by time from
+the first card POST until the last delivery completes; it includes publication
+and queue drain. It shows that Rizzy handled these larger local batches, not a
+steady-state maximum, multi-host capacity, or successful outbound throughput.
+The benchmark keeps the production private-destination guard enabled, so a
+loopback HTTP receiver cannot establish external delivery success. Reproduce
+with `python3 bench/webhook_publish_delivery.py --cards 1000 --clients 64
+--rounds 2 --server-cpus 4 --deadline 180` and repeat with `--cards 2000
+--clients 128 --deadline 240`.
+
 The [200-delivery webhook JSON run](results/webhook-deliveries-read-200-2026-09-28.json)
 uses fresh paired SQLite fixtures and checks the complete decoded 100-row fourth
 page, equal compact JSON size, and exact card/event/delivery counts before
