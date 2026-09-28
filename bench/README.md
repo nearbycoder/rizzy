@@ -70,6 +70,8 @@ other phase failed on an ActiveSearch MySQL deadlock, so the artifact is marked
 had Fizzy deadlocks in both rounds and widely varying Rizzy throughput. These
 results describe a local workload and do not prove maximum or product-wide scale.
 
+The one-versus-four-process MySQL [8-client](results/mysql-cluster-mixed-500-4boards-c8-15s-2026-09-28.json), [32-client](results/mysql-cluster-mixed-500-4boards-c32-15s-2026-09-28.json), and [64-client](results/mysql-cluster-mixed-500-4boards-c64-15s-2026-09-28.json) runs use the same release binary, four app CPUs, fresh 500-card/four-board databases, and two reversed-order 15-second rounds per level. Every phase completed with zero HTTP errors, matching sampled response structures, and exact final card/event/comment counts. Four processes completed 228–276 mixed read/write units/s versus one process's 155–202, for paired ratios of 1.20–1.47 at eight clients, 1.37–1.43 at 32, and 1.39–1.44 at 64. The 32- and 64-client rates are close, indicating a local plateau for this setup. The MySQL server and load client shared the same host, and this compares Rizzy process counts rather than Fizzy; it does not prove multi-host capacity or whole-app scale. Reproduce each level with `python3 bench/rust_cluster_mysql.py --seconds 15 --clients 32 --cards 500 --boards 4 --rounds 2 --server-cpus 4` and change `--clients` to 8 or 64.
+
 The [shared-shell named-column read](results/named-column-html-100-shared-shell-2026-09-27.json)
 uses fresh 100-card fixtures, 15 visible previews, eight shared CPUs, eight
 Fizzy workers, and one release Rizzy process. Two reversed-order rounds at
