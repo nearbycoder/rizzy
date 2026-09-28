@@ -5233,7 +5233,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/closure",
-            post(close_card).delete(open_card),
+            post(close_card_form).delete(open_card),
         )
         .route(
             "/{account}/cards/{number}/reading",
@@ -5249,7 +5249,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/cards/{number}/goldness",
-            post(gild_card).delete(ungild_card),
+            post(gild_card_form).delete(ungild_card),
         )
         .route(
             "/{account}/cards/{number}/board",
@@ -14661,21 +14661,89 @@ async fn unread_card(
     let p = principal(&app, &headers, &account).await?;
     set_card_reading(&app, &p, &number, false, &headers).await
 }
-async fn close_card(
+fn form_deletes(headers: &HeaderMap, body: &Bytes) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+        && url::form_urlencoded::parse(body)
+            .any(|(key, value)| key == "_method" && value.eq_ignore_ascii_case("delete"))
+}
+
+async fn card_flag_response(
+    app: &App,
+    account: &str,
+    number: &str,
+    headers: &HeaderMap,
+    flag: &str,
+    value: i64,
+) -> Result<Response> {
+    let p = principal(app, headers, account).await?;
+    let original = if flag == "closed" {
+        Some(card(app, &p, number).await?)
+    } else {
+        None
+    };
+    set_flag(app, &p, number, flag, value).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    if wants_turbo_stream(headers) {
+        let c = card(app, &p, number).await?;
+        let mut stream = String::new();
+        if flag == "closed" {
+            let board_id: String = c.get("board_id");
+            stream.push_str(
+                &board_page::drop_column_stream(app, &p, &board_id, "closure", None).await?,
+            );
+            let source = if value == 1 {
+                original.as_ref().unwrap_or(&c)
+            } else {
+                &c
+            };
+            let column_id: Option<String> = source.get("column_id");
+            if let Some(column_id) = column_id {
+                stream.push_str(
+                    &board_page::drop_column_stream(app, &p, &board_id, "column", Some(&column_id))
+                        .await?,
+                );
+            } else if value == 1
+                && source.get::<i64, _>("closed") == 0
+                && source.get::<i64, _>("postponed") == 0
+            {
+                stream.push_str(
+                    &board_page::drop_column_stream(app, &p, &board_id, "stream", None).await?,
+                );
+            }
+        }
+        stream.push_str(&card_page::flag_stream(app, &p, &c).await?);
+        return Ok((
+            [(
+                header::CONTENT_TYPE,
+                "text/vnd.turbo-stream.html; charset=utf-8",
+            )],
+            stream,
+        )
+            .into_response());
+    }
+    Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"))
+}
+
+async fn close_card_form(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
     h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_flag(&app, &p, &n, "closed", 1).await
+    body: Bytes,
+) -> Result<Response> {
+    let value = if form_deletes(&h, &body) { 0 } else { 1 };
+    card_flag_response(&app, &a, &n, &h, "closed", value).await
 }
 async fn open_card(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
     h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_flag(&app, &p, &n, "closed", 0).await
+) -> Result<Response> {
+    card_flag_response(&app, &a, &n, &h, "closed", 0).await
 }
 async fn postpone_card(
     State(app): Shared,
@@ -14760,21 +14828,21 @@ async fn drop_card_column(
     )
     .await
 }
-async fn gild_card(
+async fn gild_card_form(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
     h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_flag(&app, &p, &n, "golden", 1).await
+    body: Bytes,
+) -> Result<Response> {
+    let value = if form_deletes(&h, &body) { 0 } else { 1 };
+    card_flag_response(&app, &a, &n, &h, "golden", value).await
 }
 async fn ungild_card(
     State(app): Shared,
     Path((a, n)): Path<(String, String)>,
     h: HeaderMap,
-) -> Result<StatusCode> {
-    let p = principal(&app, &h, &a).await?;
-    set_flag(&app, &p, &n, "golden", 0).await
+) -> Result<Response> {
+    card_flag_response(&app, &a, &n, &h, "golden", 0).await
 }
 
 async fn triage_card(

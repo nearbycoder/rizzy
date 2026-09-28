@@ -601,13 +601,13 @@ async fn board_footer(app: &App, principal: &Principal, board_id: &str) -> Resul
     ))
 }
 
-pub(super) async fn drop_column_response(
+pub(super) async fn drop_column_stream(
     app: &App,
     principal: &Principal,
     board_id: &str,
     destination: &str,
     column_id: Option<&str>,
-) -> Result<Response> {
+) -> Result<String> {
     let (id, title, color, path, add_card) = match destination {
         "closure" => (
             "done".to_owned(),
@@ -715,8 +715,27 @@ pub(super) async fn drop_column_response(
         add_card,
         footer.as_deref(),
     );
-    Ok(([(header::CONTENT_TYPE, "text/vnd.turbo-stream.html; charset=utf-8")],
-        format!("<turbo-stream action=\"replace\" method=\"morph\" target=\"{}\"><template>{content}</template></turbo-stream>", escape(&target))).into_response())
+    Ok(format!(
+        "<turbo-stream action=\"replace\" method=\"morph\" target=\"{}\"><template>{content}</template></turbo-stream>",
+        escape(&target)
+    ))
+}
+
+pub(super) async fn drop_column_response(
+    app: &App,
+    principal: &Principal,
+    board_id: &str,
+    destination: &str,
+    column_id: Option<&str>,
+) -> Result<Response> {
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/vnd.turbo-stream.html; charset=utf-8",
+        )],
+        drop_column_stream(app, principal, board_id, destination, column_id).await?,
+    )
+        .into_response())
 }
 
 pub(super) async fn show(

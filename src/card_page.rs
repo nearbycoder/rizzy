@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use super::{
     App, Principal, Result, assignment_page, board, board_views, card_controls, comment_edit_page,
-    db_err, escape, reaction_page, step_frame, storage, tagging_page, wrap_html,
+    db_err, err, escape, reaction_page, step_frame, storage, tagging_page, wrap_html,
 };
 
 const TEMPLATE: &str = include_str!("../static/card.html");
@@ -152,6 +152,37 @@ pub(super) async fn update_stream(
     };
     Ok(format!(
         "<turbo-stream action=\"replace\" method=\"morph\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"update\" target=\"edit_card_{card_id}\"><template>{content}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template><div id=\"card_closure_toggle_card_{card_id}\">{closure}</div></template></turbo-stream>"
+    ))
+}
+
+pub(super) async fn flag_stream(app: &App, principal: &Principal, card: &DbRow) -> Result<String> {
+    let card_id: String = card.get("id");
+    let page = show(app, principal, card, "UTC").await?.0;
+    let container_start = format!("<section id=\"card_container_card_{card_id}\">");
+    let container = page
+        .find(&container_start)
+        .and_then(|start| {
+            page[start..]
+                .find("</article></section>")
+                .map(|end| &page[start..start + end + "</article></section>".len()])
+        })
+        .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "Card container missing"))?;
+    let toggle_start = format!("<div id=\"card_closure_toggle_card_{card_id}\"");
+    let toggle = page
+        .find(&toggle_start)
+        .and_then(|start| {
+            page[start..]
+                .find("\n  <section id=\"column-picker\"")
+                .map(|end| page[start..start + end].trim())
+        })
+        .ok_or_else(|| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Card closure control missing",
+            )
+        })?;
+    Ok(format!(
+        "<turbo-stream method=\"morph\" action=\"replace\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template>{toggle}</template></turbo-stream>"
     ))
 }
 
@@ -357,8 +388,9 @@ pub(super) async fn show(
             .map(|value| value.timestamp())
             .unwrap_or_default();
         format!(
-            "<div class=\"card-perma__closure-message card-perma__closure-message--completed\"><span>Completed by {} on <time datetime=\"{seconds}\" data-local-time-target=\"shortdate\">&nbsp;</time>.</span> <button id=\"undo-closure\" type=\"button\">Undo</button></div>",
-            escape(&name)
+            "<div class=\"card-perma__closure-message card-perma__closure-message--completed\"><span>Completed by {} on <time datetime=\"{seconds}\" data-local-time-target=\"shortdate\">&nbsp;</time>.</span><form id=\"undo-closure-form\" method=\"post\" action=\"/{}/cards/{number}/closure\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button id=\"undo-closure\" type=\"submit\">Undo</button></form></div>",
+            escape(&name),
+            principal.slug
         )
     } else if !postponed {
         let last_active_at: String = card.get("last_active_at");
@@ -475,6 +507,44 @@ pub(super) async fn show(
         ("STEPS", step_html),
         ("STAGE_RAIL", stage_rail),
         (
+            "GOLD_FORM",
+            format!(
+                "<form id=\"gold-action-form\" method=\"post\" action=\"/{}/cards/{number}/goldness\">{}<button id=\"gold\" class=\"side-action side-action--gold\" type=\"submit\" aria-label=\"{}\" title=\"{}\" data-method=\"{}\"><span class=\"card-icon card-icon--golden-ticket\" aria-hidden=\"true\"></span></button></form>",
+                principal.slug,
+                if card.get::<i64, _>("golden") != 0 {
+                    "<input type=\"hidden\" name=\"_method\" value=\"delete\">"
+                } else {
+                    ""
+                },
+                if card.get::<i64, _>("golden") != 0 {
+                    "Remove Golden Ticket"
+                } else {
+                    "Promote to Golden Ticket"
+                },
+                if card.get::<i64, _>("golden") != 0 {
+                    "Remove Golden Ticket"
+                } else {
+                    "Promote to Golden Ticket"
+                },
+                if card.get::<i64, _>("golden") != 0 {
+                    "DELETE"
+                } else {
+                    "POST"
+                },
+            ),
+        ),
+        (
+            "CLOSURE_FORM",
+            if closed {
+                String::new()
+            } else {
+                format!(
+                    "<form id=\"closure-action-form\" method=\"post\" action=\"/{}/cards/{number}/closure\"><button id=\"closure\" type=\"submit\" data-method=\"POST\"><span class=\"card-icon card-icon--check\" aria-hidden=\"true\"></span>Mark as Done</button></form>",
+                    principal.slug
+                )
+            },
+        ),
+        (
             "WATCH_FORM",
             card_controls::button(
                 principal.slug,
@@ -535,32 +605,6 @@ pub(super) async fn show(
         ),
     ]);
     values.insert("STATUS", String::new());
-    values.insert(
-        "CLOSURE_LABEL",
-        if closed { "Reopen" } else { "Mark as Done" }.into(),
-    );
-    values.insert(
-        "CLOSURE_METHOD",
-        if closed { "DELETE" } else { "POST" }.into(),
-    );
-    values.insert(
-        "GOLD_LABEL",
-        if card.get::<i64, _>("golden") != 0 {
-            "Remove Golden Ticket"
-        } else {
-            "Promote to Golden Ticket"
-        }
-        .into(),
-    );
-    values.insert(
-        "GOLD_METHOD",
-        if card.get::<i64, _>("golden") != 0 {
-            "DELETE"
-        } else {
-            "POST"
-        }
-        .into(),
-    );
     values.insert(
         "COMMENT_EDIT_STYLES",
         include_str!("../static/comment_edit.css").into(),

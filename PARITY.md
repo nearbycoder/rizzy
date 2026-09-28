@@ -54,15 +54,18 @@ canceled deletion. The [Fizzy desktop](docs/visual-baselines/fizzy-board-setting
 [Rizzy mobile](docs/visual-baselines/rizzy-board-settings-390.png) screenshots
 record the remaining visual differences. Fizzy's draggable knob behavior,
 published rich-text editor, avatars and icons, and exact presentation still
-differ. On the populated card page, Fizzy has 14 forms and Rizzy ten. Pin and
-watch now use POST forms with delete method overrides, and
+differ. On the populated card page, Fizzy has 14 forms and Rizzy 12. Pin and
+watch use POST forms with delete method overrides, and
 `tests/card_controls_paired.py` compares their card-page presence, cached
 frames, Turbo replacements, and JSON actions against fresh pinned Fizzy.
-Chromium toggled both controls on and off in place in Rizzy. Goldness and
-closure still use JavaScript buttons; a source probe showed that their Turbo
-responses replace the card container and closure control, with additional
-column streams for closure. The step edit form also lacks the source's hidden completed field.
-The inventory remains diagnostic for those unpaired interactions.
+Golden Ticket and completion now use POST forms with delete overrides.
+`tests/card_flag_forms_paired.py` compares those forms, the four create/destroy
+Turbo target sets, and JSON actions on fresh paired apps. Chromium toggled all
+four card controls; the Golden Ticket and completion checks also passed at
+390 pixels. The source's separate reaction-delete form and second closure
+form remain absent. The direct step edit page still lacks the source's hidden
+completed field. The inventory remains diagnostic for those interactions and
+the remaining markup differences.
 
 The comment edit page now renders inside Rizzy's application shell, and the in-card editor uses the same shared controls and styling. `tests/comment_edit_html_parity.py` passed against disposable Fizzy and Rizzy servers, including page-shell markers, Turbo create/edit/delete, JSON updates, and comment side effects. A paired Chromium check confirmed that opening and saving the inline editor keeps each app on its card URL, closes the editor, and shows the saved text. The [direct Fizzy](docs/visual-baselines/fizzy-comment-edit-direct-1280.png), [direct Rizzy](docs/visual-baselines/rizzy-comment-edit-direct-1280.png), [inline Fizzy](docs/visual-baselines/fizzy-comment-edit-inline-1280.png), and [inline Rizzy](docs/visual-baselines/rizzy-comment-edit-inline-1280.png) screenshots record the current visual comparison. This verifies one comment flow, not complete card-page visual or interaction parity.
 

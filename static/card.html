@@ -86,8 +86,11 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 #edit-mobile{display:none}
 .card-perma__closure-message{max-width:48ch;margin:16px auto 28px;padding:0 12px;color:#89bcff;text-align:center;font-size:16px;line-height:1.45}
 .card-perma__closure-message .local-time-value{font-weight:700}
-.card-perma__closure-message--completed{display:flex;align-items:center;justify-content:center;gap:7px;max-width:none;color:#d6dee2}
+.card-perma__closure-message--completed{position:relative;z-index:4;display:flex;align-items:center;justify-content:center;gap:7px;max-width:none;color:#d6dee2}
 .card-perma__closure-message--completed button{padding:0;border:0;background:none;color:inherit;font-weight:inherit;text-decoration:underline}
+.display-contents,#gold-action-form,#closure-action-form,#watch-action-form,#pin-action-form,.actions>[id^="watch_button"],.actions>[id^="pin_button"]{display:contents}
+#undo-closure-form{display:inline}
+.card-perma__notch .actions>form>button:not(.side-action){border-color:#53718e;background:#243b50;color:#e0ecf4}
 .card-perma.is-closed{background:transparent}
 .card-perma.is-closed::before{content:"";position:absolute;inset:0 0 83px;background:#586269;z-index:0}
 .card-perma.is-closed .card__header,.card-perma.is-closed .card__body,.card-perma.is-closed .card__footer{background:#19242a}
@@ -172,25 +175,25 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 <a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu" data-open-menu aria-haspopup="dialog" aria-expanded="false"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header><dialog id="menu-dialog" aria-label="Rizzy menu"><turbo-frame id="my_menu"></turbo-frame></dialog>
 <main id="main">
 <nav><a id="card-back-link" class="btn--back" href="/{{ACCOUNT}}/boards/{{BOARD_ID}}"><span class="card-icon card-icon--arrow-left" aria-hidden="true"></span><strong>Back to {{BOARD_NAME}}</strong></a></nav>
-<article class="card-perma{{IMAGE_CLASS}}{{STATE_CLASS}}{{DESCRIPTION_CLASS}}" id="card">
+<section id="card_container_card_{{CARD_ID}}"><article class="card-perma{{IMAGE_CLASS}}{{STATE_CLASS}}{{DESCRIPTION_CLASS}}" id="card">
   {{IMAGE}}
-  <button id="gold" class="side-action side-action--gold" type="button" aria-label="{{GOLD_LABEL}}" title="{{GOLD_LABEL}}" data-method="{{GOLD_METHOD}}"><span class="card-icon card-icon--golden-ticket" aria-hidden="true"></span></button>
+  {{GOLD_FORM}}
   {{IMAGE_BUTTON}}
   <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
   <div class="card__body"><div class="card__content"><turbo-frame id="edit_card_{{CARD_ID}}"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div></turbo-frame>{{STEPS}}</div>{{STAGE_RAIL}}{{STAMP}}</div>
-  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div class="card-perma__notch">
+  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div id="card_closure_toggle_card_{{CARD_ID}}" class="display-contents"><div class="card-perma__notch">
   <div class="actions">
     <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
     {{WATCH_FORM}}
     {{PIN_FORM}}
     <button id="edit-mobile" type="button" aria-label="Edit card" title="Edit card"><span class="card-icon card-icon--pencil" aria-hidden="true"></span></button>
     <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
-    <button id="closure" type="button" data-method="{{CLOSURE_METHOD}}"><span class="card-icon card-icon--check" aria-hidden="true"></span>{{CLOSURE_LABEL}}</button>
+    {{CLOSURE_FORM}}
   </div></div>
-  {{CLOSURE_NOTICE}}
+  {{CLOSURE_NOTICE}}</div>
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
   <dialog class="assignment-dialog" id="assignment-dialog" aria-label="Assign this card"><button type="button" class="assignment-dialog__close" aria-label="Close assignment picker">×</button><div id="assignment-dialog-content"></div><p class="error" role="alert" id="assignment-dialog-error"></p></dialog>
-</article>
+</article></section>
 <section class="messages"><turbo-frame id="messages_card_{{CARD_ID}}" class="comments" role="group" aria-label="Messages"><div id="comments">{{COMMENTS}}{{NEW_COMMENT_FORM}}{{COMMENT_WATCHERS}}</div>{{DELETE_ACTION}}</turbo-frame></section>
 </main>
 {{SHELL_FOOTER}}
@@ -234,26 +237,35 @@ assignmentContent.addEventListener('submit',async event=>{const form=event.targe
 document.addEventListener('keydown',async event=>{if(event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.target.closest('input,textarea,lexxy-editor,[contenteditable="true"]'))return;if(event.key==='a'){const link=document.getElementById('assignment-link');if(link&&!link.closest('[hidden]')){event.preventDefault();link.click()}}else if(event.key==='m'){const link=document.getElementById('assignment-link');if(!link||link.closest('[hidden]'))return;event.preventDefault();try{const response=await fetch(document.getElementById('self-assignment-form').action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'}});if(!response.ok)throw Error('Could not update assignment');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target'));if(!target||!replacement)throw Error('Assignment update missing');target.replaceWith(document.importNode(replacement,true));assignmentContent.replaceChildren()}catch(error){alert(error.message)}}});
 const deleteCardDialog=document.getElementById('delete-card-dialog');document.getElementById('delete-card-open')?.addEventListener('click',()=>deleteCardDialog.showModal());document.getElementById('delete-card-cancel')?.addEventListener('click',()=>deleteCardDialog.close());deleteCardDialog?.addEventListener('click',event=>{if(event.target===deleteCardDialog)deleteCardDialog.close()});
 async function mutation(path,method,body){const r=await fetch(`/${account}/cards/${number}${path}`,{method,headers:{Accept:'application/json','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){let message=`Request failed (${r.status})`;try{const result=await r.json();message=result.message||message}catch{}throw Error(message)}return r}
-function action(button,path,method){button.addEventListener('click',async()=>{button.disabled=true;try{await mutation(path,button.dataset.method||method);location.reload()}catch(error){button.disabled=false;alert(error.message)}})}
-action(document.getElementById('closure'),'/closure','{{CLOSURE_METHOD}}');
-cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#undo-closure');if(!button)return;button.disabled=true;try{await mutation('/closure','DELETE');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
-cardRoot.addEventListener('submit',async event=>{
-  const form=event.target;
-  if(!form.matches('#watch-action-form,#pin-action-form'))return;
-  event.preventDefault();
-  const button=form.querySelector('button[type=submit]');button.disabled=true;
+async function submitCardControlForm(form,button){
+  if(button)button.disabled=true;
+  const refreshCard=form.matches('#gold-action-form,#closure-action-form,#undo-closure-form');
   try{
-    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:new URLSearchParams(new FormData(form))});
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});
     if(!response.ok)throw Error(`Request failed (${response.status})`);
+    if(refreshCard){await refreshLiveCard(true);return}
     const page=new DOMParser().parseFromString(await response.text(),'text/html');
     for(const stream of page.querySelectorAll('turbo-stream[target]')){
       const target=document.getElementById(stream.getAttribute('target'));
       const replacement=stream.querySelector('template')?.content.firstElementChild;
       if(target&&replacement)target.replaceWith(document.importNode(replacement,true));
     }
-  }catch(error){button.disabled=false;alert(error.message)}
-});
-action(document.getElementById('gold'),'/goldness','{{GOLD_METHOD}}');
+  }catch(error){if(button)button.disabled=false;alert(error.message)}
+}
+const cardControlFormSelector='#watch-action-form,#pin-action-form,#gold-action-form,#closure-action-form,#undo-closure-form';
+window.addEventListener('click',event=>{
+  const button=event.target.closest('#watch,#pin,#gold,#closure,#undo-closure');
+  const form=button?.form;
+  if(!form?.matches(cardControlFormSelector))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  void submitCardControlForm(form,button);
+},true);
+window.addEventListener('submit',event=>{
+  const form=event.target;
+  if(!form.matches(cardControlFormSelector))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  void submitCardControlForm(form,event.submitter||form.querySelector('button[type=submit]'));
+},true);
 cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#remove-image');if(!button)return;button.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/image`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not remove image');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 const cardHeader=document.querySelector('.card__header');
 cardHeader.addEventListener('click',async event=>{const trigger=event.target.closest('[data-tag-picker-url]');if(trigger){const dialog=trigger.closest('.card__tags').querySelector('.tag-dialog'),content=dialog.querySelector('.tag-dialog__content'),error=dialog.querySelector('.tag-dialog__error');error.textContent='';dialog.showModal();if(content.firstElementChild){openTagPicker(content.querySelector('.tag-picker'));return}content.textContent='Loading…';try{const response=await fetch(trigger.dataset.tagPickerUrl,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load tag picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!frame)throw Error('Tag picker missing');content.replaceChildren(document.importNode(frame,true));openTagPicker(content.querySelector('.tag-picker'))}catch(ex){content.textContent='';error.textContent=ex.message}return}const close=event.target.closest('.tag-dialog__close');if(close)close.closest('dialog').close()});
@@ -442,7 +454,7 @@ async function refreshLiveCard(force=false,revisionHint=null){
       cardRoot.classList.toggle('is-postponed',nextCard.classList.contains('is-postponed'));
       const image=cardRoot.querySelector(':scope > .card-perma__image'),updatedImage=nextCard.querySelector(':scope > .card-perma__image');
       if(image&&!updatedImage)image.remove();
-      else if(!image&&updatedImage)cardRoot.querySelector('#gold').before(document.importNode(updatedImage,true));
+      else if(!image&&updatedImage)cardRoot.querySelector('#gold-action-form').before(document.importNode(updatedImage,true));
       else if(image&&updatedImage&&image.getAttribute('src')!==updatedImage.getAttribute('src'))image.replaceWith(document.importNode(updatedImage,true));
       const imageControl=cardRoot.querySelector(':scope > #remove-image, :scope > #image-upload-form');
       const updatedControl=nextCard.querySelector(':scope > #remove-image, :scope > #image-upload-form');
@@ -457,14 +469,18 @@ async function refreshLiveCard(force=false,revisionHint=null){
       document.querySelector('.card__description').innerHTML=nextDescription.innerHTML;
       document.title=nextPage.title;
     }
-    for(const id of ['closure','watch','pin','gold']){
-      const button=document.getElementById(id),updated=nextPage.getElementById(id);
-      if(!button||!updated)continue;
-      button.dataset.method=updated.dataset.method;
-      for(const attribute of ['aria-label','title']){
-        if(updated.hasAttribute(attribute))button.setAttribute(attribute,updated.getAttribute(attribute));
+    for(const id of ['gold-action-form','closure-action-form']){
+      const form=document.getElementById(id),updated=nextPage.getElementById(id);
+      if(form&&updated&&form.outerHTML!==updated.outerHTML)form.replaceWith(document.importNode(updated,true));
+      else if(form&&!updated)form.remove();
+      else if(!form&&updated){
+        const parent=id==='closure-action-form'?cardRoot.querySelector('.card-perma__notch .actions'):cardRoot;
+        parent?.append(document.importNode(updated,true));
       }
-      if(id==='closure')button.innerHTML=updated.innerHTML;
+    }
+    for(const id of ['watch','pin']){
+      const wrapper=document.getElementById(`${id}_button_card_{{CARD_ID}}`),updated=nextPage.getElementById(`${id}_button_card_{{CARD_ID}}`);
+      if(wrapper&&updated&&wrapper.outerHTML!==updated.outerHTML)wrapper.replaceWith(document.importNode(updated,true));
     }
     const status=document.querySelector('.card__header .status'),nextStatus=nextPage.querySelector('.card__header .status');
     if(status&&!nextStatus)status.remove();
@@ -602,6 +618,7 @@ document.addEventListener('keydown',event=>{
 },true);
 const liveCardStream='EventSource' in window?new EventSource(`/${account}/cards/${number}/live`):null;
 if(liveCardStream)liveCardStream.onmessage=event=>void refreshLiveCard(false,event.data);
+window.addEventListener('pagehide',()=>liveCardStream?.close());
 setInterval(()=>{if(!liveCardStream||liveCardStream.readyState!==EventSource.OPEN)void refreshLiveCard()},1500);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshLiveCard()});
 </script>
