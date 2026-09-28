@@ -818,16 +818,53 @@ fn embed_html(app: &App, blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool
     }
 }
 
-fn external_attachment(attributes: &str) -> Option<(String, String)> {
+fn attachment_attributes(attributes: &str) -> HashMap<String, String> {
     static ATTRIBUTE: OnceLock<regex::Regex> = OnceLock::new();
     let attribute = ATTRIBUTE.get_or_init(|| {
         regex::Regex::new(r#"(?i)([a-z][a-z-]*)\s*=\s*["']([^"']*)["']"#)
             .expect("attachment attribute pattern")
     });
-    let fields: HashMap<String, String> = attribute
+    attribute
         .captures_iter(attributes)
         .map(|capture| (capture[1].to_ascii_lowercase(), capture[2].to_owned()))
-        .collect();
+        .collect()
+}
+
+fn invalid_attachment(attributes: &str) -> String {
+    // Action Text keeps a failed attachment's allowlisted attributes in its
+    // own canonical order. Keep them so an unresolved SGID or malformed URL
+    // round-trips through card/comment HTML without inventing an empty SGID.
+    let fields = attachment_attributes(attributes);
+    let mut markup = String::from("<action-text-attachment");
+    for name in [
+        "sgid",
+        "content-type",
+        "url",
+        "href",
+        "filename",
+        "filesize",
+        "width",
+        "height",
+        "previewable",
+        "presentation",
+        "caption",
+        "content",
+    ] {
+        if let Some(value) = fields.get(name) {
+            markup.push_str(&format!(" {name}=\"{}\"", escape(value)));
+        }
+    }
+    markup.push_str(">☒</action-text-attachment>");
+    let sanitized = rich_text::html(&markup);
+    sanitized
+        .strip_prefix("<div class=\"action-text-content\">\n  ")
+        .and_then(|value| value.strip_suffix("\n</div>\n"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| "<action-text-attachment>☒</action-text-attachment>".to_owned())
+}
+
+fn external_attachment(attributes: &str) -> Option<(String, String)> {
+    let fields = attachment_attributes(attributes);
     let raw_url = fields.get("url")?;
     let parsed = url::Url::parse(raw_url).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -957,10 +994,7 @@ pub(super) async fn render_rich_text(
                 attached = true;
             } else {
                 plain_input.push('☒');
-                let invalid = format!(
-                    "<action-text-attachment sgid=\"{}\">☒</action-text-attachment>",
-                    escape(value)
-                );
+                let invalid = invalid_attachment(attributes);
                 replacements.push((token.clone(), invalid.clone(), invalid));
             }
         }

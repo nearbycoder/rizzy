@@ -674,6 +674,15 @@ malformed, and non-ASCII declared content types. The fixture uploads as plain
 text before setting each declared type in its disposable database, so it
 verifies the serving boundary, not every direct-upload validation path.
 
+`tests/malformed_attachment_paired.py` checks two Action Text failure paths
+from the pinned card controller suite: an unresolved attachment SGID in a card
+description and a relative image URL with an invalid media type in a comment.
+Rizzy now keeps the same allowlisted attributes and order in the invalid
+attachment marker, without adding an empty SGID; both apps return the same
+card and comment JSON rich-text HTML and render the card and edit pages. The
+existing paired Action Text embed flow also passes. Other malformed attachment
+combinations and full editor rendering remain open.
+
 `tests/pagination_control_params_paired.py` checks the other link in the
 pinned blob-proxy regression: 20-card all-cards and filtered-board pages get
 query parameters that Rails treats as URL-generation controls, including
