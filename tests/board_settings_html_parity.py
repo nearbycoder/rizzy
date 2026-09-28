@@ -36,6 +36,10 @@ def run(target):
         status, _, html = request(target, board_path + "/edit", accept="text/html")
         assert status == 200 and b"Board Settings" in html and title.encode() in html
         assert b"Who can access this board?" in html and b"Delete this board" in html
+        assert b'id="global-container"' in html and b'<main id="main">' in html
+        assert b'class="settings' in html and b'settings__panel--users' in html
+        assert b'id="footer"' in html and f'action="{board_path}"'.encode() in html
+        assert html.count(b"<form") == 6, (target["name"], "board settings form count", html.count(b"<form"))
         options = []
         for tag in re.findall(rb'<input\b[^>]*>', html):
             if b'type="radio"' in tag and b'name="board[auto_postpone_period_in_days]"' in tag:
@@ -101,7 +105,9 @@ def run(target):
         status, _, raw = request(target, board_path + ".json", bearer=True)
         board = json.loads(raw)
         assert status == 200 and board["name"] == updated and not board["all_access"] and board["auto_postpone_period_in_days"] == 11, (status, board)
-        status, headers, body = request(target, board_path, "DELETE", accept="text/html", csrf=csrf)
+        status, headers, body = request(target, board_path, "POST",
+                                        urllib.parse.urlencode({"_method": "delete"}).encode(),
+                                        accept="text/html", csrf=csrf)
         assert status == 302 and urllib.parse.urlparse(headers["Location"]).path == f"/{account}/", (target["name"], status, headers.get("Location"), body[:200])
         deleted = True
         status, _, _ = request(target, board_path + ".json", bearer=True)

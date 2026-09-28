@@ -23,7 +23,7 @@
         <div class="tray__item tray__item--hat">
           <a href="/{{ACCOUNT}}/notifications/settings">Settings</a>
           <a href="/{{ACCOUNT}}/notifications">See more new items</a>
-          <form method="post" action="/{{ACCOUNT}}/notifications/bulk_reading"><button type="submit" title="Mark all notifications as read">Clear all</button></form>
+          <form method="post" action="/{{ACCOUNT}}/notifications/bulk_reading?from_tray=true"><button type="submit" title="Mark all notifications as read">Clear all</button></form>
         </div>
       </dialog>
       <button type="button" class="tray__toggle" data-open-tray="notifications" aria-label="Toggle notifications stack" aria-haspopup="true" aria-expanded="false"><span class="tray__icon tray__icon--notifications" aria-hidden="true"></span><span class="tray__toggle-text">Notifications <kbd>N</kbd></span></button>

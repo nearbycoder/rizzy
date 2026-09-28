@@ -5118,7 +5118,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/boards/{id}",
             get(show_board)
-                .post(update_board)
+                .post(board_form_method)
                 .put(update_board)
                 .patch(update_board)
                 .delete(delete_board),
@@ -9791,6 +9791,24 @@ async fn create_board(
         format!("/{account}/boards/{id}.json"),
         board_detail(&app, &p, &r, &base(&headers)).await?,
     ))
+}
+async fn board_form_method(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let delete = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+        && url::form_urlencoded::parse(&body)
+            .any(|(key, value)| key == "_method" && value == "delete");
+    if delete {
+        delete_board(State(app), Path((account, id)), headers).await
+    } else {
+        update_board(State(app), Path((account, id)), headers, Method::POST, body).await
+    }
 }
 async fn update_board(
     State(app): Shared,

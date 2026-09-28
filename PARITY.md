@@ -37,17 +37,24 @@ remain covered by the paired test.
 
 `tests/html_form_inventory.py` extracts form actions, methods, and named controls
 from seven populated, signed-in pages on disposable paired apps. The board
-settings page now has three Rizzy forms versus six Fizzy forms: the main board,
-auto-close, and publication forms use the source's actions and form methods;
-Fizzy also has a delete form and shared-shell search and notification forms.
-Rizzy now places public description in a separate form shown when published.
+settings page now has six forms on each app: the main board, auto-close,
+publication, and deletion forms, plus shared-shell search and notification
+forms. Rizzy places public description in a separate form shown when published.
 `tests/board_settings_html_paired.py` checks fresh Fizzy and Rizzy board
 creation, updates, deletion, and Turbo Stream replacements for auto-close and
 publication. It also checks that ordinary HTML form submissions mutate state
 but return the source's empty 406 response, while JSON form submissions return
-the source's success statuses. Signed-in Chromium changed the
-Rust auto-close choice, published, and unpublished in place. The source's knob appearance, published rich-text
-editor, shared shell, and visual presentation still differ. On the card page,
+the source's success statuses. Rizzy's settings page now uses the signed-in
+shell, two source-shaped panels, a radial auto-close selector, a public-link
+switch bar, and a delete confirmation dialog. Signed-in Chromium changed the
+Rust auto-close choice, published and unpublished in place, and opened and
+canceled deletion. The [Fizzy desktop](docs/visual-baselines/fizzy-board-settings-1280.png),
+[Rizzy desktop](docs/visual-baselines/rizzy-board-settings-1280.png),
+[Fizzy mobile](docs/visual-baselines/fizzy-board-settings-390.png), and
+[Rizzy mobile](docs/visual-baselines/rizzy-board-settings-390.png) screenshots
+record the remaining visual differences. Fizzy's draggable knob behavior,
+published rich-text editor, avatars and icons, and exact presentation still
+differ. On the card page,
 Fizzy has 14 forms and Rizzy eight; several actions in Rizzy use other
 controls. The step edit form also lacks the source's hidden completed field.
 The inventory remains diagnostic for those unpaired interactions.
