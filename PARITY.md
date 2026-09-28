@@ -14,6 +14,16 @@ choice after navigation, and reported no console errors. Exact styling, the
 shared header, native behavior, and remaining profile interactions still
 differ from Fizzy.
 
+`tests/user_profile_member_paired.py` compares another member's unverified,
+verified, and removed profile states on fresh paired apps. Unverified profiles
+show one panel and the verification message without email or timeline; verified
+profiles show the email, assigned/added card links, and a lazy `user_events`
+frame with the source's route; removed profiles return 404. Rizzy now fetches
+that frame in the browser and initializes event times and pagination after
+insertion. Chromium showed the owner's timeline after the lazy request without
+console errors. This checks these profile states, not all multiuser permissions
+or exact profile presentation.
+
 The notification settings browser page now uses the shared signed-in shell and
 Fizzy's header, two settings panels, board involvement frames and forms, push
 status and help disclosure, and email frequency form structure. A disposable

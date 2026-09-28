@@ -3,8 +3,7 @@ use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
 use super::{
-    App, Principal, Result, base, card_page::render_template, db_err, escape, events_page,
-    session_transfer,
+    App, Principal, Result, base, card_page::render_template, db_err, escape, session_transfer,
 };
 
 const TEMPLATE: &str = include_str!("../static/user.html");
@@ -130,7 +129,11 @@ pub(super) async fn show(
         String::new()
     };
     let timeline = if user.get::<Option<String>, _>("verified_at").is_some() {
-        events_page::user_fragment(app, principal, user, headers, None).await?
+        format!(
+            "<turbo-frame id=\"user_events\" src=\"/{}/users/{}/events\"></turbo-frame>",
+            principal.slug,
+            escape(&id)
+        )
     } else {
         String::new()
     };
