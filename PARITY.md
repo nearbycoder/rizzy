@@ -10,8 +10,12 @@ structure, alphabetized boards, HTML and JSON involvement updates, method
 override forms, email frequency saves, and the absent-method 404 against the
 pinned source. `tests/notification_settings_html.py` checks the Rust page's
 browser controls and unsubscribe-token creation; `tests/pwa_registration.py`
-also passes for the page. Browser-specific push help text, native-device
-settings, exact styling, and live push delivery remain open. Paired Chromium
+also passes for the page. The paired check now compares push-help headings,
+steps, paragraphs, and section counts across Chrome on Linux and Android,
+Firefox on Windows and Android, Safari on iOS and macOS, Chrome on iOS, Edge on
+Windows, and an unknown user agent. Chromium opened the Chrome/Linux help
+disclosure without page errors. Native-device settings, exact styling, and
+live push delivery remain open. Paired Chromium
 screenshots at 1280 and 390 pixels record the [Fizzy desktop](docs/visual-baselines/fizzy-notification-settings-1280.png),
 [Rizzy desktop](docs/visual-baselines/rizzy-notification-settings-1280.png),
 [Fizzy mobile](docs/visual-baselines/fizzy-notification-settings-390.png), and

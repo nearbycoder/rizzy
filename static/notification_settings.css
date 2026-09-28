@@ -34,7 +34,14 @@ body:has(.notification-settings) .header__title{margin:0;font-size:30px;line-hei
 .notification-settings .notifications__status:not([data-push-settings]) [data-notifications-target="subscribeButton"]{display:none}
 .notification-settings .notifications__status details{margin-top:14px}
 .notification-settings .notifications__status summary{cursor:pointer}
+.notification-settings .notifications__status summary svg{width:16px;height:16px;margin-right:6px;fill:currentColor;vertical-align:-2px}
 .notification-settings .notifications-help__explainer{margin-top:16px;padding:16px;border-radius:8px;background:#f4f5f6;color:#101d23;text-align:left}
+.notification-settings .notifications-help h3{margin:0;font-size:1.1rem}
+.notification-settings .notifications-help ol{margin:12px 0 20px;padding-left:25px}
+.notification-settings .notifications-help ol:last-child{margin-bottom:10px}
+.notification-settings .notifications-help .icon svg{width:1.2em;height:1.2em;fill:currentColor;vertical-align:text-top}
+@media(display-mode:browser){.notification-settings .hide-in-browser{display:none}}
+@media(display-mode:standalone){.notification-settings .hide-in-pwa{display:none}}
 .notification-settings .notifications__on-message{display:none}
 .notification-settings .notifications--on .notifications__on-message{display:inline}
 .notification-settings .notifications--on .notifications__off-message{display:none}

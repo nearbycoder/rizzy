@@ -14,6 +14,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "bench"), str(ROOT / "tests")]
 
+HELP_AGENTS = {
+    "chrome_linux": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "firefox_windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+    "firefox_android": "Mozilla/5.0 (Android 14; Mobile; rv:122.0) Gecko/122.0 Firefox/122.0",
+    "chrome_android": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+    "safari_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "safari_macos": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "chrome_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.0.0 Mobile/15E148 Safari/604.1",
+    "edge_windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "unknown": "Python-urllib/3.13",
+}
+
 from draft_workflow_parity import NoRedirect, login, request  # noqa: E402
 from sustained_mixed import (prepare_rust, prepare_source, rust_env,  # noqa: E402
                              start_server, stop_server)
@@ -35,6 +47,44 @@ class Tags(HTMLParser):
     def classes(self, tag, *classes):
         return [attrs for name, attrs in self.tags if name == tag and
                 set(classes) <= set(attrs.get("class", "").split())]
+
+
+class HelpText(HTMLParser):
+    def __init__(self, raw, origin):
+        super().__init__()
+        self.origin = origin
+        self.current = None
+        self.parts = []
+        self.headings = []
+        self.steps = []
+        self.paragraphs = []
+        self.help_depth = 0
+        self.feed(raw.decode())
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "div":
+            if self.help_depth:
+                self.help_depth += 1
+            elif "notifications-help__explainer" in dict(attrs).get("class", "").split():
+                self.help_depth = 1
+        if tag in ("h3", "li") or (tag == "p" and self.help_depth):
+            self.current = tag
+            self.parts = []
+
+    def handle_data(self, data):
+        if self.current:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == self.current:
+            value = " ".join("".join(self.parts).split())
+            value = value.replace("Fizzy", "Rizzy").replace(self.origin, "ORIGIN")
+            if value:
+                (self.headings if tag == "h3" else self.steps if tag == "li" else self.paragraphs).append(value)
+            self.current = None
+            self.parts = []
+        if tag == "div" and self.help_depth:
+            self.help_depth -= 1
 
 
 def check(target):
@@ -105,7 +155,20 @@ def check(target):
     status, _, body = request(target, path, accept="text/html")
     assert status == 200
     assert "daily" in [attrs["value"] for attrs in Tags(body).find("option") if "selected" in attrs]
-    return {"panels": 2, "board_frames": len(board_frames), "saved_frequency": "daily"}
+    help_results = {}
+    for name, agent in HELP_AGENTS.items():
+        target["extra_headers"] = {"User-Agent": agent}
+        status, _, body = request(target, path, accept="text/html")
+        assert status == 200, (target["name"], name, status)
+        help_text = HelpText(body, target["url"])
+        help_tags = Tags(body)
+        blocks = len(help_tags.classes("div", "notifications-help"))
+        details = len(help_tags.find("div", **{"data-notifications-target": "details"}))
+        help_results[name] = (help_text.headings, help_text.steps,
+                              help_text.paragraphs, blocks, details)
+    target.pop("extra_headers")
+    return {"panels": 2, "board_frames": len(board_frames),
+            "saved_frequency": "daily", "help": help_results}
 
 
 def main():
@@ -133,8 +196,13 @@ def main():
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
                         NoRedirect()),
                 })
-            assert results["fizzy"] == results["rizzy"], results
-            print("PASS paired notification settings, board watch forms, and email update")
+            mismatches = [(case, results["fizzy"]["help"][case], results["rizzy"]["help"][case])
+                          for case in HELP_AGENTS
+                          if results["fizzy"]["help"][case] != results["rizzy"]["help"][case]]
+            assert not mismatches, mismatches
+            assert {key: value for key, value in results["fizzy"].items() if key != "help"} == {
+                key: value for key, value in results["rizzy"].items() if key != "help"}
+            print(f"PASS paired notification settings, watch forms, email update, and {len(HELP_AGENTS)} push-help agents")
         finally:
             for process in reversed(processes):
                 stop_server(process)
