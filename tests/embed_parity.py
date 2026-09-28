@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import time
 import urllib.parse
 import urllib.request
@@ -174,6 +175,7 @@ def run(target):
         status, _, _ = request(target, f"/cards/{card['number']}/comments/{comment['id']}", "DELETE")
         assert status == 204, status
         if target.get("database"):
+            drain_rizzy(target)
             db = sqlite3.connect(target["database"])
             try:
                 assert db.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
@@ -202,6 +204,7 @@ def run(target):
 
 
 def assert_deleted(target, blob):
+    drain_rizzy(target)
     db = sqlite3.connect(target["database"])
     try:
         assert db.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
@@ -210,6 +213,16 @@ def assert_deleted(target, blob):
         assert not (Path(target["storage_dir"]) / (blob["key"] + ".large.jpg")).exists()
     finally:
         db.close()
+
+
+def drain_rizzy(target):
+    env = {**os.environ,
+           "RIZZY_DATABASE_URL": f"sqlite://{target['database']}",
+           "RIZZY_STORAGE_DIR": str(target["storage_dir"])}
+    binary = Path(__file__).resolve().parents[1] / "target/release/rizzy"
+    result = subprocess.run([binary, "purge-stored-blobs"], env=env,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr[-1000:]
 
 
 def main():

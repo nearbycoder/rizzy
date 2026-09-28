@@ -78,8 +78,9 @@ server CPUs. This measures synchronous JPEG embed writes only; concurrent
 uploads, the other formats, and maximum sustainable throughput remain open.
 `tests/storage_variant_concurrency.py` also passed ten fresh runs with eight
 simultaneous image embeds routed across two Rizzy processes. Each run kept one
-pair of derived variants and removed their records and files only after the
-last attached card was deleted. This verifies that race and cleanup path on
+pair of derived variants. The updated test confirms those records and files
+remain until the last attached card is deleted and the queued purge is drained.
+This verifies that race and cleanup path on
 SQLite; it is not a concurrent throughput or MySQL scale measurement.
 
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
@@ -858,6 +859,15 @@ deletion. `tests/mysql_pair_selfhost.py card-image-purge` passed the same
 paired deferred cleanup cases on disposable MySQL databases. Concurrent
 card-image purge paths remain to be checked.
 
+`tests/embed_purge_parity.py` and `tests/mysql_pair_selfhost.py embed-purge`
+compare the staged Action Text lifecycle on SQLite and MySQL: removing a JPEG
+embed queues its original while retaining two variants, draining that job queues
+the variants, and later drains remove their bytes. A blob shared by a card and
+comment is queued only after the last attachment is removed; board deletion
+also queues its embed. `tests/embed_parity.py` and the two-process variant
+test drain the queue before asserting eventual file cleanup. Concurrent purge
+claims for shared embeds remain unverified.
+
 Fresh `tests/mysql_pair_selfhost.py card-image` and `embeds` runs now matched
 the pinned Fizzy app on disposable MySQL databases. The image test also read
 both databases around removal: card and board update times changed while the
@@ -872,7 +882,7 @@ separate Rust-only MySQL storage test covers selected cleanup cases.
 
 The [current deferred-purge avatar attachment benchmark](bench/results/avatar-attach-deferred-2round-2026-09-27.json) used two fresh SQLite rounds in reversed app order, 12 replacements per app per round, two server CPUs, paused purge workers, and equal 70,367-byte PNG thumbnails. Rizzy's median PATCH was 41.78–42.26 ms versus Fizzy's 66.62–70.51 ms; first anonymous thumbnail retrieval was 1.4–1.5 ms versus 16.19–17.74 ms. The artifact records the committed Rust revision and release-binary hash. The [earlier immediate-purge run](bench/results/avatar-attach-eager-2round-2026-09-27.json) is retained for comparison. The [two-round warmed retrieval benchmark](bench/results/avatar-thumbnail-exact-2round-2026-09-27.json) used the pre-deferred-purge build with equal thumbnail bytes and reversed order. At 32 clients, Rizzy completed 2,095–2,098 requests/s versus Fizzy's 491–494; at 64 clients, 1,832–1,860 versus 552–555. All eight phases had zero HTTP errors. These are single-host, one-avatar measurements, not a maximum-capacity or whole-app scale claim.
 
-The fresh SQLite replacement probe found that Fizzy retains the old original and derived blobs while queuing an `ActiveStorage::PurgeJob`. `tests/avatar_purge_parity.py` and `tests/mysql_pair_selfhost.py avatar-purge` now compare the staged lifecycle: replacement detaches the old avatar, the parent purge removes its original and queues the derived blob, and the second purge removes that derivative. Both paired tests pass on disposable databases. `tests/avatar_purge_workers.py` checks that two Rust processes drain three originals and three derivatives, recovering an abandoned claim. Rizzy uses its own durable queue rather than Solid Queue's exact job schema and serialization. Deferred purge behavior for card images and Action Text attachments remains open.
+The fresh SQLite replacement probe found that Fizzy retains the old original and derived blobs while queuing an `ActiveStorage::PurgeJob`. `tests/avatar_purge_parity.py` and `tests/mysql_pair_selfhost.py avatar-purge` now compare the staged lifecycle: replacement detaches the old avatar, the parent purge removes its original and queues the derived blob, and the second purge removes that derivative. Both paired tests pass on disposable databases. `tests/avatar_purge_workers.py` checks that two Rust processes drain three originals and three derivatives, recovering an abandoned claim. Rizzy uses its own durable queue rather than Solid Queue's exact job schema and serialization. Card-image and Action Text staged purges are covered for the cases described above; other attachment types and concurrent races remain open.
 
 `tests/rich_text_parity.py` compares common Action Text card descriptions, comments, and published board descriptions against Fizzy: plain-text extraction, safe formatted HTML, paragraph/list breaks, automatic links, retained safe class attributes, and removal of unsafe attributes and protocols. It does not cover the full Rails sanitizer allowlist, all mention forms, general remote/media embeds, or every HTML edge case. `tests/embed_parity.py` covers the tested uploaded image and plain-file forms. `tests/search_rich_text_parity.py` checks that formatted card/comment text and attachment filenames are searchable while HTML tags, attributes, and entities are not; it also checks edits, deletes, and the 32 KiB indexed-content limit against both servers. An existing-database migration was verified with a preexisting formatted card. The browser search page now renders separate card and comment hits with escaped highlights, excerpt clipping, numeric-card forwarding, blank and no-match states, and automatic pagination links; `tests/search.py` exercises these alongside the unchanged deduplicated JSON route. `tests/search_html_parity.py` creates equivalent live fixtures on both apps and compares hit counts, card versus comment rendering, snippets including fallback truncation, escaping, JSON deduplication, invalid page values, and pagination. The pinned source search controller suite passed 12 tests and 96 assertions. The [current 100-card search run](bench/results/search-html-100-page-first-2026-09-25.json) and [1,000-card run](bench/results/search-html-1000-page-first-2026-09-25.json) match result counts over four pages and report faster Rust reads on those fixtures; the source and Rust HTML sizes differ considerably, and full ActiveSearch query grammar, exact visual and Turbo behavior, and large-scale indexing remain incomplete. `tests/smoke.py` sends an encoded literal angle bracket to reflect the source API's HTML-input semantics.
 

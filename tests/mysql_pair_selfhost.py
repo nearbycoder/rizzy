@@ -35,6 +35,7 @@ from card_image_purge_parity import run as card_image_purge_run  # noqa: E402
 from avatar_parity import run as avatar_run  # noqa: E402
 from avatar_purge_parity import run as avatar_purge_run  # noqa: E402
 from embed_parity import run as embed_run  # noqa: E402
+from embed_purge_parity import run as embed_purge_run  # noqa: E402
 from card_controls_parity import check as card_controls_check  # noqa: E402
 from card_board_html_parity import check as card_board_check  # noqa: E402
 from card_edit_html_parity import check as card_edit_check  # noqa: E402
@@ -77,7 +78,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=("core", "search", "board-filter", "all-cards",
                                           "named-column", "column-cache", "column-show-cache",
-                                          "draft", "card-image", "card-image-purge", "avatar", "avatar-purge", "embeds", "card-controls",
+                                          "draft", "card-image", "card-image-purge", "avatar", "avatar-purge", "embeds", "embed-purge", "card-controls",
                                           "card-board", "card-edit", "assignment", "reaction",
                                           "column-turbo", "card-previews", "account-card",
                                           "board-views", "board-settings", "webhooks-html",
@@ -131,7 +132,7 @@ def main():
                 "owner@example.com" if args.suite == "route-get-valid"
                 else "mysql-pair-owner@example.test")
             local_rust_env["RIZZY_DEV_MAGIC_LINKS"] = "1"
-            if args.suite in ("avatar-purge", "card-image-purge"):
+            if args.suite in ("avatar-purge", "card-image-purge", "embed-purge"):
                 local_rust_env["RIZZY_DISABLE_STORAGE_PURGE"] = "1"
             rizzy_env, rizzy_credentials = prepare_rust(rizzy_dir, local_rust_env)
             cpus = sorted(os.sched_getaffinity(0))[:2]
@@ -215,6 +216,12 @@ def main():
             elif args.suite == "embeds":
                 source_result = embed_run(source)
                 rust_result = embed_run(rust)
+            elif args.suite == "embed-purge":
+                source["env"] = fizzy_env
+                rust["env"] = rizzy_env
+                rust["storage"] = rizzy_dir / "storage"
+                source_result = embed_purge_run(source)
+                rust_result = embed_purge_run(rust)
             elif args.suite == "board-views":
                 source_result = board_views_run(source)
                 rust_result = board_views_run(rust)
@@ -497,6 +504,8 @@ def main():
                 print("Disposable MySQL staged avatar purge matched pinned Fizzy")
             elif args.suite == "embeds":
                 print("Disposable MySQL rich-text embed workflow matched pinned Fizzy")
+            elif args.suite == "embed-purge":
+                print("Disposable MySQL staged Action Text embed purge matched pinned Fizzy")
             elif args.suite == "board-views":
                 print(f"Disposable MySQL private and public board views matched pinned Fizzy: "
                       f"{len(source_result)} comparisons")

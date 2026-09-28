@@ -4,6 +4,7 @@
 import concurrent.futures
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -13,13 +14,14 @@ sys.path.insert(0, str(ROOT / "bench"))
 from card_workflow import expect  # noqa: E402
 from card_image_parity import IMAGE  # noqa: E402
 from embed_parity import upload  # noqa: E402
-from sustained_mixed import prepare_rust, start_server, stop_server  # noqa: E402
+from sustained_mixed import prepare_rust, rust_env, start_server, stop_server  # noqa: E402
 
 
 def main():
     with tempfile.TemporaryDirectory(prefix="rizzy-variant-concurrency-") as temporary:
         directory = Path(temporary)
-        env, credentials = prepare_rust(directory)
+        env, credentials = prepare_rust(directory, {**rust_env(directory),
+                                                    "RIZZY_DISABLE_STORAGE_PURGE": "1"})
         processes = []
         try:
             targets = []
@@ -67,6 +69,13 @@ def main():
             assert database.execute("SELECT COUNT(*) FROM storage_variant_records WHERE blob_id=?",
                                     (blob["id"],)).fetchone()[0] == 2
             expect(targets[1], f"/cards/{numbers[-1]}", "DELETE", status=204)
+            assert database.execute("SELECT COUNT(*) FROM storage_variant_records WHERE blob_id=?",
+                                    (blob["id"],)).fetchone()[0] == 2
+            assert database.execute("SELECT COUNT(*) FROM storage_purge_jobs WHERE state='pending'").fetchone()[0] == 1
+            assert all((storage / key).exists() for key in derived_keys)
+            result = subprocess.run([str(ROOT / "target/release/rizzy"), "purge-stored-blobs"],
+                                    env=env, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr[-1000:]
             assert database.execute("SELECT COUNT(*) FROM storage_variant_records WHERE blob_id=?",
                                     (blob["id"],)).fetchone()[0] == 0
             assert all(not (storage / key).exists() for key in derived_keys)

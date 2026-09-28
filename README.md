@@ -27,7 +27,7 @@ The default database is `data/rizzy.sqlite3`. Set `RIZZY_DATABASE_URL` to a diff
 
 Install the `vips` command from libvips to generate JPEG, PNG, GIF, and WebP Action Text previews and avatar thumbnails with the same bytes as Fizzy in the tested cases. Without it, Rizzy falls back to its Rust image encoder, which can produce different preview checksums and does not preserve animated frames for Action Text previews.
 
-Replaced and removed avatars and card images queue their original blobs for deletion. The storage purge worker drains those jobs and any derived variants across Rizzy processes. Run `cargo run --release -- purge-stored-blobs` to drain a batch immediately, or set `RIZZY_DISABLE_STORAGE_PURGE=1` when an external worker owns the queue.
+Replaced and removed avatars, card images, and Action Text embeds queue their original blobs for deletion. The storage purge worker drains those jobs and any derived variants across Rizzy processes. Run `cargo run --release -- purge-stored-blobs` to drain a batch immediately, or set `RIZZY_DISABLE_STORAGE_PURGE=1` when an external worker owns the queue.
 
 User mention pickers, new blob uploads, and account exports issue Rails-compatible signed IDs. Rizzy derives their signing keys from `RIZZY_SECRET_KEY_BASE` when set, or from a persistent per-database secret otherwise. Set `RIZZY_SECRET_KEY_BASE` to a Fizzy instance's `SECRET_KEY_BASE` when signed IDs must verify across the two apps; keep the chosen value stable so existing attachments continue to resolve. Older Rizzy blobs retain their original opaque IDs.
 

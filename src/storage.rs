@@ -1317,7 +1317,6 @@ async fn sync_embeds_tx_inner(
         .bind(record_type).bind(record_id).bind(&p.account_id)
         .fetch_all(&mut **tx).await.map_err(db_err)?;
     let mut current = HashSet::new();
-    let mut keys = Vec::new();
     for row in existing {
         let blob_id: String = row.get("blob_id");
         if wanted.contains(&blob_id) {
@@ -1347,7 +1346,7 @@ async fn sync_embeds_tx_inner(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            keys.extend(purge_blob_with_variants_tx(tx, &blob_id).await?);
+            enqueue_blob_purge_tx(tx, &p.account_id, &blob_id).await?;
         }
     }
     for blob_id in wanted.difference(&current) {
@@ -1366,7 +1365,7 @@ async fn sync_embeds_tx_inner(
         )
         .await?;
     }
-    Ok(keys)
+    Ok(Vec::new())
 }
 
 pub(super) async fn purge_card_storage_tx(
@@ -1408,8 +1407,11 @@ pub(super) async fn purge_card_storage_tx(
                 .await
                 .map_err(db_err)?;
         if remaining == 0 {
-            if row.get::<String, _>("record_type") == "Card"
-                && row.get::<String, _>("attachment_name") == "image"
+            if matches!(
+                row.get::<String, _>("attachment_name").as_str(),
+                "embed" | "embeds"
+            ) || (row.get::<String, _>("record_type") == "Card"
+                && row.get::<String, _>("attachment_name") == "image")
             {
                 enqueue_blob_purge_tx(tx, account_id, &blob_id).await?;
             } else {
