@@ -65,8 +65,9 @@ four card controls; the Golden Ticket and completion checks also passed at
 390 pixels. Card and comment reactions now render POST delete-override forms;
 fresh paired HTTP and browser checks cover their deletion. The remaining card
 form is inside Fizzy's embedded closure-restoration Turbo Stream, which Rizzy
-does not yet render. The direct step edit page still lacks the source's hidden
-completed field. The inventory remains diagnostic for those interactions and
+does not yet render. The direct step edit form now includes the source's hidden
+unchecked value; `tests/step_edit_completed_paired.py` checks that editing a
+completed step submits it and reopens the step. The inventory remains diagnostic for those interactions and
 the remaining markup differences.
 
 The comment edit page now renders inside Rizzy's application shell, and the in-card editor uses the same shared controls and styling. `tests/comment_edit_html_parity.py` passed against disposable Fizzy and Rizzy servers, including page-shell markers, Turbo create/edit/delete, JSON updates, and comment side effects. A paired Chromium check confirmed that opening and saving the inline editor keeps each app on its card URL, closes the editor, and shows the saved text. The [direct Fizzy](docs/visual-baselines/fizzy-comment-edit-direct-1280.png), [direct Rizzy](docs/visual-baselines/rizzy-comment-edit-direct-1280.png), [inline Fizzy](docs/visual-baselines/fizzy-comment-edit-inline-1280.png), and [inline Rizzy](docs/visual-baselines/rizzy-comment-edit-inline-1280.png) screenshots record the current visual comparison. This verifies one comment flow, not complete card-page visual or interaction parity.
