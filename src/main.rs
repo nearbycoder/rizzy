@@ -951,7 +951,10 @@ async fn register_pwa_on_pages(State(app): Shared, request: Request, next: Next)
     if matches!(
         response.status(),
         StatusCode::NOT_FOUND | StatusCode::INTERNAL_SERVER_ERROR
-    ) {
+    ) || response
+        .headers()
+        .contains_key(header::CONTENT_SECURITY_POLICY)
+    {
         return response;
     }
     if !response
@@ -6965,11 +6968,29 @@ async fn update_timezone(
     State(app): Shared,
     Path(account): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    raw_body: Bytes,
+) -> Result<Response> {
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
-    let timezone = body.get("timezone_name").and_then(Value::as_str);
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let body = if content_type.starts_with("application/x-www-form-urlencoded") {
+        session_body(&headers, &raw_body)?.0
+    } else if content_type.starts_with("application/json") || content_type.contains("+json") {
+        if raw_body.is_empty() {
+            json!({})
+        } else {
+            match serde_json::from_slice(&raw_body) {
+                Ok(body) => body,
+                Err(_) => return Ok(timezone_bad_request(&headers)),
+            }
+        }
+    } else {
+        json!({})
+    };
+    let timezone = timezone_param(body.get("timezone_name"));
     let statement = if app.mysql {
         "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON DUPLICATE KEY UPDATE timezone_name=VALUES(timezone_name)"
     } else {
@@ -6982,7 +7003,81 @@ async fn update_timezone(
         .execute(&app.db)
         .await
         .map_err(db_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+fn timezone_param(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::Null => None,
+        Value::String(value) => Some(value.clone()),
+        Value::Bool(value) => Some(if *value { "t" } else { "f" }.to_owned()),
+        value => Some(timezone_ruby_inspect(value, false)),
+    }
+}
+fn timezone_ruby_inspect(value: &Value, array_item: bool) -> String {
+    match value {
+        Value::Null => "nil".into(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => serde_json::to_string(value).expect("string inspection"),
+        Value::Array(items) => format!(
+            "[{}]",
+            items
+                .iter()
+                .filter(|item| !item.is_null())
+                .map(|item| timezone_ruby_inspect(item, true))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Object(items) => {
+            let contents = items
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{} => {}",
+                        serde_json::to_string(key).expect("key inspection"),
+                        timezone_ruby_inspect(value, false)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let hash = format!("{{{contents}}}");
+            if array_item {
+                format!("#<ActionController::Parameters {hash} permitted: false>")
+            } else {
+                hash
+            }
+        }
+    }
+}
+fn timezone_bad_request(headers: &HeaderMap) -> Response {
+    let json = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|accept| accept.contains("json"));
+    let (content_type, body) = if json {
+        (
+            "application/json; charset=UTF-8",
+            r#"{"status":400,"error":"Bad Request"}"#.to_owned(),
+        )
+    } else {
+        (
+            "text/html; charset=UTF-8",
+            format!("{}\n", include_str!("../static/400.html")),
+        )
+    };
+    let mut response = (
+        StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, content_type)],
+        body,
+    )
+        .into_response();
+    if !json {
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(STATIC_CSP),
+        );
+    }
+    response
 }
 async fn my_identity(
     State(app): Shared,
