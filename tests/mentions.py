@@ -85,7 +85,7 @@ def main():
             notices, _ = call(port, f"/{account}/notifications", bearer="mentioned")
             assert len(notices) == 1 and notices[0]["source_type"] == "mention"
             assert notices[0]["unread_count"] == 1, notices
-            assert "Hello MentionedMentioned" in notices[0]["body"], notices
+            assert "Hello @mentioned@mentioned" in notices[0]["body"], notices
             call(port, f"/{account}/cards/{number}", "PUT", {"card": {"description": description}}, bearer=owner_token)
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT COUNT(*) FROM mentions WHERE source_id=?", (card_id,)).fetchone()[0] == 2

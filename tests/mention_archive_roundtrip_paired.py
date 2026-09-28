@@ -99,7 +99,7 @@ def verify_rust_import(target, created, expected_sha256, expected_blobs,
     status, _, rendered = request(target, f"/{created['account']}/cards/{card[1]}",
                                   accept="text/html")
     assert status == 200, (status, rendered[-1500:])
-    assert b'<span class="mention">' in rendered and b"notes.txt" in rendered, rendered[-1500:]
+    assert b'content-type="application/vnd.actiontext.mention"><img title=' in rendered and b"notes.txt" in rendered, rendered[-1500:]
     if image_filename:
         assert image_filename.encode() in rendered, rendered[-1500:]
     return {"cards": 1, "mentions": 1, "attachments": 2 + bool(image_filename),

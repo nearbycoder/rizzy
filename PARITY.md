@@ -167,10 +167,11 @@ field. The test also passes each Rizzy User SGID to Fizzy's signed GlobalID
 parser with a shared signing secret and checks the decoded User ID. Rizzy's
 mention picker now emits this format; `tests/mentions.py` checks that the signed
 IDs render and create mentions and notifications.
-`tests/mention_attachment_flag_paired.py` confirms that a rendered User mention
-does not set the card's `has_attachments` flag on either app. The rendered mention
-HTML still differs: Fizzy includes an avatar image and full name, while Rizzy
-currently uses a span and first name.
+`tests/mention_attachment_flag_paired.py` compares a rendered signed User
+mention in card and comment JSON, including plain text and normalized HTML,
+and confirms that neither app sets the card's `has_attachments` flag. Both now
+render the avatar image and first name for a two-word user name. Unicode names,
+attachment attributes, and browser editor flows remain unverified.
 The export fixture writes a
 signed User attachment to each card, explicitly runs Fizzy's queued mention
 job, and checks that both archives contain its portable User GID and one

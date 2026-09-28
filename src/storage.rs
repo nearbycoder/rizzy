@@ -1014,7 +1014,7 @@ pub(super) async fn render_rich_text(
             ));
             attached = true;
         } else {
-            let mut user = sqlx::query("SELECT u.name FROM user_attachables s JOIN users u ON u.id=s.user_id WHERE s.sgid=? AND s.account_id=?")
+            let mut user = sqlx::query("SELECT u.id,u.name FROM user_attachables s JOIN users u ON u.id=s.user_id WHERE s.sgid=? AND s.account_id=?")
                 .bind(value).bind(account_id).fetch_optional(&app.db).await.map_err(db_err)?;
             if user.is_none() {
                 if let Some(user_id) = app
@@ -1022,7 +1022,7 @@ pub(super) async fn render_rich_text(
                     .parse_user(value)
                     .or_else(|| value.strip_prefix("gid://fizzy/User/").map(str::to_owned))
                 {
-                    user = sqlx::query("SELECT name FROM users WHERE id=? AND account_id=?")
+                    user = sqlx::query("SELECT id,name FROM users WHERE id=? AND account_id=?")
                         .bind(&user_id)
                         .bind(account_id)
                         .fetch_optional(&app.db)
@@ -1031,12 +1031,15 @@ pub(super) async fn render_rich_text(
                 }
             }
             if let Some(user) = user {
+                let user_id: String = user.get("id");
                 let name: String = user.get("name");
                 let first_name = name.split_whitespace().next().unwrap_or(&name);
-                plain_input.push_str(first_name);
+                plain_input.push_str(&format!("@{}", first_name.to_lowercase()));
                 let markup = format!(
-                    "<action-text-attachment sgid=\"{}\" content-type=\"application/vnd.actiontext.mention\"><span class=\"mention\">{}</span></action-text-attachment>",
+                    "<action-text-attachment sgid=\"{}\" content-type=\"application/vnd.actiontext.mention\"><img title=\"{}\" src=\"/{slug}/users/{}/avatar\" width=\"48\" height=\"48\">\n{}</action-text-attachment>",
                     escape(value),
+                    escape(&name),
+                    escape(&user_id),
                     escape(first_name)
                 );
                 replacements.push((token.clone(), markup.clone(), markup));

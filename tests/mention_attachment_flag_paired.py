@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare whether a User mention counts as a card file attachment."""
+"""Compare rendered User mentions on live Fizzy and Rizzy cards and comments."""
 
 import http.cookiejar
 import json
@@ -26,6 +26,12 @@ def check(target):
                           {"board": {"name": "Mention attachment flag"}})
     assert status == 201, (target["name"], status, raw[:120])
     board_id = json.loads(raw)["id"]
+    status, _, raw = call(target, f"/{account}/users")
+    assert status == 200, (target["name"], status, raw[:120])
+    owner = next(user for user in json.loads(raw) if user["role"] == "owner")
+    status, _, raw = call(target, f"/{account}/users/{owner['id']}", "PATCH",
+                          {"user": {"name": "Ada Lovelace"}})
+    assert status == 200, (target["name"], status, raw[:120])
     status, _, prompt = request(target, f"/{account}/prompts/boards/{board_id}/users",
                                 accept="text/html")
     assert status == 200, (target["name"], status)
@@ -44,7 +50,22 @@ def check(target):
     assert status == 200, (target["name"], status, raw[:120])
     reread = json.loads(raw)
     assert card["has_attachments"] == reread["has_attachments"], (target["name"], card, reread)
-    return card["has_attachments"]
+    status, _, raw = call(target, f"/{account}/cards/{card['number']}/comments", "POST",
+                          {"comment": {"body": markup}})
+    assert status == 201, (target["name"], status, raw[:120])
+    comment = json.loads(raw)
+
+    def normalize(html):
+        return re.sub(rf"/{account}/users/[^/]+/avatar", f"/{account}/users/USER/avatar",
+                      html.replace(sgid, "SGID"))
+
+    return {
+        "has_attachments": card["has_attachments"],
+        "card_plain": card["description"],
+        "card_html": normalize(card["description_html"]),
+        "comment_plain": comment["body"]["plain_text"],
+        "comment_html": normalize(comment["body"]["html"]),
+    }
 
 
 def main():
@@ -75,8 +96,11 @@ def main():
                         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
                         NoRedirect()),
                 })
-            assert results["fizzy"] == results["rizzy"] == False, results
-            print("PASS User mentions do not count as file attachments")
+            assert results["fizzy"] == results["rizzy"], results
+            assert results["fizzy"]["has_attachments"] is False, results
+            assert results["fizzy"]["card_plain"] == "Hello @ada", results
+            assert '<img title="Ada Lovelace"' in results["fizzy"]["card_html"], results
+            print("PASS User mention card/comment rendering and attachment flag match Fizzy")
         finally:
             for process in reversed(processes):
                 stop_server(process)
