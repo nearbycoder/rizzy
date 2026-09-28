@@ -862,6 +862,19 @@ fn canonical_attachment_open(fields: &HashMap<String, String>) -> String {
     markup
 }
 
+fn restore_attachment_attribute_gt(html: String) -> String {
+    if !html.contains("&gt;") {
+        return html;
+    }
+    static OPEN_TAG: OnceLock<regex::Regex> = OnceLock::new();
+    OPEN_TAG
+        .get_or_init(|| regex::Regex::new(r"(?is)<action-text-attachment\b[^>]*>").unwrap())
+        .replace_all(&html, |matched: &regex::Captures<'_>| {
+            matched[0].replace("&gt;", ">")
+        })
+        .into_owned()
+}
+
 fn invalid_attachment(attributes: &str) -> String {
     // Action Text keeps a failed attachment's allowlisted attributes in its
     // own canonical order. Keep them so an unresolved SGID or malformed URL
@@ -978,8 +991,7 @@ pub(super) async fn render_rich_text(
                     plain_input.pop();
                 }
                 plain_input.push_str(&plain);
-                replacements.push((token.clone(), format!("</p>{markup}<p>"), markup));
-                html_input.push_str(&token);
+                html_input.push_str(&markup);
                 offset = whole.end();
                 continue;
             }
@@ -1034,7 +1046,9 @@ pub(super) async fn render_rich_text(
                     plain_input.pop();
                 }
                 plain_input.push_str(&plain);
-                replacements.push((token.clone(), format!("</p>{markup}<p>"), markup));
+                html_input.push_str(&markup);
+                offset = whole.end();
+                continue;
             } else {
                 plain_input.push('☒');
                 let invalid = invalid_attachment(attributes);
@@ -1046,7 +1060,7 @@ pub(super) async fn render_rich_text(
     }
     plain_input.push_str(&raw[offset..]);
     html_input.push_str(&raw[offset..]);
-    let mut html = rich_text::html(&html_input);
+    let mut html = restore_attachment_attribute_gt(rich_text::html(&html_input));
     for (token, paragraph_html, bare_html) in replacements {
         let before = html
             .split_once(&token)

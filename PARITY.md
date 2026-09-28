@@ -675,13 +675,16 @@ text before setting each declared type in its disposable database, so it
 verifies the serving boundary, not every direct-upload validation path.
 
 `tests/malformed_attachment_paired.py` checks the pinned card controller's
-unresolved attachment SGID and malformed comment image paths, plus fourteen
+unresolved attachment SGID and malformed comment image paths, plus seventeen
 card-description cases for relative and remote images, videos, dimensions,
 HTML entities, quoted greater-than characters, self-closing tags, captions,
-unresolved SGID fallback, and unsafe URLs. Rizzy now keeps
+unresolved SGID fallback, unsafe URLs, and media embedded between paragraph
+text. Rizzy now keeps
 Action Text's canonical attribute order and remote figure markup, and remote
-media no longer sets the blob-attachment flag. The paired suite matches
-card/comment JSON rich-text HTML, plain text, and attachment flags; both apps
+media goes through the final HTML parser so Fizzy's paragraph splitting and
+figures match. Remote media no longer sets the blob-attachment flag. The paired
+suite matches card and comment JSON rich-text HTML, including a remote image
+inside a comment paragraph, plus plain text and attachment flags; both apps
 render the card and edit pages. The existing paired Action Text embed flow and
 45-case rich-text allowlist suite still pass. Other malformed attachment
 combinations and full editor rendering remain open.

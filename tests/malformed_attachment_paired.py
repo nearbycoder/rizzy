@@ -32,6 +32,9 @@ CASES = {
     "unsafe image URL": '<action-text-attachment url="data:text/html,PAYLOAD" content-type="image/png" caption="Danger"></action-text-attachment>',
     "unsafe video URL": '<action-text-attachment url="javascript:alert(1)" content-type="video/mp4" caption="Danger"></action-text-attachment>',
     "javascript URL": '<action-text-attachment url="javascript:alert(1)" content-type="image/png" caption="Danger"></action-text-attachment>',
+    "inline remote image": '<p>Before <action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="Photo"></action-text-attachment> after</p>',
+    "paragraph remote video": '<p><action-text-attachment url="https://example.com/video.mp4" content-type="video/mp4" caption="Clip"></action-text-attachment></p><p>Later</p>',
+    "two remote attachments": '<p>One <action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="Photo"></action-text-attachment> and <action-text-attachment url="https://example.com/video.mp4" content-type="video/mp4" caption="Clip"></action-text-attachment> done</p>',
 }
 
 
@@ -55,6 +58,14 @@ def check(target):
                           {"comment": {"body": malformed}})
     assert status == 201, (target["name"], status, raw[:120])
     comment = json.loads(raw)
+    remote_comment = (
+        '<p>See <action-text-attachment url="https://example.com/image.png" '
+        'content-type="image/png" caption="Photo"></action-text-attachment> here</p>'
+    )
+    status, _, raw = call(target, f"/{account}/cards/{card['number']}/comments", "POST",
+                          {"comment": {"body": remote_comment}})
+    assert status == 201, (target["name"], status, raw[:120])
+    rendered_remote_comment = json.loads(raw)
     for suffix in ("", "/edit"):
         status, headers, page = request(
             target, f"/{account}/cards/{card['number']}{suffix}", accept="text/html")
@@ -70,6 +81,7 @@ def check(target):
         matrix[name] = {key: updated[key] for key in
                         ("description", "description_html", "has_attachments")}
     return {"description": card["description_html"], "comment": comment["body"],
+            "remote_comment": rendered_remote_comment["body"],
             "matrix": matrix}
 
 
