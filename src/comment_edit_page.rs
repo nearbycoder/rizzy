@@ -112,14 +112,38 @@ pub(super) async fn edit(
     let board_id: String = card.get("board_id");
     let body: String = comment.get("body");
     let path = format!("/{account}/cards/{number}/comments/{}", escape(&id));
-    let card_path = format!("/{account}/cards/{number}");
-    let html = format!(
-        r##"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit comment | Rizzy</title><link rel="stylesheet" href="/assets/lexxy/lexxy.css"><link rel="stylesheet" href="/assets/lexxy/rizzy-dark.css"><script type="importmap">{{"imports":{{"@rails/activestorage":"/assets/lexxy/activestorage.esm.js"}}}}</script><script type="module" src="/assets/lexxy/lexxy.js"></script><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#1b1b1b;color:#f5f0e8}}*{{box-sizing:border-box}}body{{margin:0}}main{{max-width:760px;margin:36px auto;padding:24px;border-radius:14px;background:#292826}}a{{color:#e7bd61}}lexxy-editor{{display:block;min-height:180px;margin:15px 0;border:1px solid #666158;border-radius:9px;background:#34322f;padding:12px}}button,.btn{{display:inline-block;margin-right:8px;padding:9px 15px;border:0;border-radius:8px;background:#e7bd61;color:#201b12;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}}.btn{{background:#46433d;color:#f5f0e8}}.danger{{background:#6a302b;color:#fff}}.actions{{display:flex;align-items:center;gap:8px}}.actions form:last-child{{margin-left:auto}}.comment{{display:flex;gap:12px}}.comment__avatar{{flex:none;margin:8px 0 0}}.comment__avatar img{{display:block;width:38px;height:38px;border-radius:50%;object-fit:cover}}.comment__content{{flex:1;min-width:0}}</style></head><body><main><p><a href="{card_path}">← Back to card</a></p><turbo-frame id="container_comment_{id}"><div id="comment_{id}" class="comment"><figure class="comment__avatar" aria-hidden="true"><a href="/{account}/users/{user_id}" tabindex="-1"><img src="/{account}/users/{user_id}/avatar" alt="" width="38" height="38"></a></figure><div class="comment__content"><div class="comment__body" data-turbo-permanent><form id="edit_comment_{id}" action="{path}" method="post"><input type="hidden" name="_method" value="patch"><lexxy-editor id="comment_body_{id}" name="comment[body]" value="{body}" required autofocus placeholder="Type your comment…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename"><lexxy-prompt trigger="@" src="/{account}/prompts/boards/{board_id}/users" name="mention"></lexxy-prompt><lexxy-prompt trigger="#" src="/{account}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt></lexxy-editor></form><div class="actions"><button type="submit" form="edit_comment_{id}" title="Save changes (Ctrl+Enter)">Save</button><a class="btn" href="{path}" data-comment-cancel title="Cancel (Esc)">Cancel</a><form id="delete_comment_{id}" action="{path}" method="post"><input type="hidden" name="_method" value="delete"><button class="danger" type="submit">Delete</button></form></div><p id="comment_error" role="alert"></p></div></div></div></turbo-frame></main><script>{script}</script></body></html>"##,
+    let frame = format!(
+        r##"<turbo-frame id="container_comment_{id}" class="comment-editor-frame"><div id="comment_{id}" class="comment"><figure class="comment__avatar" aria-hidden="true"><a href="/{account}/users/{user_id}" tabindex="-1"><img src="/{account}/users/{user_id}/avatar" alt="" width="50" height="50"></a></figure><div class="comment__content"><div class="comment__body" data-turbo-permanent><form id="edit_comment_{id}" action="{path}" method="post"><input type="hidden" name="_method" value="patch"><lexxy-editor id="comment_body_{id}" name="comment[body]" value="{body}" required autofocus placeholder="Type your comment…" data-direct-upload-url="/{account}/rails/active_storage/direct_uploads" data-blob-url-template="/{account}/rails/active_storage/blobs/redirect/:signed_id/:filename"><lexxy-prompt trigger="@" src="/{account}/prompts/boards/{board_id}/users" name="mention"></lexxy-prompt><lexxy-prompt trigger="#" src="/{account}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt></lexxy-editor><div class="comment-edit-actions"><button type="submit" title="Save changes (Ctrl+Enter)">Save</button><a href="{path}" data-comment-cancel title="Cancel (Esc)">Cancel</a><button type="submit" form="delete_comment_{id}" title="Delete comment" aria-label="Delete"><span class="comment-edit__trash" aria-hidden="true"></span><span class="for-screen-reader">Delete</span></button></div></form><form id="delete_comment_{id}" action="{path}" method="post"><input type="hidden" name="_method" value="delete"></form><p id="comment_error" role="alert"></p></div></div></div></turbo-frame>"##,
         id = escape(&id),
         user_id = escape(&principal.user_id),
         body = escape(&body),
         board_id = escape(&board_id),
-        script = include_str!("../static/comment_edit.js"),
     );
-    Ok(Html(html).into_response())
+    let styles = [
+        include_str!("../static/comment_edit.css"),
+        include_str!("../static/shell_footer.css"),
+        include_str!("../static/notification_cards.css"),
+        include_str!("../static/menu_overlay.css"),
+    ]
+    .concat();
+    let values = HashMap::from([
+        ("ACCOUNT", principal.slug.to_string()),
+        ("FRAME", frame),
+        ("STYLES", styles),
+        (
+            "FOOTER",
+            include_str!("../static/home_footer.html")
+                .replace("{{ACCOUNT}}", &principal.slug.to_string()),
+        ),
+        (
+            "COMMENT_EDIT_SCRIPT",
+            include_str!("../static/comment_edit.js").into(),
+        ),
+        ("SHELL_SCRIPT", include_str!("../static/events.js").into()),
+    ]);
+    Ok(Html(card_page::render_template(
+        include_str!("../static/comment_edit.html"),
+        &values,
+    ))
+    .into_response())
 }

@@ -26,6 +26,7 @@ pub(super) async fn icon(Path(filename): Path<String>) -> Response {
         "picture-remove.svg" => include_str!("../static/card-icons/picture-remove.svg"),
         "pinned.svg" => include_str!("../static/card-icons/pinned.svg"),
         "tag.svg" => include_str!("../static/card-icons/tag.svg"),
+        "trash.svg" => include_str!("../static/card-icons/trash.svg"),
         "unpinned.svg" => include_str!("../static/card-icons/unpinned.svg"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -562,6 +563,10 @@ pub(super) async fn show(
             "POST"
         }
         .into(),
+    );
+    values.insert(
+        "COMMENT_EDIT_STYLES",
+        include_str!("../static/comment_edit.css").into(),
     );
     values.insert(
         "SHELL_STYLES",

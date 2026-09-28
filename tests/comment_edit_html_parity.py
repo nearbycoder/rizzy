@@ -60,6 +60,8 @@ def check(target):
         assert request(target, path, accept="text/vnd.turbo-stream.html")[0] == 406
         status, _, body = request(target, path + "/edit", accept="text/html")
         assert status == 200, (target["name"], "edit", status)
+        for marker in (b'<main', b'id="footer"', b'<lexxy-editor', b'comment__avatar'):
+            assert marker in body, (target["name"], "edit page shell", marker)
         csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', body)
         csrf = csrf_match.group(1).decode() if csrf_match else None
         new_target = f"new_comment_card_{card['id']}".encode()
