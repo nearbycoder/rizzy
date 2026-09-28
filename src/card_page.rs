@@ -12,6 +12,7 @@ use super::{
 };
 
 const TEMPLATE: &str = include_str!("../static/card.html");
+const CLOSURE_TOGGLE_TEMPLATE: &str = r#"<div id="card_closure_toggle_card_{{CARD_ID}}" class="display-contents"><div class="card-perma__notch"><div class="actions"><button id="edit-mobile" type="button" aria-label="Edit card" title="Edit card"><span class="card-icon card-icon--pencil" aria-hidden="true"></span></button><button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>{{CLOSURE_FORM}}</div></div>{{CLOSURE_NOTICE}}</div>"#;
 const NEW_COMMENT: &str = include_str!("../static/new_comment.html");
 
 pub(super) async fn icon(Path(filename): Path<String>) -> Response {
@@ -117,7 +118,7 @@ pub(super) async fn update_stream(
         board_views::public_html_title(&title)
     );
     let draft = card.get::<String, _>("status") == "drafted";
-    let container = if draft {
+    let (container, closure) = if draft {
         let image = storage::image_url_for_card(app, principal, &card_id)
             .await?
             .as_str()
@@ -128,8 +129,11 @@ pub(super) async fn update_stream(
                 )
             })
             .unwrap_or_default();
-        format!(
-            "<section id=\"card_container_card_{card_id}\" class=\"card-perma card-perma--draft\">{image}<div class=\"card__content\">{content}</div></section>"
+        (
+            format!(
+                "<section id=\"card_container_card_{card_id}\" class=\"card-perma card-perma--draft\">{image}<div class=\"card__content\">{content}</div></section>"
+            ),
+            String::new(),
         )
     } else {
         let page = show(app, principal, card, "UTC").await?.0;
@@ -141,17 +145,13 @@ pub(super) async fn update_stream(
                     .map(|end| &page[start..start + end + "</article>".len()])
             })
             .unwrap_or("");
-        format!("<section id=\"card_container_card_{card_id}\">{article}</section>")
-    };
-    let closure = if card.get::<i64, _>("closed") != 0 {
-        "<span>Completed</span>".to_owned()
-    } else if draft {
-        String::new()
-    } else {
-        "<button type=\"button\" id=\"closure\">Mark as done</button>".to_owned()
+        (
+            format!("<section id=\"card_container_card_{card_id}\">{article}</section>"),
+            closure_toggle_from_page(&page, &card_id)?.to_owned(),
+        )
     };
     Ok(format!(
-        "<turbo-stream action=\"replace\" method=\"morph\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"update\" target=\"edit_card_{card_id}\"><template>{content}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template><div id=\"card_closure_toggle_card_{card_id}\">{closure}</div></template></turbo-stream>"
+        "<turbo-stream action=\"replace\" method=\"morph\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"update\" target=\"edit_card_{card_id}\"><template>{content}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template>{closure}</template></turbo-stream>"
     ))
 }
 
@@ -167,9 +167,15 @@ pub(super) async fn flag_stream(app: &App, principal: &Principal, card: &DbRow) 
                 .map(|end| &page[start..start + end + "</article></section>".len()])
         })
         .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "Card container missing"))?;
+    let toggle = closure_toggle_from_page(&page, &card_id)?;
+    Ok(format!(
+        "<turbo-stream method=\"morph\" action=\"replace\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template>{toggle}</template></turbo-stream>"
+    ))
+}
+
+fn closure_toggle_from_page<'a>(page: &'a str, card_id: &str) -> Result<&'a str> {
     let toggle_start = format!("<div id=\"card_closure_toggle_card_{card_id}\"");
-    let toggle = page
-        .find(&toggle_start)
+    page.rfind(&toggle_start)
         .and_then(|start| {
             page[start..]
                 .find("\n  <section id=\"column-picker\"")
@@ -180,10 +186,7 @@ pub(super) async fn flag_stream(app: &App, principal: &Principal, card: &DbRow) 
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Card closure control missing",
             )
-        })?;
-    Ok(format!(
-        "<turbo-stream method=\"morph\" action=\"replace\" target=\"card_container_card_{card_id}\"><template>{container}</template></turbo-stream><turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template>{toggle}</template></turbo-stream>"
-    ))
+        })
 }
 
 pub(super) fn render_template(template: &str, values: &HashMap<&str, String>) -> String {
@@ -604,6 +607,14 @@ pub(super) async fn show(
             .to_owned(),
         ),
     ]);
+    let closure_toggle = render_template(CLOSURE_TOGGLE_TEMPLATE, &values);
+    values.insert("CLOSURE_TOGGLE", closure_toggle.clone());
+    values.insert(
+        "CLOSURE_RESTORE_STREAM",
+        format!(
+            "<turbo-stream action=\"replace\" target=\"card_closure_toggle_card_{card_id}\"><template>{closure_toggle}</template></turbo-stream>"
+        ),
+    );
     values.insert("STATUS", String::new());
     values.insert(
         "COMMENT_EDIT_STYLES",

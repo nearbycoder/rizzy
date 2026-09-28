@@ -54,7 +54,7 @@ canceled deletion. The [Fizzy desktop](docs/visual-baselines/fizzy-board-setting
 [Rizzy mobile](docs/visual-baselines/rizzy-board-settings-390.png) screenshots
 record the remaining visual differences. Fizzy's draggable knob behavior,
 published rich-text editor, avatars and icons, and exact presentation still
-differ. On the populated card page, Fizzy has 14 forms and Rizzy 13. Pin and
+differ. On the populated card page, Fizzy and Rizzy now each have 14 forms. Pin and
 watch use POST forms with delete method overrides, and
 `tests/card_controls_paired.py` compares their card-page presence, cached
 frames, Turbo replacements, and JSON actions against fresh pinned Fizzy.
@@ -63,9 +63,11 @@ Golden Ticket and completion now use POST forms with delete overrides.
 Turbo target sets, and JSON actions on fresh paired apps. Chromium toggled all
 four card controls; the Golden Ticket and completion checks also passed at
 390 pixels. Card and comment reactions now render POST delete-override forms;
-fresh paired HTTP and browser checks cover their deletion. The remaining card
-form is inside Fizzy's embedded closure-restoration Turbo Stream, which Rizzy
-does not yet render. The direct step edit form now includes the source's hidden
+fresh paired HTTP and browser checks cover their deletion. Rizzy now renders
+Fizzy's embedded closure-restoration Turbo Stream, with watch and pin outside
+the replaceable closure area. Its browser handler shows Save changes while
+editing, then restores completion and move after cancel or save;
+`tests/card_flag_browser.py` checks those flows. The direct step edit form now includes the source's hidden
 unchecked value; `tests/step_edit_completed_paired.py` checks that editing a
 completed step submits it and reopens the step. The inventory remains diagnostic for those interactions and
 the remaining markup differences.

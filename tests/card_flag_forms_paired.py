@@ -60,6 +60,8 @@ def check(target):
         token = csrf(page)
         form(page, gold_path)
         form(page, close_path)
+        assert len(re.findall(rb'<form\b[^>]*action="' + re.escape(close_path.encode()) + rb'"', page)) == 2, target["name"]
+        assert re.search(rb'<turbo-stream\b[^>]*action="replace"[^>]*target="card_closure_toggle_card_[^"]+"', page), target["name"]
         gold_on = mutate(target, gold_path, token)
         status, _, page = request(target, card_path, accept="text/html")
         assert status == 200

@@ -31,7 +31,11 @@ def state(session):
       watch:document.getElementById('watch')?.dataset.method,
       done:!!document.getElementById('closure'),
       undo:!!document.getElementById('undo-closure'),
-      closed:document.getElementById('card')?.classList.contains('is-closed')
+      closed:document.getElementById('card')?.classList.contains('is-closed'),
+      editing:!!document.querySelector('form[id^="edit_form_card_"]'),
+      save:!!document.querySelector('[id^="card_closure_toggle_card_"] button[form^="edit_form_card_"]'),
+      move:!!document.getElementById('choose-column'),
+      title:document.querySelector('.card__title-link')?.textContent.trim()
     }))()"""))
 
 
@@ -75,6 +79,16 @@ def main():
                         "--url", url, "--path", cookie.path, "--httpOnly")
             browser(session, "open", url + path)
             until(session, lambda value: value["gold"] == "POST" and value["done"] and not value["closed"], "initial")
+            initial_controls = state(session)
+            browser(session, "click", ".card__title-link")
+            until(session, lambda value: value["editing"] and value["save"] and not value["done"] and value["watch"] == initial_controls["watch"] and value["pin"] == initial_controls["pin"], "edit controls")
+            browser(session, "press", "Escape")
+            until(session, lambda value: not value["editing"] and value["done"] and value["move"] and value["watch"] == initial_controls["watch"] and value["pin"] == initial_controls["pin"], "cancel restores controls")
+            browser(session, "click", ".card__title-link")
+            until(session, lambda value: value["editing"] and value["save"], "reopen editor")
+            browser(session, "fill", 'textarea[name="card[title]"]', "Flag browser saved")
+            browser(session, "click", 'form[id^="edit_form_card_"] button[type="submit"]')
+            until(session, lambda value: not value["editing"] and value["title"] == "Flag browser saved" and value["done"] and value["move"], "save restores controls")
             browser(session, "click", "#gold")
             until(session, lambda value: value["gold"] == "DELETE", "promote")
             browser(session, "click", "#gold")
@@ -100,7 +114,7 @@ def main():
                 until(session, lambda value, kind=kind: value[kind] == "POST", f"mobile {kind} off")
             assert browser(session, "get", "url") == url + path
             assert not browser(session, "errors"), "Browser page errors"
-            print("PASS desktop and mobile browser Golden Ticket and completion toggles")
+            print("PASS card edit restoration and desktop/mobile control toggles")
         finally:
             try:
                 browser(session, "close")

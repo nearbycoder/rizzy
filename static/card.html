@@ -35,8 +35,8 @@ main>nav a{display:inline-flex;align-items:center;gap:8px}
 .side-action{position:absolute;display:grid;place-items:center;width:50px;height:50px;padding:0;border:1px solid #3b5362;border-radius:50%;background:#101b20;color:#f4f5f6;font-size:26px;z-index:2}.side-action:hover{background:#243b50}.side-action svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8}.side-action--gold{top:0;left:-60px}.side-action--watch{top:0;right:-60px}.side-action--pin{top:60px;right:-60px}.card__footer .side-action{border:1px solid #3b5362;background:#101b20;color:#f4f5f6}.card__footer .side-action:hover{background:#243b50}
 .card-perma__notch .side-action{background:#101b20;border-color:#3b5362;color:#f4f5f6}
 .card-perma__notch .side-action:hover{background:#243b50}
-.card-perma__notch #watch[data-method="DELETE"],.card-perma__notch #pin[data-method="DELETE"]{background:#f4f5f6;border-color:#f4f5f6;color:#101b20}
-.card-perma__notch #watch[data-method="DELETE"]:hover,.card-perma__notch #pin[data-method="DELETE"]:hover{background:#fff}
+.card-perma #watch[data-method="DELETE"],.card-perma #pin[data-method="DELETE"]{background:#f4f5f6;border-color:#f4f5f6;color:#101b20}
+.card-perma #watch[data-method="DELETE"]:hover,.card-perma #pin[data-method="DELETE"]:hover{background:#fff}
 .side-action--image{top:60px;left:-60px;cursor:pointer}.side-action--image input{position:absolute;width:1px;height:1px;opacity:0}.side-action--image:focus-within{outline:2px solid #87b9fa;outline-offset:3px}.card-perma__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.card-perma.has-image .card__body{background:#101b20ba}.card__header,.card__body,.card__footer{position:relative;z-index:1}
 .card-tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card-tags details{position:relative}.card-tags summary{display:grid;place-items:center;width:31px;height:31px;border:1px solid #526d80;border-radius:50%;list-style:none;cursor:pointer;color:#a8cbf2}.card-tags summary::-webkit-details-marker{display:none}.card-tags summary svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}.card-tags__picker{position:absolute;top:35px;left:0;z-index:9;display:grid;gap:7px;width:240px;padding:12px;border:1px solid #536574;border-radius:9px;background:#1d2c35;box-shadow:0 10px 25px #0009}.card-tags__picker label{color:#dbe5ec}.card-tags__picker input{width:100%;margin:4px 0 9px;padding:7px}.card-tags__picker button{width:100%;padding:7px;font-size:13px}.card-tags__list{display:flex;gap:6px;white-space:nowrap;overflow:hidden}.card-tags__link{color:#a8cbf2;font-size:13px;font-weight:750;text-transform:uppercase;text-decoration:none}.card-tags__link:hover{text-decoration:underline}
 .card__tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card__tag-picker-button{width:31px;height:31px;display:grid;place-items:center;padding:0;border:1px solid #526d80;border-radius:50%;background:transparent;color:#a8cbf2;font-size:20px}.card__tag-picker-button:hover{background:#203d57}.tag-dialog{width:min(410px,calc(100vw - 24px));max-height:75vh;padding:20px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.tag-dialog::backdrop{background:#0008}.tag-dialog__close{float:right;border:0;background:none;color:#f4f5f6}.tag-dialog .popup__list{max-height:48vh;overflow:auto;margin:10px 0;padding:0;list-style:none}.tag-dialog .popup__item button{width:100%;display:flex;justify-content:space-between;padding:9px;border:0;background:transparent;color:#f4f5f6;text-align:left}.tag-dialog .popup__item button:hover,.tag-dialog .popup__item[aria-selected=true] button{background:#304553}.tag-dialog .popup__item[hidden]{display:none}.tag-dialog input{margin:10px 0}.tag-dialog__error{min-height:0}
@@ -180,17 +180,11 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
   {{GOLD_FORM}}
   {{IMAGE_BUTTON}}
   <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
-  <div class="card__body"><div class="card__content"><turbo-frame id="edit_card_{{CARD_ID}}"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div></turbo-frame>{{STEPS}}</div>{{STAGE_RAIL}}{{STAMP}}</div>
-  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div><div id="card_closure_toggle_card_{{CARD_ID}}" class="display-contents"><div class="card-perma__notch">
-  <div class="actions">
-    <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
-    {{WATCH_FORM}}
-    {{PIN_FORM}}
-    <button id="edit-mobile" type="button" aria-label="Edit card" title="Edit card"><span class="card-icon card-icon--pencil" aria-hidden="true"></span></button>
-    <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
-    {{CLOSURE_FORM}}
-  </div></div>
-  {{CLOSURE_NOTICE}}</div>
+  <div class="card__body"><div class="card__content"><turbo-frame id="edit_card_{{CARD_ID}}">{{CLOSURE_RESTORE_STREAM}}<h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div></turbo-frame>{{STEPS}}</div>{{STAGE_RAIL}}{{STAMP}}</div>
+  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}</div>
+  <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
+  <div class="card-perma__actions card-perma__actions--right display-contents">{{WATCH_FORM}}{{PIN_FORM}}</div>
+  {{CLOSURE_TOGGLE}}
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
   <dialog class="assignment-dialog" id="assignment-dialog" aria-label="Assign this card"><button type="button" class="assignment-dialog__close" aria-label="Close assignment picker">×</button><div id="assignment-dialog-content"></div><p class="error" role="alert" id="assignment-dialog-error"></p></dialog>
 </article></section>
@@ -272,9 +266,9 @@ cardHeader.addEventListener('click',async event=>{const trigger=event.target.clo
 cardHeader.addEventListener('input',event=>{if(event.target.id==='tag-search')scheduleTagPickerFilter(event.target.closest('.tag-picker'))});
 cardHeader.addEventListener('keydown',navigateTagPicker);
 cardHeader.addEventListener('submit',async event=>{const form=event.target;if(!form.closest('.tag-dialog'))return;event.preventDefault();if(form.id.startsWith('tags_form_card_')&&!form.elements.tag_title.value.trim())return;const button=event.submitter,dialog=form.closest('.tag-dialog'),error=dialog.querySelector('.tag-dialog__error');if(button)button.disabled=true;error.textContent='';try{const body=new URLSearchParams(new FormData(form)),response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body});if(!response.ok)throw Error('Could not update tag');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target')),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!target||!replacement||!frame)throw Error('Tag update missing');replacement.querySelector('.tag-dialog__content')?.append(document.importNode(frame,true));dialog.close();target.replaceWith(document.importNode(replacement,true))}catch(ex){error.textContent=ex.message;if(button)button.disabled=false}});
-const chooseColumn=document.getElementById('choose-column'),columnPicker=document.getElementById('column-picker');
-document.getElementById('edit-mobile').addEventListener('click',()=>{void openCardEditor(`/${account}/cards/${number}/edit`)});
-chooseColumn.addEventListener('click',async()=>{if(!columnPicker.hidden){columnPicker.hidden=true;chooseColumn.setAttribute('aria-expanded','false');return}chooseColumn.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/column/edit`,{headers:{Accept:'text/html'}});if(!response.ok)throw Error(`Request failed (${response.status})`);columnPicker.innerHTML=await response.text();columnPicker.hidden=false;chooseColumn.setAttribute('aria-expanded','true')}catch(error){alert(error.message)}finally{chooseColumn.disabled=false}});
+const columnPicker=document.getElementById('column-picker');
+cardRoot.addEventListener('click',event=>{if(event.target.closest('#edit-mobile'))void openCardEditor(`/${account}/cards/${number}/edit`)});
+cardRoot.addEventListener('click',async event=>{const chooseColumn=event.target.closest('#choose-column');if(!chooseColumn)return;if(!columnPicker.hidden){columnPicker.hidden=true;chooseColumn.setAttribute('aria-expanded','false');return}chooseColumn.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/column/edit`,{headers:{Accept:'text/html'}});if(!response.ok)throw Error(`Request failed (${response.status})`);columnPicker.innerHTML=await response.text();columnPicker.hidden=false;chooseColumn.setAttribute('aria-expanded','true')}catch(error){alert(error.message)}finally{chooseColumn.disabled=false}});
 async function chooseStage(button){if(button.disabled||button.getAttribute('aria-checked')==='true')return;const stage=button.dataset.stage;const action=stage==='not_now'?['/not_now','POST']:stage==='maybe'?['/triage','DELETE']:stage==='done'?['/closure','POST']:['/triage','POST'];button.disabled=true;try{await mutation(action[0],action[1],stage==='column'?{column_id:button.dataset.columnId}:undefined);location.reload()}catch(error){button.disabled=false;alert(error.message)}}
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 document.querySelector('.stage-rail').addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
@@ -472,7 +466,7 @@ async function refreshLiveCard(force=false,revisionHint=null){
       document.querySelector('.card__description').innerHTML=nextDescription.innerHTML;
       document.title=nextPage.title;
     }
-    for(const id of ['gold-action-form','closure-action-form']){
+    for(const id of ['gold-action-form',...(!cardEditOpen()?['closure-action-form']:[])]){
       const form=document.getElementById(id),updated=nextPage.getElementById(id);
       if(form&&updated&&form.outerHTML!==updated.outerHTML)form.replaceWith(document.importNode(updated,true));
       else if(form&&!updated)form.remove();
@@ -489,9 +483,11 @@ async function refreshLiveCard(force=false,revisionHint=null){
     if(status&&!nextStatus)status.remove();
     else if(!status&&nextStatus)document.querySelector('.card__header').append(document.importNode(nextStatus,true));
     const closureNotice=cardRoot.querySelector('.card-perma__closure-message'),nextClosureNotice=nextCard?.querySelector('.card-perma__closure-message');
-    if(closureNotice&&!nextClosureNotice)closureNotice.remove();
-    else if(!closureNotice&&nextClosureNotice)cardRoot.querySelector('#column-picker').before(document.importNode(nextClosureNotice,true));
-    else if(closureNotice&&nextClosureNotice&&closureNotice.outerHTML!==nextClosureNotice.outerHTML)closureNotice.replaceWith(document.importNode(nextClosureNotice,true));
+    if(!cardEditOpen()){
+      if(closureNotice&&!nextClosureNotice)closureNotice.remove();
+      else if(!closureNotice&&nextClosureNotice)cardRoot.querySelector('[id^="card_closure_toggle_card_"]').append(document.importNode(nextClosureNotice,true));
+      else if(closureNotice&&nextClosureNotice&&closureNotice.outerHTML!==nextClosureNotice.outerHTML)closureNotice.replaceWith(document.importNode(nextClosureNotice,true));
+    }
     formatClosureNotice();
     const stamp=cardRoot.querySelector('.card__closed'),nextStamp=nextCard?.querySelector('.card__closed');
     if(stamp&&!nextStamp)stamp.remove();
@@ -559,6 +555,14 @@ async function refreshLiveCard(force=false,revisionHint=null){
     }
   }
 }
+function applyCardClosureStream(root){
+  const target=document.getElementById('card_closure_toggle_card_{{CARD_ID}}');
+  const stream=[...root.querySelectorAll('turbo-stream[target]')].find(item=>item.getAttribute('target')===target?.id);
+  const content=stream?.querySelector('template')?.content;
+  if(!target||!content)return;
+  if(stream.getAttribute('action')==='replace')target.replaceWith(document.importNode(content,true));
+  else if(stream.getAttribute('action')==='update')target.replaceChildren(document.importNode(content,true));
+}
 async function openCardEditor(url){
   if(cardEditOpen()){liveCardEditor().querySelector('textarea')?.focus();return}
   const frame=liveCardEditor();
@@ -570,6 +574,7 @@ async function openCardEditor(url){
     if(!nextFrame)throw Error('Card edit frame missing');
     liveCardDisplayFrame=frame.cloneNode(true);
     frame.replaceWith(document.importNode(nextFrame,true));
+    applyCardClosureStream(liveCardEditor());
     await restoreCardEditDraft(liveCardEditor().querySelector('form'));
     liveCardEditor().querySelector('textarea')?.focus();
   }catch(error){console.warn('Could not open card editor',error);location.href=url}
@@ -578,6 +583,7 @@ function closeCardEditor(){
   if(!cardEditOpen())return;
   if(liveCardDisplayFrame)liveCardEditor().replaceWith(liveCardDisplayFrame);
   liveCardDisplayFrame=null;
+  applyCardClosureStream(liveCardEditor());
   document.querySelector('.card__title-link')?.focus();
   void refreshLiveCard(true);
 }
@@ -608,6 +614,7 @@ document.addEventListener('submit',async event=>{
     if(!template)throw Error('Card update frame missing');
     clearCardEditDraft(form);
     liveCardEditor().replaceChildren(document.importNode(template.content,true));
+    applyCardClosureStream(page);
     liveCardDisplayFrame=null;
     void refreshLiveCard(true);
   }catch(cause){error.textContent=cause.message;if(button)button.disabled=false}
