@@ -68,7 +68,7 @@ For browser push, set `RIZZY_VAPID_PRIVATE_KEY` (or Fizzy's `VAPID_PRIVATE_KEY`)
 - Account settings and entropy with browser forms, people listing, invite-link and usage-limit pages, board entropy overrides, and an activity feed backed by card and comment events.
 - An account home activity timeline with Added, Updated, and Done columns, board and person filters, timezone grouping, day pagination, column detail pages, and a user activity frame.
 - Fizzy-format account exports and an account import upload/status flow with transactional restoration of the record groups represented by Rizzy, including original uploaded files, card due dates, blob metadata and variants, mentions, notification bundles, and portable User references in rich text.
-- A basic browser interface for boards, columns, cards, user profiles, description editing, and completion.
+- A basic browser interface for boards, columns, cards, user profiles, description editing, and completion. The card's board picker opens in place, filters available boards, and moves the card from its dialog.
 - An account navigation menu for boards, people, tags, settings, and shortcuts, with conditional ETag responses.
 - A dedicated card edit route with title and Lexxy description fields, alongside the card page's inline editor.
 - A Fizzy-matching service worker script and local offline bundle, plus a Rizzy web app manifest and icons. Authenticated full HTML pages register the worker; installed-app behavior and source asset preloading remain unverified.
@@ -155,6 +155,7 @@ python3 tests/webhooks_html_paired.py
 python3 tests/notification_settings_paired.py
 python3 tests/card_edit_html_parity.py
 python3 tests/card_edit_html_paired.py
+python3 tests/card_board_html_paired.py
 python3 tests/card_controls_parity.py
 python3 tests/email_change_html_parity.py
 python3 tests/email_confirmation_html_parity.py
