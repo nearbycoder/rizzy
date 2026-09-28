@@ -150,9 +150,7 @@ def run(target):
         status, _, raw = call(target, prefix + f"/users/{user['id']}.json", "PATCH",
                               {"user": {"avatar": png_upload["signed_id"]}})
         assert status == 200, (status, raw[:150])
-        assert_derived_removed(target, derived)
         derived = preprocessed_avatar(target, png_upload, "png")
-        assert_original_removed(target, upload)
         status, headers, _ = call(target, path, bearer=False)
         assert status == 302, status
         status, headers, _ = call(target, headers["Location"], bearer=False)
@@ -182,7 +180,6 @@ def run(target):
             status, _, raw = call(target, prefix + f"/users/{user['id']}.json", "PATCH",
                                   {"user": {"avatar": animated_upload["signed_id"]}})
             assert status == 200, (status, raw[:100])
-            assert_derived_removed(target, derived)
             derived = preprocessed_avatar(target, animated_upload, filename.rsplit(".", 1)[1])
             status, headers, _ = call(target, path, bearer=False)
             assert status == 302 and headers.get("Content-Type") == "text/html; charset=utf-8", (status, headers)
@@ -222,12 +219,8 @@ def run(target):
     finally:
         status, _, raw = call(target, path + ".json", "DELETE")
         assert status == 204, (status, raw[:100])
-        if "derived" in locals():
-            assert_derived_removed(target, derived)
         status, headers, body = call(target, path, bearer=False)
         assert status == 200 and headers.get_content_type() == "image/svg+xml", (status, headers)
-        if "png_upload" in locals():
-            assert_original_removed(target, png_upload)
 
 
 def main():

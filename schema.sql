@@ -320,6 +320,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS storage_embed_unique
   ON storage_attachments(record_type,record_id,name,blob_id) WHERE name='embed';
 CREATE INDEX IF NOT EXISTS storage_attachments_record ON storage_attachments(record_type,record_id);
 CREATE INDEX IF NOT EXISTS storage_attachments_blob_type ON storage_attachments(account_id,blob_id,record_type);
+CREATE TABLE IF NOT EXISTS storage_purge_jobs (
+  blob_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  claimed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS storage_purge_jobs_pending ON storage_purge_jobs(state,created_at,blob_id);
 CREATE TABLE IF NOT EXISTS storage_entries (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

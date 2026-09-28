@@ -4629,6 +4629,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("Deleted {count} unused tags");
         return Ok(());
     }
+    if env::args().nth(1).as_deref() == Some("purge-stored-blobs") {
+        let limit = if env::args().nth(2).as_deref() == Some("--one") {
+            1
+        } else {
+            100
+        };
+        let count = storage::purge_pending(&app, limit)
+            .await
+            .map_err(|error| std::io::Error::other(error.1))?;
+        println!("Purged {count} stored blobs");
+        return Ok(());
+    }
     if env::var("RIZZY_DISABLE_WEBHOOK_DELIVERY").as_deref() != Ok("1") {
         tokio::spawn(webhook_worker(app.clone()));
     }
@@ -4644,6 +4656,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     if env::var("RIZZY_DISABLE_STORAGE_MATERIALIZATION").as_deref() != Ok("1") {
         tokio::spawn(storage::materialize_worker(app.clone()));
+    }
+    if env::var("RIZZY_DISABLE_STORAGE_PURGE").as_deref() != Ok("1") {
+        tokio::spawn(storage::purge_worker(app.clone()));
     }
     let maintenance_db = app.db.clone();
     tokio::spawn(async move {

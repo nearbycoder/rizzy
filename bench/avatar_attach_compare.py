@@ -19,7 +19,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from avatar_parity import PNG  # noqa: E402
 from card_image_parity import call  # noqa: E402
-from sustained_mixed import prepare_rust, prepare_source, start_server, stop_server  # noqa: E402
+from sustained_mixed import (RUST, prepare_rust, prepare_source, rust_env,  # noqa: E402
+                             start_server, stop_server)
 
 
 def summary(samples):
@@ -75,8 +76,13 @@ def main():
     assert args.replacements > 0 and args.rounds > 0
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    dirty = bool(subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=ROOT, text=True).strip())
     cpus = sorted(os.sched_getaffinity(0))[:2]
-    results = {"rizzy_commit": revision, "upstream_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
+    results = {"rizzy_commit": revision, "rizzy_dirty": dirty,
+               "rizzy_binary_sha256": hashlib.sha256(RUST.read_bytes()).hexdigest(),
+               "upstream_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
                "fixture": {"format": "PNG", "width": 806, "height": 926, "bytes": len(PNG)},
                "server_cpus": len(cpus), "source_workers": 2,
                "replacements_per_app_per_round": args.replacements, "rounds": []}
@@ -88,7 +94,9 @@ def main():
                 for name, prepare in (("fizzy", prepare_source), ("rizzy", prepare_rust)):
                     directory = root / f"round-{round_index}" / name
                     directory.mkdir(parents=True)
-                    env, seed = prepare(directory, 2) if name == "fizzy" else prepare(directory)
+                    env, seed = (prepare(directory, 2) if name == "fizzy" else
+                                 prepare(directory, {**rust_env(directory),
+                                                     "RIZZY_DISABLE_STORAGE_PURGE": "1"}))
                     process, url = start_server(name, directory, env, cpus)
                     servers.append(process)
                     targets[name] = {"url": url, **seed}

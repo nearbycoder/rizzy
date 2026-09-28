@@ -1215,6 +1215,62 @@ async fn purge_blob_with_variants_tx(
     Ok(keys)
 }
 
+async fn enqueue_blob_purge_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    blob_id: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO storage_purge_jobs(blob_id,account_id,state,created_at) SELECT ?,?,'pending',? WHERE NOT EXISTS(SELECT 1 FROM storage_purge_jobs WHERE blob_id=?)")
+        .bind(blob_id)
+        .bind(account_id)
+        .bind(now())
+        .bind(blob_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    Ok(())
+}
+
+async fn purge_blob_after_detaching_variants_tx(
+    tx: &mut sqlx::Transaction<'_, Db>,
+    account_id: &str,
+    blob_id: &str,
+) -> Result<Vec<String>> {
+    let variants = sqlx::query("SELECT v.id AS variant_id,a.blob_id AS derived_id FROM storage_variant_records v LEFT JOIN storage_attachments a ON a.record_type='ActiveStorage::VariantRecord' AND a.record_id=v.id AND a.name='image' WHERE v.blob_id=?")
+        .bind(blob_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    for variant in variants {
+        let variant_id: String = variant.get("variant_id");
+        let derived_id: Option<String> = variant.get("derived_id");
+        sqlx::query("DELETE FROM storage_attachments WHERE record_type='ActiveStorage::VariantRecord' AND record_id=?")
+            .bind(&variant_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("DELETE FROM storage_variant_records WHERE id=?")
+            .bind(&variant_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        if let Some(derived_id) = derived_id {
+            enqueue_blob_purge_tx(tx, account_id, &derived_id).await?;
+        }
+    }
+    let key: String = sqlx::query_scalar("SELECT storage_key FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    sqlx::query("DELETE FROM storage_blobs WHERE id=?")
+        .bind(blob_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+    Ok(vec![key])
+}
+
 pub(super) async fn sync_embeds_tx(
     tx: &mut sqlx::Transaction<'_, Db>,
     p: &Principal,
@@ -1382,6 +1438,110 @@ pub(super) async fn remove_files(keys: Vec<String>) {
     }
 }
 
+async fn claim_purge_job(app: &App) -> sqlx::Result<Option<String>> {
+    if app.mysql {
+        let mut tx = app.db.begin().await?;
+        let blob_id: Option<String> = sqlx::query_scalar("SELECT blob_id FROM storage_purge_jobs WHERE state='pending' ORDER BY created_at,blob_id LIMIT 1 FOR UPDATE SKIP LOCKED")
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(blob_id) = blob_id {
+            sqlx::query(
+                "UPDATE storage_purge_jobs SET state='in_progress',claimed_at=? WHERE blob_id=?",
+            )
+            .bind(now())
+            .bind(&blob_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(Some(blob_id))
+        } else {
+            tx.commit().await?;
+            Ok(None)
+        }
+    } else {
+        sqlx::query_scalar("UPDATE storage_purge_jobs SET state='in_progress',claimed_at=? WHERE blob_id=(SELECT blob_id FROM storage_purge_jobs WHERE state='pending' ORDER BY created_at,blob_id LIMIT 1) AND state='pending' RETURNING blob_id")
+            .bind(now())
+            .fetch_optional(&app.db)
+            .await
+    }
+}
+
+async fn purge_claimed_blob(app: &App, blob_id: &str) -> Result<()> {
+    let mut tx = begin_write(app).await.map_err(db_err)?;
+    let blob_query = if app.mysql {
+        "SELECT id,account_id FROM storage_blobs WHERE id=? FOR UPDATE"
+    } else {
+        "SELECT id,account_id FROM storage_blobs WHERE id=?"
+    };
+    let blob = sqlx::query(blob_query)
+        .bind(blob_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let mut keys = Vec::new();
+    if let Some(blob) = blob {
+        let attached: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM storage_attachments WHERE blob_id=?")
+                .bind(blob_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if attached == 0 {
+            keys = purge_blob_after_detaching_variants_tx(
+                &mut tx,
+                &blob.get::<String, _>("account_id"),
+                blob_id,
+            )
+            .await?;
+        }
+    }
+    sqlx::query("DELETE FROM storage_purge_jobs WHERE blob_id=?")
+        .bind(blob_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    remove_files(keys).await;
+    Ok(())
+}
+
+pub(super) async fn purge_pending(app: &App, limit: usize) -> Result<usize> {
+    let stale = (Utc::now() - chrono::Duration::minutes(15))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    sqlx::query("UPDATE storage_purge_jobs SET state='pending',claimed_at=NULL WHERE state='in_progress' AND claimed_at<?")
+        .bind(stale)
+        .execute(&app.db)
+        .await
+        .map_err(db_err)?;
+    let mut completed = 0;
+    for _ in 0..limit {
+        let Some(blob_id) = claim_purge_job(app).await.map_err(db_err)? else {
+            break;
+        };
+        if let Err(error) = purge_claimed_blob(app, &blob_id).await {
+            let _ = sqlx::query(
+                "UPDATE storage_purge_jobs SET state='pending',claimed_at=NULL WHERE blob_id=?",
+            )
+            .bind(&blob_id)
+            .execute(&app.db)
+            .await;
+            return Err(error);
+        }
+        completed += 1;
+    }
+    Ok(completed)
+}
+
+pub(super) async fn purge_worker(app: Arc<App>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        interval.tick().await;
+        if let Err(error) = purge_pending(&app, 100).await {
+            eprintln!("storage purge worker failed: {}", error.1);
+        }
+    }
+}
+
 pub(super) async fn prepare_user_avatar(
     app: &App,
     p: &Principal,
@@ -1464,7 +1624,7 @@ pub(super) async fn attach_user_avatar_tx(
             return Err(bad("Avatar blob is already attached"));
         }
     }
-    let keys = purge_user_avatar_tx(tx, &p.account_id, user_id).await?;
+    let keys = detach_user_avatar_tx(tx, &p.account_id, user_id).await?;
     if let Some(blob_id) = blob_id {
         sqlx::query("INSERT INTO storage_attachments(id,account_id,blob_id,record_type,record_id,name,created_at) VALUES(?,?,?,'User',?,'avatar',?)")
             .bind(id()).bind(&p.account_id).bind(blob_id).bind(user_id).bind(now())
@@ -1474,12 +1634,12 @@ pub(super) async fn attach_user_avatar_tx(
     Ok(keys)
 }
 
-pub(super) async fn purge_user_avatar_tx(
+pub(super) async fn detach_user_avatar_tx(
     tx: &mut sqlx::Transaction<'_, Db>,
     account_id: &str,
     user_id: &str,
 ) -> Result<Vec<String>> {
-    let row = sqlx::query("SELECT a.id AS attachment_id,b.id AS blob_id,b.storage_key FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='User' AND a.name='avatar' AND a.record_id=? AND a.account_id=?")
+    let row = sqlx::query("SELECT a.id AS attachment_id,b.id AS blob_id FROM storage_attachments a JOIN storage_blobs b ON b.id=a.blob_id WHERE a.record_type='User' AND a.name='avatar' AND a.record_id=? AND a.account_id=?")
         .bind(user_id).bind(account_id).fetch_optional(&mut **tx).await.map_err(db_err)?;
     let Some(row) = row else {
         return Ok(Vec::new());
@@ -1500,7 +1660,8 @@ pub(super) async fn purge_user_avatar_tx(
     if remaining != 0 {
         return Ok(Vec::new());
     }
-    purge_blob_with_variants_tx(tx, &blob_id).await
+    enqueue_blob_purge_tx(tx, account_id, &blob_id).await?;
+    Ok(Vec::new())
 }
 
 pub(super) async fn direct_upload(
@@ -2691,7 +2852,7 @@ pub(super) async fn delete_avatar(
     let user = active_user(&app, &p, &user_id).await?;
     can_change_user(&p, &user)?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
-    let keys = purge_user_avatar_tx(&mut tx, &p.account_id, &user_id).await?;
+    let keys = detach_user_avatar_tx(&mut tx, &p.account_id, &user_id).await?;
     tx.commit().await.map_err(db_err)?;
     remove_files(keys).await;
     if headers.contains_key("x-rizzy-json-request") {

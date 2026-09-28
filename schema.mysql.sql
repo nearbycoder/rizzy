@@ -302,6 +302,14 @@ CREATE TABLE `storage_attachments` (
   `created_at` LONGTEXT NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE `storage_purge_jobs` (
+  `blob_id` VARCHAR(64),
+  `account_id` VARCHAR(64) NOT NULL,
+  `state` VARCHAR(16) NOT NULL DEFAULT 'pending',
+  `created_at` VARCHAR(40) NOT NULL,
+  `claimed_at` VARCHAR(40),
+  PRIMARY KEY (`blob_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE `storage_entries` (
   `id` VARCHAR(64),
   `account_id` VARCHAR(64) NOT NULL,
@@ -687,6 +695,7 @@ CREATE UNIQUE INDEX `uniq_storage_blobs_3` ON `storage_blobs` (`storage_key`);
 CREATE UNIQUE INDEX `uniq_storage_variant_records_0` ON `storage_variant_records` (`blob_id`, `variation_digest`);
 CREATE INDEX `storage_attachments_record` ON `storage_attachments` (`record_type`, `record_id`);
 CREATE INDEX `storage_attachments_blob_type` ON `storage_attachments` (`account_id`, `blob_id`, `record_type`);
+CREATE INDEX `storage_purge_jobs_pending` ON `storage_purge_jobs` (`state`, `created_at`, `blob_id`);
 CREATE INDEX `storage_entries_user` ON `storage_entries` (`user_id`);
 CREATE INDEX `storage_entries_request` ON `storage_entries` (`request_id`);
 CREATE INDEX `storage_entries_recordable` ON `storage_entries` (`recordable_type`, `recordable_id`);
@@ -794,6 +803,7 @@ ALTER TABLE `storage_variant_records` ADD CONSTRAINT `fk_storage_variant_records
 ALTER TABLE `storage_variant_records` ADD CONSTRAINT `fk_storage_variant_records_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_attachments` ADD CONSTRAINT `fk_storage_attachments_0` FOREIGN KEY (`blob_id`) REFERENCES `storage_blobs` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_attachments` ADD CONSTRAINT `fk_storage_attachments_1` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
+ALTER TABLE `storage_purge_jobs` ADD CONSTRAINT `fk_storage_purge_jobs_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_entries` ADD CONSTRAINT `fk_storage_entries_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_totals` ADD CONSTRAINT `fk_storage_totals_0` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE;
 ALTER TABLE `storage_download_tokens` ADD CONSTRAINT `fk_storage_download_tokens_0` FOREIGN KEY (`blob_id`) REFERENCES `storage_blobs` (`id`) ON DELETE CASCADE;
