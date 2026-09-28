@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -31,7 +32,9 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="rizzy-mysql-variant-") as temporary:
             directory = Path(temporary)
-            env, credentials = prepare_rust(directory, rust_env(directory, "127.0.0.1", PORT, database))
+            env, credentials = prepare_rust(directory, {
+                **rust_env(directory, "127.0.0.1", PORT, database),
+                "RIZZY_DISABLE_STORAGE_PURGE": "1"})
             query = lambda statement: mysql_query(str(CLIENT), str(SOCKET), database, statement)
             assert query("SELECT COUNT(*) FROM storage_blobs") == "0"
             query("ALTER TABLE storage_blobs MODIFY COLUMN signed_id VARCHAR(64) NOT NULL")
@@ -84,15 +87,39 @@ def main():
                 assert query("SELECT COUNT(*) FROM storage_attachments "
                              f"WHERE blob_id='{blob['id']}'") == "8"
 
-                for number in numbers[:-1]:
-                    expect(targets[0], f"/cards/{number}", "DELETE", status=204)
+                def delete(index):
+                    expect(targets[index % 2], f"/cards/{numbers[index]}", "DELETE", status=204)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                    list(pool.map(delete, range(8)))
+                assert query("SELECT COUNT(*) FROM storage_attachments "
+                             f"WHERE blob_id='{blob['id']}'") == "0"
                 assert query("SELECT COUNT(*) FROM storage_variant_records "
                              f"WHERE blob_id='{blob['id']}'") == "2"
-                expect(targets[1], f"/cards/{numbers[-1]}", "DELETE", status=204)
+                assert query("SELECT COUNT(*) FROM storage_purge_jobs WHERE state='pending'") == "1"
+                assert all((storage / key).exists() for key in keys)
+                worker_env = {key: value for key, value in env.items()
+                              if key != "RIZZY_DISABLE_STORAGE_PURGE"}
+                for index in range(2):
+                    worker_directory = directory / f"worker-{index}"
+                    worker_directory.mkdir()
+                    process, _ = start_server("rizzy", worker_directory, worker_env,
+                                              sorted(os.sched_getaffinity(0))[:4])
+                    processes.append(process)
+                    logs.append(worker_directory / "rizzy.log")
+                deadline = time.monotonic() + 12
+                while time.monotonic() < deadline:
+                    if (query("SELECT COUNT(*) FROM storage_purge_jobs") == "0"
+                            and not (storage / blob["key"]).exists()
+                            and all(not (storage / key).exists() for key in keys)):
+                        break
+                    time.sleep(.1)
+                assert query("SELECT COUNT(*) FROM storage_purge_jobs") == "0"
                 assert query("SELECT COUNT(*) FROM storage_variant_records "
                              f"WHERE blob_id='{blob['id']}'") == "0"
                 assert all(not (storage / key).exists() for key in keys)
-                print("MySQL two-process variant creation and last-attachment cleanup passed")
+                assert not (storage / blob["key"]).exists()
+                print("MySQL two-process concurrent embed deletion and two-worker staged purge passed")
             except Exception:
                 for log in logs:
                     print(log.read_text()[-2400:], file=sys.stderr)

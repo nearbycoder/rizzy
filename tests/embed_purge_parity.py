@@ -103,17 +103,39 @@ def run(target):
     assert old_blob_state(target, shared) == (0, 0, 0)
     assert_bytes(target, [shared["key"]], False)
 
+    reused = upload(target, FILE, "reused.txt", "text/plain")
+    first = checked(target, f"/boards/{board['id']}/cards", "POST",
+                    {"card": {"title": "First use", "description": markup(reused)}}, 201)
+    checked(target, f"/cards/{first['number']}.json", "PATCH",
+            {"card": {"description": "Detached"}})
+    assert old_blob_state(target, reused) == (1, 0, 0)
+    jobs_before_reuse = pending_jobs(target)
+    second = checked(target, f"/boards/{board['id']}/cards", "POST",
+                     {"card": {"title": "Reused before purge", "description": markup(reused)}}, 201)
+    assert old_blob_state(target, reused) == (1, 0, 1)
+    drain(target, reused["key"])
+    assert old_blob_state(target, reused) == (1, 0, 1), target["name"]
+    assert_bytes(target, [reused["key"]], True)
+    assert pending_jobs(target) == (jobs_before_reuse if target["name"] == "fizzy" else 0)
+    checked(target, f"/cards/{second['number']}", "DELETE", expected=204)
+    assert old_blob_state(target, reused) == (1, 0, 0)
+    assert pending_jobs(target) == (jobs_before_reuse + 1 if target["name"] == "fizzy" else 1)
+    drain(target, reused["key"])
+    assert old_blob_state(target, reused) == (0, 0, 0)
+    assert_bytes(target, [reused["key"]], False)
+
+    board_jobs_before = pending_jobs(target)
     last = upload(target, FILE, "last.txt", "text/plain")
     checked(target, f"/boards/{board['id']}/cards", "POST",
             {"card": {"title": "Board delete", "description": markup(last)}}, 201)
     checked(target, f"/boards/{board['id']}", "DELETE", expected=204)
     assert old_blob_state(target, last) == (1, 0, 0)
-    assert pending_jobs(target) == earlier_jobs + (2 if target["name"] == "fizzy" else 1)
+    assert pending_jobs(target) == board_jobs_before + 1
     drain(target, last["key"])
     assert old_blob_state(target, last) == (0, 0, 0)
     assert_bytes(target, [last["key"]], False)
     return {"image_edit": "staged", "shared_file": "last attachment",
-            "board_delete": "staged"}
+            "reuse_before_purge": "retained", "board_delete": "staged"}
 
 
 def main():

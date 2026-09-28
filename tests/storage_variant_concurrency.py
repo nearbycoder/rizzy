@@ -4,9 +4,9 @@
 import concurrent.futures
 import os
 import sqlite3
-import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,23 +64,40 @@ def main():
                                          (blob["id"],)).fetchone()[0]
             assert originals == 8, originals
 
-            for number in numbers[:-1]:
-                expect(targets[0], f"/cards/{number}", "DELETE", status=204)
-            assert database.execute("SELECT COUNT(*) FROM storage_variant_records WHERE blob_id=?",
-                                    (blob["id"],)).fetchone()[0] == 2
-            expect(targets[1], f"/cards/{numbers[-1]}", "DELETE", status=204)
+            def delete(index):
+                expect(targets[index % 2], f"/cards/{numbers[index]}", "DELETE", status=204)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(delete, range(8)))
+            assert database.execute("SELECT COUNT(*) FROM storage_attachments WHERE blob_id=?",
+                                    (blob["id"],)).fetchone()[0] == 0
             assert database.execute("SELECT COUNT(*) FROM storage_variant_records WHERE blob_id=?",
                                     (blob["id"],)).fetchone()[0] == 2
             assert database.execute("SELECT COUNT(*) FROM storage_purge_jobs WHERE state='pending'").fetchone()[0] == 1
             assert all((storage / key).exists() for key in derived_keys)
-            result = subprocess.run([str(ROOT / "target/release/rizzy"), "purge-stored-blobs"],
-                                    env=env, capture_output=True, text=True)
-            assert result.returncode == 0, result.stderr[-1000:]
+            worker_env = {key: value for key, value in env.items()
+                          if key != "RIZZY_DISABLE_STORAGE_PURGE"}
+            for index in range(2):
+                worker_dir = directory / f"worker-{index}"
+                worker_dir.mkdir()
+                worker, _ = start_server("rizzy", worker_dir, worker_env,
+                                         sorted(os.sched_getaffinity(0))[:4])
+                processes.append(worker)
+            deadline = time.monotonic() + 12
+            while time.monotonic() < deadline:
+                queued = database.execute("SELECT COUNT(*) FROM storage_purge_jobs").fetchone()[0]
+                if queued == 0 and not (storage / blob["key"]).exists() and all(
+                    not (storage / key).exists() for key in derived_keys
+                ):
+                    break
+                time.sleep(.1)
+            assert database.execute("SELECT COUNT(*) FROM storage_purge_jobs").fetchone()[0] == 0
             assert database.execute("SELECT COUNT(*) FROM storage_variant_records WHERE blob_id=?",
                                     (blob["id"],)).fetchone()[0] == 0
             assert all(not (storage / key).exists() for key in derived_keys)
+            assert not (storage / blob["key"]).exists()
             database.close()
-            print("Two-process variant creation and last-attachment cleanup passed")
+            print("Two-process concurrent embed deletion and two-worker staged purge passed")
         finally:
             for process in reversed(processes):
                 stop_server(process)

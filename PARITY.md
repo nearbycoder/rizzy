@@ -76,12 +76,13 @@ variant records across the 43 writes, including warmups. Rizzy's median was
 44.1 ms and p95 48.1 ms versus Fizzy's 52.2 ms and 69.6 ms on the same four
 server CPUs. This measures synchronous JPEG embed writes only; concurrent
 uploads, the other formats, and maximum sustainable throughput remain open.
-`tests/storage_variant_concurrency.py` also passed ten fresh runs with eight
-simultaneous image embeds routed across two Rizzy processes. Each run kept one
-pair of derived variants. The updated test confirms those records and files
-remain until the last attached card is deleted and the queued purge is drained.
-This verifies that race and cleanup path on
-SQLite; it is not a concurrent throughput or MySQL scale measurement.
+`tests/storage_variant_concurrency.py` passed ten fresh runs with eight
+simultaneous attachments and deletions of one image embed routed across two
+Rizzy processes. Each run kept one pair of derived variants, queued one purge
+after the last deletion, and removed original and variant bytes with two
+worker processes available. The equivalent MySQL test passed eight runs.
+These verify the shared-blob lifecycle under local concurrent requests; they
+are not throughput or multi-host capacity measurements.
 
 The [MySQL port status](docs/mysql-port.md) records the tested core workflow,
 the still-missing MySQL runtime work, and the database comparison needed
@@ -864,9 +865,12 @@ compare the staged Action Text lifecycle on SQLite and MySQL: removing a JPEG
 embed queues its original while retaining two variants, draining that job queues
 the variants, and later drains remove their bytes. A blob shared by a card and
 comment is queued only after the last attachment is removed; board deletion
-also queues its embed. `tests/embed_parity.py` and the two-process variant
-test drain the queue before asserting eventual file cleanup. Concurrent purge
-claims for shared embeds remain unverified.
+also queues its embed. A queued purge leaves an embed intact if it gains a new
+attachment before the job runs, and a later last detach queues it again. Both
+paired suites passed that case. `tests/embed_parity.py` drains the queue before
+asserting eventual file cleanup. The two-process tests above exercise Rust
+concurrent deletion and worker cleanup; equivalent concurrent Fizzy behavior
+and independent-host worker coordination remain unverified.
 
 The [two-round JPEG embed-removal comparison](bench/results/embed-removal-deferred-2round-2026-09-27.json)
 timed 12 last-attachment removals per app per round, reversing app order on
