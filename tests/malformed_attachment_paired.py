@@ -17,6 +17,23 @@ from draft_workflow_parity import NoRedirect, login, request  # noqa: E402
 from sustained_mixed import (prepare_rust, prepare_source, rust_env,  # noqa: E402
                              start_server, stop_server)
 
+CASES = {
+    "relative image": '<action-text-attachment url="image.png" content-type="image/png" caption="Relative"></action-text-attachment>',
+    "remote image": '<action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="Remote"></action-text-attachment>',
+    "remote image entity caption": '<action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="A &amp; B"></action-text-attachment>',
+    "remote image quoted greater-than": '<action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="A > B"></action-text-attachment>',
+    "remote image escaped greater-than": '<action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="A &gt; B"></action-text-attachment>',
+    "self-closing remote image": '<action-text-attachment url="https://example.com/image.png" content-type="image/png" caption="Self-closing" />',
+    "remote image empty SGID": '<action-text-attachment sgid="" url="https://example.com/image.png" content-type="image/png"></action-text-attachment>',
+    "remote image dimensions": '<action-text-attachment url="https://example.com/image.png" content-type="image/png" width="80" height="60"></action-text-attachment>',
+    "remote image with unresolved SGID": '<action-text-attachment sgid="gid://fizzy/Card/missing" url="https://example.com/image.png" content-type="image/png" caption="Fallback"></action-text-attachment>',
+    "remote video": '<action-text-attachment url="https://example.com/video.mp4" content-type="video/mp4" caption="Remote"></action-text-attachment>',
+    "remote video filename": '<action-text-attachment url="video.mp4" content-type="video/mp4" filename="movie.mp4"></action-text-attachment>',
+    "unsafe image URL": '<action-text-attachment url="data:text/html,PAYLOAD" content-type="image/png" caption="Danger"></action-text-attachment>',
+    "unsafe video URL": '<action-text-attachment url="javascript:alert(1)" content-type="video/mp4" caption="Danger"></action-text-attachment>',
+    "javascript URL": '<action-text-attachment url="javascript:alert(1)" content-type="image/png" caption="Danger"></action-text-attachment>',
+}
+
 
 def check(target):
     login(target)
@@ -44,7 +61,16 @@ def check(target):
         assert status == 200 and headers.get_content_type() == "text/html", (
             target["name"], suffix, status)
         assert b"Attachment" in page, (target["name"], suffix)
-    return {"description": card["description_html"], "comment": comment["body"]}
+    matrix = {}
+    for name, markup in CASES.items():
+        status, _, raw = call(target, f"/{account}/cards/{card['number']}", "PATCH",
+                              {"card": {"description": markup}})
+        assert status == 200, (target["name"], name, status, raw[:120])
+        updated = json.loads(raw)
+        matrix[name] = {key: updated[key] for key in
+                        ("description", "description_html", "has_attachments")}
+    return {"description": card["description_html"], "comment": comment["body"],
+            "matrix": matrix}
 
 
 def main():
@@ -76,7 +102,7 @@ def main():
                         NoRedirect()),
                 })
             assert results["fizzy"] == results["rizzy"], results
-            print("PASS unresolved card and comment attachments match Fizzy")
+            print("PASS unresolved and remote Action Text attachments match Fizzy")
         finally:
             for process in reversed(processes):
                 stop_server(process)

@@ -2,6 +2,7 @@ use super::*;
 use axum::{body::Body, http::Request};
 use base64::Engine as _;
 use futures_util::StreamExt;
+use kuchiki::traits::TendrilSink;
 use md5::Md5;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
@@ -819,22 +820,22 @@ fn embed_html(app: &App, blob: &DbRow, sgid: &str, slug: i64, in_paragraph: bool
 }
 
 fn attachment_attributes(attributes: &str) -> HashMap<String, String> {
-    static ATTRIBUTE: OnceLock<regex::Regex> = OnceLock::new();
-    let attribute = ATTRIBUTE.get_or_init(|| {
-        regex::Regex::new(r#"(?i)([a-z][a-z-]*)\s*=\s*["']([^"']*)["']"#)
-            .expect("attachment attribute pattern")
-    });
-    attribute
-        .captures_iter(attributes)
-        .map(|capture| (capture[1].to_ascii_lowercase(), capture[2].to_owned()))
+    let fragment = kuchiki::parse_html().one(format!(
+        "<action-text-attachment{attributes}></action-text-attachment>"
+    ));
+    let Ok(attachment) = fragment.select_first("action-text-attachment") else {
+        return HashMap::new();
+    };
+    attachment
+        .attributes
+        .borrow()
+        .map
+        .iter()
+        .map(|(name, value)| (name.local.to_string(), value.value.clone()))
         .collect()
 }
 
-fn invalid_attachment(attributes: &str) -> String {
-    // Action Text keeps a failed attachment's allowlisted attributes in its
-    // own canonical order. Keep them so an unresolved SGID or malformed URL
-    // round-trips through card/comment HTML without inventing an empty SGID.
-    let fields = attachment_attributes(attributes);
+fn canonical_attachment_open(fields: &HashMap<String, String>) -> String {
     let mut markup = String::from("<action-text-attachment");
     for name in [
         "sgid",
@@ -851,53 +852,95 @@ fn invalid_attachment(attributes: &str) -> String {
         "content",
     ] {
         if let Some(value) = fields.get(name) {
-            markup.push_str(&format!(" {name}=\"{}\"", escape(value)));
+            // Nokogiri leaves '>' literal inside a quoted attribute while
+            // escaping it in figure text.
+            let value = escape(value).replace("&gt;", ">");
+            markup.push_str(&format!(" {name}=\"{value}\""));
         }
     }
-    markup.push_str(">☒</action-text-attachment>");
-    let sanitized = rich_text::html(&markup);
-    sanitized
-        .strip_prefix("<div class=\"action-text-content\">\n  ")
-        .and_then(|value| value.strip_suffix("\n</div>\n"))
-        .map(str::to_owned)
-        .unwrap_or_else(|| "<action-text-attachment>☒</action-text-attachment>".to_owned())
+    markup.push('>');
+    markup
+}
+
+fn invalid_attachment(attributes: &str) -> String {
+    // Action Text keeps a failed attachment's allowlisted attributes in its
+    // own canonical order. Keep them so an unresolved SGID or malformed URL
+    // round-trips through card/comment HTML without inventing an empty SGID.
+    let fields = attachment_attributes(attributes);
+    let mut markup = canonical_attachment_open(&fields);
+    markup.push_str("☒</action-text-attachment>");
+    markup
 }
 
 fn external_attachment(attributes: &str) -> Option<(String, String)> {
     let fields = attachment_attributes(attributes);
     let raw_url = fields.get("url")?;
-    let parsed = url::Url::parse(raw_url).ok()?;
-    if !matches!(parsed.scheme(), "http" | "https") {
+    let content_type = fields.get("content-type").map(String::as_str).unwrap_or("");
+    static REMOTE_URL: OnceLock<regex::Regex> = OnceLock::new();
+    let remote_url = REMOTE_URL
+        .get_or_init(|| regex::Regex::new(r"(?i)^(?:[-a-z]+://|(?:cid|data):|//)").unwrap())
+        .is_match(raw_url);
+    let image = remote_url && (content_type == "image" || content_type.starts_with("image/"));
+    let video = content_type == "video" || content_type.starts_with("video/");
+    if !image && !video {
         return None;
     }
-    let content_type = fields.get("content-type").map(String::as_str).unwrap_or("");
-    let caption = fields
-        .get("caption")
-        .or_else(|| fields.get("filename"))
-        .map(String::as_str)
-        .unwrap_or("Attachment");
-    let filename = fields.get("filename").map(String::as_str).unwrap_or("");
+    let caption = fields.get("caption").filter(|value| !value.is_empty());
+    let plain_label = caption.map(String::as_str).unwrap_or_else(|| {
+        if video {
+            fields
+                .get("filename")
+                .map(String::as_str)
+                .unwrap_or("Video")
+        } else {
+            "Image"
+        }
+    });
     let safe_url = escape(raw_url);
     let safe_type = escape(content_type);
-    let safe_caption = escape(caption);
-    let safe_filename = escape(filename);
-    let figure = if content_type.starts_with("video/") {
-        format!(
-            "<figure class=\"attachment attachment--preview attachment--video\"><video controls=\"controls\"><source src=\"{safe_url}\" type=\"{safe_type}\"></video><figcaption class=\"attachment__caption\">{safe_caption}</figcaption></figure>"
-        )
-    } else if content_type.starts_with("image/") {
-        format!(
-            "<figure class=\"attachment attachment--preview\"><img src=\"{safe_url}\" alt=\"{safe_caption}\"><figcaption class=\"attachment__caption\">{safe_caption}</figcaption></figure>"
-        )
+    let dimensions = ["width", "height"]
+        .into_iter()
+        .filter_map(|name| {
+            fields
+                .get(name)
+                .map(|value| format!(" {name}=\"{}\"", escape(value)))
+        })
+        .collect::<String>();
+    let figure = if video {
+        let mut figure = format!(
+            "<figure class=\"attachment attachment--preview attachment--video\">\n  <video controls=\"controls\"{dimensions}>\n    <source src=\"{safe_url}\" type=\"{safe_type}\">\n</video>"
+        );
+        if let Some(caption) = caption {
+            figure.push_str(&format!(
+                "    <figcaption class=\"attachment__caption\">\n      {}\n    </figcaption>\n",
+                escape(caption)
+            ));
+        }
+        figure.push_str("</figure>");
+        figure
     } else {
-        format!("<a class=\"attachment attachment--file\" href=\"{safe_url}\">{safe_caption}</a>")
+        let mut figure = format!(
+            "<figure class=\"attachment attachment--preview\">\n  <img{dimensions} src=\"{safe_url}\">\n"
+        );
+        if let Some(caption) = caption {
+            figure.push_str(&format!(
+                "    <figcaption class=\"attachment__caption\">\n      {}\n    </figcaption>\n",
+                escape(caption)
+            ));
+        }
+        figure.push_str("</figure>");
+        figure
     };
-    Some((
-        format!("[{caption}]"),
-        format!(
-            "<action-text-attachment content-type=\"{safe_type}\" url=\"{safe_url}\" filename=\"{safe_filename}\" caption=\"{safe_caption}\">{figure}</action-text-attachment>"
-        ),
-    ))
+    let sanitized_figure = rich_text::html(&figure);
+    let sanitized_figure = sanitized_figure
+        .strip_prefix("<div class=\"action-text-content\">\n  ")
+        .and_then(|value| value.strip_suffix("\n</div>\n"))?
+        .to_owned();
+    let markup = format!(
+        "{}{sanitized_figure}</action-text-attachment>",
+        canonical_attachment_open(&fields)
+    );
+    Some((format!("[{plain_label}]"), markup))
 }
 
 pub(super) async fn render_rich_text(
@@ -910,13 +953,11 @@ pub(super) async fn render_rich_text(
         return Ok((rich_text::plain_text(raw), rich_text::html(raw), false));
     }
     static TAG: OnceLock<regex::Regex> = OnceLock::new();
-    static SGID: OnceLock<regex::Regex> = OnceLock::new();
     let tag = TAG.get_or_init(|| {
-        regex::Regex::new(r"(?is)<action-text-attachment\b([^>]*)>.*?</action-text-attachment>")
-            .expect("attachment pattern")
-    });
-    let sgid = SGID.get_or_init(|| {
-        regex::Regex::new(r#"(?i)\bsgid\s*=\s*["']([^"']+)["']"#).expect("sgid pattern")
+        regex::Regex::new(
+            r#"(?is)<action-text-attachment\b((?:[^<>"']|"[^"]*"|'[^']*')*?)(?:/\s*>|>.*?</action-text-attachment>)"#,
+        )
+        .expect("attachment pattern")
     });
     let mut plain_input = String::new();
     let mut html_input = String::new();
@@ -928,11 +969,8 @@ pub(super) async fn render_rich_text(
         plain_input.push_str(&raw[offset..whole.start()]);
         html_input.push_str(&raw[offset..whole.start()]);
         let attributes = matched.get(1).map(|value| value.as_str()).unwrap_or("");
-        let value = sgid
-            .captures(attributes)
-            .and_then(|captures| captures.get(1))
-            .map(|value| value.as_str())
-            .unwrap_or("");
+        let fields = attachment_attributes(attributes);
+        let value = fields.get("sgid").map(String::as_str).unwrap_or("");
         let token = format!("RIZZYEMBEDPLACEHOLDER{index}END");
         if value.is_empty() {
             if let Some((plain, markup)) = external_attachment(attributes) {
@@ -941,7 +979,6 @@ pub(super) async fn render_rich_text(
                 }
                 plain_input.push_str(&plain);
                 replacements.push((token.clone(), format!("</p>{markup}<p>"), markup));
-                attached = true;
                 html_input.push_str(&token);
                 offset = whole.end();
                 continue;
@@ -992,6 +1029,12 @@ pub(super) async fn render_rich_text(
                 );
                 replacements.push((token.clone(), markup.clone(), markup));
                 attached = true;
+            } else if let Some((plain, markup)) = external_attachment(attributes) {
+                if plain_input.ends_with('\n') {
+                    plain_input.pop();
+                }
+                plain_input.push_str(&plain);
+                replacements.push((token.clone(), format!("</p>{markup}<p>"), markup));
             } else {
                 plain_input.push('☒');
                 let invalid = invalid_attachment(attributes);
