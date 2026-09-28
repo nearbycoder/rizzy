@@ -35,6 +35,18 @@ remain covered by the paired test.
 
 `tests/route_get_valid_paired.py` repeats the populated-route comparison on disposable SQLite apps. Its 36 JSON contracts match response shapes, stable field values, pagination, and selected cache/write headers. Its 59 browser contracts match status, content type, selected content markers, layout flags, and conditional response behavior. The initial fixture showed large HTML differences: Fizzy's webhook creation page was 51,748 bytes versus Rizzy's 5,203, and the card edit page was 45,595 versus 3,695. Both pages have since received closer source-shaped rendering, but the source's shared navigation, form details, and much of the presentation remain to be ported and compared structurally.
 
+`tests/html_form_inventory.py` extracts form actions, methods, and named controls
+from seven populated, signed-in pages on disposable paired apps. On the board
+settings page, Fizzy has six forms and Rizzy one: Rizzy currently handles auto
+close and publication with JavaScript controls rather than Fizzy's separate
+forms, and its public description is in the main board form instead of a
+published-board form. On the card page, Fizzy has 14 forms and Rizzy eight;
+several actions in Rizzy use other controls. The step edit form also lacks the
+source's hidden completed field. Matching page status and selected markers
+therefore does not establish equivalent browser form structure or submission
+behavior. The inventory is diagnostic; each mismatch still needs a paired
+interaction check and implementation work.
+
 The comment edit page now renders inside Rizzy's application shell, and the in-card editor uses the same shared controls and styling. `tests/comment_edit_html_parity.py` passed against disposable Fizzy and Rizzy servers, including page-shell markers, Turbo create/edit/delete, JSON updates, and comment side effects. A paired Chromium check confirmed that opening and saving the inline editor keeps each app on its card URL, closes the editor, and shows the saved text. The [direct Fizzy](docs/visual-baselines/fizzy-comment-edit-direct-1280.png), [direct Rizzy](docs/visual-baselines/rizzy-comment-edit-direct-1280.png), [inline Fizzy](docs/visual-baselines/fizzy-comment-edit-inline-1280.png), and [inline Rizzy](docs/visual-baselines/rizzy-comment-edit-inline-1280.png) screenshots record the current visual comparison. This verifies one comment flow, not complete card-page visual or interaction parity.
 
 The direct card edit page now uses Fizzy's full-width, borderless title and Lexxy layout instead of a separate brown panel. The [Fizzy](docs/visual-baselines/fizzy-card-edit-direct-1280.png) and [Rizzy](docs/visual-baselines/rizzy-card-edit-direct-1280.png) screenshots use the same title and description. `tests/card_edit_html_paired.py` passed against fresh SQLite apps after the change. A signed-in Chromium check also saved a title with Enter and canceled with Escape in each app; both persisted the save or discarded the edit, replaced the editor with read-only content, and kept the `/edit` URL. The paired test checks request and response contracts, while the browser check covers this direct-page interaction; broader card editing controls and visual parity remain open.
