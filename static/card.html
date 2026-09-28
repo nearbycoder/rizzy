@@ -248,6 +248,15 @@ async function submitCardControlForm(form,button){
   }catch(error){if(button)button.disabled=false;alert(error.message)}
 }
 const cardControlFormSelector='#watch-action-form,#pin-action-form,#gold-action-form,#closure-action-form,#undo-closure-form';
+document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.target.closest('input,textarea,lexxy-editor,[contenteditable]'))return;
+  const key=event.key.toLowerCase();
+  const selector=event.shiftKey?{g:'#gold',n:'#watch',p:'#pin'}[key]:{e:'.card__title-link',d:'#closure'}[key];
+  if(!selector)return;
+  const control=document.querySelector(selector);
+  if(!control||control.disabled||!control.getClientRects().length||getComputedStyle(control).pointerEvents==='none')return;
+  event.preventDefault();control.click();
+});
 window.addEventListener('click',event=>{
   const button=event.target.closest('#watch,#pin,#gold,#closure,#undo-closure');
   const form=button?.form;
@@ -482,6 +491,9 @@ async function refreshLiveCard(force=false,revisionHint=null){
       document.querySelector('.card__title').innerHTML=nextTitle.innerHTML;
       document.querySelector('.card__description').innerHTML=nextDescription.innerHTML;
       document.title=nextPage.title;
+      const closure=cardRoot.querySelector('[id^="card_closure_toggle_card_"]');
+      const updatedClosure=nextCard?.querySelector('[id^="card_closure_toggle_card_"]');
+      if(closure&&updatedClosure&&closure.outerHTML!==updatedClosure.outerHTML)closure.replaceWith(document.importNode(updatedClosure,true));
     }
     for(const id of ['gold-action-form',...(!cardEditOpen()?['closure-action-form']:[])]){
       const form=document.getElementById(id),updated=nextPage.getElementById(id);

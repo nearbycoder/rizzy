@@ -67,7 +67,17 @@ fresh paired HTTP and browser checks cover their deletion. Rizzy now renders
 Fizzy's embedded closure-restoration Turbo Stream, with watch and pin outside
 the replaceable closure area. Its browser handler shows Save changes while
 editing, then restores completion and move after cancel or save;
-`tests/card_flag_browser.py` checks those flows. The direct step edit form now includes the source's hidden
+`tests/card_flag_browser.py` checks those flows.
+
+The card page now handles Fizzy's `e`, `d`, `Shift+g`, `Shift+n`, and `Shift+p`
+shortcuts. The browser check exercises each shortcut, confirms editing ignores
+one while a title field has focus, and repeats edit/cancel after a save. That
+last sequence exposed a stale Save changes control; live refresh now restores
+the closure controls from the current card response. These checks cover the
+Rust browser flow and source-declared shortcut mappings, not every source
+keyboard interaction.
+
+The direct step edit form now includes the source's hidden
 unchecked value; `tests/step_edit_completed_paired.py` checks that editing a
 completed step submits it and reopens the step. The inventory remains diagnostic for those interactions and
 the remaining markup differences.

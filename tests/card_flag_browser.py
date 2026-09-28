@@ -89,6 +89,29 @@ def main():
             browser(session, "fill", 'textarea[name="card[title]"]', "Flag browser saved")
             browser(session, "click", 'form[id^="edit_form_card_"] button[type="submit"]')
             until(session, lambda value: not value["editing"] and value["title"] == "Flag browser saved" and value["done"] and value["move"], "save restores controls")
+            browser(session, "press", "e")
+            until(session, lambda value: value["editing"] and value["save"], "edit hotkey")
+            browser(session, "click", 'textarea[name="card[title]"]')
+            browser(session, "press", "Shift+g")
+            assert state(session)["gold"] == "POST", "Typing in an editor triggered the Golden Ticket hotkey"
+            browser(session, "press", "Escape")
+            until(session, lambda value: not value["editing"] and value["done"], "hotkey edit cancel")
+            browser(session, "press", "Shift+g")
+            until(session, lambda value: value["gold"] == "DELETE", "Golden Ticket hotkey on")
+            browser(session, "press", "Shift+g")
+            until(session, lambda value: value["gold"] == "POST", "Golden Ticket hotkey off")
+            browser(session, "press", "Shift+n")
+            until(session, lambda value: value["watch"] == "POST", "watch hotkey off")
+            browser(session, "press", "Shift+n")
+            until(session, lambda value: value["watch"] == "DELETE", "watch hotkey on")
+            browser(session, "press", "Shift+p")
+            until(session, lambda value: value["pin"] == "DELETE", "pin hotkey on")
+            browser(session, "press", "Shift+p")
+            until(session, lambda value: value["pin"] == "POST", "pin hotkey off")
+            browser(session, "press", "d")
+            until(session, lambda value: value["closed"] and value["undo"], "complete hotkey")
+            browser(session, "click", "#undo-closure")
+            until(session, lambda value: not value["closed"] and value["done"], "reopen after complete hotkey")
             browser(session, "click", "#gold")
             until(session, lambda value: value["gold"] == "DELETE", "promote")
             browser(session, "click", "#gold")
@@ -114,7 +137,7 @@ def main():
                 until(session, lambda value, kind=kind: value[kind] == "POST", f"mobile {kind} off")
             assert browser(session, "get", "url") == url + path
             assert not browser(session, "errors"), "Browser page errors"
-            print("PASS card edit restoration and desktop/mobile control toggles")
+            print("PASS card edit restoration, keyboard shortcuts, and desktop/mobile control toggles")
         finally:
             try:
                 browser(session, "close")
