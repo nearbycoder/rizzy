@@ -11,6 +11,17 @@ use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
+fn html_redirect(location: String) -> Response {
+    (
+        StatusCode::FOUND,
+        [
+            (header::LOCATION, location),
+            (header::CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
+        ],
+    )
+        .into_response()
+}
+
 pub(super) fn storage_dir() -> PathBuf {
     env::var_os("RIZZY_STORAGE_DIR")
         .map(PathBuf::from)
@@ -1767,7 +1778,7 @@ pub(super) async fn show_blob(
         base(&headers),
         encoded_filename(&filename)
     );
-    Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
+    Ok(html_redirect(location))
 }
 
 async fn ensure_large_variant(key: &str, content_type: &str) -> Result<PathBuf> {
@@ -2176,7 +2187,7 @@ pub(super) async fn show_representation(
         base(&headers),
         encoded_filename(&filename)
     );
-    Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
+    Ok(html_redirect(location))
 }
 
 pub(super) async fn proxy_representation(
@@ -2438,7 +2449,7 @@ pub(super) async fn show_avatar(
             base(&headers),
             encoded_filename(&filename)
         );
-        return Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response());
+        return Ok(html_redirect(location));
     }
     let name: String = user.get("name");
     let initials: String = name

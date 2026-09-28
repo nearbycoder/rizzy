@@ -43,8 +43,10 @@ def run(target):
 
         status, headers, _ = call(target, path, bearer=False)
         assert status == 302 and "/representations/redirect/" in headers["Location"], (status, headers)
+        assert headers.get("Content-Type") == "text/html; charset=utf-8", headers
         status, headers, _ = call(target, headers["Location"], bearer=False)
         assert status == 302 and "/rails/active_storage/disk/" in headers["Location"], (status, headers)
+        assert headers.get("Content-Type") == "text/html; charset=utf-8", headers
         status, headers, thumbnail = call(target, headers["Location"], bearer=False)
         assert status == 200 and headers.get_content_type() == "image/jpeg", (status, headers)
         assert thumbnail.startswith(b"\xff\xd8") and thumbnail != IMAGE, len(thumbnail)
@@ -52,6 +54,7 @@ def run(target):
         original = prefix + "/rails/active_storage/blobs/redirect/" + upload["signed_id"] + "/moon.jpg"
         status, headers, _ = call(target, original, bearer=False)
         assert status == 302 and "/rails/active_storage/disk/" in headers["Location"], (status, headers)
+        assert headers.get("Content-Type") == "text/html; charset=utf-8", headers
 
         png_blob = {"filename": "avatar.png", "byte_size": len(PNG),
                     "checksum": base64.b64encode(hashlib.md5(PNG).digest()).decode(),
@@ -80,6 +83,37 @@ def run(target):
         assert thumbnail.startswith(b"\x89PNG\r\n\x1a\n")
         assert (int.from_bytes(thumbnail[16:20], "big"), int.from_bytes(thumbnail[20:24], "big")) == (256, 256)
 
+        for filename, content_type, signature in (
+            ("animated.gif", "image/gif", b"GIF89a"),
+            ("animated.webp", "image/webp", b"RIFF"),
+        ):
+            data = (Path(__file__).resolve().parent / "fixtures" / filename).read_bytes()
+            animated_blob = {"filename": filename, "byte_size": len(data),
+                             "checksum": base64.b64encode(hashlib.md5(data).digest()).decode(),
+                             "content_type": content_type}
+            status, _, raw = call(target, prefix + "/rails/active_storage/direct_uploads", "POST",
+                                  {"blob": animated_blob})
+            assert status == 200, (status, raw[:100])
+            animated_upload = json.loads(raw)
+            status, _, raw = call(target, animated_upload["direct_upload"]["url"], "PUT", data,
+                                  bearer=False, headers=animated_upload["direct_upload"]["headers"])
+            assert status == 204, (status, raw[:100])
+            status, _, raw = call(target, prefix + f"/users/{user['id']}.json", "PATCH",
+                                  {"user": {"avatar": animated_upload["signed_id"]}})
+            assert status == 200, (status, raw[:100])
+            status, headers, _ = call(target, path, bearer=False)
+            assert status == 302 and headers.get("Content-Type") == "text/html; charset=utf-8", (status, headers)
+            status, headers, _ = call(target, headers["Location"], bearer=False)
+            assert status == 302 and headers.get("Content-Type") == "text/html; charset=utf-8", (status, headers)
+            status, headers, thumbnail = call(target, headers["Location"], bearer=False)
+            assert status == 200 and headers.get_content_type() == content_type, (status, headers)
+            assert thumbnail.startswith(signature) and thumbnail != data, len(thumbnail)
+            if filename.endswith(".gif"):
+                assert (int.from_bytes(thumbnail[6:8], "little"),
+                        int.from_bytes(thumbnail[8:10], "little")) == (256, 256)
+            else:
+                assert thumbnail[8:12] == b"WEBP"
+
         svg_blob = {"filename": "avatar.svg", "byte_size": len(SVG),
                     "checksum": base64.b64encode(hashlib.md5(SVG).digest()).decode(),
                     "content_type": "image/svg+xml"}
@@ -97,7 +131,8 @@ def run(target):
         assert status == 302, status
         return {"initials": 200, "etag": 304, "attach": 200, "avatar": 302,
                 "thumbnail_redirect": 302, "thumbnail": 200, "public_blob": 302,
-                "png_thumbnail": 200, "invalid_svg": 422}
+                "png_thumbnail": 200, "animated_gif_thumbnail": 200,
+                "animated_webp_thumbnail": 200, "invalid_svg": 422}
     finally:
         status, _, raw = call(target, path + ".json", "DELETE")
         assert status == 204, (status, raw[:100])
