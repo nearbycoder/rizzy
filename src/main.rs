@@ -87,6 +87,7 @@ mod tag_cleanup;
 mod tagging_page;
 mod timezone;
 mod unsubscribes;
+mod user_live;
 mod user_page;
 mod webhook_cleanup;
 mod webhook_page;
@@ -5195,6 +5196,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/notifications/unsubscribe/new", get(unsubscribes::new))
         .route("/{account}/notifications/unsubscribe", get(unsubscribes::show).post(unsubscribes::create))
         .route("/{account}/notifications/tray", get(notification_tray))
+        .route("/{account}/my/live", get(user_live::stream))
         .route(
             "/{account}/notifications/bulk_reading",
             post(read_all_notifications),

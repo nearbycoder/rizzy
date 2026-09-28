@@ -278,4 +278,16 @@ if (footer) {
   });
   loadTray('notifications');
   window.addEventListener('focus', () => loadTray('notifications'));
+  if ('EventSource' in window) {
+    const updates = new EventSource(`/${account}/my/live`);
+    let previous;
+    updates.onmessage = event => {
+      let revision;
+      try { revision = JSON.parse(event.data); } catch { return; }
+      if (!previous || revision.notifications !== previous.notifications) void loadTray('notifications');
+      if (trays.pins.open && (!previous || revision.pins !== previous.pins)) void loadTray('pins');
+      previous = revision;
+    };
+    window.addEventListener('pagehide', () => updates.close());
+  }
 }

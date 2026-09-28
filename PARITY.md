@@ -340,8 +340,16 @@ body, and mention title treatment in the Home tray and full notifications
 page. Chromium found the populated card and successfully used Mark as read and
 Clear all. The Home footer fetches notification state when it loads and on
 window focus, marks unread status on its toggle, and closes after Clear all.
-Source Action Cable broadcasts and the remaining visual and keyboard details
-are still open.
+Rizzy now also streams per-user notification and pin revisions to open pages
+using server-sent events. Its 1.5-second probe batches active users, and
+revision hashes cover each notification and pinned card so editing an older
+item still refreshes the tray. `tests/user_live_stream.py` checks updates
+written through a second SQLite process and the live unread badge and Pins
+tray in Chromium. `tests/mysql_user_live_stream.py` checks the cross-process
+revision stream on MySQL, including an older pinned card edit. This does not
+replicate source Action Cable broadcasts, and the many-user probe cost and
+maximum live-client capacity have not been benchmarked. Remaining visual and
+keyboard details are still open.
 The [latest Home read](bench/results/home-media-html-notification-tray-98-2026-09-26.json)
 and [same-binary repeat](bench/results/home-media-html-notification-tray-repeat-98-2026-09-26.json)
 still favored Rizzy in all 16 error-free phases, but both targets slowed
