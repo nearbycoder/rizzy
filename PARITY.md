@@ -181,6 +181,12 @@ SGID points to the imported account, the blob SGID points to its imported file,
 and the file bytes match SHA-256. A signed-in HTML request on the Rust import
 also renders the mention and file name. This covers that cross-import fixture,
 not every record or attachment variant.
+The same paired cross-import now passes with JPEG, PNG, animated GIF, animated
+WebP, SVG, and BMP embeds. For each format, it checks every original and derived
+blob's SHA-256, every imported attachment ID and blob link, the preview-record
+count, resolved User and image SGIDs, and the rendered Rust card. SVG and BMP
+have no generated previews in these fixtures. Other image formats, dimensions,
+and import paths remain unverified.
 `tests/account_export_field_inventory.py
 --image-variant --strict` and its `--image-format` option now compare JPEG,
 PNG, animated GIF, and animated WebP embeds. On these four fixtures, both
