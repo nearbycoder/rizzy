@@ -10,6 +10,8 @@ The [auto-postponement comparison](bench/results/auto-postpone-sqlite-5000-2026-
 
 A [paired MySQL mixed-workload comparison](bench/results/mysql-mixed-clean-500-4boards-c16-20s-2026-09-27.json) on four app CPUs, four processes or workers, and 16 clients measured 259.65–266.88 completed JSON read/write workflows per second for Rizzy versus 24.84–25.04 for Fizzy across two reversed-order rounds. Both apps returned zero errors and passed record-count checks. This tests the covered workflow on one host; full application parity and maximum capacity remain unverified.
 
+A [paired MySQL read-scale extension](bench/results/mysql-read-scale-extension-1000-c256-512-2026-09-28.json) compared four JSON routes on equal 1,000-card fixtures through 512 clients. At 512, four Rizzy processes served 4,721–4,751 requests/s with 467–476 ms p95 latency versus four Fizzy workers at 314–334 requests/s and 1.73–1.81 s p95. Both reversed-order rounds passed response-parity, error, and record-count checks. This is a one-host read result, not an application-wide capacity claim.
+
 A [2,000-card webhook queue comparison](bench/results/webhook-publish-delivery-2000-c128-2026-09-28.json) at 128 clients measured 1,309–1,451 completed batch deliveries per second for Rizzy versus 53–57 for Fizzy, with zero HTTP errors and exact final counts in both reversed-order rounds. The destination was blocked as private by both apps, so this measures publication and queue dispatch rather than successful outbound network delivery.
 
 ## Quick start
