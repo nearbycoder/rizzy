@@ -645,10 +645,24 @@ registered. The Turbo Native responses match the source's HTML text. Rizzy now
 registers all nine Active Storage routes. Paired tests compare original blob
 bytes, private/public access, single byte ranges, and disposition, plus signed
 image representation redirects, proxy, alias, tampering, cache policy, and
-cleanup. Rizzy cannot yet decode Rails variation keys, process every source
-transformation, or reproduce libvips variant bytes. Fourteen Action Mailbox
+cleanup. Rizzy now verifies Rails-signed variation keys and reproduces the
+tested `resize_to_limit` and `resize_to_fill` JPEG, PNG, GIF, and WebP bytes
+and derived variant records. Other source transformations, media types, and
+variation-key options remain open. Fourteen Action Mailbox
 framework routes remain unmatched. Route
 registration alone does not prove behavioral parity for any of these areas.
+
+`tests/rails_variation_key_paired.py` uses Fizzy-generated signed keys with
+`loader: { n: -1 }`, centered fill, and explicit PNG conversion. Its paired
+JPEG, PNG, GIF, and WebP runs match the representation bytes, content types,
+variant digests, checksums, dimensions, metadata, filenames, and tampered-key
+404s. Rails loads an image before applying these transformations. Rizzy now
+calls libvips on an image object with the same autorotation, resize, and save
+steps; the command-line `thumbnail` path had produced different PNG crop
+pixels. The existing `tests/storage_representation_parity.py` also passes on
+all four formats after its asynchronous deletion check waits for the storage
+purge worker. This coverage does not establish every libvips transformation
+or animated-frame edge case.
 
 `tests/blob_cross_account_html_paired.py` now compares the pinned source's
 unattached-blob authorization across two accounts. Both apps return an empty

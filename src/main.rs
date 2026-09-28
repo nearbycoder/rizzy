@@ -89,6 +89,7 @@ mod timezone;
 mod unsubscribes;
 mod user_live;
 mod user_page;
+mod vips_variation;
 mod webhook_cleanup;
 mod webhook_page;
 

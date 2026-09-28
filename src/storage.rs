@@ -688,21 +688,61 @@ pub(super) fn event_attachment_preview(
 fn verified_variation(app: &App, key: &str) -> Result<Variation> {
     let (payload, signature) = key.rsplit_once("--").ok_or_else(missing)?;
     let expected = hmac_sha256(&app.qr_secret, &format!("storage_variation:{payload}"));
-    if signature.len() != expected.len()
-        || signature
+    let local_signature = signature.len() == expected.len()
+        && signature
             .bytes()
             .zip(expected.bytes())
             .fold(0_u8, |difference, (left, right)| {
                 difference | (left ^ right)
             })
-            != 0
-    {
-        return Err(missing());
-    }
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|_| missing())?;
-    let variation: Variation = serde_json::from_slice(&bytes).map_err(|_| missing())?;
+            == 0;
+    let variation: Variation = if local_signature {
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload)
+            .map_err(|_| missing())?;
+        serde_json::from_slice(&bytes).map_err(|_| missing())?
+    } else {
+        let source = app.sgid_signer.parse_variation(key).ok_or_else(missing)?;
+        let fields = source.as_object().ok_or_else(missing)?;
+        if fields.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "loader" | "resize_to_limit" | "resize_to_fill" | "format"
+            )
+        }) {
+            return Err(missing());
+        }
+        if let Some(loader) = fields.get("loader") {
+            if *loader != json!({"n":-1}) {
+                return Err(missing());
+            }
+        }
+        let (operation, dimensions) =
+            match (fields.get("resize_to_limit"), fields.get("resize_to_fill")) {
+                (Some(dimensions), None) => ("limit", dimensions),
+                (None, Some(dimensions)) => ("fill", dimensions),
+                _ => return Err(missing()),
+            };
+        let dimensions = dimensions
+            .as_array()
+            .filter(|values| values.len() == 2)
+            .ok_or_else(missing)?;
+        Variation {
+            operation: operation.to_owned(),
+            width: dimensions[0]
+                .as_u64()
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(missing)?,
+            height: dimensions[1]
+                .as_u64()
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(missing)?,
+            format: fields
+                .get("format")
+                .map(|value| value.as_str().map(str::to_owned).ok_or_else(missing))
+                .transpose()?,
+        }
+    };
     if !matches!(variation.operation.as_str(), "limit" | "fill")
         || variation.width == 0
         || variation.height == 0
@@ -2023,6 +2063,7 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     if fs::metadata(&target).await.is_ok() {
         persist_rich_text_variant(app, blob, &variation, &target).await?;
         persist_avatar_variant(app, blob, &variation, &target).await?;
+        persist_source_variation(app, blob, variation_key, &variation, &target).await?;
         return Ok(target);
     }
     fs::create_dir_all(&directory)
@@ -2031,6 +2072,11 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     let source = storage_dir().join(&key);
     let output = target.clone();
     let persisted_variation = variation.clone();
+    let loader_all_frames = app
+        .sgid_signer
+        .parse_variation(variation_key)
+        .map(|source| source.get("loader").is_some())
+        .unwrap_or(variation.operation == "limit");
     tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
         if matches!(variation.operation.as_str(), "limit" | "fill")
             && matches!(
@@ -2042,32 +2088,25 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
             )
         {
             let temporary = output.with_extension(format!("{}.tmp.{extension}", random_token()));
-            let source_argument = if variation.operation == "limit"
+            let all_frames = loader_all_frames
                 && matches!(
                     image_format,
                     image::ImageFormat::Gif | image::ImageFormat::WebP
-                ) {
-                format!("{}[n=-1]", source.display())
-            } else {
-                source.display().to_string()
-            };
-            let mut command = std::process::Command::new("vips");
-            command
-                .arg("thumbnail_image")
-                .arg(source_argument)
-                .arg(&temporary)
-                .arg(variation.width.to_string())
-                .arg("--height")
-                .arg(variation.height.to_string());
-            if variation.operation == "fill" {
-                command.arg("--crop").arg("centre");
-            } else {
-                command.arg("--size").arg("down");
-            }
-            let result = command.output();
-            if matches!(result, Ok(ref result) if result.status.success()) {
+                );
+            let result = crate::vips_variation::render(
+                &source,
+                &temporary,
+                variation.width,
+                variation.height,
+                variation.operation == "fill",
+                all_frames,
+            );
+            if result.is_ok() {
                 std::fs::rename(&temporary, &output).map_err(|error| error.to_string())?;
                 return Ok(());
+            }
+            if let Err(error) = result {
+                eprintln!("libvips variation render failed: {error}");
             }
             let _ = std::fs::remove_file(&temporary);
         }
@@ -2106,6 +2145,7 @@ async fn ensure_variation(app: &App, blob: &DbRow, variation_key: &str) -> Resul
     })?;
     persist_rich_text_variant(app, blob, &persisted_variation, &target).await?;
     persist_avatar_variant(app, blob, &persisted_variation, &target).await?;
+    persist_source_variation(app, blob, variation_key, &persisted_variation, &target).await?;
     Ok(target)
 }
 
@@ -2181,6 +2221,71 @@ fn avatar_variation_digest(format: &str) -> String {
     marshal_positive_fixnum(&mut bytes, 256);
     marshal_positive_fixnum(&mut bytes, 256);
     base64::engine::general_purpose::STANDARD.encode(Sha1::digest(bytes))
+}
+
+fn source_variation_digest(format: &str, variation: &Variation, all_frames: bool) -> String {
+    // Rails reverse-merges the output format ahead of the signed transforms.
+    let mut bytes = vec![4, 8, b'{', if all_frames { 8 } else { 7 }];
+    marshal_symbol(&mut bytes, "format");
+    marshal_utf8_string(&mut bytes, format);
+    if all_frames {
+        marshal_symbol(&mut bytes, "loader");
+        bytes.extend_from_slice(&[b'{', 6]);
+        marshal_symbol(&mut bytes, "n");
+        bytes.extend_from_slice(&[b'i', 0xfa]);
+    }
+    marshal_symbol(
+        &mut bytes,
+        if variation.operation == "fill" {
+            "resize_to_fill"
+        } else {
+            "resize_to_limit"
+        },
+    );
+    bytes.extend_from_slice(&[b'[', 7]);
+    marshal_positive_fixnum(&mut bytes, variation.width);
+    marshal_positive_fixnum(&mut bytes, variation.height);
+    base64::engine::general_purpose::STANDARD.encode(Sha1::digest(bytes))
+}
+
+#[cfg(test)]
+#[test]
+fn source_variation_digests_match_active_storage() {
+    for (operation, size, format, all_frames, expected) in [
+        ("limit", 100, "jpg", true, "NHBKNcXOqNrcp0uLmawHKJZKiRY="),
+        ("fill", 64, "jpg", false, "QvdW6Y2OiHtytRVi7kb9G8d0g4A="),
+        ("limit", 100, "png", false, "uyx6Kcit1Aa78Mrn7bVgZ7OZn0Y="),
+    ] {
+        let variation = Variation {
+            operation: operation.into(),
+            width: size,
+            height: size,
+            format: None,
+        };
+        assert_eq!(
+            source_variation_digest(format, &variation, all_frames),
+            expected
+        );
+    }
+}
+
+async fn persist_source_variation(
+    app: &App,
+    blob: &DbRow,
+    key: &str,
+    variation: &Variation,
+    target: &std::path::Path,
+) -> Result<()> {
+    let Some(transformations) = app.sgid_signer.parse_variation(key) else {
+        return Ok(());
+    };
+    let filename: String = blob.get("filename");
+    let content_type: String = blob.get("content_type");
+    let default_format = blob_variant_format(&filename, &content_type);
+    let format = variation.format.as_deref().unwrap_or(&default_format);
+    let digest =
+        source_variation_digest(format, variation, transformations.get("loader").is_some());
+    persist_variant_record(app, blob, &digest, target).await
 }
 
 #[cfg(test)]
@@ -2331,6 +2436,26 @@ async fn persist_variant_record(
     let account_id: String = blob.get("account_id");
     let filename: String = blob.get("filename");
     let content_type: String = blob.get("content_type");
+    let (derived_type, derived_extension) =
+        match target.extension().and_then(|value| value.to_str()) {
+            Some("jpg") | Some("jpeg") => ("image/jpeg", "jpg"),
+            Some("png") => ("image/png", "png"),
+            Some("gif") => ("image/gif", "gif"),
+            Some("webp") => ("image/webp", "webp"),
+            _ => (content_type.as_str(), ""),
+        };
+    let derived_filename = if derived_type == content_type {
+        filename.clone()
+    } else {
+        format!(
+            "{}.{}",
+            filename
+                .rsplit_once('.')
+                .map(|(stem, _)| stem)
+                .unwrap_or(&filename),
+            derived_extension
+        )
+    };
     let exists: Option<String> = sqlx::query_scalar(
         "SELECT id FROM storage_variant_records WHERE blob_id=? AND variation_digest=?",
     )
@@ -2386,8 +2511,8 @@ async fn persist_variant_record(
         .bind(&derived_id)
         .bind(&account_id)
         .bind(&derived_key)
-        .bind(&filename)
-        .bind(&content_type)
+        .bind(&derived_filename)
+        .bind(derived_type)
         .bind(data.len() as i64)
         .bind(checksum)
         .bind(json!({"identified":true,"width":width,"height":height,"analyzed":true}).to_string())

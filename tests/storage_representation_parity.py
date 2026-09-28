@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,7 +95,12 @@ def check(target, image):
         status, _, _ = call(target, prefix + f"/boards/{board['id']}", "DELETE")
         assert status == 204, (target["name"], status)
         if target.get("storage") and "blob" in locals():
-            assert not (target["storage"] / "variants" / blob["key"]).exists()
+            directory = target["storage"] / "variants" / blob["key"]
+            for _ in range(50):
+                if not directory.exists():
+                    break
+                time.sleep(.1)
+            assert not directory.exists(), directory
 
 
 def main():

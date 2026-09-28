@@ -55,6 +55,20 @@ impl Signer {
         self.sign(&self.active_storage_key, blob_id, "blob_id")
     }
 
+    pub(crate) fn parse_variation(&self, signed: &str) -> Option<Value> {
+        let (encoded, digest) = signed.rsplit_once("--")?;
+        let bytes = hex::decode(digest).ok()?;
+        let mut mac = Hmac::<Sha1>::new_from_slice(&self.active_storage_key).ok()?;
+        mac.update(encoded.as_bytes());
+        mac.verify_slice(&bytes).ok()?;
+        let envelope: Value = serde_json::from_slice(&URL_SAFE.decode(encoded).ok()?).ok()?;
+        if envelope["_rails"]["pur"] != "variation" || envelope["_rails"].get("exp").is_some() {
+            return None;
+        }
+        let transformations = envelope["_rails"]["data"].as_object()?;
+        Some(Value::Object(transformations.clone()))
+    }
+
     fn sign(&self, key: &[u8; 64], data: &str, purpose: &str) -> String {
         let envelope = json!({"_rails": {"data": data, "pur": purpose}});
         let encoded = URL_SAFE.encode(serde_json::to_vec(&envelope).expect("verifier envelope"));
@@ -109,5 +123,11 @@ mod tests {
             signer.blob_signed_id("test"),
             "eyJfcmFpbHMiOnsiZGF0YSI6InRlc3QiLCJwdXIiOiJibG9iX2lkIn19--e5c891d5395c0dc305c03cd2c1777213e8dc687f"
         );
+        let variation = "eyJfcmFpbHMiOnsiZGF0YSI6eyJsb2FkZXIiOnsibiI6LTF9LCJyZXNpemVfdG9fbGltaXQiOlsxMDAsMTAwXX0sInB1ciI6InZhcmlhdGlvbiJ9fQ==--9af012acd08c49a4255b2a56539cb4fc6cce8278";
+        assert_eq!(
+            signer.parse_variation(variation),
+            Some(serde_json::json!({"loader":{"n":-1},"resize_to_limit":[100,100]}))
+        );
+        assert!(signer.parse_variation(&format!("{variation}x")).is_none());
     }
 }
