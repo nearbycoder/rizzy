@@ -301,6 +301,9 @@ impl IntoResponse for ApiError {
         if self.0 == StatusCode::NOT_ACCEPTABLE && self.1 == "Not Acceptable" {
             return (self.0, Json(json!({"status":406,"error":"Not Acceptable"}))).into_response();
         }
+        if self.0 == StatusCode::BAD_REQUEST && self.1 == "Bad Request" {
+            return (self.0, Json(json!({"status":400,"error":"Bad Request"}))).into_response();
+        }
         (self.0, Json(json!({"message": self.1}))).into_response()
     }
 }
@@ -1670,6 +1673,41 @@ fn base(headers: &HeaderMap) -> String {
 }
 fn nested<'a>(body: &'a Value, key: &str) -> &'a Value {
     body.get(key).unwrap_or(body)
+}
+fn card_params(body: &Value) -> Result<&Value> {
+    let card = nested(body, "card");
+    let fields = card
+        .as_object()
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Bad Request"))?;
+    if !fields.iter().any(|(key, value)| {
+        matches!(
+            key.as_str(),
+            "title" | "description" | "image" | "created_at" | "last_active_at"
+        ) && !matches!(value, Value::Array(_) | Value::Object(_))
+    }) {
+        return Err(err(StatusCode::BAD_REQUEST, "Bad Request"));
+    }
+    Ok(card)
+}
+fn card_title_param(card: &Value) -> Option<String> {
+    match card.get("title") {
+        None => None,
+        Some(Value::Null) => Some(String::new()),
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Number(value)) => Some(value.to_string()),
+        Some(Value::Bool(value)) => Some(if *value { "t" } else { "f" }.into()),
+        Some(_) => None,
+    }
+}
+fn card_description_param(card: &Value) -> Option<String> {
+    match card.get("description") {
+        None => None,
+        Some(Value::Null) => Some(String::new()),
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Number(value)) => Some(value.to_string()),
+        Some(Value::Bool(value)) => Some(value.to_string()),
+        Some(_) => None,
+    }
 }
 fn string(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(str::to_owned)
@@ -12989,11 +13027,11 @@ async fn create_card(
     }
     let body: Value =
         serde_json::from_slice(&body).map_err(|_| err(StatusCode::BAD_REQUEST, "Invalid JSON"))?;
-    let v = nested(&body, "card");
-    let title = string(v, "title")
+    let v = card_params(&body)?;
+    let title = card_title_param(v)
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Untitled".into());
-    let description = string(v, "description").unwrap_or_default();
+    let description = card_description_param(v).unwrap_or_default();
     let (plain_description, _, _) =
         storage::render_rich_text(&app, &p.account_id, p.slug, &description).await?;
     let search_text = search_content(plain_description);
@@ -13548,12 +13586,9 @@ async fn update_card(
     let c = card(&app, &p, &number).await?;
     let original_title: String = c.get("title");
     let input = card_update_input(&app, request).await?;
-    let v = nested(&input.body, "card");
-    let requested_title = string(v, "title");
-    let requested_description = match v.get("description") {
-        Some(Value::Null) => Some(String::new()),
-        _ => string(v, "description"),
-    };
+    let v = card_params(&input.body)?;
+    let requested_title = card_title_param(v);
+    let requested_description = card_description_param(v);
     let requested_search_text = if let Some(description) = &requested_description {
         let (plain, _, _) =
             storage::render_rich_text(&app, &p.account_id, p.slug, description).await?;
