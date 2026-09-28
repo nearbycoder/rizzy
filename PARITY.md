@@ -172,8 +172,16 @@ job, and checks that both archives contain its portable User GID and one
 mention. New direct, multipart, and imported blobs use Rails-compatible signed
 IDs. `tests/blob_signed_id_reference.py` verifies a direct upload's blob ID and
 Action Text SGID with Fizzy's verifiers, then embeds the file in Rizzy. Legacy
-opaque blob IDs, import round trips with signed User mentions, and unrepresented
-record groups remain open. `tests/account_export_field_inventory.py
+opaque blob IDs and unrepresented record groups remain open.
+`tests/mention_archive_roundtrip_paired.py` exports the same card with a User
+mention and text-file embed from each app, imports Rizzy's ZIP through Fizzy's
+record sets, and imports Fizzy's ZIP through Rizzy's HTTP import worker. Both
+imports restore one mention and two resolved rich-text attachments: the User
+SGID points to the imported account, the blob SGID points to its imported file,
+and the file bytes match SHA-256. A signed-in HTML request on the Rust import
+also renders the mention and file name. This covers that cross-import fixture,
+not every record or attachment variant.
+`tests/account_export_field_inventory.py
 --image-variant --strict` and its `--image-format` option now compare JPEG,
 PNG, animated GIF, and animated WebP embeds. On these four fixtures, both
 archives contain the same blob and attachment counts, preview bytes and

@@ -118,7 +118,7 @@ def export(target, env):
                 attachments.append(record)
             if group == "active_storage_variant_records":
                 variants.append(record)
-        return {group: sorted(keys) for group, keys in fields.items()}, counts, users, rich_text, blobs, attachments, variants
+        return {group: sorted(keys) for group, keys in fields.items()}, counts, users, rich_text, blobs, attachments, variants, archive
 
 
 def verify_rust_user_sgids(users, source_env):
