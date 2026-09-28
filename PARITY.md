@@ -2,6 +2,14 @@
 
 Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is complete only when its route behavior, JSON and HTML response, permissions, side effects, and upstream tests are reproduced. A check means an initial implementation exists; it does not establish one-for-one parity.
 
+The notification settings browser page now uses the shared signed-in shell and
+Fizzy's header, two settings panels, board involvement frames, push status and
+help disclosure, and email frequency form structure. `tests/notification_settings_html.py`
+checks those structures along with board involvement changes, email preference
+updates, JSON reads, and unsubscribe-token creation; `tests/pwa_registration.py`
+also passes for the page. Browser-specific push help text, native-device
+settings, exact styling, and paired visual and interaction checks remain open.
+
 `python3 tests/route_coverage.py --strict` now finds all 211 application routes, three Turbo Native routes, nine Active Storage routes, and 14 Action Mailbox routes registered. `tests/action_mailbox_parity.py` compares the pinned production source's default disabled-ingress and gated-conductor responses with Rizzy across all 14 methods, three JSON suffixes, HTML and JSON Accept headers, and anonymous and bearer-token requests. Configured mailbox ingress and development conductor behavior remain open, as does functional parity for the rest of the route inventory.
 
 `tests/http_methods_parity.py` compares 493 paired HEAD and unsupported-method contracts on disposable source and Rust servers. All 92 application GET paths match for authenticated JSON HEAD; their OPTIONS responses match under HTML and JSON Accept headers, with and without a bearer token. Six `.json` paths exercise conflicting Accept headers, and six other unsupported verbs match under authenticated JSON. Two unsupported `.json` writes verify that the error keeps the original HTML Accept preference. An anonymous GET to the POST-only passkey challenge also returns the same 404. Fizzy returns a negotiated 404 for these method misses; Rizzy's router now does the same without Axum's `Allow` header. `tests/shadowed_routes_parity.py` compares another 152 requests across six literal paths that overlap dynamic resource routes, plus the unscoped access-token path. It covers every dynamic-only GET, HEAD, PATCH, PUT, and DELETE method on those paths, with JSON suffixes, HTML and JSON Accept headers, and anonymous and bearer-token requests. These error and authentication contracts match; valid-resource behavior, side effects, and other route families still require parity checks.

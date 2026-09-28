@@ -19,6 +19,7 @@
     const subscription = await registration?.pushManager?.getSubscription();
     const on = Notification.permission === "granted" && !!subscription;
     state.textContent = on ? "ON" : "OFF";
+    panel.classList.toggle("notifications--on", on);
     button.hidden = on;
   };
   button.addEventListener("click", async () => {
