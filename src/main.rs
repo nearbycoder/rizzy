@@ -9301,7 +9301,7 @@ async fn show_webhook(
     p.account_admin()?;
     let w = webhook_row(&app, &p, &board_id, &webhook_id).await?;
     if !headers.contains_key("x-rizzy-json-request") {
-        let deliveries = sqlx::query("SELECT state,created_at FROM webhook_deliveries WHERE webhook_id=? ORDER BY created_at DESC,id DESC LIMIT 20")
+        let deliveries = sqlx::query("SELECT id,state,response,created_at FROM webhook_deliveries WHERE webhook_id=? ORDER BY created_at DESC,id DESC LIMIT 20")
             .bind(&webhook_id).fetch_all(&app.db).await.map_err(db_err)?;
         return Ok(webhook_page::show(p.slug, &board_id, &w, &deliveries).into_response());
     }

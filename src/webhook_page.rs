@@ -271,14 +271,7 @@ pub(super) fn show(
     } else {
         format!(
             "<ul>{}</ul>",
-            deliveries
-                .iter()
-                .map(|delivery| format!(
-                    "<li><strong>{}</strong> <time>{}</time></li>",
-                    escape(&delivery.get::<String, _>("state")),
-                    escape(&delivery.get::<String, _>("created_at"))
-                ))
-                .collect::<String>()
+            deliveries.iter().map(delivery_entry).collect::<String>()
         )
     };
     let reactivate = if row.get::<i64, _>("active") == 0 {
@@ -302,5 +295,54 @@ pub(super) fn show(
         "Webhooks",
         false,
         Some(&format!("{path}/edit")),
+    )
+}
+
+fn delivery_entry(delivery: &DbRow) -> String {
+    let id: String = delivery.get("id");
+    let state: String = delivery.get("state");
+    let response: Option<String> = delivery.get("response");
+    let response: Value = response
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or(Value::Null);
+    let succeeded = state == "completed"
+        && response
+            .get("code")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| (200..=299).contains(&code))
+        && response
+            .get("error")
+            .is_none_or(|error| error.is_null() || error == "");
+    let class = if succeeded { "delivery--succeeded" } else { "" };
+    let created_at: String = delivery.get("created_at");
+    let datetime = chrono::DateTime::parse_from_rfc3339(&created_at).ok();
+    let (datetime_value, age) = if let Some(created) = datetime {
+        let minutes = ((chrono::Utc::now() - created.with_timezone(&chrono::Utc))
+            .num_seconds()
+            .unsigned_abs() as f64
+            / 60.0)
+            .round() as u64;
+        let age = match minutes {
+            0 => "less than a minute".to_owned(),
+            1 => "1 minute".to_owned(),
+            2..=44 => format!("{minutes} minutes"),
+            45..=89 => "about 1 hour".to_owned(),
+            90..=1439 => format!("about {} hours", (minutes as f64 / 60.0).round() as u64),
+            1440..=2519 => "1 day".to_owned(),
+            2520..=43199 => format!("{} days", (minutes as f64 / 1440.0).round() as u64),
+            43200..=86399 => "about 1 month".to_owned(),
+            _ => format!("{} months", (minutes as f64 / 43200.0).round() as u64),
+        };
+        (created.format("%Y-%m-%dT%H:%M:%SZ").to_string(), age)
+    } else {
+        (created_at.clone(), created_at)
+    };
+    format!(
+        "<li id=\"webhook_delivery_{}\" class=\"{class}\"><strong>{}</strong><div class=\"txt-subtle\"><time datetime=\"{}\">{}</time></div></li>",
+        escape(&id),
+        escape(&state),
+        escape(&datetime_value),
+        escape(&age)
     )
 }
