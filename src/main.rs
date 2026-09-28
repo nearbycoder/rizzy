@@ -15150,189 +15150,204 @@ async fn move_card(
     } else {
         None
     };
-    let mut transfer_tx = None;
-    let mut verified = false;
-    for _ in 0..16 {
-        let mut tx = begin_write(&app).await.map_err(db_err)?;
-        let mut board_ids = [&old_board_id, &destination];
-        board_ids.sort();
-        for board_id in board_ids {
-            lock_board_for_write(&mut tx, board_id, app.mysql).await?;
-        }
-        let card_board_sql = if app.mysql {
-            "SELECT board_id FROM cards WHERE id=? FOR UPDATE"
-        } else {
-            "SELECT board_id FROM cards WHERE id=?"
-        };
-        let actual_board: String = sqlx::query_scalar(card_board_sql)
-            .bind(&card_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_err)?
-            .ok_or_else(missing)?;
-        if actual_board != old_board_id {
-            tx.rollback().await.map_err(db_err)?;
-            old_board_id = actual_board;
-            old_board = board(&app, &p, &old_board_id).await?;
-            if old_board_id != destination && move_actor.is_none() {
-                move_actor = Some((
-                    escape(&actor_name(&app, &p).await?),
-                    system_user(&app, &p).await?,
-                ));
-            }
-            continue;
-        }
-        for board_id in [&old_board_id, &destination] {
-            let accessible: Option<String> =
-                sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
-                    .bind(board_id)
-                    .bind(&p.user_id)
+    let mut deadlock_retries = 0;
+    loop {
+        let write: Result<()> = async {
+            let mut transfer_tx = None;
+            let mut verified = false;
+            for _ in 0..16 {
+                let mut tx = begin_write(&app).await.map_err(db_err)?;
+                let mut board_ids = [&old_board_id, &destination];
+                board_ids.sort();
+                for board_id in board_ids {
+                    lock_board_for_write(&mut tx, board_id, app.mysql).await?;
+                }
+                let card_board_sql = if app.mysql {
+                    "SELECT board_id FROM cards WHERE id=? FOR UPDATE"
+                } else {
+                    "SELECT board_id FROM cards WHERE id=?"
+                };
+                let actual_board: String = sqlx::query_scalar(card_board_sql)
+                    .bind(&card_id)
                     .fetch_optional(&mut *tx)
                     .await
-                    .map_err(db_err)?;
-            if accessible.is_none() {
-                return Err(missing());
-            }
-        }
-        verified = true;
-        if old_board_id == destination {
-            tx.rollback().await.map_err(db_err)?;
-            break;
-        }
-        old_board = sqlx::query("SELECT * FROM boards WHERE id=?")
-            .bind(&old_board_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        new_board = sqlx::query("SELECT * FROM boards WHERE id=?")
-            .bind(&destination)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        transfer_tx = Some(tx);
-        break;
-    }
-    if !verified {
-        return Err(err(StatusCode::CONFLICT, "Card moved during write"));
-    }
-    if let Some(mut tx) = transfer_tx {
-        storage::record_board_transfer_tx(
-            &mut tx,
-            app.mysql,
-            &p.account_id,
-            &card_id,
-            &old_board_id,
-            &destination,
-            &p.user_id,
-            &p.request_id,
-        )
-        .await?;
-        sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")
-            .bind(&destination)
-            .bind(now())
-            .bind(&card_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        sqlx::query("UPDATE events SET board_id=? WHERE card_id=?")
-            .bind(&destination)
-            .bind(&card_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        if new_board.get::<i64, _>("all_access") == 0
-            && p.admin(&new_board.get::<String, _>("creator_id")).is_ok()
-        {
-            if app.mysql {
-                let user_ids: Vec<String> = sqlx::query_scalar("SELECT a.assignee_id FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
-                    .bind(&card_id)
-                    .fetch_all(&mut *tx)
+                    .map_err(db_err)?
+                    .ok_or_else(missing)?;
+                if actual_board != old_board_id {
+                    tx.rollback().await.map_err(db_err)?;
+                    old_board_id = actual_board;
+                    old_board = board(&app, &p, &old_board_id).await?;
+                    if old_board_id != destination && move_actor.is_none() {
+                        move_actor = Some((
+                            escape(&actor_name(&app, &p).await?),
+                            system_user(&app, &p).await?,
+                        ));
+                    }
+                    continue;
+                }
+                for board_id in [&old_board_id, &destination] {
+                    let accessible: Option<String> =
+                        sqlx::query_scalar("SELECT board_id FROM accesses WHERE board_id=? AND user_id=?")
+                            .bind(board_id)
+                            .bind(&p.user_id)
+                            .fetch_optional(&mut *tx)
+                            .await
+                            .map_err(db_err)?;
+                    if accessible.is_none() {
+                        return Err(missing());
+                    }
+                }
+                verified = true;
+                if old_board_id == destination {
+                    tx.rollback().await.map_err(db_err)?;
+                    break;
+                }
+                old_board = sqlx::query("SELECT * FROM boards WHERE id=?")
+                    .bind(&old_board_id)
+                    .fetch_one(&mut *tx)
                     .await
                     .map_err(db_err)?;
-                for user_id in user_ids {
-                    sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id,involvement) VALUES(?,?,'access_only')")
-                        .bind(&destination)
-                        .bind(user_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(db_err)?;
-                }
-            } else {
-                sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT ?,a.assignee_id,'access_only' FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
+                new_board = sqlx::query("SELECT * FROM boards WHERE id=?")
+                    .bind(&destination)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                transfer_tx = Some(tx);
+                break;
+            }
+            if !verified {
+                return Err(err(StatusCode::CONFLICT, "Card moved during write"));
+            }
+            if let Some(mut tx) = transfer_tx {
+                storage::record_board_transfer_tx(
+                    &mut tx,
+                    app.mysql,
+                    &p.account_id,
+                    &card_id,
+                    &old_board_id,
+                    &destination,
+                    &p.user_id,
+                    &p.request_id,
+                )
+                .await?;
+                sqlx::query("UPDATE cards SET board_id=?,column_id=NULL,updated_at=? WHERE id=?")
+                    .bind(&destination)
+                    .bind(now())
+                    .bind(&card_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                sqlx::query("UPDATE events SET board_id=? WHERE card_id=?")
                     .bind(&destination)
                     .bind(&card_id)
                     .execute(&mut *tx)
                     .await
                     .map_err(db_err)?;
-            }
-        }
-        for table in ["pins", "watches", "notifications"] {
-            let query = format!(
-                "DELETE FROM {table} WHERE card_id=? AND user_id NOT IN (SELECT user_id FROM accesses WHERE board_id=?)"
-            );
-            sqlx::query(&query)
-                .bind(&card_id)
-                .bind(&destination)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_err)?;
-        }
-        sqlx::query("DELETE FROM assignments WHERE card_id=? AND assignee_id NOT IN (SELECT user_id FROM accesses WHERE board_id=?)")
-            .bind(&card_id)
-            .bind(&destination)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        if app.mysql {
-            mysql_search::sync_card(&mut tx, &p.account_id, &card_id)
-                .await
-                .map_err(db_err)?;
-            let comment_ids: Vec<String> =
-                sqlx::query_scalar("SELECT id FROM comments WHERE card_id=?")
+                if new_board.get::<i64, _>("all_access") == 0
+                    && p.admin(&new_board.get::<String, _>("creator_id")).is_ok()
+                {
+                    if app.mysql {
+                        let user_ids: Vec<String> = sqlx::query_scalar("SELECT a.assignee_id FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
+                            .bind(&card_id)
+                            .fetch_all(&mut *tx)
+                            .await
+                            .map_err(db_err)?;
+                        for user_id in user_ids {
+                            sqlx::query("INSERT IGNORE INTO accesses(board_id,user_id,involvement) VALUES(?,?,'access_only')")
+                                .bind(&destination)
+                                .bind(user_id)
+                                .execute(&mut *tx)
+                                .await
+                                .map_err(db_err)?;
+                        }
+                    } else {
+                        sqlx::query("INSERT OR IGNORE INTO accesses(board_id,user_id,involvement) SELECT ?,a.assignee_id,'access_only' FROM assignments a JOIN users u ON u.id=a.assignee_id WHERE a.card_id=? AND u.active=1")
+                            .bind(&destination)
+                            .bind(&card_id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(db_err)?;
+                    }
+                }
+                for table in ["pins", "watches", "notifications"] {
+                    let query = format!(
+                        "DELETE FROM {table} WHERE card_id=? AND user_id NOT IN (SELECT user_id FROM accesses WHERE board_id=?)"
+                    );
+                    sqlx::query(&query)
+                        .bind(&card_id)
+                        .bind(&destination)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(db_err)?;
+                }
+                sqlx::query("DELETE FROM assignments WHERE card_id=? AND assignee_id NOT IN (SELECT user_id FROM accesses WHERE board_id=?)")
                     .bind(&card_id)
-                    .fetch_all(&mut *tx)
+                    .bind(&destination)
+                    .execute(&mut *tx)
                     .await
                     .map_err(db_err)?;
-            for comment_id in comment_ids {
-                mysql_search::sync_comment(&mut tx, &p.account_id, &comment_id)
-                    .await
-                    .map_err(db_err)?;
+                if app.mysql {
+                    mysql_search::sync_card(&mut tx, &p.account_id, &card_id)
+                        .await
+                        .map_err(db_err)?;
+                    let comment_ids: Vec<String> =
+                        sqlx::query_scalar("SELECT id FROM comments WHERE card_id=?")
+                            .bind(&card_id)
+                            .fetch_all(&mut *tx)
+                            .await
+                            .map_err(db_err)?;
+                    for comment_id in comment_ids {
+                        mysql_search::sync_comment(&mut tx, &p.account_id, &comment_id)
+                            .await
+                            .map_err(db_err)?;
+                    }
+                }
+                let event_timestamp = now();
+                let particulars = json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")});
+                insert_event_tx(
+                    &app,
+                    &mut tx,
+                    &p,
+                    &destination,
+                    &card_id,
+                    "Card",
+                    &card_id,
+                    "card_board_changed",
+                    &particulars,
+                    &event_timestamp,
+                )
+                .await?;
+                let (who, system) = move_actor.as_ref().ok_or_else(|| missing())?;
+                let body = format!(
+                    "{who} <strong>moved</strong> this from “{}” to “{}”.",
+                    escape(&old_board.get::<String, _>("name")),
+                    escape(&new_board.get::<String, _>("name"))
+                );
+                let content = search_content(rich_text::plain_text(&body));
+                insert_system_comment_tx(
+                    &app,
+                    &mut tx,
+                    &p,
+                    system,
+                    &card_id,
+                    &body,
+                    &content,
+                    &event_timestamp,
+                )
+                .await?;
+                tx.commit().await.map_err(db_err)?;
             }
+            Ok(())
         }
-        let event_timestamp = now();
-        let particulars = json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")});
-        insert_event_tx(
-            &app,
-            &mut tx,
-            &p,
-            &destination,
-            &card_id,
-            "Card",
-            &card_id,
-            "card_board_changed",
-            &particulars,
-            &event_timestamp,
-        )
-        .await?;
-        let (who, system) = move_actor.as_ref().ok_or_else(|| missing())?;
-        let body = format!(
-            "{who} <strong>moved</strong> this from “{}” to “{}”.",
-            escape(&old_board.get::<String, _>("name")),
-            escape(&new_board.get::<String, _>("name"))
-        );
-        let content = search_content(rich_text::plain_text(&body));
-        insert_system_comment_tx(
-            &app,
-            &mut tx,
-            &p,
-            system,
-            &card_id,
-            &body,
-            &content,
-            &event_timestamp,
-        )
-        .await?;
-        tx.commit().await.map_err(db_err)?;
+        .await;
+        match write {
+            Ok(()) => break,
+            Err(error) if app.mysql && error.is_retryable_deadlock() && deadlock_retries < 3 => {
+                deadlock_retries += 1;
+                tokio::time::sleep(Duration::from_millis(10 * deadlock_retries)).await;
+            }
+            Err(error) => return Err(error),
+        }
     }
     let c = card(&app, &p, &number).await?;
     if form {

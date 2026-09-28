@@ -411,9 +411,13 @@ webhook queue inserts. `tests/mysql_card_move_atomic.py` passes the same
 failure and success checks on MySQL 8.4.11. The two-process same-card MySQL
 move race, paired chained image-bearing move sequence, and paired private-board
 access and cleanup flow also pass after the change (with Fizzy's Solid Queue
-worker enabled for its asynchronous cleanup). Forced-deadlock retry for this
-move transaction and wider
-cross-host failure handling remain open.
+worker enabled for its asynchronous cleanup). `tests/mysql_card_move_deadlock_retry.py`
+forces a board/card InnoDB lock cycle: Rizzy logs MySQL `1213`, retries the
+whole move transaction, returns the destination card, and commits exactly one
+board-change event and one system comment. The paired SQLite rollback and
+chained-move checks, MySQL failure rollback, and two-process same-card move
+race still pass after the bounded retry. Other MySQL deadlock patterns,
+sustained move load, and cross-host failure handling remain open.
 `tests/storage_materialization.py` checks concurrent materialization, exact
 account and board totals, idempotency, board cleanup, and reconciliation of an
 attachment that predates the ledger. `reconcile-storage` scans existing
