@@ -33,12 +33,20 @@ fn page(
     back_path: &str,
     back_label: &str,
     show_header_title: bool,
+    header_edit_path: Option<&str>,
 ) -> Html<String> {
     let heading = if show_header_title {
         format!("<h1>{}</h1>", escape(title))
     } else {
         String::new()
     };
+    let edit_link = header_edit_path
+        .map(|path| {
+            format!(
+                "<a class=\"webhook-header__edit\" href=\"{path}\" aria-label=\"Edit\"><span aria-hidden=\"true\"></span></a>"
+            )
+        })
+        .unwrap_or_default();
     signed_in_shell_html(
         account,
         title,
@@ -46,7 +54,7 @@ fn page(
         "",
         include_str!("../static/webhooks.css"),
         &format!(
-            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{back_path}\">Back to {}</a>{heading}</nav>",
+            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{back_path}\">Back to {}</a>{heading}{edit_link}</nav>",
             escape(back_label)
         ),
     )
@@ -134,6 +142,7 @@ fn form(
         &back_path,
         &back_label,
         show_header_title,
+        None,
     )
 }
 
@@ -226,7 +235,7 @@ pub(super) fn index(
     let content = format!(
         "<section class=\"panel\">{intro}<ul class=\"webhook-list\">{entries}</ul><nav class=\"pagination\">{before}{after}</nav><a class=\"submit\" href=\"{base}/webhooks/new\">Set up a new webhook</a></section>"
     );
-    page(account, "Webhooks", &content, &base, board_name, true)
+    page(account, "Webhooks", &content, &base, board_name, true, None)
 }
 
 pub(super) fn show(
@@ -280,7 +289,7 @@ pub(super) fn show(
         String::new()
     };
     let content = format!(
-        "<section class=\"panel\"><a href=\"{path}/edit\">Edit</a><h2>{}</h2><p class=\"url\">{}</p>{reactivate}<h3>Secret</h3><strong><code>{}</code></strong><p>We'll send an <code>X-Webhook-Signature</code> header with each request. Generate an HMAC using SHA256 of the request body with this secret to verify the request.</p><h3>Subscribed to</h3>{actions_html}<h3>Deliveries</h3>{delivery_html}</section>",
+        "<section class=\"panel webhook-detail\"><header><h1>{}</h1><span class=\"url\">{}</span></header>{reactivate}<section class=\"webhook-detail__section\"><h2>Secret</h2><strong><code>{}</code></strong><p>We'll send a <code>X-Webhook-Signature</code> header with each request. You can generate a <code>HMAC</code> using <code>SHA256</code> of the request body with this secret to verify that the request came from us.</p></section><section class=\"webhook-detail__section\"><h2>Subscribed to</h2>{actions_html}</section><section class=\"webhook-detail__section\"><h2>Deliveries</h2>{delivery_html}</section></section>",
         escape(&name),
         escape(&url),
         escape(&secret)
@@ -292,5 +301,6 @@ pub(super) fn show(
         &format!("/{account}/boards/{}/webhooks", escape(board_id)),
         "Webhooks",
         false,
+        Some(&format!("{path}/edit")),
     )
 }

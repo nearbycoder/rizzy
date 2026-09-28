@@ -73,6 +73,8 @@ def check(target):
         status, _, page = request(target, detail, accept="text/html")
         assert status == 200 and name.encode() in page and payload_url.encode() in page, (target["name"], "show", status)
         assert_shell(target, page)
+        assert f'href="{detail}/edit"'.encode() in page and b"Back to Webhooks" in page, (target["name"], "detail navigation")
+        assert b"verify that the request came from us" in page, (target["name"], "signature guidance")
         assert b"Secret" in page and b"Subscribed to" in page and b"Card added" in page and b"Card moved to" in page
 
         status, _, page = request(target, detail + "/edit", accept="text/html")

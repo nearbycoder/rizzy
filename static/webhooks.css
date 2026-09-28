@@ -13,15 +13,26 @@ button,input{font:inherit}
 .webhook-header>a{position:absolute;left:22px;color:#f4f5f6;font-size:21px;font-weight:800;text-decoration:none}
 .webhook-header>a:hover{text-decoration:underline}
 .webhook-header h1{margin:0;font-size:29px;font-weight:900;line-height:1.2}
+.webhook-header .webhook-header__edit{position:absolute;top:-2px;left:auto;right:0;display:grid;place-items:center;width:39px;height:39px;border:1px solid #40515d;border-radius:50%;color:#f4f5f6}
+.webhook-header__edit span{display:block;width:21px;height:21px;background:currentColor;mask:url('/assets/card/icons/pencil.svg') center/contain no-repeat}
 #main{width:100%;max-width:none;margin:0;padding:0 36px 86px}
 .webhook-content{width:100%;margin:0 auto}
 .webhook-content .panel{width:min(720px,100%);margin:0 auto;padding:38px;border:1px solid #26343d;border-radius:20px;background:transparent;color:#f4f5f6;box-shadow:none}
+.webhook-content .webhook-detail{display:flex;flex-direction:column;gap:24px;padding-bottom:42px;box-shadow:0 14px 35px #0003}
+.webhook-detail>header h1{margin:0;font-size:36px;font-weight:900;line-height:1.2}
+.webhook-detail>header .url{display:block;font-size:22px;line-height:1.2}
+.webhook-detail__section h2{margin:0;font-size:21px;line-height:1.25;text-transform:uppercase}
+.webhook-detail__section strong code{font-size:19px;line-height:1.3;overflow-wrap:anywhere}
+.webhook-detail__section p{margin:0;color:#a9b3ba;font-size:16px;line-height:1.4}
+.webhook-detail__section ul{margin:0;padding-left:40px;font-size:19px}
+.webhook-detail__section li{line-height:1.35}
 .webhook-content:has(.webhook-list) .panel{text-align:center;box-shadow:0 14px 35px #0003}
 .webhook-content:has(.webhook-list) .panel>p{margin:17px 0 20px}
 .webhook-content:has(.webhook-list) .submit{display:inline-flex;align-items:center;gap:12px;margin-top:1px;padding:8px 24px;border-radius:999px;font-size:19px}
 .webhook-content:has(.webhook-list) .submit::before{content:"+";font-size:31px;font-weight:400;line-height:1}
 .webhook-content form{margin:0}
 .field{display:grid;gap:8px;margin:0 0 21px}
+.field:has(.checks){gap:0}
 .field label{display:block;font-weight:700}
 .field small,.field>small{display:block;color:#aab3ba;font-size:14px;font-weight:400}
 .field input:not([type=checkbox]){width:100%;height:47px;padding:8px 15px;border:1px solid #75828b;border-radius:9px;background:transparent;color:#f4f5f6;outline:0}
