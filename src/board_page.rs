@@ -371,18 +371,11 @@ pub(super) async fn show_filtered(
     }
     list.push_str("</div>");
     let page_url = |page: i64| {
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        for (key, value) in url::form_urlencoded::parse(raw_query.unwrap_or("").as_bytes()) {
-            if key != "page" {
-                serializer.append_pair(&key, &value);
-            }
-        }
-        serializer.append_pair("page", &page.to_string());
         format!(
             "/{}/boards/{}?{}",
             principal.slug,
             escape(&board_id),
-            escape(&serializer.finish())
+            escape(&cards_page::page_query(raw_query, page, None))
         )
     };
     if query.page > 1 {

@@ -660,6 +660,15 @@ malformed, and non-ASCII declared content types. The fixture uploads as plain
 text before setting each declared type in its disposable database, so it
 verifies the serving boundary, not every direct-upload validation path.
 
+`tests/pagination_control_params_paired.py` checks the other link in the
+pinned blob-proxy regression: 20-card all-cards and filtered-board pages get
+query parameters that Rails treats as URL-generation controls, including
+`script_name`, `original_script_name`, `host`, and `protocol`. Fizzy and Rizzy
+now keep the next-page links on their actual routes, preserve the ordinary
+term filter, and omit every control option listed by Fizzy's pagination
+helper. The paired check covers those two populated pages; other pagination
+surfaces and browser execution of a poisoned link still need verification.
+
 `tests/static_csp_parity.py` compares all five static error pages and the
 production 404 response byte-for-byte with Fizzy, including its locked-down
 static Content Security Policy. It also compares the default dynamic policy

@@ -249,12 +249,32 @@ pub(super) async fn preview_fragments(
     Ok(fragments)
 }
 
-fn page_query(raw: Option<&str>, page: i64, target: Option<&str>) -> String {
+pub(super) fn page_query(raw: Option<&str>, page: i64, target: Option<&str>) -> String {
     let mut params = url::form_urlencoded::Serializer::new(String::new());
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
-        if key != "page" && key != "target" {
-            params.append_pair(&key, &value);
+        if key == "page"
+            || (target.is_some() && key == "target")
+            || matches!(
+                key.as_ref(),
+                "script_name"
+                    | "original_script_name"
+                    | "host"
+                    | "protocol"
+                    | "port"
+                    | "subdomain"
+                    | "domain"
+                    | "tld_length"
+                    | "trailing_slash"
+                    | "only_path"
+                    | "relative_url_root"
+                    | "anchor"
+                    | "params"
+                    | "_recall"
+            )
+        {
+            continue;
         }
+        params.append_pair(&key, &value);
     }
     if let Some(target) = target {
         params.append_pair("target", target);
