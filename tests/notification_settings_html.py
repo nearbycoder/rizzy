@@ -70,6 +70,8 @@ def main():
             assert b'<button type="submit">Save</button>' not in html
             assert b'Boards' in html and b'value="every_few_hours" selected' in html
             assert b'Launch board' in html and b'data-board-involvement' in html
+            assert b'class="button_to"' in html and b'name="_method" value="put"' in html
+            assert b'event.preventDefault()' in html
             assert b'data-involvement="watching"' in html and b'aria-label="Stop watching"' in html
             assert b'fetch(button.dataset.url' in html
             involvement_path = f'/{account}/boards/{board_id}/involvement'

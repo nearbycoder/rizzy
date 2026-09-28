@@ -5048,7 +5048,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/{account}/boards/{id}/accesses", get(list_board_accesses))
         .route(
             "/{account}/boards/{id}/involvement",
-            axum::routing::put(update_board_involvement).patch(update_board_involvement),
+            axum::routing::put(update_board_involvement)
+                .patch(update_board_involvement)
+                .post(update_board_involvement),
         )
         .route(
             "/{account}/boards/{board}/webhooks",
@@ -9168,13 +9170,49 @@ async fn list_board_accesses(
 async fn update_board_involvement(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
+    method: Method,
+    uri: Uri,
     headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<StatusCode> {
+    body: Bytes,
+) -> Result<Response> {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let form = if content_type.starts_with("application/x-www-form-urlencoded") {
+        Some(
+            url::form_urlencoded::parse(&body)
+                .into_owned()
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
+    let query = url::form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+        .into_owned()
+        .collect::<Vec<_>>();
+    if method == Method::POST
+        && !form
+            .iter()
+            .flatten()
+            .any(|(key, value)| key == "_method" && value.eq_ignore_ascii_case("put"))
+    {
+        return Err(missing());
+    }
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     board(&app, &p, &id).await?;
-    let involvement = required(&body, "involvement")?;
+    let involvement = if content_type.starts_with("application/json") {
+        let body: Value = serde_json::from_slice(&body).map_err(|_| bad("Invalid JSON"))?;
+        required(&body, "involvement")?
+    } else {
+        form.iter()
+            .flatten()
+            .chain(query.iter())
+            .find(|(key, _)| key == "involvement")
+            .map(|(_, value)| value.clone())
+            .ok_or_else(|| bad("Missing involvement"))?
+    };
     if !["access_only", "watching"].contains(&involvement.as_str()) {
         return Err(bad("Invalid involvement"));
     }
@@ -9188,7 +9226,49 @@ async fn update_board_involvement(
     if changed.rows_affected() == 0 {
         return Err(missing());
     }
-    Ok(StatusCode::NO_CONTENT)
+    if headers.contains_key("x-rizzy-json-request") {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    let icon_only = form
+        .iter()
+        .flatten()
+        .chain(query.iter())
+        .any(|(key, value)| key == "icon_only" && value == "true");
+    let label = if involvement == "watching" {
+        "Stop watching"
+    } else {
+        "Watch this"
+    };
+    let next = if involvement == "watching" {
+        "access_only"
+    } else {
+        "watching"
+    };
+    let icon = if involvement == "watching" {
+        include_str!("../assets/notification-bell.svg")
+    } else {
+        include_str!("../assets/notification-bell-off.svg")
+    };
+    let button = format!(
+        "<turbo-frame id=\"involvement_button_board_{}\"><form class=\"button_to\" method=\"post\" action=\"/{}/boards/{}/involvement\"><input type=\"hidden\" name=\"_method\" value=\"put\"><input type=\"hidden\" name=\"involvement\" value=\"{next}\"><input type=\"hidden\" name=\"show_watchers\" value=\"false\"><input type=\"hidden\" name=\"icon_only\" value=\"{}\"><button type=\"submit\" class=\"btn{}\"{}><span aria-hidden=\"true\">{icon}</span><span class=\"{}\" id=\"involvement_label_board_{}\">{label}</span></button></form></turbo-frame>",
+        escape(&id),
+        p.slug,
+        escape(&id),
+        icon_only,
+        if involvement == "watching" && icon_only {
+            " btn--reversed"
+        } else {
+            ""
+        },
+        if icon_only {
+            format!(" title=\"{label}\"")
+        } else {
+            String::new()
+        },
+        if icon_only { "for-screen-reader" } else { "" },
+        escape(&id),
+    );
+    Ok(Html(button).into_response())
 }
 const WEBHOOK_ACTIONS: &[&str] = &[
     "card_assigned",
@@ -11770,11 +11850,13 @@ async fn show_notification_settings(
         } else {
             "Watch this"
         };
-        board_html.push_str(&format!(
-            "<turbo-frame id=\"board_{}_involvement\"><div class=\"board-involvement flex align-center gap\"><h2 class=\"txt-medium overflow-ellipsis\">{}</h2><hr class=\"board-separator separator--horizontal flex-item-grow\" aria-hidden=\"true\"><label class=\"flex-item-no-shrink txt-small\"><turbo-frame id=\"board_{}_involvement_button\"><button type=\"button\" class=\"watch-button{}\" data-board-involvement data-url=\"/{}/boards/{}/involvement\" data-involvement=\"{}\" aria-label=\"{}\" title=\"{}\" aria-pressed=\"{}\"><span class=\"watch-icon\" aria-hidden=\"true\">{}{}</span></button></turbo-frame></label></div></turbo-frame>",
+        let next = if watching { "access_only" } else { "watching" };
+        let button = format!(
+            "<turbo-frame id=\"involvement_button_board_{}\"><form class=\"button_to\" method=\"post\" action=\"/{}/boards/{}/involvement\"><input type=\"hidden\" name=\"_method\" value=\"put\"><input type=\"hidden\" name=\"show_watchers\" value=\"false\"><input type=\"hidden\" name=\"icon_only\" value=\"true\"><input type=\"hidden\" name=\"involvement\" value=\"{next}\"><button type=\"submit\" class=\"watch-button btn{}{}\" data-board-involvement data-url=\"/{}/boards/{}/involvement\" data-involvement=\"{}\" aria-label=\"{}\" title=\"{}\" aria-pressed=\"{}\"><span class=\"watch-icon\" aria-hidden=\"true\">{}{}</span><span class=\"for-screen-reader\">{action}</span></button></form></turbo-frame>",
             escape(&id),
-            escape(&name),
+            p.slug,
             escape(&id),
+            if watching { " btn--reversed" } else { "" },
             if watching { " is-watching" } else { "" },
             p.slug,
             escape(&id),
@@ -11784,6 +11866,11 @@ async fn show_notification_settings(
             watching,
             include_str!("../assets/notification-bell.svg"),
             include_str!("../assets/notification-bell-off.svg"),
+        );
+        board_html.push_str(&format!(
+            "<turbo-frame id=\"involvement_board_{}\"><div class=\"board-involvement flex align-center gap\"><h2 class=\"txt-medium overflow-ellipsis\">{}</h2><hr class=\"board-separator separator--horizontal flex-item-grow\" aria-hidden=\"true\"><label class=\"flex-item-no-shrink txt-small\">{button}</label></div></turbo-frame>",
+            escape(&id),
+            escape(&name),
         ));
     }
     let choices = [

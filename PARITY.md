@@ -3,10 +3,13 @@
 Reference revision: `477c943e0506f109e5bc83ae9dadbe519732c045`. Each item is complete only when its route behavior, JSON and HTML response, permissions, side effects, and upstream tests are reproduced. A check means an initial implementation exists; it does not establish one-for-one parity.
 
 The notification settings browser page now uses the shared signed-in shell and
-Fizzy's header, two settings panels, board involvement frames, push status and
-help disclosure, and email frequency form structure. `tests/notification_settings_html.py`
-checks those structures along with board involvement changes, email preference
-updates, JSON reads, and unsubscribe-token creation; `tests/pwa_registration.py`
+Fizzy's header, two settings panels, board involvement frames and forms, push
+status and help disclosure, and email frequency form structure. A disposable
+paired `tests/notification_settings_paired.py` run checks panel and frame
+structure, alphabetized boards, HTML and JSON involvement updates, method
+override forms, email frequency saves, and the absent-method 404 against the
+pinned source. `tests/notification_settings_html.py` checks the Rust page's
+browser controls and unsubscribe-token creation; `tests/pwa_registration.py`
 also passes for the page. Browser-specific push help text, native-device
 settings, exact styling, and paired visual and interaction checks remain open.
 
