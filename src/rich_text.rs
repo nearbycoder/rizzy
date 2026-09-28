@@ -25,6 +25,11 @@ fn allowed_html(input: &str) -> String {
             "border-right-color",
             "border-top",
             "border-top-color",
+            "border-radius",
+            "border-top-left-radius",
+            "border-top-right-radius",
+            "border-bottom-left-radius",
+            "border-bottom-right-radius",
             "clear",
             "color",
             "cursor",
@@ -202,6 +207,29 @@ fn allowed_html(input: &str) -> String {
             .filter_style_properties(style_properties)
             .clean_content_tags(HashSet::new())
             .link_rel(None)
+            .add_url_schemes(&["data"])
+            .attribute_filter(|_, attribute, value| {
+                // Fizzy's Loofah allowlist permits only these media types in data URLs.
+                if matches!(attribute, "href" | "src" | "poster")
+                    && value
+                        .get(..5)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+                {
+                    let media_type = value[5..]
+                        .split([';', ','])
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_ascii_lowercase();
+                    if !matches!(
+                        media_type.as_str(),
+                        "image/gif" | "image/jpeg" | "image/png" | "text/css" | "text/plain"
+                    ) {
+                        return None;
+                    }
+                }
+                Some(value.into())
+            })
             .url_relative(ammonia::UrlRelative::PassThrough);
         sanitizer
     });
@@ -284,6 +312,7 @@ fn normalize_styles(input: String) -> String {
                                     | "translatex"
                                     | "translatey"
                                     | "translatez"
+                                    | "var"
                             )
                         })
                     {
