@@ -7820,40 +7820,15 @@ async fn deliver_email_change(email: &str, link: &str) -> Result<()> {
     if dev_magic_links() {
         return Ok(());
     }
-    let path = env::var("RIZZY_SENDMAIL").map_err(|_| {
-        err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Mail delivery is not configured",
-        )
-    })?;
-    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
-    if !valid_email(email) || from.contains(['\r', '\n']) {
-        return Err(bad("invalid email address"));
-    }
-    let message = format!(
-        "From: {from}\nTo: {email}\nSubject: Confirm your Rizzy email address\nContent-Type: text/plain; charset=UTF-8\n\nConfirm your new email address within 30 minutes:\n{link}\n"
+    let support = mail_transport::support_address()?;
+    let content = format!(
+        "<p class=\"subtitle\">Confirm your email address change</p>\n\n<a class=\"btn\" href=\"{}\">Yes use this email address</a>\n\n<p class=\"margin-block-start-double\">If you didn’t request this change, you can ignore this email. Your email address WILL NOT be changed unless you hit the button.</p>\n\n<p class=\"footer\">Need help? <a href=\"mailto:{}\">Send us an email</a>.\n</p>\n",
+        escape(link),
+        escape(&support)
     );
-    let mut child = Command::new(path)
-        .arg("-t")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    };
-    stdin
-        .write_all(message.as_bytes())
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    drop(stdin);
-    let status = child
-        .wait()
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    if !status.success() {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    }
-    Ok(())
+    let html =
+        include_str!("../assets/notification_mail_layout.html").replace("{{content}}", &content);
+    mail_transport::send_html(email, "Confirm your new email address", &html).await
 }
 async fn new_email_change(
     State(app): Shared,

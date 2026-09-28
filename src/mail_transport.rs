@@ -23,22 +23,40 @@ pub(super) async fn send_multipart(
     plain: &str,
     html: &str,
 ) -> Result<()> {
-    let path = env::var("RIZZY_SENDMAIL").map_err(|_| {
-        err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Mail delivery is not configured",
-        )
-    })?;
-    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
-    if !valid_email(email) || from.contains(['\r', '\n']) || subject.contains(['\r', '\n']) {
-        return Err(bad("invalid email address"));
-    }
+    let from = mail_from(email, subject)?;
     let boundary = format!("rizzy-{}", id());
     let message = format!(
         "From: {from}\r\nTo: {email}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n--{boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}\r\n--{boundary}--\r\n",
         plain.replace('\n', "\r\n"),
         html.replace('\n', "\r\n")
     );
+    send_message(message).await
+}
+
+pub(super) async fn send_html(email: &str, subject: &str, html: &str) -> Result<()> {
+    let from = mail_from(email, subject)?;
+    let message = format!(
+        "From: {from}\r\nTo: {email}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{}",
+        html.replace('\n', "\r\n")
+    );
+    send_message(message).await
+}
+
+fn mail_from(email: &str, subject: &str) -> Result<String> {
+    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
+    if !valid_email(email) || from.contains(['\r', '\n']) || subject.contains(['\r', '\n']) {
+        return Err(bad("invalid email address"));
+    }
+    Ok(from)
+}
+
+async fn send_message(message: String) -> Result<()> {
+    let path = env::var("RIZZY_SENDMAIL").map_err(|_| {
+        err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Mail delivery is not configured",
+        )
+    })?;
     let mut child = Command::new(path)
         .arg("-t")
         .stdin(Stdio::piped())
