@@ -19,14 +19,32 @@ document.getElementById('board-access-filter')?.addEventListener('input',event=>
 });
 document.getElementById('access-select-all')?.addEventListener('click',()=>{accessCheckboxes.forEach(input=>{input.checked=true})});
 document.getElementById('access-select-none')?.addEventListener('click',()=>{accessCheckboxes.forEach(input=>{if(input.id!=='current-user-access')input.checked=false})});
-document.querySelectorAll('input[name="board[auto_postpone_period_in_days]"]').forEach(input=>input.addEventListener('change',async()=>{
-  if(!boardPath)return;
-  const response=await fetch(`${boardPath}/entropy`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({board:{auto_postpone_period_in_days:Number(input.value)}})});
-  if(!response.ok)alert('Could not change auto close period');
-}));
-document.getElementById('publication-toggle')?.addEventListener('change',async event=>{
-  const response=await fetch(`${boardPath}/publication`,{method:event.target.checked?'POST':'DELETE',headers:{Accept:'application/json'}});
-  if(response.ok)location.reload();else{event.target.checked=!event.target.checked;alert('Could not change public link')}
+async function submitBoardFrame(form){
+  const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:new URLSearchParams(new FormData(form))});
+  if(!response.ok)return false;
+  const streams=new DOMParser().parseFromString(await response.text(),'text/html').querySelectorAll('turbo-stream');
+  streams.forEach(stream=>{
+    const current=document.getElementById(stream.getAttribute('target'));
+    const template=stream.querySelector('template');
+    if(current&&template)current.replaceWith(template.content.cloneNode(true));
+  });
+  return true;
+}
+document.addEventListener('change',async event=>{
+  if(event.target.matches('input[name="board[auto_postpone_period_in_days]"]')){
+    const form=event.target.form;
+    if(!await submitBoardFrame(form))alert('Could not change auto close period');
+  }else if(event.target.matches('input[name="board[slider]"]')){
+    const form=event.target.form;
+    const radio=form.querySelectorAll('input[name="board[auto_postpone_period_in_days]"]')[Number(event.target.value)];
+    if(radio){radio.checked=true;if(!await submitBoardFrame(form))alert('Could not change auto close period')}
+  }else if(event.target.matches('#publication-toggle')){
+    const previous=!event.target.checked;
+    if(!await submitBoardFrame(event.target.form)){
+      event.target.checked=previous;
+      alert('Could not change public link');
+    }
+  }
 });
 document.getElementById('delete-board')?.addEventListener('click',async()=>{
   if(!confirm('Delete this board and all its cards? This cannot be undone.'))return;

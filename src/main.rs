@@ -5086,11 +5086,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/{account}/boards/{id}/publication",
-            post(publish_board).delete(unpublish_board),
+            post(publication_form_method).delete(unpublish_board),
         )
         .route(
             "/{account}/boards/{id}/entropy",
-            axum::routing::put(update_board_entropy).patch(update_board_entropy),
+            axum::routing::put(update_board_entropy)
+                .patch(update_board_entropy)
+                .post(update_board_entropy_form),
         )
         .route("/{account}/public/boards/{key}", get(public_pages::board))
         .route(
@@ -10001,6 +10003,59 @@ async fn update_board(
     }
     Ok(Json(board_detail(&app, &p, &r, &base(&headers)).await?).into_response())
 }
+async fn update_board_entropy_form(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    if !headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+    {
+        return Err(missing());
+    }
+    let fields: HashMap<String, String> = url::form_urlencoded::parse(&body)
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    if fields.get("_method").map(String::as_str) != Some("patch") {
+        return Err(missing());
+    }
+    let value = fields.get("board[auto_postpone_period_in_days]");
+    let payload = json!({"board":{"auto_postpone_period_in_days":value}});
+    let response = update_board_entropy(
+        State(app.clone()),
+        Path((account.clone(), id.clone())),
+        headers.clone(),
+        Json(payload),
+    )
+    .await?;
+    if response.status() != StatusCode::OK {
+        return Ok(response);
+    }
+    if headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/vnd.turbo-stream.html"))
+    {
+        board_settings::stream(&State(app), &account, &id, &headers, "entropy").await
+    } else if headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/html") && !value.contains("application/json"))
+    {
+        Ok((
+            StatusCode::NOT_ACCEPTABLE,
+            [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
+            "",
+        )
+            .into_response())
+    } else {
+        Ok(response)
+    }
+}
+
 async fn update_board_entropy(
     State(app): Shared,
     Path((account, id)): Path<(String, String)>,
@@ -10119,6 +10174,72 @@ fn publication_key() -> String {
     (0..24)
         .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
         .collect()
+}
+async fn publication_form_method(
+    State(app): Shared,
+    Path((account, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response> {
+    let form = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    let delete = form
+        && url::form_urlencoded::parse(&body)
+            .any(|(key, value)| key == "_method" && value == "delete");
+    let turbo = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/vnd.turbo-stream.html"));
+    let html_only = form
+        && headers
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.contains("text/html")
+                    && !value.contains("application/json")
+                    && !value.contains("text/vnd.turbo-stream.html")
+            });
+    if delete {
+        let status = unpublish_board(
+            State(app.clone()),
+            Path((account.clone(), id.clone())),
+            headers.clone(),
+        )
+        .await?;
+        if turbo && status == StatusCode::NO_CONTENT {
+            board_settings::stream(&State(app), &account, &id, &headers, "publication").await
+        } else if html_only && status == StatusCode::NO_CONTENT {
+            Ok((
+                StatusCode::NOT_ACCEPTABLE,
+                [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
+                "",
+            )
+                .into_response())
+        } else {
+            Ok(status.into_response())
+        }
+    } else {
+        let response = publish_board(
+            State(app.clone()),
+            Path((account.clone(), id.clone())),
+            headers.clone(),
+        )
+        .await?;
+        if turbo && response.status() == StatusCode::CREATED {
+            board_settings::stream(&State(app), &account, &id, &headers, "publication").await
+        } else if html_only && response.status() == StatusCode::CREATED {
+            Ok((
+                StatusCode::NOT_ACCEPTABLE,
+                [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
+                "",
+            )
+                .into_response())
+        } else {
+            Ok(response)
+        }
+    }
 }
 async fn publish_board(
     State(app): Shared,

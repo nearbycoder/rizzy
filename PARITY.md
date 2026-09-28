@@ -36,16 +36,21 @@ remain covered by the paired test.
 `tests/route_get_valid_paired.py` repeats the populated-route comparison on disposable SQLite apps. Its 36 JSON contracts match response shapes, stable field values, pagination, and selected cache/write headers. Its 59 browser contracts match status, content type, selected content markers, layout flags, and conditional response behavior. The initial fixture showed large HTML differences: Fizzy's webhook creation page was 51,748 bytes versus Rizzy's 5,203, and the card edit page was 45,595 versus 3,695. Both pages have since received closer source-shaped rendering, but the source's shared navigation, form details, and much of the presentation remain to be ported and compared structurally.
 
 `tests/html_form_inventory.py` extracts form actions, methods, and named controls
-from seven populated, signed-in pages on disposable paired apps. On the board
-settings page, Fizzy has six forms and Rizzy one: Rizzy currently handles auto
-close and publication with JavaScript controls rather than Fizzy's separate
-forms, and its public description is in the main board form instead of a
-published-board form. On the card page, Fizzy has 14 forms and Rizzy eight;
-several actions in Rizzy use other controls. The step edit form also lacks the
-source's hidden completed field. Matching page status and selected markers
-therefore does not establish equivalent browser form structure or submission
-behavior. The inventory is diagnostic; each mismatch still needs a paired
-interaction check and implementation work.
+from seven populated, signed-in pages on disposable paired apps. The board
+settings page now has three Rizzy forms versus six Fizzy forms: the main board,
+auto-close, and publication forms use the source's actions and form methods;
+Fizzy also has a delete form and shared-shell search and notification forms.
+Rizzy now places public description in a separate form shown when published.
+`tests/board_settings_html_paired.py` checks fresh Fizzy and Rizzy board
+creation, updates, deletion, and Turbo Stream replacements for auto-close and
+publication. It also checks that ordinary HTML form submissions mutate state
+but return the source's empty 406 response, while JSON form submissions return
+the source's success statuses. Signed-in Chromium changed the
+Rust auto-close choice, published, and unpublished in place. The source's knob appearance, published rich-text
+editor, shared shell, and visual presentation still differ. On the card page,
+Fizzy has 14 forms and Rizzy eight; several actions in Rizzy use other
+controls. The step edit form also lacks the source's hidden completed field.
+The inventory remains diagnostic for those unpaired interactions.
 
 The comment edit page now renders inside Rizzy's application shell, and the in-card editor uses the same shared controls and styling. `tests/comment_edit_html_parity.py` passed against disposable Fizzy and Rizzy servers, including page-shell markers, Turbo create/edit/delete, JSON updates, and comment side effects. A paired Chromium check confirmed that opening and saving the inline editor keeps each app on its card URL, closes the editor, and shows the saved text. The [direct Fizzy](docs/visual-baselines/fizzy-comment-edit-direct-1280.png), [direct Rizzy](docs/visual-baselines/rizzy-comment-edit-direct-1280.png), [inline Fizzy](docs/visual-baselines/fizzy-comment-edit-inline-1280.png), and [inline Rizzy](docs/visual-baselines/rizzy-comment-edit-inline-1280.png) screenshots record the current visual comparison. This verifies one comment flow, not complete card-page visual or interaction parity.
 
