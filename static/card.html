@@ -30,14 +30,21 @@ main{width:100%;margin:0 auto;padding:0 36px 90px}main>nav{margin:9px 22px 41px}
 .card-icon--pin{--svg:url('/assets/card/icons/unpinned.svg')}
 #pin[data-method="DELETE"] .card-icon--pin{--svg:url('/assets/card/icons/pinned.svg')}
 main>nav a{display:inline-flex;align-items:center;gap:8px}
+@media(min-width:851px){main>nav a .card-icon{display:none}}
 #closure .card-icon{display:none}
 .side-action{position:absolute;display:grid;place-items:center;width:50px;height:50px;padding:0;border:1px solid #3b5362;border-radius:50%;background:#101b20;color:#f4f5f6;font-size:26px;z-index:2}.side-action:hover{background:#243b50}.side-action svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8}.side-action--gold{top:0;left:-60px}.side-action--watch{top:0;right:-60px}.side-action--pin{top:60px;right:-60px}.card__footer .side-action{border:1px solid #3b5362;background:#101b20;color:#f4f5f6}.card__footer .side-action:hover{background:#243b50}
+.card-perma__notch .side-action{background:#101b20;border-color:#3b5362;color:#f4f5f6}
+.card-perma__notch .side-action:hover{background:#243b50}
+.card-perma__notch #watch[data-method="DELETE"],.card-perma__notch #pin[data-method="DELETE"]{background:#f4f5f6;border-color:#f4f5f6;color:#101b20}
+.card-perma__notch #watch[data-method="DELETE"]:hover,.card-perma__notch #pin[data-method="DELETE"]:hover{background:#fff}
 .side-action--image{top:60px;left:-60px;cursor:pointer}.side-action--image input{position:absolute;width:1px;height:1px;opacity:0}.side-action--image:focus-within{outline:2px solid #87b9fa;outline-offset:3px}.card-perma__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.card-perma.has-image .card__body{background:#101b20ba}.card__header,.card__body,.card__footer{position:relative;z-index:1}
 .card-tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card-tags details{position:relative}.card-tags summary{display:grid;place-items:center;width:31px;height:31px;border:1px solid #526d80;border-radius:50%;list-style:none;cursor:pointer;color:#a8cbf2}.card-tags summary::-webkit-details-marker{display:none}.card-tags summary svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}.card-tags__picker{position:absolute;top:35px;left:0;z-index:9;display:grid;gap:7px;width:240px;padding:12px;border:1px solid #536574;border-radius:9px;background:#1d2c35;box-shadow:0 10px 25px #0009}.card-tags__picker label{color:#dbe5ec}.card-tags__picker input{width:100%;margin:4px 0 9px;padding:7px}.card-tags__picker button{width:100%;padding:7px;font-size:13px}.card-tags__list{display:flex;gap:6px;white-space:nowrap;overflow:hidden}.card-tags__link{color:#a8cbf2;font-size:13px;font-weight:750;text-transform:uppercase;text-decoration:none}.card-tags__link:hover{text-decoration:underline}
 .card__tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card__tag-picker-button{width:31px;height:31px;display:grid;place-items:center;padding:0;border:1px solid #526d80;border-radius:50%;background:transparent;color:#a8cbf2;font-size:20px}.card__tag-picker-button:hover{background:#203d57}.tag-dialog{width:min(410px,calc(100vw - 24px));max-height:75vh;padding:20px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.tag-dialog::backdrop{background:#0008}.tag-dialog__close{float:right;border:0;background:none;color:#f4f5f6}.tag-dialog .popup__list{max-height:48vh;overflow:auto;margin:10px 0;padding:0;list-style:none}.tag-dialog .popup__item button{width:100%;display:flex;justify-content:space-between;padding:9px;border:0;background:transparent;color:#f4f5f6;text-align:left}.tag-dialog .popup__item button:hover,.tag-dialog .popup__item[aria-selected=true] button{background:#304553}.tag-dialog .popup__item[hidden]{display:none}.tag-dialog input{margin:10px 0}.tag-dialog__error{min-height:0}
 .reactions{display:flex;align-items:center;gap:9px;padding:8px 25px 13px;background:#101b20}.reactions__list{display:flex;flex-wrap:wrap;gap:6px}.reaction{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid #405a6c;border-radius:99px;color:#e4ebf1;font-size:15px}.reaction__avatar{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#47647b;font-size:12px}.reaction__delete{border:0;background:transparent;color:#edaaac;padding:0 3px}.reactions__trigger{display:inline-grid;place-items:center;width:32px;height:32px;border:1px solid #54718d;border-radius:50%;color:#a8cbf2;text-decoration:none}.reaction__form{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.reaction__form input{width:135px;margin:0;padding:5px}.reaction__form .reaction__emoji-list{display:flex;flex-wrap:wrap;gap:2px}.reaction__form .reaction__emoji-btn{padding:3px 5px;border:0;background:transparent;color:#fff;font-size:18px}.reaction__form .actions{gap:5px}.reaction__form .actions button,.reaction__form .actions a{font-size:13px;padding:5px 8px}.comment .reactions{padding:8px 0 0;background:transparent}
 turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reaction__form .reaction__emoji-list{max-height:105px;overflow:auto}
 .card__header{justify-content:flex-start;z-index:3}.card__board-label a{margin-left:3px;padding-left:14px;border-left:1px solid #4d7fbb;color:#101b20;text-decoration:none;font-weight:850;text-transform:uppercase}
+.card__header{gap:0}
+.card__body{padding-bottom:17px}
 .messages{width:min(995px,calc(100% - 120px));margin:42px auto}.messages h2{color:#f4f5f6}.comment{border-color:#344b5b}textarea,input{background:#172731;border-color:#536574;color:#f4f5f6}button{border-color:#6288af;background:#87b9fa;color:#101b20}button:hover{background:#a6cbfa}
 .comments{display:block;text-align:center}.comments #comments{display:flex;flex-direction:column;gap:18px;align-items:center}.comments turbo-frame[id^="container_comment_"]{display:block;width:100%;max-width:70ch}.comments .comment{display:flex;align-items:flex-start;gap:12px;width:100%;max-width:70ch;padding:0;border:0;text-align:left}.comment__avatar{flex:none;margin:8px 0 0}.comment__avatar img,.comments__subscribers img{display:block;width:38px;height:38px;object-fit:cover;border-radius:50%}.comment__content{position:relative;flex:1;min-width:0;padding:12px 16px;background:#172731;border-radius:4px}.comment__author{display:flex;align-items:center;gap:10px}.comment__author h3{flex:1;min-width:0;margin:0 0 8px;font-size:15px;font-weight:400}.comment__author h3 strong{font-weight:700}.comment__author a{text-decoration:none}.comment__author a:hover{text-decoration:underline}.comment__permalink-title{color:#a7b6c3;text-transform:capitalize}.comment__edit{font-size:13px;color:#a8cbf2}.comment__body{font-size:16px}.comment__body p:last-child{margin-bottom:0}.comment .reactions{padding:8px 0 0}.comment--new{margin-top:12px}.comment--new .comment__content{padding:10px 16px}.comment--new form{width:100%}.comment--new lexxy-editor{margin:0 0 10px;min-height:120px}.comment__submit{display:block;margin-left:auto}.comments__subscribers{width:100%;max-width:70ch;padding:22px 0 0;text-align:left;color:#a7b6c3}.comments__subscribers strong{color:#f4f5f6;font-size:13px;text-transform:uppercase}.comments__subscribers p{margin:4px 0 12px}.comments__subscribers>div{display:flex;align-items:center;gap:6px}.comments__subscribers img{width:30px;height:30px}.comment-by-system{display:none!important}.comments--system-expanded .comment-by-system{display:block!important}.comment-by-system:nth-last-child(1 of .comment-by-system){display:block!important}.comment-by-system .comment{justify-content:center;text-align:center}.comment-by-system .comment__content{flex:none;width:calc(100% - 50px);background:repeating-linear-gradient(45deg,#172731 0 1px,#203849 1px 10px)}.comment-by-system .comment__author h3 strong{display:none}.comment-by-system .comment__body{text-align:center}.comment-by-system .reactions{display:none}.comment__history{display:none;padding:2px 7px;border:0;background:transparent;color:#a8cbf2;font-size:12px}.comment-by-system:nth-last-child(1 of .comment-by-system):not(:nth-child(1 of .comment-by-system)) .comment__history{display:inline-flex}.for-screen-reader{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .card__body{min-height:366px}
@@ -62,7 +69,9 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 .steps .step{display:flex;align-items:center;gap:8px;min-height:27px}
 .steps .step__checkbox{display:flex;align-items:center;flex:none}
 .steps .step__content{color:inherit;text-decoration:none;overflow-wrap:anywhere}
+.steps .step__content{font-weight:500}
 .steps .step__content:hover{text-decoration:underline}
+.steps input[type=checkbox]:disabled{opacity:.45}
 .steps .step>form:has(input:checked)+.step__content{text-decoration:line-through;opacity:.7}
 .steps>turbo-frame{display:block}
 .steps .step>form{margin:0}
@@ -244,6 +253,7 @@ async function chooseStage(button){if(button.disabled||button.getAttribute('aria
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 document.querySelector('.stage-rail').addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 const stepRoot=document.querySelector('.card__content');
+const stepPending=new Map();
 function frameFromStepPage(html,id){
   const page=new DOMParser().parseFromString(html,'text/html');
   return [...page.querySelectorAll(`turbo-frame[id="${CSS.escape(id)}"]`)].at(-1);
@@ -277,16 +287,23 @@ stepRoot.addEventListener('click',async event=>{
   const frame=link.closest('turbo-frame');
   if(!frame)return;
   try{
-    const response=await fetch(link.href,{headers:{Accept:'text/html'}});
+    if(stepPending.has(frame.id))await stepPending.get(frame.id);
+    const current=document.getElementById(frame.id);
+    const currentLink=current?.querySelector('a[data-step-edit]');
+    if(!currentLink||current.hasAttribute('data-edit-loading'))return;
+    current.dataset.editLoading='';
+    const response=await fetch(currentLink.href,{headers:{Accept:'text/html'}});
     if(!response.ok)throw Error('Could not edit step');
-    const replacement=frameFromStepPage(await response.text(),frame.id);
+    const replacement=frameFromStepPage(await response.text(),current.id);
     if(!replacement)throw Error('Step editor response has no frame');
     replacement.querySelector('form:has(input[name="step[content]"])').dataset.stepEditor='';
     replacement.querySelector('form:has(input[name="_method"][value="delete"])').dataset.stepDeleteForm='';
-    frame.replaceWith(replacement);
+    const live=document.getElementById(frame.id);
+    if(!live)return;
+    live.replaceWith(replacement);
     const input=replacement.querySelector('input[name="step[content]"]');
     input.focus();input.select();
-  }catch(error){alert(error.message)}
+  }catch(error){document.getElementById(frame.id)?.removeAttribute('data-edit-loading');alert(error.message)}
 });
 stepRoot.addEventListener('keydown',event=>{
   if(event.key!=='Escape'||!event.target.closest('[data-step-editor]'))return;
@@ -296,13 +313,19 @@ stepRoot.addEventListener('keydown',event=>{
 stepRoot.addEventListener('change',async event=>{
   const checkbox=event.target.closest('input[data-step-id]');
   if(!checkbox)return;
+  const frame=checkbox.closest('turbo-frame');
   const form=checkbox.form,body=new URLSearchParams(new FormData(form));
   checkbox.disabled=true;
-  try{
-    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body});
-    if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not update step');
-    void refreshLiveCard(true);
-  }catch(error){checkbox.checked=!checkbox.checked;checkbox.disabled=false;alert(error.message)}
+  const pending=(async()=>{
+    try{
+      const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body});
+      if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not update step');
+      void refreshLiveCard(true);
+    }catch(error){checkbox.checked=!checkbox.checked;checkbox.disabled=false;alert(error.message)}
+  })();
+  stepPending.set(frame.id,pending);
+  await pending;
+  if(stepPending.get(frame.id)===pending)stepPending.delete(frame.id);
 });
 stepRoot.addEventListener('submit',async event=>{
   const form=event.target;
