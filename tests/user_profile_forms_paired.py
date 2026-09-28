@@ -11,7 +11,6 @@ import sqlite3
 import sys
 import tempfile
 import urllib.parse
-import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -89,6 +88,11 @@ def check(target):
         location = headers.get("Location")
         return normalized(urllib.parse.urlsplit(location).path, account) if location else None
     return {"forms": forms,
+            "shell_structure": tuple(
+                tuple(marker in pages[label] for marker in (
+                    b'id="global-container"', b'id="header"',
+                    b'id="my_menu"', b'id="main"', b'id="footer_frames"'))
+                for label in ("show", "edit")),
             "profile_structure": tuple(marker in pages["show"] for marker in (
                 b"settings--profile", b"settings__panel", b"Appearance",
                 b"theme-switcher", b"Which cards are assigned to me?",
@@ -128,6 +132,7 @@ def main():
                         NoRedirect()),
                 })
             assert results["fizzy"] == results["rizzy"], results
+            assert all(all(page) for page in results["fizzy"]["shell_structure"]), results
             assert all(results["fizzy"]["profile_structure"]), results
             assert results["fizzy"]["avatar_state"] == (302, 1, 200, 0), results
             assert results["fizzy"]["signout"] == (302, "/session/new", 302), results

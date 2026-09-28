@@ -17,6 +17,10 @@ fn page(title: &str, account: i64, content: String) -> Html<String> {
             "EVENTS_CSS",
             include_str!("../static/events.css").to_owned(),
         ),
+        (
+            "MENU_CSS",
+            include_str!("../static/menu_overlay.css").to_owned(),
+        ),
         ("EVENTS_JS", include_str!("../static/events.js").to_owned()),
         (
             "FOOTER",

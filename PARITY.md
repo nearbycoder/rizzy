@@ -10,9 +10,12 @@ POST sign-out form and checks its redirect and access loss. The profile now
 has appearance, devices, developer, and data-export sections plus assigned
 and added card links. Chromium loaded both Rust pages, opened search, followed
 an assigned-cards link, switched light and dark themes, retained the dark
-choice after navigation, and reported no console errors. Exact styling, the
-shared header, native behavior, and remaining profile interactions still
-differ from Fizzy.
+choice after navigation, and reported no console errors. The show and edit
+pages now use the source's global container, header, menu frame, main, and
+footer structure; the paired check asserts those markers on both pages.
+Chromium opened the profile menu and loaded its navigation controls. Exact
+styling, native behavior, and remaining profile interactions still differ
+from Fizzy.
 
 `tests/user_profile_member_paired.py` compares another member's unverified,
 verified, and removed profile states on fresh paired apps. Unverified profiles
