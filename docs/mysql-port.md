@@ -224,12 +224,13 @@ source archive variant or every browser workflow after restoration.
 The pinned source's selected webhook model and controller suites passed 71
 tests and 334 assertions on MySQL 8 with one test worker. The separate
 `tests/mysql_webhooks.py` flow checks Rizzy's webhook create, update,
-activation, and deletion; a queued card event; two worker processes claiming
-one delivery; private target rejection; and deactivation after the tenth
-failure. The claim uses a row lock with `SKIP LOCKED` on MySQL. This verifies
-single-delivery correctness for a local blocked target, not successful
-internet delivery or maximum worker throughput. The MySQL claim path has not
-yet been exercised on MariaDB.
+activation, and deletion; 100 queued card events drained by two worker
+processes; private target rejection; an exact 100-failure tracker count; and
+deactivation after an aged tenth failure. Six fresh MySQL 8.4.11 schemas passed
+after the worker-slot refill change. The claim uses a row lock with
+`SKIP LOCKED` on MySQL. This verifies a local blocked-target backlog without
+duplicate claims, not successful internet delivery or maximum worker
+throughput. The MySQL claim path has not yet been exercised on MariaDB.
 
 `tests/mysql_webhook_cleanup.py` passed on a disposable MySQL 8.4.11 database:
 503 eight-day-old delivery rows were removed in 500-row batches while three
@@ -263,7 +264,7 @@ and deactivation timestamps, and export/import of a zero-failure tracker pass.
 The pinned Fizzy import probe restored that tracker from a Rizzy archive.
 On a disposable MySQL 8.4.11 server, `tests/mysql_schema_resume.py` recovered
 two partial schemas with 67 application tables and 16 search shards;
-`tests/mysql_webhooks.py` passed two-worker blocked delivery;
+`tests/mysql_webhooks.py` passed a two-worker, 100-delivery blocked-target backlog;
 `tests/mysql_account_import.py` restored the tracker; and
 `tests/mysql_webhook_tracker_migration.py` backfilled a legacy nine-failure
 webhook and survived a second restart. These are single-host local checks.

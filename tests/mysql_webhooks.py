@@ -66,6 +66,8 @@ def main():
             "RIZZY_SEED_EMAIL": "mysql-webhooks-" + uuid.uuid4().hex + "@example.test",
             "RIZZY_DISABLE_PUSH_DELIVERY": "1",
         }
+        subprocess.run([BINARY, "init-db"], cwd=ROOT, env=env,
+                       capture_output=True, text=True, check=True)
         seeded = subprocess.run([BINARY, "seed"], cwd=ROOT, env=env,
                                 capture_output=True, text=True, check=True).stdout
         account = re.search(r"Account: (\d+)", seeded).group(1)
@@ -95,7 +97,10 @@ def main():
                  {"card": {"title": "Webhook event"}}, 201)
             queued = call(base, token, delivery_path)
             assert len(queued) == 1 and queued[0]["state"] == "pending", queued
-            mysql_scalar(url, f"UPDATE webhook_delinquency_trackers SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE webhook_id='{webhook['id']}'")
+            for index in range(1, 100):
+                call(base, token, scope + f"/boards/{board['id']}/cards", "POST",
+                     {"card": {"title": f"Webhook backlog {index:03d}"}}, 201)
+            assert mysql_scalar(url, f"SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}' AND state='pending'") == "100"
             stop(process)
             processes.clear()
 
@@ -103,23 +108,39 @@ def main():
                 worker_base, worker, log = start(env, temp, f"worker-{index}")
                 processes.append(worker)
                 logs.append(log)
-            for _ in range(100):
-                delivered = call(worker_base, token, delivery_path)
-                if delivered[0]["state"] in ("completed", "errored"):
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                completed = mysql_scalar(url, f"SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}' AND state='completed'")
+                if completed == "100":
                     break
                 time.sleep(.1)
+            else:
+                raise AssertionError(("MySQL webhook backlog did not drain", completed))
+            delivered = call(worker_base, token, delivery_path)
             assert delivered[0]["state"] == "completed", delivered
             assert delivered[0]["response"] == {"code": None, "error": "private_uri"}, delivered
             assert delivered[0]["request"]["headers"]["User-Agent"] == "fizzy/1.0.0 Webhook"
             assert "X-Webhook-Signature" not in delivered[0]["request"]["headers"]
-            assert mysql_scalar(url, f"SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}'") == "1"
+            assert mysql_scalar(url, f"SELECT COUNT(DISTINCT id) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}'") == "100"
+            assert mysql_scalar(url, f"SELECT consecutive_failures_count FROM webhook_delinquency_trackers WHERE webhook_id='{webhook['id']}'") == "100"
+            assert call(worker_base, token, path + "/" + webhook["id"])["active"] is True
+            mysql_scalar(url, f"UPDATE webhook_delinquency_trackers SET consecutive_failures_count=9,first_failure_at='2025-01-01T00:00:00.000Z' WHERE webhook_id='{webhook['id']}'")
+            call(worker_base, token, scope + f"/boards/{board['id']}/cards", "POST",
+                 {"card": {"title": "Webhook delinquency"}}, 201)
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                completed = mysql_scalar(url, f"SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}' AND state='completed'")
+                if completed == "101":
+                    break
+                time.sleep(.1)
+            assert completed == "101", completed
             assert mysql_scalar(url, f"SELECT consecutive_failures_count FROM webhook_delinquency_trackers WHERE webhook_id='{webhook['id']}'") == "10"
             assert call(worker_base, token, path + "/" + webhook["id"])["active"] is False
             assert call(worker_base, token, path + "/" + webhook["id"] + "/activation",
                         "POST", expected=201)["active"] is True
             call(worker_base, token, path + "/" + webhook["id"], "DELETE", expected=204)
             assert mysql_scalar(url, f"SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id='{webhook['id']}'") == "0"
-            print("MySQL webhooks passed: CRUD, queue, two-worker claim, blocked target, one delivery, delinquency")
+            print("MySQL webhooks passed: CRUD, two-worker 100-delivery backlog, blocked target, delinquency")
         except Exception:
             for log in logs:
                 print(f"{log}: {log.read_text()[-1800:]}")

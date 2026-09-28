@@ -610,7 +610,7 @@ The pinned Fizzy import probe also accepted a Rizzy account ZIP and restored
 one tracker per webhook.
 `tests/webhook_tracker_migration.py` checks idempotent SQLite backfill from
 legacy webhook columns. A disposable MySQL 8.4.11 server passed partial-schema
-recovery, two-worker delivery, account import, and
+recovery, a two-worker 100-delivery backlog, account import, and
 `tests/mysql_webhook_tracker_migration.py`'s legacy backfill and second restart.
 Cross-host delivery ordering and less-common event variants are still open.
 Webhook DNS selection now pins the first public address in mixed DNS answers,
