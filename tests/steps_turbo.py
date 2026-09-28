@@ -62,6 +62,17 @@ def main():
             assert steps[0]["completed"] is True
             step_id = steps[0]["id"]
             assert f'id="step_{step_id}"' in stream
+            with target["opener"].open(
+                f"{target['url']}/{target['account']}/cards/{number}", timeout=10
+            ) as response:
+                page = response.read().decode()
+            assert '<ol class="steps txt-small margin-block-start-auto">' in page
+            assert f'<turbo-frame id="step_{step_id}">' in page
+            assert f'name="_method" value="patch"' in page
+            assert f'name="step[completed]" value="0"' in page
+            assert f'data-step-id="{step_id}"' in page
+            assert f'id="new_step_card_{card_id}"' in page
+            assert 'name="step[content]"' in page
 
             status, content_type, stream = turbo(
                 target, f"{path}/{step_id}", "PUT",
@@ -71,6 +82,14 @@ def main():
             assert f'action="replace" target="bubble_card_{card_id}"' in stream, stream
             step, _ = expect(target, f"{path}/{step_id}")
             assert step == {"id": step_id, "content": "Changed", "completed": False}
+
+            status, content_type, stream = turbo(
+                target, f"{path}/{step_id}", "POST",
+                b"_method=patch&step%5Bcompleted%5D=0&step%5Bcompleted%5D=1")
+            assert status == 200 and content_type.startswith("text/vnd.turbo-stream.html")
+            assert f'action="replace" target="step_{step_id}"' in stream
+            step, _ = expect(target, f"{path}/{step_id}")
+            assert step["completed"] is True
 
             status, content_type, stream = turbo(target, f"{path}/{step_id}", "DELETE")
             assert status == 200 and content_type.startswith("text/vnd.turbo-stream.html")

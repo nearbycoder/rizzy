@@ -5303,6 +5303,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route(
             "/{account}/cards/{number}/steps/{step}",
             get(show_step)
+                .post(update_step)
                 .put(update_step)
                 .patch(update_step)
                 .delete(delete_step),
@@ -15172,16 +15173,18 @@ async fn show_step(
     if headers.contains_key("x-rizzy-json-request") {
         return Ok(Json(step_value(&row)).into_response());
     }
-    let step_id = escape(&row.get::<String, _>("id"));
-    let content = escape(&row.get::<String, _>("content"));
-    let checked = if row.get::<i64, _>("completed") != 0 {
-        " checked"
-    } else {
-        ""
-    };
-    let path = format!("/{account}/cards/{number}/steps/{step_id}");
+    let step_id = row.get::<String, _>("id");
+    let content = row.get::<String, _>("content");
+    let frame = step_frame(
+        &account,
+        &number,
+        &step_id,
+        &content,
+        row.get::<i64, _>("completed") != 0,
+    );
+    let path = format!("/{account}/cards/{number}/steps/{}", escape(&step_id));
     let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Step | Rizzy</title></head><body><main><turbo-frame id="step_{step_id}"><li class="step"><form class="step" id="step-form"><input type="checkbox" id="step-completed" name="step[completed]" class="checkbox"{checked}><a class="step__content" href="{path}/edit">{content}</a></form></li></turbo-frame></main><script>document.getElementById('step-completed').addEventListener('change',async event => {{const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{completed:event.target.checked}}}})}});if(!response.ok) event.target.checked=!event.target.checked;}});</script></body></html>"#
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Step | Rizzy</title></head><body><main>{frame}</main><script>document.querySelector('input[data-step-id]').addEventListener('change',async event => {{const response=await fetch('{path}',{{method:'PATCH',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{step:{{completed:event.target.checked}}}})}});if(!response.ok) event.target.checked=!event.target.checked;}});</script></body></html>"#
     );
     Ok(Html(html).into_response())
 }
@@ -15249,7 +15252,7 @@ fn step_frame(account: &str, number: &str, id: &str, content: &str, completed: b
     let path = format!("/{account}/cards/{number}/steps/{id}");
     let checked = if completed { " checked" } else { "" };
     format!(
-        "<turbo-frame id=\"step_{id}\"><li class=\"step\"><form action=\"{path}\" method=\"post\" data-controller=\"form\"><input type=\"hidden\" name=\"_method\" value=\"put\"><input type=\"hidden\" name=\"step[completed]\" value=\"0\"><input type=\"checkbox\" name=\"step[completed]\" value=\"1\" class=\"checkbox\" data-action=\"change-&gt;form#submit\"{checked}></form><a href=\"{path}/edit\" class=\"step__content\">{}</a></li></turbo-frame>",
+        "<turbo-frame id=\"step_{id}\"><li class=\"step\" data-step-id=\"{id}\"><form action=\"{path}\" method=\"post\" data-controller=\"form\"><input type=\"hidden\" name=\"_method\" value=\"patch\"><input type=\"hidden\" name=\"step[completed]\" value=\"0\"><input type=\"checkbox\" name=\"step[completed]\" value=\"1\" class=\"checkbox\" data-step-id=\"{id}\" data-action=\"change-&gt;form#submit\" aria-label=\"Toggle step completion\"{checked}></form><a href=\"{path}/edit\" class=\"step__content\" data-step-edit>{}</a></li></turbo-frame>",
         escape(content)
     )
 }
@@ -15324,9 +15327,20 @@ async fn create_step(
 async fn update_step(
     State(app): Shared,
     Path((account, number, step)): Path<(String, String, String)>,
+    method: Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response> {
+    if method == Method::POST
+        && (!headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"))
+            || !url::form_urlencoded::parse(&body)
+                .any(|(key, value)| key == "_method" && value == "patch"))
+    {
+        return Err(bad("Invalid method override"));
+    }
     let p = principal(&app, &headers, &account).await?;
     p.write()?;
     let c = card(&app, &p, &number).await?;

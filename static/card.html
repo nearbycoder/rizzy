@@ -63,7 +63,9 @@ turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reactio
 .steps .step__checkbox{display:flex;align-items:center;flex:none}
 .steps .step__content{color:inherit;text-decoration:none;overflow-wrap:anywhere}
 .steps .step__content:hover{text-decoration:underline}
-.steps .step__checkbox:has(input:checked)+.step__content{text-decoration:line-through;opacity:.7}
+.steps .step>form:has(input:checked)+.step__content{text-decoration:line-through;opacity:.7}
+.steps>turbo-frame{display:block}
+.steps .step>form{margin:0}
 .steps .step__editor{display:flex;align-items:center;gap:8px;width:100%}
 .steps .step__editor input[type=text]{flex:1;min-width:0;width:auto;margin:0;padding:3px 6px;border-radius:3px}
 .steps .step__editor button{padding:3px 8px;font-size:13px}
@@ -263,7 +265,7 @@ stepRoot.addEventListener('click',async event=>{
   const remove=event.target.closest('[data-step-delete]');
   if(!remove)return;
   const li=remove.closest('li[data-step-id]'),id=li.dataset.stepId;remove.disabled=true;
-  try{const response=await fetch(`/${account}/cards/${number}/steps/${id}`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not delete step');stepEdits.delete(id);li.remove();void refreshLiveCard(true)}catch(error){remove.disabled=false;alert(error.message)}
+  try{const response=await fetch(`/${account}/cards/${number}/steps/${id}`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not delete step');stepEdits.delete(id);(li.closest('turbo-frame')||li).remove();void refreshLiveCard(true)}catch(error){remove.disabled=false;alert(error.message)}
 });
 stepRoot.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.target.closest('[data-step-edit-form]')){event.preventDefault();closeStepEditor(event.target.closest('li[data-step-id]'))}});
 stepRoot.addEventListener('change',async event=>{const checkbox=event.target.closest('input[data-step-id]');if(!checkbox)return;checkbox.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${checkbox.dataset.stepId}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{completed:checkbox.checked}})});if(!response.ok)throw Error('Could not update step');checkbox.closest('li').classList.toggle('is-completed',checkbox.checked)}catch(error){checkbox.checked=!checkbox.checked;alert(error.message)}finally{checkbox.disabled=false}});
@@ -386,7 +388,7 @@ async function refreshLiveCard(force=false,revisionHint=null){
       for(const editor of openEdits){
         const replacement=stepSection.querySelector(`li[data-step-id="${CSS.escape(editor.dataset.stepId)}"]`);
         if(replacement)replacement.replaceWith(editor);
-        else (stepSection.querySelector('#new-step')?.closest('li')||stepSection.querySelector('ul')).append(editor);
+        else (stepSection.querySelector('#new-step')?.closest('li')||stepSection.querySelector('ol')).append(editor);
       }
       const replacement=stepSection.querySelector('#new-step');
       if(replacement){replacement.value=draftValue;if(draftFocused){replacement.focus();replacement.setSelectionRange(cursorStart,cursorEnd)}}

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use super::{
     App, Principal, Result, assignment_page, board, board_views, comment_edit_page, db_err, escape,
-    reaction_page, storage, tagging_page, wrap_html,
+    reaction_page, step_frame, storage, tagging_page, wrap_html,
 };
 
 const TEMPLATE: &str = include_str!("../static/card.html");
@@ -222,29 +222,24 @@ pub(super) async fn show(
     .await
     .map_err(db_err)?;
     let mut step_html = String::new();
-    step_html.push_str("<section aria-label=\"Steps\"><ul class=\"steps\">");
+    step_html.push_str(
+        "<section aria-label=\"Steps\"><ol class=\"steps txt-small margin-block-start-auto\">",
+    );
     for step in steps {
         let id: String = step.get("id");
         let content: String = step.get("content");
-        let checked = if step.get::<i64, _>("completed") != 0 {
-            " checked"
-        } else {
-            ""
-        };
-        step_html.push_str(&format!(
-                "<li class=\"step\" data-step-id=\"{}\"><label class=\"step__checkbox\"><input type=\"checkbox\" data-step-id=\"{}\" aria-label=\"Toggle step completion\"{checked}></label><a class=\"step__content\" data-step-edit href=\"/{}/cards/{}/steps/{}/edit\">{}</a></li>",
-                escape(&id),
-                escape(&id),
-                principal.slug,
-                number,
-                escape(&id),
-                escape(&content)
-            ));
+        step_html.push_str(&step_frame(
+            &principal.slug.to_string(),
+            &number.to_string(),
+            &id,
+            &content,
+            step.get::<i64, _>("completed") != 0,
+        ));
     }
     if !closed {
-        step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step step--new\"><input type=\"checkbox\" disabled><form class=\"steps__form\" id=\"step-form\"><input id=\"new-step\" name=\"content\" placeholder=\"Add a step…\" autocomplete=\"off\" aria-label=\"Add a step\"></form></li>", escape(&card_id)));
+        step_html.push_str(&format!("<li id=\"new_step_card_{}\" class=\"step step--new\"><input type=\"checkbox\" class=\"checkbox\" disabled><form class=\"min-width steps__form\" id=\"step-form\" action=\"/{}/cards/{}/steps\" method=\"post\" data-controller=\"form\" data-action=\"submit-&gt;form#preventEmptySubmit submit-&gt;form#preventComposingSubmit turbo:submit-end-&gt;form#reset\"><input id=\"new-step\" name=\"step[content]\" class=\"input step__content hide-focus-ring\" placeholder=\"Add a step…\" autocomplete=\"off\" data-form-target=\"input\" data-1p-ignore=\"true\" data-action=\"compositionstart-&gt;form#compositionStart compositionend-&gt;form#compositionEnd\" aria-label=\"Add a step\"></form></li>", escape(&card_id), principal.slug, number));
     }
-    step_html.push_str("</ul></section>");
+    step_html.push_str("</ol></section>");
     let comments = sqlx::query("SELECT c.id,c.body,c.created_at,c.updated_at,c.creator_id,u.name AS creator_name,u.role AS creator_role FROM comments c JOIN users u ON u.id=c.creator_id WHERE c.card_id=? ORDER BY c.created_at,c.id")
         .bind(&card_id)
         .fetch_all(&app.db)
