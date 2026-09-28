@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import tempfile
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,25 @@ def row(target, path, delivery_id):
             "subtle": b'class="txt-subtle"' in match[2]}
 
 
+def older_delivery_age(target, path, delivery_id, days, expected):
+    if target["name"] == "fizzy":
+        source_runner(target, "Webhook::Delivery.find(" + json.dumps(delivery_id) +
+                      f").update_columns(created_at: {days}.days.ago)")
+    else:
+        timestamp = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        with sqlite3.connect(target["db"]) as db:
+            db.execute("UPDATE webhook_deliveries SET created_at=? WHERE id=?",
+                       (timestamp, delivery_id))
+    status, _, body = request(target, f"/{target['account']}{path}", accept="text/html")
+    assert status == 200, (target["name"], "old delivery", status)
+    match = re.search(rb'<li id="webhook_delivery_' + delivery_id.encode() +
+                      rb'" class="[^"]*">(.*?)</li>', body, re.S)
+    assert match, (target["name"], "missing old delivery")
+    label = re.search(rb'<time datetime="[^"]+">([^<]+)</time>', match[1]).group(1).decode()
+    assert label == expected, (target["name"], days, label, expected, match[1][-200:])
+
+
 def check(target):
     login(target)
     board = api(target, "/boards", "POST", {"board": {"name": "Delivery HTML"}}, 201)
@@ -119,7 +139,42 @@ def check(target):
         assert event["eventable"]["url"].endswith(
             f"/{target['account']}/cards/{card['number']}#comment_{comment['id']}"), (
                 target["name"], event)
-        return {"states": results, "comment_event": event["action"]}
+        for days, label in ((50, "about 2 months"), (400, "about 1 year"),
+                            (600, "over 1 year"), (700, "almost 2 years")):
+            older_delivery_age(target, path, delivery_id, days, label)
+        for index in range(22):
+            api(target, f"/boards/{board_id}/cards", "POST",
+                {"card": {"title": f"Delivery page {index:02d}"}}, 201)
+        if target["name"] == "fizzy":
+            quoted_id = json.dumps(webhook_id)
+            source_runner(target, 'webhook = Webhook.find(' + quoted_id + '); '
+                          'Event.where(board_id: webhook.board_id, action: "card_published")'
+                          '.where.not(id: Webhook::Delivery.where(webhook_id: webhook.id)'
+                          '.select(:event_id)).find_each { |event| '
+                          'Event::WebhookDispatchJob.perform_now(event) }')
+        pages = []
+        for page_number, expected_count in ((1, 15), (2, 9)):
+            status, headers, raw = request(
+                target, f"/{target['account']}{path}/deliveries?page={page_number}",
+                bearer=True)
+            assert status == 200 and int(headers["X-Total-Count"]) == 24, (
+                target["name"], page_number, status, headers)
+            link = headers.get("Link")
+            assert (link is not None and 'rel="next"' in link) == (page_number == 1), (
+                target["name"], page_number, link)
+            page_rows = json.loads(raw)
+            assert len(page_rows) == expected_count, (target["name"], page_number, len(page_rows))
+            pages.append(page_rows)
+        all_rows = pages[0] + pages[1]
+        assert len({item["id"] for item in all_rows}) == 24, (target["name"], "duplicate delivery")
+        assert [item["created_at"] for item in all_rows] == sorted(
+            (item["created_at"] for item in all_rows), reverse=True), (
+                target["name"], "delivery order")
+        status, _, body = request(target, f"/{target['account']}{path}", accept="text/html")
+        assert status == 200 and body.count(b'<li id="webhook_delivery_') == 20, (
+            target["name"], "HTML delivery limit", status)
+        return {"states": results, "comment_event": event["action"],
+                "page_sizes": [len(page) for page in pages], "html_limit": 20}
     finally:
         api(target, f"/boards/{board_id}", "DELETE", expected=204)
 
@@ -151,7 +206,7 @@ def main():
                               NoRedirect())}
                 results[name] = check(target)
             assert results["fizzy"] == results["rizzy"], results
-            print("PASS webhook delivery HTML states, sanitized JSON, and comment event JSON")
+            print("PASS webhook delivery states, JSON, older times, and pagination")
         finally:
             for process in reversed(processes):
                 stop_server(process)

@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Datelike;
 
 const ACTION_LABELS: &[(&str, &str)] = &[
     ("card_published", "Card added"),
@@ -318,21 +319,55 @@ fn delivery_entry(delivery: &DbRow) -> String {
     let created_at: String = delivery.get("created_at");
     let datetime = chrono::DateTime::parse_from_rfc3339(&created_at).ok();
     let (datetime_value, age) = if let Some(created) = datetime {
-        let minutes = ((chrono::Utc::now() - created.with_timezone(&chrono::Utc))
-            .num_seconds()
-            .unsigned_abs() as f64
-            / 60.0)
-            .round() as u64;
+        let current = chrono::Utc::now();
+        let occurred = created.to_utc();
+        let (from, to) = if occurred <= current {
+            (occurred, current)
+        } else {
+            (current, occurred)
+        };
+        let minutes = ((to - from).num_milliseconds() as f64 / 60_000.0).round() as i64;
         let age = match minutes {
             0 => "less than a minute".to_owned(),
             1 => "1 minute".to_owned(),
             2..=44 => format!("{minutes} minutes"),
             45..=89 => "about 1 hour".to_owned(),
-            90..=1439 => format!("about {} hours", (minutes as f64 / 60.0).round() as u64),
+            90..=1439 => format!("about {} hours", (minutes as f64 / 60.0).round() as i64),
             1440..=2519 => "1 day".to_owned(),
-            2520..=43199 => format!("{} days", (minutes as f64 / 1440.0).round() as u64),
-            43200..=86399 => "about 1 month".to_owned(),
-            _ => format!("{} months", (minutes as f64 / 43200.0).round() as u64),
+            2520..=43199 => format!("{} days", (minutes as f64 / 1440.0).round() as i64),
+            43200..=86399 => {
+                format!("about {} months", (minutes as f64 / 43200.0).round() as i64)
+            }
+            86400..=525599 => {
+                format!("{} months", (minutes as f64 / 43200.0).round() as i64)
+            }
+            _ => {
+                let from_year = from.year() + i32::from(from.month() >= 3);
+                let to_year = to.year() - i32::from(to.month() < 3);
+                let leap_count = |year: i32| year / 4 - year / 100 + year / 400;
+                let leap_years = if from_year > to_year {
+                    0
+                } else {
+                    leap_count(to_year) - leap_count(from_year - 1)
+                };
+                let adjusted = minutes - i64::from(leap_years) * 1440;
+                let years = adjusted / 525600;
+                let remainder = adjusted % 525600;
+                if remainder < 131400 {
+                    format!(
+                        "about {years} {}",
+                        if years == 1 { "year" } else { "years" }
+                    )
+                } else if remainder < 394200 {
+                    format!("over {years} {}", if years == 1 { "year" } else { "years" })
+                } else {
+                    let years = years + 1;
+                    format!(
+                        "almost {years} {}",
+                        if years == 1 { "year" } else { "years" }
+                    )
+                }
+            }
         };
         (created.format("%Y-%m-%dT%H:%M:%SZ").to_string(), age)
     } else {
