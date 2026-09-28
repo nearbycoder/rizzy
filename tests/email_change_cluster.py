@@ -27,8 +27,10 @@ def main():
         cpus = sorted(os.sched_getaffinity(0))[:2]
         processes = []
         try:
-            for _ in range(2):
-                process, url = start_server("rizzy", directory, env, cpus)
+            for name in ("process-a", "process-b"):
+                log_directory = directory / name
+                log_directory.mkdir()
+                process, url = start_server("rizzy", log_directory, env, cpus)
                 processes.append((process, url))
             source, destination = (item[1] for item in processes)
             jar = http.cookiejar.CookieJar()
