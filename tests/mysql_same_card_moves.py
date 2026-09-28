@@ -18,6 +18,8 @@ from mysql_webhook_cleanup import MYSQL, SOCKET, root_mysql
 from mysql_webhooks import BINARY, ROOT, start, stop
 from storage_ledger_parity import api, upload
 
+PORT = int(os.environ.get("MYSQL_PORT", "33080"))
+
 
 def main():
     if not SOCKET.is_socket():
@@ -39,7 +41,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="rizzy-same-card-moves-") as temporary:
             env = {
                 **os.environ,
-                "RIZZY_DATABASE_URL": f"mysql://{username}:{password}@127.0.0.1:33080/{database}",
+                "RIZZY_DATABASE_URL": f"mysql://{username}:{password}@127.0.0.1:{PORT}/{database}",
                 "RIZZY_STORAGE_DIR": str(Path(temporary) / "storage"),
                 "RIZZY_SEED_EMAIL": "same-card-" + suffix + "@example.test",
                 "RIZZY_DISABLE_STORAGE_MATERIALIZATION": "1",

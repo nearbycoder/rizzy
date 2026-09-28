@@ -401,6 +401,19 @@ reliable.
 
 `tests/storage_ledger_parity.py` compares Fizzy and Rizzy ledger operations for
 card images, board/card/comment embeds, a board transfer, and card deletion.
+`tests/card_move_atomic_paired.py` now forces the board-change event insert and
+the following system-comment insert to fail separately on fresh Fizzy and
+Rizzy SQLite apps. Both roll back the board move and leave event/comment counts
+unchanged, then commit one successful move with one event and a comment at the
+same timestamp. Rizzy previously committed the board transfer before creating
+those two records; they now share its transaction, including notification and
+webhook queue inserts. `tests/mysql_card_move_atomic.py` passes the same
+failure and success checks on MySQL 8.4.11. The two-process same-card MySQL
+move race, paired chained image-bearing move sequence, and paired private-board
+access and cleanup flow also pass after the change (with Fizzy's Solid Queue
+worker enabled for its asynchronous cleanup). Forced-deadlock retry for this
+move transaction and wider
+cross-host failure handling remain open.
 `tests/storage_materialization.py` checks concurrent materialization, exact
 account and board totals, idempotency, board cleanup, and reconciliation of an
 attachment that predates the ledger. `reconcile-storage` scans existing

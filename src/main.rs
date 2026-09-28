@@ -15142,6 +15142,14 @@ async fn move_card(
     let mut old_board = board(&app, &p, &old_board_id).await?;
     let mut new_board = board(&app, &p, &destination).await?;
     let card_id: String = c.get("id");
+    let mut move_actor = if old_board_id != destination {
+        Some((
+            escape(&actor_name(&app, &p).await?),
+            system_user(&app, &p).await?,
+        ))
+    } else {
+        None
+    };
     let mut transfer_tx = None;
     let mut verified = false;
     for _ in 0..16 {
@@ -15166,6 +15174,12 @@ async fn move_card(
             tx.rollback().await.map_err(db_err)?;
             old_board_id = actual_board;
             old_board = board(&app, &p, &old_board_id).await?;
+            if old_board_id != destination && move_actor.is_none() {
+                move_actor = Some((
+                    escape(&actor_name(&app, &p).await?),
+                    system_user(&app, &p).await?,
+                ));
+            }
             continue;
         }
         for board_id in [&old_board_id, &destination] {
@@ -15285,20 +15299,40 @@ async fn move_card(
                     .map_err(db_err)?;
             }
         }
-        tx.commit().await.map_err(db_err)?;
-        record_event(&app,&p,&destination,&c.get::<String,_>("id"),"Card",&c.get::<String,_>("id"),"card_board_changed",json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")})).await?;
-        let who = escape(&actor_name(&app, &p).await?);
-        system_comment(
+        let event_timestamp = now();
+        let particulars = json!({"old_board":old_board.get::<String,_>("name"),"new_board":new_board.get::<String,_>("name")});
+        insert_event_tx(
             &app,
+            &mut tx,
             &p,
-            &c.get::<String, _>("id"),
-            &format!(
-                "{who} <strong>moved</strong> this from “{}” to “{}”.",
-                escape(&old_board.get::<String, _>("name")),
-                escape(&new_board.get::<String, _>("name"))
-            ),
+            &destination,
+            &card_id,
+            "Card",
+            &card_id,
+            "card_board_changed",
+            &particulars,
+            &event_timestamp,
         )
         .await?;
+        let (who, system) = move_actor.as_ref().ok_or_else(|| missing())?;
+        let body = format!(
+            "{who} <strong>moved</strong> this from “{}” to “{}”.",
+            escape(&old_board.get::<String, _>("name")),
+            escape(&new_board.get::<String, _>("name"))
+        );
+        let content = search_content(rich_text::plain_text(&body));
+        insert_system_comment_tx(
+            &app,
+            &mut tx,
+            &p,
+            system,
+            &card_id,
+            &body,
+            &content,
+            &event_timestamp,
+        )
+        .await?;
+        tx.commit().await.map_err(db_err)?;
     }
     let c = card(&app, &p, &number).await?;
     if form {
