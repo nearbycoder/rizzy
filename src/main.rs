@@ -57,6 +57,7 @@ mod events_page;
 mod exports;
 mod imports;
 mod join_code_page;
+mod magic_mail;
 mod my_menu;
 mod mysql_search;
 mod named_column_page;
@@ -5729,45 +5730,6 @@ async fn auth_attempt(
 fn dev_magic_links() -> bool {
     env::var("RIZZY_DEV_MAGIC_LINKS").as_deref() == Ok("1")
 }
-async fn deliver_magic_link(email: &str, code: &str, host: &str) -> Result<()> {
-    if dev_magic_links() {
-        return Ok(());
-    }
-    let path = env::var("RIZZY_SENDMAIL").map_err(|_| {
-        err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Mail delivery is not configured",
-        )
-    })?;
-    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
-    if !valid_email(email) || from.contains(['\r', '\n']) {
-        return Err(bad("invalid email address"));
-    }
-    let message = format!(
-        "From: {from}\nTo: {email}\nSubject: Your Rizzy sign-in code\nContent-Type: text/plain; charset=UTF-8\n\nYour Rizzy code is {code}.\n\nIt expires in 15 minutes.\n{host}/session/magic_link?code={code}\n"
-    );
-    let mut child = Command::new(path)
-        .arg("-t")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    };
-    stdin
-        .write_all(message.as_bytes())
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    drop(stdin);
-    let status = child
-        .wait()
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    if !status.success() {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    }
-    Ok(())
-}
 async fn request_magic_link(
     State(app): Shared,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -6078,7 +6040,9 @@ async fn request_magic_link_inner(
             }
         };
         drop(guard);
-        if let Err(error) = deliver_magic_link(&email, &code, &base(&headers)).await {
+        if let Err(error) =
+            magic_mail::deliver(app, &identity_id, &email, &code, purpose, &base(&headers)).await
+        {
             sqlx::query("DELETE FROM magic_links WHERE code=?")
                 .bind(&code)
                 .execute(&app.db)
