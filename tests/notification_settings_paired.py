@@ -55,6 +55,8 @@ def check(target):
     assert len(tags.classes("div", "settings__panel--users")) == 1
     assert len(tags.classes("div", "settings__scrollable-list")) == 1
     assert len(tags.find("section", **{"data-controller": "notifications"})) == 1
+    subscribe = tags.find("div", **{"data-notifications-target": "subscribeButton"})
+    assert len(subscribe) == 1 and "hidden" in subscribe[0]
     assert len(tags.find("form", **{"data-controller": "form"})) == 1
     assert len(tags.find("select", name="user_settings[bundle_email_frequency]")) == 1
     assert b"Alpha board" in body and b"Zulu board" in body

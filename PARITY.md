@@ -11,7 +11,17 @@ override forms, email frequency saves, and the absent-method 404 against the
 pinned source. `tests/notification_settings_html.py` checks the Rust page's
 browser controls and unsubscribe-token creation; `tests/pwa_registration.py`
 also passes for the page. Browser-specific push help text, native-device
-settings, exact styling, and paired visual and interaction checks remain open.
+settings, exact styling, and live push delivery remain open. Paired Chromium
+screenshots at 1280 and 390 pixels record the [Fizzy desktop](docs/visual-baselines/fizzy-notification-settings-1280.png),
+[Rizzy desktop](docs/visual-baselines/rizzy-notification-settings-1280.png),
+[Fizzy mobile](docs/visual-baselines/fizzy-notification-settings-390.png), and
+[Rizzy mobile](docs/visual-baselines/rizzy-notification-settings-390.png)
+pages with one board and the default email setting. Rizzy toggled board
+involvement in place and auto-saved the email choice in Chromium, with no page
+errors or horizontal overflow at 390 pixels. The pinned source's live board
+watch form returned HTTP 406 in this local production setup, so its click flow
+was not established as a passing browser comparison. Its request contracts
+remain covered by the paired test.
 
 `python3 tests/route_coverage.py --strict` now finds all 211 application routes, three Turbo Native routes, nine Active Storage routes, and 14 Action Mailbox routes registered. `tests/action_mailbox_parity.py` compares the pinned production source's default disabled-ingress and gated-conductor responses with Rizzy across all 14 methods, three JSON suffixes, HTML and JSON Accept headers, and anonymous and bearer-token requests. Configured mailbox ingress and development conductor behavior remain open, as does functional parity for the rest of the route inventory.
 

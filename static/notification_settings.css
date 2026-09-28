@@ -1,34 +1,64 @@
-.notification-settings{display:flex;flex-direction:column;align-items:stretch;gap:32px;max-width:100ch;margin:24px auto}
-.notification-settings .settings__panel{min-width:0;display:flex;flex-direction:column;gap:32px;padding:32px;border-radius:16px;background:#f9fafb;color:#20262b;box-shadow:0 12px 35px #0004}
-.notification-settings .settings__panel--users{max-height:calc(100dvh - 12rem)}
+body:has(.notification-settings) #main{max-width:1280px;padding:0 40px 80px}
+body:has(.notification-settings) .header{display:flex;flex-direction:column;align-items:center;gap:4px;padding:14px 24px 22px;border:0}
+body:has(.notification-settings) .header__skip-navigation{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+body:has(.notification-settings) .header__skip-navigation:focus-visible{position:static;width:auto;height:auto;clip:auto}
+body:has(.notification-settings) .header>a[data-open-menu]{color:#f7f8f9;font-size:24px;font-weight:750;text-decoration:none}
+body:has(.notification-settings) .header>a[data-open-menu]::before{content:"";display:inline-block;width:28px;height:28px;margin-right:8px;border-radius:7px;background:repeating-linear-gradient(90deg,#963dd4 0 3px,#2165ca 3px 6px,#22a6a9 6px 9px,#b3c33b 9px 12px,#d98030 12px 15px,#bd4b87 15px 18px);vertical-align:-5px}
+body:has(.notification-settings) .header__title{margin:0;font-size:30px;line-height:1.2;text-align:center}
+.notification-settings{display:flex;flex-direction:column;gap:38px;max-width:1200px;margin:0 auto}
+.notification-settings .settings__panel{box-sizing:border-box;display:flex;flex-direction:column;gap:42px;min-width:0;padding:30px 38px 38px;border:1px solid #2b3941;border-radius:20px;background:#101d23;color:#f4f5f6;box-shadow:0 12px 30px #0002}
+.notification-settings .settings__panel--users{max-height:calc(100dvh - 12rem);padding-bottom:30px}
 .notification-settings .settings__section{min-width:0}
 .notification-settings .settings__section>heading{display:block}
-.notification-settings .divider{margin:0 0 18px;padding-bottom:12px;border-bottom:1px solid #cfd6d9;font-size:1.25rem}
-.notification-settings .settings__scrollable-list{overflow:auto;display:flex;flex-direction:column;gap:12px}
+.notification-settings .divider{display:flex;align-items:center;gap:18px;margin:0;font-size:30px;line-height:1.2;text-align:center;white-space:nowrap}
+.notification-settings .divider::before,.notification-settings .divider::after{content:"";flex:1;border-top:1px solid #405057}
+.notification-settings .settings__scrollable-list{display:flex;flex-direction:column;gap:12px;overflow:auto}
 .notification-settings .settings__scrollable-list turbo-frame{display:block}
+#board-involvement-error:empty,.notification-settings [data-push-error]:empty{display:none}
 .notification-settings .board-involvement{display:flex;align-items:center;gap:12px;min-height:42px}
-.notification-settings .board-involvement h2{font-size:1rem;font-weight:500;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.notification-settings .board-separator{flex:1;border-top:1px dashed #849099}
-.notification-settings .watch-button{border:1px solid #8c989f;border-radius:50%;width:38px;height:38px;padding:0;background:white;color:#20262b;cursor:pointer}
-.notification-settings .watch-button.is-watching{background:#20262b;color:white;border-color:#20262b}
-.notification-settings .watch-icon svg{width:20px;height:20px;fill:currentColor;vertical-align:middle}
+.notification-settings .board-involvement h2{margin:0;overflow:hidden;font-size:23px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.notification-settings .board-separator{flex:1;border:0;border-top:1px dashed #839096}
+.notification-settings .watch-button{width:42px;height:42px;padding:0;border:1px solid #d6dcdf;border-radius:50%;background:#f4f5f6;color:#101d23;cursor:pointer}
+.notification-settings .watch-icon svg{width:22px;height:22px;fill:currentColor;vertical-align:middle}
+.notification-settings .for-screen-reader{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .notification-settings .watch-icon svg:first-child{display:none}
 .notification-settings .is-watching .watch-icon svg:first-child{display:inline}
 .notification-settings .is-watching .watch-icon svg:last-child{display:none}
-.notification-settings .watch-button:focus-visible{outline:3px solid #147dbe;outline-offset:2px}
+.notification-settings .watch-button:focus-visible{outline:3px solid #80b7fc;outline-offset:2px}
 .notification-settings .watch-button:disabled{opacity:.5;cursor:wait}
-.notification-settings .notifications__status{padding:24px;border-radius:8px;background:#edf1f2;text-align:center}
-.notification-settings .notifications__status h2{margin:0;font-size:1rem;font-weight:500}
-.notification-settings .notifications__status button,.notification-settings select{font:inherit;padding:9px;cursor:pointer}
-.notification-settings .notifications__status:not([data-push-settings]) button{display:none}
-.notification-settings .notifications__status details{margin-top:16px}
+.notification-settings .notifications__status{padding:18px 24px 12px;border:1px solid #293640;border-radius:9px;background:#1e2731;text-align:center}
+.notification-settings .notifications__status h2{margin:0;font-size:22px;font-weight:700}
+.notification-settings .notifications__status button{padding:7px 18px;border:1px solid #48545c;border-radius:999px;background:#101d23;color:#f4f5f6;font:inherit;font-weight:650;cursor:pointer}
+.notification-settings .notifications__status button svg{width:16px;height:16px;margin-right:6px;fill:currentColor;vertical-align:-2px}
+.notification-settings .notifications__status [data-notifications-target="subscribeButton"]{margin-top:12px}
+.notification-settings .notifications__status:not([data-push-settings]) [data-notifications-target="subscribeButton"]{display:none}
+.notification-settings .notifications__status details{margin-top:14px}
 .notification-settings .notifications__status summary{cursor:pointer}
-.notification-settings .notifications-help__explainer{margin-top:16px;padding:16px;border-radius:8px;background:white;text-align:left}
+.notification-settings .notifications-help__explainer{margin-top:16px;padding:16px;border-radius:8px;background:#f4f5f6;color:#101d23;text-align:left}
 .notification-settings .notifications__on-message{display:none}
 .notification-settings .notifications--on .notifications__on-message{display:inline}
 .notification-settings .notifications--on .notifications__off-message{display:none}
-.notification-settings .settings__section form{margin-top:18px}
-.notification-settings .settings__section label{display:block;margin-bottom:10px}
-.notification-settings .settings__section select{min-width:180px;text-align:center}
+.notification-settings .settings__section>heading>div{font-size:20px;line-height:1.3;text-align:center}
+.notification-settings .settings__section form[data-controller="form"]{margin-top:14px;text-align:center}
+.notification-settings .settings__section form[data-controller="form"] label{display:block;margin-bottom:10px;font-size:20px}
+.notification-settings .settings__section select{box-sizing:border-box;width:100%;padding:8px 18px;border:1px solid #7e8b94;border-radius:999px;background:#101d23;color:#f4f5f6;font:inherit;font-size:20px;text-align:center;cursor:pointer}
 @media(min-width:960px){.notification-settings{flex-direction:row;align-items:flex-start}.notification-settings .settings__panel{width:50%}}
-@media(max-width:639px){.notification-settings .settings__panel{padding:20px}}
+@media(max-width:639px){
+  body:has(.notification-settings) .header{padding-bottom:12px}
+  body:has(.notification-settings) #main{padding:0 12px 80px}
+  .notification-settings{gap:30px}
+  .notification-settings .settings__panel{gap:20px;padding:20px 16px}
+  .notification-settings .settings__panel--users{padding-top:10px;padding-bottom:10px}
+  .notification-settings .settings__panel:not(.settings__panel--users){padding-bottom:15px}
+  .notification-settings .divider{font-size:24px}
+  .notification-settings .settings__scrollable-list{margin-inline:-4px}
+  .notification-settings .board-involvement h2{font-size:18px}
+  .notification-settings .notifications__status{padding:4px 16px 19px}
+  .notification-settings .notifications__status h2{font-size:20px}
+  .notification-settings .notifications__status [data-notifications-target="subscribeButton"]{margin-top:6px}
+  .notification-settings .notifications__status button{padding:6px 12px;line-height:1.3}
+  .notification-settings .settings__section>heading>div{font-size:16px}
+  .notification-settings .settings__section form[data-controller="form"]{margin-top:7px}
+  .notification-settings .settings__section form[data-controller="form"] label{font-size:16px}
+  .notification-settings .settings__section select{font-size:16px}
+}
