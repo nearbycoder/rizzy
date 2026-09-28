@@ -1059,7 +1059,10 @@ database without `RIZZY_SECRET_KEY_BASE`. One process issues the email link;
 the other confirms it and renews the browser session; the first then reads the
 new identity and rejects replay. This checks that the persisted per-database
 signing secret works across two local processes. It does not test separate
-hosts or MySQL deployment.
+hosts. `tests/email_change_cluster_mysql.py` runs the same issue/confirm/read
+flow through two processes on a fresh MySQL 8.4.11 schema; it passed with the
+database-backed secret and cleaned up its schema and temporary trigger setting.
+Separate hosts and sustained confirmation load remain open.
 
 `tests/auth_format_parity.py` checks Fizzy's bearer-token format restriction, write-method rejection for read tokens, the exact HTTP Token denial, and unauthenticated redirect behavior against both running servers. Rizzy now requires JSON for bearer access and redirects missing credentials to `/session/new`. The sign-in HTML is simplified. Browser and Turbo tests use session cookies; bearer tokens in those formats are rejected.
 
