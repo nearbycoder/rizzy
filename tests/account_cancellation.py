@@ -7,6 +7,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -101,6 +102,7 @@ def main():
             assert status == 302 and headers["Location"] == "/session/menu"
             with sqlite3.connect(db_path) as db:
                 assert db.execute("SELECT COUNT(*) FROM account_cancellations").fetchone()[0] == 0
+                assert db.execute("SELECT COUNT(*) FROM cancellation_mail_jobs").fetchone()[0] == 0
         finally:
             stop(server)
 
@@ -114,9 +116,12 @@ def main():
             assert request(port, "/1/account/cancellation", "POST", cookie=member_cookie, html=True)[0] == 403
             status, headers, _ = request(port, "/1/account/cancellation", "POST", cookie=cookie, html=True)
             assert status == 302 and headers["Location"] == "/session/menu"
+            with sqlite3.connect(db_path) as db:
+                assert db.execute("SELECT COUNT(*) FROM cancellation_mail_jobs WHERE status=0").fetchone()[0] == 1
             assert request(port, "/1/account/settings", cookie=cookie, html=True)[0] == 302
             assert request(port, "/1/account/settings.json", token=token)[0] == 403
-            assert request(port, "/1/my/identity.json", token=token)[0] == 403
+            identity_status, _, identity_body = request(port, "/1/my/identity.json", token=token)
+            assert identity_status == 403, (identity_status, identity_body)
             assert request(port, "/2/account/settings.json", token=other_token)[0] == 200
             status, _, page = request(port, "/session/menu", cookie=cookie, html=True)
             assert status == 200 and b"don\xe2\x80\x99t have any Rizzy accounts" in page
@@ -133,8 +138,17 @@ def main():
                 db.execute("UPDATE account_cancellations SET created_at=?", (stamp(31),))
         finally:
             stop(server)
+        subprocess.run([BINARY, "incinerate-due"], cwd=ROOT, env=env,
+                       capture_output=True, text=True, check=True)
         port, server = start(env)
         try:
+            for _ in range(100):
+                with sqlite3.connect(db_path) as db:
+                    if db.execute("SELECT COUNT(*) FROM accounts WHERE id=?", (account,)).fetchone()[0] == 0:
+                        break
+                time.sleep(.05)
+            else:
+                raise AssertionError("Cancelled account was not incinerated within five seconds")
             with sqlite3.connect(db_path) as db:
                 assert db.execute("SELECT COUNT(*) FROM accounts WHERE id=?", (account,)).fetchone()[0] == 0
                 assert db.execute("SELECT COUNT(*) FROM accounts WHERE id=?", (other_account,)).fetchone()[0] == 1
@@ -142,6 +156,7 @@ def main():
                 assert db.execute("SELECT COUNT(*) FROM cards WHERE id='card-1'").fetchone()[0] == 0
                 assert db.execute("SELECT COUNT(*) FROM comments WHERE id='comment-1'").fetchone()[0] == 0
                 assert db.execute("SELECT COUNT(*) FROM notifications WHERE id='notice-1'").fetchone()[0] == 0
+                assert db.execute("SELECT COUNT(*) FROM cancellation_mail_jobs").fetchone()[0] == 0
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
             assert not (storage / "blob-key").exists()
             assert not (exports / "export-1.zip").exists()

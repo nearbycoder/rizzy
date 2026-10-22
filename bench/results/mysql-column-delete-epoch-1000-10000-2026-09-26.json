@@ -1,0 +1,54 @@
+{
+  "database": "Oracle MySQL 8",
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "source_dirty": false,
+  "rizzy_revision": "1d1d501e7e41f2da365018c28101220c7b71004d",
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "2412a5218c57babb4111a97a873f9d2de4c7927a0d7f7cd3fa9b33dffb9a32e5",
+  "mysql_version": "8.4.11",
+  "fixture": "Three API cards, then SQL-cloned cards and timestamp markers outside the timed DELETE; all-card timestamp, activity, placement, and other-column state verified after each request",
+  "server_cpus": [
+    0,
+    1
+  ],
+  "source_workers": 2,
+  "rust_processes": 1,
+  "sizes": {
+    "1000": {
+      "samples_ms": {
+        "fizzy": [
+          26.205,
+          16.981,
+          26.097
+        ],
+        "rizzy": [
+          15.985,
+          15.542,
+          16.659
+        ]
+      },
+      "median_ms": {
+        "fizzy": 26.097,
+        "rizzy": 15.985
+      }
+    },
+    "10000": {
+      "samples_ms": {
+        "fizzy": [
+          68.867,
+          62.87,
+          58.162
+        ],
+        "rizzy": [
+          141.805,
+          144.683,
+          145.307
+        ]
+      },
+      "median_ms": {
+        "fizzy": 62.87,
+        "rizzy": 144.683
+      }
+    }
+  }
+}

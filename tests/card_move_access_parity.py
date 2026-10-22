@@ -124,7 +124,7 @@ def run(target):
         assert move_events == 1, (target["name"], "move event", move_events)
 
     try:
-        assignee, _ = create_user("Parity assignee")
+        assignee, assignee_token = create_user("Parity assignee")
         mover, mover_token = create_user("Parity member")
         source = board("Parity source", True)
         admin_destination = board("Parity admin destination", False)
@@ -154,7 +154,40 @@ def run(target):
             time.sleep(.2)
             member_state = state(member_destination, card_id, event_id, assignee)
         assert member_state == (0, 0, 0, 0, 0), (target["name"], "member state", member_state)
-        return {"admin": admin_state, "member": member_state}
+        pin_status, _, _ = request({**target, "token": assignee_token},
+                                   f"/{account}/cards/{number}/pin", "POST", bearer=True)
+        assert pin_status == 404, (target["name"], "pin after access loss", pin_status)
+        watch_status, _, _ = request({**target, "token": assignee_token},
+                                     f"/{account}/cards/{number}/watch", "POST", bearer=True)
+        assert watch_status == 404, (target["name"], "watch after access loss", watch_status)
+        inaccessible_writes = (
+            ("card edit", f"/cards/{number}", "PATCH", {"card": {"title": "No access"}}),
+            ("card delete", f"/cards/{number}", "DELETE", None),
+            ("card publish", f"/cards/{number}/publish", "POST", None),
+            ("card reading", f"/cards/{number}/reading", "POST", None),
+            ("tag", f"/cards/{number}/taggings", "POST", {"tag_title": "no-access"}),
+            ("assignment", f"/cards/{number}/assignments", "POST", {"assignee_id": "nonexistent"}),
+            ("step", f"/cards/{number}/steps", "POST", {"step": {"content": "No access"}}),
+            ("comment", f"/cards/{number}/comments", "POST", {"comment": {"body": "No access"}}),
+            ("reaction", f"/cards/{number}/reactions", "POST", {"reaction": {"content": "👍"}}),
+        )
+        for label, suffix, method, payload in inaccessible_writes:
+            status, _, _ = request({**target, "token": assignee_token},
+                                   f"/{account}{suffix}", method, payload, bearer=True)
+            assert status == 404, (target["name"], label, status)
+        for label, path, payload in (
+            ("board card create", f"/{account}/boards/{member_destination}/cards",
+             {"card": {"title": "No access"}}),
+            ("account card create", f"/{account}/cards",
+             {"board_id": member_destination, "card": {"title": "No access"}}),
+        ):
+            status, _, _ = request({**target, "token": assignee_token}, path, "POST",
+                                   payload, bearer=True)
+            assert status == 404, (target["name"], label, status)
+        assert state(member_destination, card_id, event_id, assignee) == member_state
+        return {"admin": admin_state, "member": member_state,
+                "pin_after_access_loss": pin_status,
+                "watch_after_access_loss": watch_status}
     finally:
         for board_id in created["boards"]:
             request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
@@ -177,7 +210,7 @@ def main():
                   "db": os.environ[f"{name}_DB"], "opener": urllib.request.build_opener(NoRedirect())}
         results[name.lower()] = run(target)
     assert results["fizzy"] == results["rizzy"], results
-    print("Card move access parity matched: admin grants and member cleanup")
+    print("Card move access parity matched: admin grants, member cleanup, and pin/watch rejection after access loss")
 
 
 if __name__ == "__main__":

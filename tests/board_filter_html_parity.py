@@ -14,21 +14,46 @@ from draft_workflow_parity import NoRedirect, login, request
 GRID = '<section class="cards cards--grid"'
 
 
-def run(target):
-    try:
-        login(target)
-    except AssertionError as error:
-        raise AssertionError(f"{target['name']} sign-in failed: {error}") from error
+def run(target, signed_in=False):
+    if not signed_in:
+        try:
+            login(target)
+        except AssertionError as error:
+            raise AssertionError(f"{target['name']} sign-in failed: {error}") from error
     account = target["account"]
     marker = f"boardfilter{time.time_ns()}"
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board": {"name": marker}}, bearer=True)
     assert status == 201, (target["name"], status, raw[:200])
     board_id = json.loads(raw)["id"]
+    second_board_id = None
     board_path = f"/{account}/boards/{board_id}"
     try:
+        status, _, raw = request(target, f"/{account}/boards", "POST",
+                                 {"board": {"name": marker + " Café second"}}, bearer=True)
+        assert status == 201, (target["name"], status, raw[:200])
+        second_board_id = json.loads(raw)["id"]
         for index in range(17):
             status, _, raw = request(target, board_path + "/cards", "POST", {"card": {"title": f"{marker} card {index:02d}"}}, bearer=True)
             assert status == 201, (status, raw[:200])
+            if index == 0:
+                tagged_number = json.loads(raw)["number"]
+                owner_id = json.loads(raw)["creator"]["id"]
+                step_path = f"/{account}/cards/{tagged_number}/steps"
+                status, _, raw = request(target, step_path, "POST", {"step": {"content": "First"}}, bearer=True)
+                assert status == 201, (target["name"], status)
+                first_step_id = json.loads(raw)["id"]
+                status, _, _ = request(target, step_path, "POST", {"step": {"content": "Second"}}, bearer=True)
+                assert status == 201, (target["name"], status)
+                status, _, _ = request(target, step_path + "/" + first_step_id, "PUT",
+                                       {"step": {"completed": True}}, bearer=True)
+                assert status == 200, (target["name"], status)
+        tag_title = f"tag{marker}"
+        status, _, _ = request(target, f"/{account}/cards/{tagged_number}/taggings", "POST",
+                               {"tag_title": tag_title}, bearer=True)
+        assert status == 204, (target["name"], "tag", status)
+        status, _, raw = request(target, f"/{account}/tags", bearer=True)
+        assert status == 200
+        tag_id = next(tag["id"] for tag in json.loads(raw) if tag["title"] == tag_title)
         special = {}
         for state in ("closed", "not_now"):
             title = f"{state} separate {marker}"
@@ -46,9 +71,20 @@ def run(target):
 
         plain = html()
         assert "card-columns" in plain and "cards--maybe" in plain and GRID not in plain
+        assert 'placeholder="Filter…"' in plain, (target["name"], "multi-board search")
+        assert 'id="filter-settings-save-toggle"' not in plain, target["name"]
+        unfiltered_expanded = html("?expand_all=true")
+        assert "card-columns" in unfiltered_expanded and GRID not in unfiltered_expanded
+        assert ('filters--expanded' if target["name"] == "fizzy" else
+                'class="board-filter is-expanded"') in unfiltered_expanded
         if target["name"] == "rizzy":
             assert 'cards--maybe is-expanded' in plain and 'board-tools__watch-toggle' in plain
-            assert 'data-card-number=' in plain and 'class="bottom-bar"' in plain
+            assert 'data-card-number=' in plain and 'id="footer"' in plain
+            assert 'data-open-menu' in plain and 'id="pin-tray"' in plain
+            assert '<span>System</span></label>' not in plain
+            assert 'class="board-filter is-expanded"' not in plain
+            assert all(f'>{label}</button>' in plain for label in
+                       ('Board…', 'Recently updated', 'Status…', 'Assigned to…', 'Added by…', 'Closed by…'))
             target["extra_headers"] = {"X-Rizzy-Card-Fragment": "1"}
             try:
                 status, _, fragment = request(target, board_path + "/columns/stream?page=2", accept="text/html")
@@ -56,6 +92,7 @@ def run(target):
                 target["extra_headers"].pop("X-Rizzy-Card-Fragment")
             assert status == 200 and fragment.count(b"<article ") == 2, fragment[:200]
             assert b'card__meta' in fragment and f"{marker} card 00".encode() in fragment
+            assert b'Steps completed">1/2' in fragment, fragment[:300]
             status, _, _ = request(target, board_path + "/involvement", "PUT", {"involvement": "access_only"}, bearer=True)
             assert status == 204, status
             assert "No one is watching for new cards" in html()
@@ -63,8 +100,20 @@ def run(target):
             assert status == 204 and "Watching for new cards" in html()
         explicit_default = html("?indexed_by=all&sorted_by=latest")
         assert GRID not in explicit_default
+        tagged = html("?tag_ids%5B%5D=" + urllib.parse.quote(tag_id))
+        assert GRID in tagged and f"{marker} card 00" in tagged and f"{marker} card 01" not in tagged
+        if target["name"] == "rizzy":
+            assert 'name="tag_ids[]"' in plain and f'value="{tag_id}"' in plain
+            assert re.search(rf'name="tag_ids\[\]" value="{re.escape(tag_id)}" checked', tagged)
         closed = html("?indexed_by=closed")
         assert GRID in closed and special["closed"] in closed and special["not_now"] not in closed
+        expanded_closed = html("?expand_all=true&indexed_by=closed")
+        if target["name"] == "rizzy":
+            assert 'class="board-filter is-expanded"' in expanded_closed
+            assert 'name="expand_all" value="true"' in expanded_closed
+            assert '>Done</button>' in expanded_closed
+        else:
+            assert 'filters--expanded' in expanded_closed
         postponed = html("?indexed_by=not_now")
         assert GRID in postponed and special["not_now"] in postponed and special["closed"] not in postponed
         term = urllib.parse.quote(marker)
@@ -79,9 +128,31 @@ def run(target):
         assert GRID in oldest and f"{marker} card 00" in oldest and f"{marker} card 16" not in oldest
         empty = html("?terms%5B%5D=notpresentzzzz")
         assert "No cards match this filter" in empty
-        return {"columns_without_filter": True, "special_filters": True,
-                "term_pages": (first_numbers, second_numbers), "oldest": True, "empty": True}
+        status, _, _ = request(target, f"/{account}/cards/{tagged_number}/self_assignment.json",
+                               "POST", b"", bearer=True)
+        assert status == 204, (target["name"], "self assignment", status)
+        owner = urllib.parse.quote(owner_id)
+        assigned = html("?assignee_ids%5B%5D=" + owner)
+        assert f"{marker} card 00" in assigned and f"{marker} card 01" not in assigned
+        unassigned = html("?assignment_status=unassigned")
+        assert f"{marker} card 00" not in unassigned and f"{marker} card 02" in unassigned
+        created_by = html("?creator_ids%5B%5D=" + owner)
+        assert f"{marker} card 00" in created_by
+        closed_by = html("?closer_ids%5B%5D=" + owner)
+        assert special["closed"] in closed_by and special["not_now"] not in closed_by
+        if target["name"] == "rizzy":
+            for field, page in (("assignee_ids[]", assigned), ("creator_ids[]", created_by),
+                                ("closer_ids[]", closed_by)):
+                assert f'name="{field}"' in plain
+                assert re.search(rf'name="{re.escape(field)}" value="{re.escape(owner_id)}" checked', page)
+            assert 'name="assignment_status" value="unassigned" checked' in unassigned
+        return {"columns_without_filter": True, "special_filters": True, "tag_filter": True,
+                "term_pages": (first_numbers, second_numbers), "oldest": True, "empty": True,
+                "people_filters": True}
     finally:
+        if second_board_id:
+            status, _, _ = request(target, f"/{account}/boards/{second_board_id}", "DELETE", bearer=True)
+            assert status == 204, status
         status, _, _ = request(target, board_path, "DELETE", bearer=True)
         assert status == 204, status
 

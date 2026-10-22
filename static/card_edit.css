@@ -1,0 +1,26 @@
+:root{color-scheme:dark;background:#0d1a20;color:#f4f5f6;font:19px/1.375 "Segoe UI",system-ui,sans-serif;--lexxy-color-ink:#f4f5f6;--lexxy-color-canvas:#0d1a20;--lexxy-color-accent-dark:#87b9fa}
+*{box-sizing:border-box}
+body{margin:0}
+#global-container{min-height:100vh;padding-bottom:50px}
+#header{display:flex;align-items:center;justify-content:center;height:63px;padding:0 36px;border:0}
+#header .header__skip-navigation{position:absolute;left:-9999px}
+#header .header__skip-navigation:focus{left:12px;top:10px;z-index:30}
+#header a[data-open-menu]{display:inline-flex;align-items:center;gap:8px;color:#f4f5f6;font-size:20px;font-weight:800;text-decoration:none}
+#header a[data-open-menu]::before{content:"";display:block;width:29px;height:29px;border:1px solid #40505a;border-radius:7px;background:linear-gradient(90deg,#182730 0 19%,#e65667 19% 25%,#182730 25% 32%,#eab548 32% 38%,#182730 38% 45%,#75bf74 45% 51%,#182730 51% 58%,#56a7d8 58% 64%,#182730 64% 71%,#a67bd7 71% 77%,#182730 77%)}
+#header a[data-open-menu]::after{content:"⌄";font-size:16px;font-weight:400;margin-left:11px}
+#main{width:100%;max-width:none;margin:0;padding:0 36px 88px}
+.card-edit{width:100%;margin:0;padding:0;background:transparent;color:#f4f5f6}
+.card-edit turbo-frame{display:block}
+.card-edit form{display:block;margin:0}
+.card-edit .card__title{margin:0;font-size:47.5px;font-weight:900;line-height:1.15}
+.card-edit textarea[name="card[title]"]{display:block;field-sizing:content;width:auto;min-width:10ch;max-width:100%;min-height:0;margin:0;padding:0 0 .6ch;border:0;border-radius:0;outline:0;resize:none;overflow:hidden;background:transparent;color:#f4f5f6;font:inherit;line-height:1.15}
+.card-edit textarea[name="card[title]"]:focus{outline:0;box-shadow:none}
+.card-edit lexxy-editor{display:block;width:100%;min-height:266px;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:#f4f5f6;font:inherit;--lexxy-toolbar-button-size:32px}
+.card-edit lexxy-editor:focus-within{outline:0;box-shadow:none}
+.card-edit lexxy-editor [contenteditable]{padding:0}
+.card-edit lexxy-toolbar{min-height:44px;border-block:1px solid #33424b}
+.card-edit lexxy-toolbar button,.card-edit lexxy-toolbar .lexxy-editor__toolbar-button{padding:6px;border:0;border-radius:3px;background:transparent;color:#f4f5f6}
+.card-edit lexxy-toolbar button:hover,.card-edit lexxy-toolbar .lexxy-editor__toolbar-button:hover{background:#23353f}
+.card-edit form>button[type="submit"],.card-edit form>a{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.card-edit__error{margin:0;color:#ff9f96}
+@media(max-width:700px){#header{height:56px}#main{padding:0 18px 86px}.card-edit .card__title{font-size:clamp(28px,7vw,47.5px)}}

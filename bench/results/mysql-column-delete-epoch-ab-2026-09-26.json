@@ -1,0 +1,78 @@
+{
+  "database": "Oracle MySQL 8",
+  "mysql_version": "8.4.11",
+  "fixture": "Fresh database per binary/trial; SQL-cloned cards; timed API DELETE; all-card timestamps, activity, placement, and other-column state verified",
+  "server_cpus": [
+    0,
+    1
+  ],
+  "rust_processes_per_binary": 1,
+  "before": {
+    "revision": "095e0c1",
+    "binary_sha256": "27aec293a5c5acda86221393fb615909179e968378d42c28db1de7078231ab9d"
+  },
+  "after": {
+    "revision": "1d1d501",
+    "binary_sha256": "2412a5218c57babb4111a97a873f9d2de4c7927a0d7f7cd3fa9b33dffb9a32e5"
+  },
+  "sizes": {
+    "1000": {
+      "samples_ms": {
+        "before": [
+          20.286,
+          19.541,
+          19.405,
+          19.492,
+          19.689
+        ],
+        "after": [
+          16.179,
+          16.345,
+          16.481,
+          16.075,
+          16.763
+        ]
+      },
+      "median_ms": {
+        "before": 19.541,
+        "after": 16.345
+      },
+      "paired_after_before_ratios": [
+        0.798,
+        0.836,
+        0.849,
+        0.825,
+        0.851
+      ]
+    },
+    "10000": {
+      "samples_ms": {
+        "before": [
+          177.148,
+          182.391,
+          182.927,
+          182.47,
+          191.458
+        ],
+        "after": [
+          148.976,
+          154.159,
+          144.181,
+          145.673,
+          152.663
+        ]
+      },
+      "median_ms": {
+        "before": 182.47,
+        "after": 148.976
+      },
+      "paired_after_before_ratios": [
+        0.841,
+        0.845,
+        0.788,
+        0.798,
+        0.797
+      ]
+    }
+  }
+}

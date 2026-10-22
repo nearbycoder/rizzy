@@ -89,14 +89,11 @@ pub(super) async fn create(
         .unwrap_or_else(|| email.split('@').next().unwrap_or("Importer").to_owned());
     let account_id = id();
     let user_id = id();
-    let system_identity = id();
     let system_id = id();
     let timestamp = now();
-    let slug: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(external_account_id),0)+1 FROM accounts")
-            .fetch_one(&app.db)
-            .await
-            .map_err(db_err)?;
+    let slug = account_sequence::next(&app.db, app.mysql)
+        .await
+        .map_err(db_err)?;
     let mut tx = app.db.begin().await.map_err(db_err)?;
     sqlx::query(
         "INSERT INTO accounts(id,external_account_id,name,created_at) VALUES(?,?,'Import',?)",
@@ -107,22 +104,21 @@ pub(super) async fn create(
     .execute(&mut *tx)
     .await
     .map_err(db_err)?;
-    insert_join_code_tx(&mut tx, &account_id)
+    insert_join_code_tx(&mut tx, &account_id, app.mysql)
         .await
         .map_err(db_err)?;
     sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at,verified_at) VALUES(?,?,?,?,'owner',?,?)")
         .bind(&user_id).bind(&account_id).bind(&identity_id).bind(owner_name).bind(&timestamp).bind(&timestamp)
         .execute(&mut *tx).await.map_err(db_err)?;
-    sqlx::query("INSERT INTO identities(id,email_address,created_at) VALUES(?,?,?)")
-        .bind(&system_identity)
-        .bind(format!("system+{account_id}@rizzy.invalid"))
-        .bind(&timestamp)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-        .bind(&system_id).bind(&account_id).bind(&system_identity).bind(&timestamp)
-        .execute(&mut *tx).await.map_err(db_err)?;
+    sqlx::query(
+        "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+    )
+    .bind(&system_id)
+    .bind(&account_id)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
     sqlx::query(
         "INSERT INTO imports(id,account_id,identity_id,created_at,updated_at) VALUES(?,?,?,?,?)",
     )
@@ -231,11 +227,11 @@ fn load_archive(path: &PathBuf) -> ImportResult<Archive> {
             }
             groups.entry(group.to_owned()).or_default().push(value);
         } else if let Some(key) = name.strip_prefix("storage/") {
-            if key.is_empty()
-                || key.contains('/')
-                || key.contains('\\')
-                || key == "."
-                || key == ".."
+            if key.contains('\\')
+                || key.contains('\0')
+                || key
+                    .split('/')
+                    .any(|segment| segment.is_empty() || segment == "." || segment == "..")
             {
                 return Err(format!("Invalid storage path: {name}"));
             }
@@ -534,12 +530,6 @@ async fn apply_archive(
     let join_code = field(join, "code")?;
     let imported_at = now();
     let mut tx = app.db.begin().await.map_err(|e| e.to_string())?;
-    let system_identity: String =
-        sqlx::query_scalar("SELECT identity_id FROM users WHERE account_id=? AND role='system'")
-            .bind(account_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
     let importer_identity: String =
         sqlx::query_scalar("SELECT identity_id FROM imports WHERE account_id=?")
             .bind(account_id)
@@ -581,26 +571,30 @@ async fn apply_archive(
     for user in records(&archive, "users") {
         let user_id = field(user, "id")?;
         let role = field(user, "role")?;
-        let identity_id = if role == "system" {
-            system_identity.clone()
-        } else {
-            let email = maybe_field(user, "email_address")
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("missing+{user_id}@rizzy.invalid"));
-            sqlx::query(
-                "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)",
-            )
-            .bind(id())
-            .bind(&email)
-            .bind(field(user, "created_at")?)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
-            sqlx::query_scalar("SELECT id FROM identities WHERE email_address=?")
+        let identity_id: Option<String> = if let Some(email) =
+            maybe_field(user, "email_address").filter(|email| !email.trim().is_empty())
+        {
+            let insert_identity = if app.mysql {
+                "INSERT IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+            } else {
+                "INSERT OR IGNORE INTO identities(id,email_address,created_at) VALUES(?,?,?)"
+            };
+            sqlx::query(insert_identity)
+                .bind(id())
                 .bind(email)
-                .fetch_one(&mut *tx)
+                .bind(field(user, "created_at")?)
+                .execute(&mut *tx)
                 .await
-                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+            Some(
+                sqlx::query_scalar::<_, String>("SELECT id FROM identities WHERE email_address=?")
+                    .bind(email)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
         };
         sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,active,verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
             .bind(user_id).bind(account_id).bind(identity_id).bind(field(user,"name")?).bind(role)
@@ -611,9 +605,24 @@ async fn apply_archive(
     for settings in records(&archive, "user_settings") {
         let user_id = field(settings, "user_id")?;
         let frequency = field(settings, "bundle_email_frequency")?;
-        sqlx::query("INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency")
-            .bind(user_id).bind(account_id).bind(frequency).execute(&mut *tx).await.map_err(|e| e.to_string())?;
-        sqlx::query("INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name")
+        let update_notifications = if app.mysql {
+            "INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON DUPLICATE KEY UPDATE bundle_email_frequency=VALUES(bundle_email_frequency)"
+        } else {
+            "INSERT INTO notification_settings(user_id,account_id,bundle_email_frequency) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET bundle_email_frequency=excluded.bundle_email_frequency"
+        };
+        sqlx::query(update_notifications)
+            .bind(user_id)
+            .bind(account_id)
+            .bind(frequency)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let update_timezone = if app.mysql {
+            "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON DUPLICATE KEY UPDATE timezone_name=VALUES(timezone_name)"
+        } else {
+            "INSERT INTO user_timezones(user_id,account_id,timezone_name) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET timezone_name=excluded.timezone_name"
+        };
+        sqlx::query(update_timezone)
             .bind(user_id)
             .bind(account_id)
             .bind(maybe_field(settings, "timezone_name"))
@@ -629,29 +638,85 @@ async fn apply_archive(
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
-        if changed.rows_affected() != 1 {
-            return Err("User settings metadata was not restored".into());
+        if changed.rows_affected() == 0 {
+            let existing: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM user_settings_records WHERE user_id=? AND account_id=?",
+            )
+            .bind(user_id)
+            .bind(account_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            if existing.is_none() {
+                sqlx::query("INSERT INTO user_settings_records(id,account_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+                    .bind(field(settings, "id")?)
+                    .bind(account_id)
+                    .bind(user_id)
+                    .bind(field(settings, "created_at")?)
+                    .bind(&imported_at)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    // Fizzy inserts imported users in bulk, bypassing their create callbacks.
+    // Rizzy's database triggers make default settings for every regular user;
+    // discard those defaults when the archive has no settings for that user.
+    let settings_users: HashSet<String> = records(&archive, "user_settings")
+        .iter()
+        .filter_map(|settings| maybe_field(settings, "user_id").map(str::to_owned))
+        .collect();
+    let imported_user_ids: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM users WHERE account_id=?")
+            .bind(account_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    for user_id in imported_user_ids {
+        if !settings_users.contains(&user_id) {
+            for table in [
+                "user_timezones",
+                "notification_settings",
+                "user_settings_records",
+            ] {
+                sqlx::query(&format!(
+                    "DELETE FROM {table} WHERE user_id=? AND account_id=?"
+                ))
+                .bind(&user_id)
+                .bind(account_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
         }
     }
     if !records(&archive, "users")
         .iter()
         .any(|user| maybe_field(user, "role") == Some("system"))
     {
-        sqlx::query("INSERT INTO users(id,account_id,identity_id,name,role,created_at) VALUES(?,?,?,'System','system',?)")
-            .bind(id()).bind(account_id).bind(system_identity).bind(now())
-            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO users(id,account_id,name,role,created_at) VALUES(?,?,'System','system',?)",
+        )
+        .bind(id())
+        .bind(account_id)
+        .bind(now())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
-    sqlx::query("INSERT OR IGNORE INTO notification_settings(user_id,account_id) SELECT id,account_id FROM users WHERE account_id=? AND role!='system'")
-        .bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     for tag in records(&archive, "tags") {
-        sqlx::query("INSERT INTO tags(id,account_id,title,created_at) VALUES(?,?,?,?)")
-            .bind(field(tag, "id")?)
-            .bind(account_id)
-            .bind(field(tag, "title")?)
-            .bind(field(tag, "created_at")?)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO tags(id,account_id,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+        )
+        .bind(field(tag, "id")?)
+        .bind(account_id)
+        .bind(field(tag, "title")?)
+        .bind(field(tag, "created_at")?)
+        .bind(&imported_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     for board in records(&archive, "boards") {
         sqlx::query("INSERT INTO boards(id,account_id,creator_id,name,all_access,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
@@ -712,7 +777,7 @@ async fn apply_archive(
         }
     }
     for publication in records(&archive, "board_publications") {
-        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,key,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO board_publications(id,account_id,board_id,`key`,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(field(publication, "id")?)
             .bind(account_id)
             .bind(field(publication, "board_id")?)
@@ -804,18 +869,23 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for assignment in records(&archive, "assignments") {
-        sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at) VALUES(?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO assignments(id,account_id,card_id,assignee_id,assigner_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
             .bind(field(assignment,"id")?).bind(account_id).bind(field(assignment,"card_id")?)
             .bind(field(assignment,"assignee_id")?).bind(field(assignment,"assigner_id")?)
-            .bind(field(assignment,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(field(assignment,"created_at")?).bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for tagging in records(&archive, "taggings") {
-        sqlx::query("INSERT INTO taggings(card_id,tag_id) VALUES(?,?)")
-            .bind(field(tagging, "card_id")?)
-            .bind(field(tagging, "tag_id")?)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO taggings(id,card_id,tag_id,created_at,updated_at) VALUES(?,?,?,?,?)",
+        )
+        .bind(field(tagging, "id")?)
+        .bind(field(tagging, "card_id")?)
+        .bind(field(tagging, "tag_id")?)
+        .bind(field(tagging, "created_at")?)
+        .bind(&imported_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     for closure in records(&archive, "closures") {
         let card_id = field(closure, "card_id")?;
@@ -894,21 +964,22 @@ async fn apply_archive(
             .map_err(|e| e.to_string())?;
     }
     for pin in records(&archive, "pins") {
-        sqlx::query("INSERT INTO pins(id,account_id,card_id,user_id,created_at) VALUES(?,?,?,?,?)")
+        sqlx::query("INSERT INTO pins(id,account_id,card_id,user_id,created_at,updated_at) VALUES(?,?,?,?,?,?)")
             .bind(field(pin, "id")?)
             .bind(account_id)
             .bind(field(pin, "card_id")?)
             .bind(field(pin, "user_id")?)
             .bind(field(pin, "created_at")?)
+            .bind(&imported_at)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
     }
     for reaction in records(&archive, "reactions") {
-        sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at) VALUES(?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO reactions(id,account_id,reactable_type,reactable_id,reacter_id,content,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
             .bind(field(reaction,"id")?).bind(account_id).bind(field(reaction,"reactable_type")?)
             .bind(field(reaction,"reactable_id")?).bind(field(reaction,"reacter_id")?)
-            .bind(field(reaction,"content")?).bind(field(reaction,"created_at")?)
+            .bind(field(reaction,"content")?).bind(field(reaction,"created_at")?).bind(&imported_at)
             .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for mention in records(&archive, "mentions") {
@@ -927,14 +998,27 @@ async fn apply_archive(
             .bind(&imported_at).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
     for tracker in records(&archive, "webhook_delinquency_trackers") {
-        let changed = sqlx::query("UPDATE webhooks SET consecutive_failures_count=?,first_failure_at=? WHERE id=? AND account_id=?")
-            .bind(integer(tracker,"consecutive_failures_count",0))
-            .bind(maybe_field(tracker,"first_failure_at")).bind(field(tracker,"webhook_id")?)
-            .bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
-        if changed.rows_affected() != 1 {
+        let webhook_id = field(tracker, "webhook_id")?;
+        let exists: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM webhooks WHERE id=? AND account_id=?")
+                .bind(webhook_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+        if exists != 1 {
             return Err("Tracker references unknown webhook".into());
         }
+        let tracker_id = maybe_field(tracker, "id").unwrap_or(webhook_id);
+        sqlx::query("INSERT INTO webhook_delinquency_trackers(id,account_id,webhook_id,consecutive_failures_count,first_failure_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+            .bind(tracker_id).bind(account_id).bind(webhook_id)
+            .bind(integer(tracker,"consecutive_failures_count",0))
+            .bind(maybe_field(tracker,"first_failure_at"))
+            .bind(field(tracker,"created_at")?).bind(&imported_at)
+            .execute(&mut *tx).await.map_err(|e| e.to_string())?;
     }
+    sqlx::query("INSERT INTO webhook_delinquency_trackers(id,account_id,webhook_id,created_at,updated_at) SELECT w.id,w.account_id,w.id,w.created_at,w.updated_at FROM webhooks w LEFT JOIN webhook_delinquency_trackers t ON t.webhook_id=w.id WHERE w.account_id=? AND t.id IS NULL")
+        .bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
     for event in records(&archive, "events") {
         let eventable_id = field(event, "eventable_id")?;
         let eventable_type = field(event, "eventable_type")?;
@@ -1003,33 +1087,37 @@ async fn apply_archive(
         if !seen_storage.insert(old_key.to_owned()) {
             return Err("Duplicate blob key".into());
         }
-        let bytes = archive
-            .storage
-            .get(old_key)
-            .ok_or_else(|| format!("Missing storage file: {old_key}"))?;
-        if bytes.len() as i64 != integer(blob, "byte_size", -1) {
-            return Err(format!("Storage size mismatch: {old_key}"));
-        }
-        let checksum = base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes));
-        if checksum != field(blob, "checksum")? {
-            return Err(format!("Storage checksum mismatch: {old_key}"));
+        let bytes = archive.storage.get(old_key);
+        let checksum = field(blob, "checksum")?;
+        let byte_size = integer(blob, "byte_size", -1);
+        if let Some(bytes) = bytes {
+            if bytes.len() as i64 != byte_size {
+                return Err(format!("Storage size mismatch: {old_key}"));
+            }
+            let actual_checksum =
+                base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes));
+            if actual_checksum != checksum {
+                return Err(format!("Storage checksum mismatch: {old_key}"));
+            }
         }
         let new_key = random_token();
-        let signed_id = random_token();
-        let sgid = random_token();
+        let signed_id = app.sgid_signer.blob_signed_id(blob_id);
+        let sgid = app.sgid_signer.blob(blob_id);
         let upload_hash = hash(&random_token());
         let metadata = serde_json::to_string(blob.get("metadata").unwrap_or(&json!({})))
             .map_err(|e| e.to_string())?;
         let path = storage::storage_dir().join(&new_key);
-        tokio::fs::write(&path, bytes)
-            .await
-            .map_err(|e| e.to_string())?;
-        files.0.push(path);
+        if let Some(bytes) = bytes {
+            tokio::fs::write(&path, bytes)
+                .await
+                .map_err(|e| e.to_string())?;
+            files.0.push(path);
+        }
         sqlx::query("INSERT INTO storage_blobs(id,account_id,storage_key,filename,content_type,byte_size,checksum,metadata,signed_id,attachable_sgid,upload_token_hash,upload_expires_at,uploaded_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(blob_id).bind(account_id).bind(new_key).bind(field(blob,"filename")?)
-            .bind(field(blob,"content_type")?).bind(bytes.len() as i64).bind(checksum)
+            .bind(field(blob,"content_type")?).bind(byte_size).bind(checksum)
             .bind(metadata)
-            .bind(signed_id).bind(&sgid).bind(upload_hash).bind(now()).bind(now())
+            .bind(signed_id).bind(&sgid).bind(upload_hash).bind(now()).bind(bytes.map(|_| now()))
             .bind(field(blob,"created_at")?).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         blob_sgids.insert(blob_id.to_owned(), sgid);
     }
@@ -1160,8 +1248,20 @@ async fn apply_archive(
             .await
             .map_err(|e| e.to_string())?;
     }
-    sqlx::query("UPDATE accounts SET cards_count=MAX(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?")
-        .bind(account_id).bind(account_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    let repair_count = if app.mysql {
+        "UPDATE accounts SET cards_count=GREATEST(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?"
+    } else {
+        "UPDATE accounts SET cards_count=MAX(cards_count,COALESCE((SELECT MAX(number) FROM cards WHERE account_id=?),0)) WHERE id=?"
+    };
+    sqlx::query(repair_count)
+        .bind(account_id)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    storage::reconcile_imported_storage_tx(&mut tx, account_id, app.mysql)
+        .await
+        .map_err(|error| error.1)?;
     let timestamp = now();
     let completed = sqlx::query("UPDATE imports SET status='completed',completed_at=?,updated_at=? WHERE id=? AND status='processing'")
         .bind(&timestamp).bind(&timestamp).bind(import_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
@@ -1205,11 +1305,6 @@ pub(super) async fn worker(app: Arc<App>) {
                 eprintln!("import recovery failed: {error}");
             }
         }
-        if timer_tick && (ticks == 1 || ticks.is_multiple_of(3600)) {
-            if let Err(error) = cleanup(&app).await {
-                eprintln!("import cleanup failed: {error}");
-            }
-        }
         let pending = sqlx::query(
             "SELECT id,account_id FROM imports WHERE status='pending' ORDER BY created_at LIMIT 1",
         )
@@ -1237,16 +1332,22 @@ pub(super) async fn worker(app: Arc<App>) {
             continue;
         }
         match restore(&app, &import_id, &account_id).await {
-            Ok(()) => {}
+            Ok(()) => {
+                if let Err(error) = import_mail::send(&app, &import_id, true, None).await {
+                    eprintln!("import completion email failed: {}", error.1);
+                }
+            }
             Err(error) => {
                 eprintln!("import {import_id} failed: {error}");
-                let reason = if error.contains("UNIQUE constraint") || error.contains("PRIMARY KEY")
+                let reason = if error.contains("UNIQUE constraint")
+                    || error.contains("PRIMARY KEY")
+                    || error.contains("1062 (23000)")
                 {
                     "conflict"
                 } else {
                     "invalid_export"
                 };
-                let _ = sqlx::query(
+                let recorded = sqlx::query(
                     "UPDATE imports SET status='failed',failure_reason=?,updated_at=? WHERE id=?",
                 )
                 .bind(reason)
@@ -1254,13 +1355,20 @@ pub(super) async fn worker(app: Arc<App>) {
                 .bind(&import_id)
                 .execute(&app.db)
                 .await;
+                if recorded.is_ok_and(|result| result.rows_affected() == 1) {
+                    if let Err(error) =
+                        import_mail::send(&app, &import_id, false, Some(reason)).await
+                    {
+                        eprintln!("import failure email failed: {}", error.1);
+                    }
+                }
             }
         }
         app.import_notify.notify_one();
     }
 }
 
-async fn cleanup(app: &App) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn cleanup(app: &App) -> std::result::Result<(), sqlx::Error> {
     let completed = (Utc::now() - chrono::Duration::hours(24))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let failed = (Utc::now() - chrono::Duration::days(7))

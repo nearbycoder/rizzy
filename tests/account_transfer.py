@@ -142,20 +142,34 @@ def main():
             comment = api(target, f"/cards/{card['number']}/comments", "POST",
                           {"comment": {"body": "An observation"}}, 201)
             mutate(target, f"/cards/{card['number']}/taggings", payload={"tag_title": "#transfer"})
+            mutate(target, f"/cards/{card['number']}/pin")
+            with sqlite3.connect(db_path) as db:
+                tag_record = db.execute("SELECT id,title,created_at,updated_at FROM tags WHERE title='transfer'").fetchone()
+                tagging_record = db.execute("SELECT id,card_id,tag_id,created_at,updated_at FROM taggings WHERE card_id=?", (card["id"],)).fetchone()
+            assert tag_record and tagging_record and tagging_record[2] == tag_record[0]
             mutate(target, f"/cards/{card['number']}/assignments", payload={"assignee_id": owner["id"]})
             mutate(target, f"/cards/{card['number']}/goldness")
             with sqlite3.connect(db_path) as db:
+                assignment_record = db.execute(
+                    "SELECT id,card_id,assignee_id,assigner_id,created_at,updated_at "
+                    "FROM assignments WHERE card_id=? AND assignee_id=?",
+                    (card["id"], owner["id"])).fetchone()
                 gold_record = db.execute(
                     "SELECT id,created_at,updated_at FROM card_goldnesses WHERE card_id=?",
                     (card["id"],)).fetchone()
                 watch_record = db.execute(
                     "SELECT id,user_id,watching,created_at,updated_at FROM watches WHERE card_id=? AND user_id=?",
                     (card["id"], owner["id"])).fetchone()
+                pin_record = db.execute(
+                    "SELECT id,card_id,user_id,created_at,updated_at FROM pins WHERE card_id=? AND user_id=?",
+                    (card["id"], owner["id"])).fetchone()
                 rich_record = db.execute(
                     "SELECT id,created_at,updated_at FROM rich_text_records WHERE record_type='Card' AND record_id=? AND name='description'",
                     (card["id"],)).fetchone()
+            assert assignment_record and assignment_record[4] == assignment_record[5]
             assert gold_record
             assert watch_record
+            assert pin_record and pin_record[3] == pin_record[4]
             assert rich_record
             with sqlite3.connect(db_path) as db:
                 spike_record = db.execute(
@@ -169,15 +183,26 @@ def main():
                     (card["id"],)).fetchone()
             assert closure_record and closure_record[2] == owner["id"]
             mutate(target, f"/cards/{card['number']}/reactions", payload={"reaction": {"content": "👍"}})
+            with sqlite3.connect(db_path) as db:
+                reaction_record = db.execute(
+                    "SELECT id,reactable_type,reactable_id,reacter_id,content,created_at,updated_at FROM reactions WHERE reactable_type='Card' AND reactable_id=?",
+                    (card["id"],)).fetchone()
+            assert reaction_record and reaction_record[5] == reaction_record[6]
             mutate(target, f"/boards/{board['id']}/publication")
             with sqlite3.connect(db_path) as db:
                 publication_record = db.execute(
                     "SELECT id,account_id,key,created_at,updated_at FROM board_publications WHERE board_id=?",
                     (board["id"],)).fetchone()
             assert publication_record and publication_record[2]
-            mutate(target, f"/boards/{board['id']}/webhooks", payload={
+            webhook = mutate(target, f"/boards/{board['id']}/webhooks", payload={
                 "webhook": {"name": "Transfer hook", "url": "https://example.invalid/rizzy-transfer",
                             "subscribed_actions": []}})
+            with sqlite3.connect(db_path) as db:
+                tracker_record = db.execute(
+                    "SELECT id,account_id,webhook_id,consecutive_failures_count,first_failure_at,created_at,updated_at "
+                    "FROM webhook_delinquency_trackers WHERE webhook_id=?", (webhook["id"],)).fetchone()
+            assert tracker_record and tracker_record[0] != webhook["id"]
+            assert tracker_record[3] == 0 and tracker_record[4] is None
             with sqlite3.connect(db_path) as db:
                 user_before = db.execute("SELECT created_at,updated_at FROM users WHERE id=?",
                                          (owner["id"],)).fetchone()
@@ -218,7 +243,8 @@ def main():
                              f"storage/{image['key']}", f"storage/{embed['key']}"):
                     assert path in names, path
                 for directory in ("tags", "taggings", "assignments", "closures", "card_goldnesses", "card_not_nows",
-                                  "watches", "reactions", "board_publications", "webhooks"):
+                                  "watches", "reactions", "board_publications", "webhooks",
+                                  "webhook_delinquency_trackers"):
                     assert any(name.startswith(f"data/{directory}/") for name in names), directory
                 assert archive.read(f"storage/{image['key']}") == IMAGE
                 assert archive.read(f"storage/{embed['key']}") == IMAGE
@@ -239,6 +265,15 @@ def main():
                 step_data = json.loads(archive.read(f"data/steps/{step['id']}.json"))
                 assert (step_data["content"], step_data["completed"], step_data["created_at"],
                         step_data["updated_at"]) == ("First step revised", True, *step_times)
+                tag_data = json.loads(archive.read(f"data/tags/{tag_record[0]}.json"))
+                assert (tag_data["title"], tag_data["created_at"], tag_data["updated_at"]) == tag_record[1:]
+                tagging_data = json.loads(archive.read(f"data/taggings/{tagging_record[0]}.json"))
+                assert (tagging_data["card_id"], tagging_data["tag_id"], tagging_data["created_at"],
+                        tagging_data["updated_at"]) == tagging_record[1:]
+                assignment_data = json.loads(archive.read(f"data/assignments/{assignment_record[0]}.json"))
+                assert (assignment_data["card_id"], assignment_data["assignee_id"],
+                        assignment_data["assigner_id"], assignment_data["created_at"],
+                        assignment_data["updated_at"]) == assignment_record[1:]
                 gold_data = json.loads(archive.read(f"data/card_goldnesses/{gold_record[0]}.json"))
                 assert (gold_data["card_id"], gold_data["created_at"], gold_data["updated_at"]) == (
                     card["id"], gold_record[1], gold_record[2])
@@ -270,6 +305,11 @@ def main():
                 assert (publication_data["account_id"], publication_data["board_id"], publication_data["key"],
                         publication_data["created_at"], publication_data["updated_at"]) == (
                     account_id, board["id"], publication_record[2], publication_record[3], publication_record[4])
+                tracker_data = json.loads(archive.read(
+                    f"data/webhook_delinquency_trackers/{tracker_record[0]}.json"))
+                assert (tracker_data["account_id"], tracker_data["webhook_id"],
+                        tracker_data["consecutive_failures_count"], tracker_data["first_failure_at"],
+                        tracker_data["created_at"], tracker_data["updated_at"]) == tracker_record[1:]
                 spike_data = json.loads(archive.read(f"data/card_activity_spikes/{spike_record[0]}.json"))
                 assert (spike_data["card_id"], spike_data["created_at"], spike_data["updated_at"]) == (
                     card["id"], spike_record[1], spike_record[2])
@@ -277,6 +317,13 @@ def main():
                 assert (watch_data["card_id"], watch_data["user_id"], watch_data["watching"],
                         watch_data["created_at"], watch_data["updated_at"]) == (
                     card["id"], owner["id"], bool(watch_record[2]), watch_record[3], watch_record[4])
+                pin_data = json.loads(archive.read(f"data/pins/{pin_record[0]}.json"))
+                assert (pin_data["card_id"], pin_data["user_id"], pin_data["created_at"],
+                        pin_data["updated_at"]) == pin_record[1:]
+                reaction_data = json.loads(archive.read(f"data/reactions/{reaction_record[0]}.json"))
+                assert (reaction_data["reactable_type"], reaction_data["reactable_id"],
+                        reaction_data["reacter_id"], reaction_data["content"],
+                        reaction_data["created_at"], reaction_data["updated_at"]) == reaction_record[1:]
                 not_now_data = json.loads(archive.read(f"data/card_not_nows/{postponed_record[0]}.json"))
                 assert (not_now_data["card_id"], not_now_data["user_id"], not_now_data["created_at"]) == (
                     postponed_card["id"], owner["id"], postponed_record[2])

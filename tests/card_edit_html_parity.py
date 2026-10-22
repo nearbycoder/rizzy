@@ -33,12 +33,42 @@ def check(target):
         card = json.loads(raw)
         number = card["number"]
         path = f"/{account}/cards/{number}/edit"
+        frame_id = f"edit_card_{card['id']}"
+        status, _, card_page = request(target, f"/{account}/cards/{number}", accept="text/html")
+        assert status == 200, (target["name"], "card page", status)
+        frame_start = card_page.find(f'<turbo-frame id="{frame_id}"'.encode())
+        frame_end = card_page.find(b'</turbo-frame>', frame_start)
+        assert frame_start >= 0 and frame_end > frame_start, (target["name"], "card display frame")
+        display_frame = card_page[frame_start:frame_end]
+        assert b'class="card__title-link"' in display_frame and title.encode() in display_frame
+        assert b'A description for editing' in display_frame, (target["name"], "card display content")
         status, _, body = request(target, path, accept="text/html")
         assert status == 200, (target["name"], "edit page", status)
+        for marker in (b'id="global-container"', b'id="header"', b'id="main"', b'id="footer"'):
+            assert marker in body, (target["name"], "full edit shell", marker)
         for marker in (b'<turbo-frame id="edit_card_', b'<form id="edit_form_card_',
                        b'name="card[title]"', b'name="card[description]"', b'<lexxy-editor',
+                       f'data-local-save-key-value="card-{card["id"]}"'.encode(),
                        b'Close editor and discard changes', title.encode(), b'A description for editing'):
             assert marker in body, (target["name"], marker)
+        frame_request = urllib.request.Request(target["url"] + path, headers={
+            "Accept": "text/html", "Turbo-Frame": frame_id})
+        with target["opener"].open(frame_request, timeout=10) as response:
+            frame_body = response.read()
+            assert response.status == 200, (target["name"], "frame edit", response.status)
+        assert f'<turbo-frame id="{frame_id}"'.encode() in frame_body
+        assert b'id="global-container"' not in frame_body, (target["name"], "frame layout")
+        assert len(frame_body) < len(body), (target["name"], "frame response size")
+        csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', body)
+        csrf = csrf_match.group(1).decode() if csrf_match else None
+        status, headers, stream = request(target, f"/{account}/cards/{number}", "PATCH",
+                                          {"card": {"title": title + ' in place'}},
+                                          accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], "stream edit", status)
+        for target_id in (f"card_container_card_{card['id']}", frame_id,
+                          f"card_closure_toggle_card_{card['id']}"):
+            assert f'target="{target_id}"'.encode() in stream, (target["name"], "stream target", target_id)
+        assert (title + ' in place').encode() in stream, (target["name"], "stream title")
         status, _, _ = request(target, path, accept="application/json", bearer=True)
         assert status == 406, (target["name"], "JSON edit", status)
         status, _, raw = request(target, f"/{account}/cards/{number}", "PATCH",
@@ -49,7 +79,7 @@ def check(target):
     finally:
         status, _, _ = request(target, f"/{account}/boards/{board['id']}", "DELETE", bearer=True)
         assert status == 204, (target["name"], "cleanup", status)
-    return {"edit":200,"json":406,"save":200,"reload":200}
+    return {"edit":200,"frame":200,"stream":200,"json":406,"save":200,"reload":200}
 
 
 def main():

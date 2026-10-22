@@ -1,0 +1,182 @@
+{
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "5dd1ef83386c49cb3fa2062f9726cba37cf5fc99",
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "6744190af1aee779973428f5ab42eaad704cd78a687c27e32e8f9d01ed12e7bb",
+  "fixture": {
+    "format": "JPEG",
+    "bytes": 12794,
+    "derived_variants": 2
+  },
+  "server_cpus": 2,
+  "source_workers": 2,
+  "samples_per_app_per_round": 12,
+  "warmup": 2,
+  "purge_workers_paused": true,
+  "rounds": [
+    {
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "fizzy": {
+        "latency": {
+          "count": 12,
+          "median_ms": 31.75,
+          "p95_ms": 75.54,
+          "mean_ms": 35.7
+        },
+        "queued_originals": 14,
+        "retained_variants": 28,
+        "response_bytes": {
+          "min": 1469,
+          "max": 1473
+        },
+        "response_fields": [
+          "assignees",
+          "board",
+          "closed",
+          "comments_url",
+          "created_at",
+          "creator",
+          "description",
+          "description_html",
+          "golden",
+          "has_attachments",
+          "has_more_assignees",
+          "id",
+          "image_url",
+          "last_active_at",
+          "number",
+          "postponed",
+          "reactions_url",
+          "status",
+          "steps",
+          "tags",
+          "title",
+          "url"
+        ]
+      },
+      "rizzy": {
+        "latency": {
+          "count": 12,
+          "median_ms": 0.82,
+          "p95_ms": 3.1,
+          "mean_ms": 1.08
+        },
+        "queued_originals": 14,
+        "retained_variants": 28,
+        "response_bytes": {
+          "min": 1449,
+          "max": 1453
+        },
+        "response_fields": [
+          "assignees",
+          "board",
+          "closed",
+          "comments_url",
+          "created_at",
+          "creator",
+          "description",
+          "description_html",
+          "golden",
+          "has_attachments",
+          "has_more_assignees",
+          "id",
+          "image_url",
+          "last_active_at",
+          "number",
+          "postponed",
+          "reactions_url",
+          "status",
+          "steps",
+          "tags",
+          "title",
+          "url"
+        ]
+      }
+    },
+    {
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "rizzy": {
+        "latency": {
+          "count": 12,
+          "median_ms": 0.73,
+          "p95_ms": 0.99,
+          "mean_ms": 0.76
+        },
+        "queued_originals": 14,
+        "retained_variants": 28,
+        "response_bytes": {
+          "min": 1449,
+          "max": 1453
+        },
+        "response_fields": [
+          "assignees",
+          "board",
+          "closed",
+          "comments_url",
+          "created_at",
+          "creator",
+          "description",
+          "description_html",
+          "golden",
+          "has_attachments",
+          "has_more_assignees",
+          "id",
+          "image_url",
+          "last_active_at",
+          "number",
+          "postponed",
+          "reactions_url",
+          "status",
+          "steps",
+          "tags",
+          "title",
+          "url"
+        ]
+      },
+      "fizzy": {
+        "latency": {
+          "count": 12,
+          "median_ms": 27.34,
+          "p95_ms": 56.98,
+          "mean_ms": 28.3
+        },
+        "queued_originals": 14,
+        "retained_variants": 28,
+        "response_bytes": {
+          "min": 1469,
+          "max": 1473
+        },
+        "response_fields": [
+          "assignees",
+          "board",
+          "closed",
+          "comments_url",
+          "created_at",
+          "creator",
+          "description",
+          "description_html",
+          "golden",
+          "has_attachments",
+          "has_more_assignees",
+          "id",
+          "image_url",
+          "last_active_at",
+          "number",
+          "postponed",
+          "reactions_url",
+          "status",
+          "steps",
+          "tags",
+          "title",
+          "url"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Compare notification preferences on disposable Fizzy and Rizzy accounts."""
+
+import http.cookiejar
+import json
+import os
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+from html.parser import HTMLParser
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / "bench"), str(ROOT / "tests")]
+
+HELP_AGENTS = {
+    "chrome_linux": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "firefox_windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+    "firefox_android": "Mozilla/5.0 (Android 14; Mobile; rv:122.0) Gecko/122.0 Firefox/122.0",
+    "chrome_android": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+    "safari_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "safari_macos": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "chrome_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.0.0 Mobile/15E148 Safari/604.1",
+    "edge_windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "unknown": "Python-urllib/3.13",
+}
+
+from draft_workflow_parity import NoRedirect, login, request  # noqa: E402
+from sustained_mixed import (prepare_rust, prepare_source, rust_env,  # noqa: E402
+                             start_server, stop_server)
+
+
+class Tags(HTMLParser):
+    def __init__(self, raw):
+        super().__init__()
+        self.tags = []
+        self.feed(raw.decode())
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append((tag, dict(attrs)))
+
+    def find(self, tag, **wanted):
+        return [attrs for name, attrs in self.tags if name == tag and
+                all(attrs.get(key) == value for key, value in wanted.items())]
+
+    def classes(self, tag, *classes):
+        return [attrs for name, attrs in self.tags if name == tag and
+                set(classes) <= set(attrs.get("class", "").split())]
+
+
+class HelpText(HTMLParser):
+    def __init__(self, raw, origin):
+        super().__init__()
+        self.origin = origin
+        self.current = None
+        self.parts = []
+        self.headings = []
+        self.steps = []
+        self.paragraphs = []
+        self.help_depth = 0
+        self.feed(raw.decode())
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "div":
+            if self.help_depth:
+                self.help_depth += 1
+            elif "notifications-help__explainer" in dict(attrs).get("class", "").split():
+                self.help_depth = 1
+        if tag in ("h3", "li") or (tag == "p" and self.help_depth):
+            self.current = tag
+            self.parts = []
+
+    def handle_data(self, data):
+        if self.current:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == self.current:
+            value = " ".join("".join(self.parts).split())
+            value = value.replace("Fizzy", "Rizzy").replace(self.origin, "ORIGIN")
+            if value:
+                (self.headings if tag == "h3" else self.steps if tag == "li" else self.paragraphs).append(value)
+            self.current = None
+            self.parts = []
+        if tag == "div" and self.help_depth:
+            self.help_depth -= 1
+
+
+def check(target):
+    login(target)
+    account = target["account"]
+    board_ids = []
+    for name in ("Zulu board", "Alpha board"):
+        status, _, body = request(target, f"/{account}/boards", "POST",
+                                  {"board": {"name": name}}, bearer=True)
+        assert status == 201, (target["name"], status, body[:200])
+        board_ids.append(json.loads(body)["id"])
+    path = f"/{account}/notifications/settings"
+    status, _, body = request(target, path, accept="text/html")
+    assert status == 200, (target["name"], status)
+    tags = Tags(body)
+    assert len(tags.classes("h1", "header__title")) == 1
+    assert len(tags.classes("div", "settings__panel")) == 2
+    assert len(tags.classes("div", "settings__panel--users")) == 1
+    assert len(tags.classes("div", "settings__scrollable-list")) == 1
+    assert len(tags.find("section", **{"data-controller": "notifications"})) == 1
+    subscribe = tags.find("div", **{"data-notifications-target": "subscribeButton"})
+    assert len(subscribe) == 1 and "hidden" in subscribe[0]
+    assert len(tags.find("form", **{"data-controller": "form"})) == 1
+    assert len(tags.find("select", name="user_settings[bundle_email_frequency]")) == 1
+    assert b"Alpha board" in body and b"Zulu board" in body
+    assert body.index(b"Alpha board") < body.index(b"Zulu board")
+    assert b"Email Notifications" in body and b"Help me fix this" in body
+    board_frames = [attrs for attrs in tags.find("turbo-frame") if
+                    attrs.get("id", "").startswith("involvement_board_")]
+    button_frames = [attrs for attrs in tags.find("turbo-frame") if
+                     attrs.get("id", "").startswith("involvement_button_board_")]
+    assert len(board_frames) == len(button_frames) == 2, (target["name"], tags.find("turbo-frame"))
+    assert len(tags.classes("form", "button_to")) >= 2, (target["name"], tags.classes("form", "button_to"))
+    assert len(tags.find("input", name="_method", value="put")) >= 2
+    selected = [attrs["value"] for attrs in tags.find("option") if "selected" in attrs]
+    assert "every_few_hours" in selected, (target["name"], selected)
+    csrf = next((attrs["content"] for attrs in tags.find("meta", name="csrf-token")), None)
+
+    involvement_path = f"/{account}/boards/{board_ids[0]}/involvement"
+    status, _, _ = request(target, involvement_path, "PUT",
+                           {"involvement": "access_only"}, bearer=True)
+    assert status == 204, (target["name"], status)
+    status, headers, body = request(target, involvement_path + "?involvement=watching",
+                                    "PUT", b"", accept="text/html", csrf=csrf)
+    assert status == 200, (target["name"], status, body[:150])
+    assert headers.get_content_type() == "text/html"
+    assert Tags(body).find("turbo-frame", id=f"involvement_button_board_{board_ids[0]}")
+    assert b"Stop watching" in body
+    watch_form = urllib.parse.urlencode({"_method": "put", "involvement": "access_only",
+                                        "show_watchers": "false", "icon_only": "true"}).encode()
+    status, _, body = request(target, involvement_path, "POST", watch_form,
+                              accept="text/html", csrf=csrf)
+    assert status == 200, (target["name"], status, body[:150])
+    assert Tags(body).find("turbo-frame", id=f"involvement_button_board_{board_ids[0]}")
+    assert b"Watch this" in body
+    status, _, _ = request(target, involvement_path, "POST", b"", accept="text/html", csrf=csrf)
+    assert status == 404, (target["name"], status)
+    anonymous = {**target, "opener": urllib.request.build_opener(NoRedirect())}
+    status, _, _ = request(anonymous, involvement_path, "POST", b"", accept="text/html")
+    assert status == 404, (target["name"], status)
+
+    form = urllib.parse.urlencode({"_method": "patch", "user_settings[bundle_email_frequency]": "daily"}).encode()
+    status, headers, _ = request(target, path, "POST", form, accept="text/html", csrf=csrf)
+    assert status == 302, (target["name"], status)
+    assert urllib.parse.urlparse(headers["Location"]).path == path
+    status, _, body = request(target, path + ".json", bearer=True)
+    assert status == 200 and json.loads(body)["bundle_email_frequency"] == "daily"
+    status, _, body = request(target, path, accept="text/html")
+    assert status == 200
+    assert "daily" in [attrs["value"] for attrs in Tags(body).find("option") if "selected" in attrs]
+    help_results = {}
+    for name, agent in HELP_AGENTS.items():
+        target["extra_headers"] = {"User-Agent": agent}
+        status, _, body = request(target, path, accept="text/html")
+        assert status == 200, (target["name"], name, status)
+        help_text = HelpText(body, target["url"])
+        help_tags = Tags(body)
+        blocks = len(help_tags.classes("div", "notifications-help"))
+        details = len(help_tags.find("div", **{"data-notifications-target": "details"}))
+        help_results[name] = (help_text.headings, help_text.steps,
+                              help_text.paragraphs, blocks, details)
+    target.pop("extra_headers")
+    return {"panels": 2, "board_frames": len(board_frames),
+            "saved_frequency": "daily", "help": help_results}
+
+
+def main():
+    with tempfile.TemporaryDirectory(prefix="rizzy-notification-settings-") as temporary:
+        processes = []
+        results = {}
+        try:
+            for name in ("fizzy", "rizzy"):
+                directory = Path(temporary) / name
+                directory.mkdir()
+                if name == "fizzy":
+                    env, credentials = prepare_source(directory, 2)
+                else:
+                    env = rust_env(directory)
+                    env["RIZZY_DEV_MAGIC_LINKS"] = "1"
+                    env, credentials = prepare_rust(directory, env)
+                process, url = start_server(name, directory, env,
+                                            sorted(os.sched_getaffinity(0))[:2])
+                processes.append(process)
+                results[name] = check({
+                    "name": name, "url": url, "account": str(credentials["account"]),
+                    "token": credentials["token"], "email": "owner@example.com",
+                    "db": str(directory / ("db.sqlite3" if name == "fizzy" else "rizzy.sqlite3")),
+                    "opener": urllib.request.build_opener(
+                        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                        NoRedirect()),
+                })
+            mismatches = [(case, results["fizzy"]["help"][case], results["rizzy"]["help"][case])
+                          for case in HELP_AGENTS
+                          if results["fizzy"]["help"][case] != results["rizzy"]["help"][case]]
+            assert not mismatches, mismatches
+            assert {key: value for key, value in results["fizzy"].items() if key != "help"} == {
+                key: value for key, value in results["rizzy"].items() if key != "help"}
+            print(f"PASS paired notification settings, watch forms, email update, and {len(HELP_AGENTS)} push-help agents")
+        finally:
+            for process in reversed(processes):
+                stop_server(process)
+
+
+if __name__ == "__main__":
+    main()

@@ -20,14 +20,26 @@ pub(super) fn public_key() -> Option<String> {
 }
 
 pub(super) async fn queue(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Db>,
     user_id: &str,
     card_id: &str,
 ) -> Result<()> {
     let timestamp = now();
-    sqlx::query("INSERT OR IGNORE INTO push_deliveries(id,account_id,notification_id,source_id,status,attempts,next_attempt_at,created_at,updated_at) SELECT ?,n.account_id,n.id,n.source_id,0,0,?,?,? FROM notifications n WHERE n.user_id=? AND n.card_id=?")
-        .bind(id()).bind(&timestamp).bind(&timestamp).bind(&timestamp).bind(user_id).bind(card_id)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let statement = if (**tx).backend_name() == "MySQL" {
+        "INSERT IGNORE INTO push_deliveries(id,account_id,notification_id,source_id,status,attempts,next_attempt_at,created_at,updated_at) SELECT ?,n.account_id,n.id,n.source_id,0,0,?,?,? FROM notifications n WHERE n.user_id=? AND n.card_id=?"
+    } else {
+        "INSERT OR IGNORE INTO push_deliveries(id,account_id,notification_id,source_id,status,attempts,next_attempt_at,created_at,updated_at) SELECT ?,n.account_id,n.id,n.source_id,0,0,?,?,? FROM notifications n WHERE n.user_id=? AND n.card_id=?"
+    };
+    sqlx::query(statement)
+        .bind(id())
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(user_id)
+        .bind(card_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
     Ok(())
 }
 
@@ -319,8 +331,17 @@ async fn deliver_one(
             .map_err(db_err)?;
         match send(&endpoint, &p256dh, &auth, &content, key).await {
             Ok(true) => {
-                sqlx::query("INSERT OR IGNORE INTO push_delivery_receipts(delivery_id,subscription_id) VALUES(?,?)")
-                    .bind(delivery_id).bind(&id).execute(&app.db).await.map_err(db_err)?;
+                let statement = if app.mysql {
+                    "INSERT IGNORE INTO push_delivery_receipts(delivery_id,subscription_id) VALUES(?,?)"
+                } else {
+                    "INSERT OR IGNORE INTO push_delivery_receipts(delivery_id,subscription_id) VALUES(?,?)"
+                };
+                sqlx::query(statement)
+                    .bind(delivery_id)
+                    .bind(&id)
+                    .execute(&app.db)
+                    .await
+                    .map_err(db_err)?;
             }
             Ok(false) => {
                 sqlx::query("DELETE FROM push_subscriptions WHERE id=? AND user_id=?")
@@ -339,7 +360,7 @@ async fn deliver_one(
     Ok(!retry)
 }
 
-async fn process_job(app: &App, row: SqliteRow, key: &str) -> Result<usize> {
+async fn process_job(app: &App, row: DbRow, key: &str) -> Result<usize> {
     let id: String = row.get("id");
     let claimed = sqlx::query("UPDATE push_deliveries SET status=1,attempts=attempts+1,updated_at=? WHERE id=? AND status=0")
         .bind(now()).bind(&id).execute(&app.db).await.map_err(db_err)?;
@@ -389,8 +410,17 @@ async fn process_job(app: &App, row: SqliteRow, key: &str) -> Result<usize> {
 
 pub(super) async fn deliver_due(app: &App) -> Result<usize> {
     let Some(key) = private_key() else {
-        sqlx::query("UPDATE push_deliveries SET status=2,updated_at=? WHERE id IN (SELECT id FROM push_deliveries WHERE status=0 AND next_attempt_at<=? LIMIT 1000)")
-            .bind(now()).bind(now()).execute(&app.db).await.map_err(db_err)?;
+        let statement = if app.mysql {
+            "UPDATE push_deliveries SET status=2,updated_at=? WHERE status=0 AND next_attempt_at<=? LIMIT 1000"
+        } else {
+            "UPDATE push_deliveries SET status=2,updated_at=? WHERE id IN (SELECT id FROM push_deliveries WHERE status=0 AND next_attempt_at<=? LIMIT 1000)"
+        };
+        sqlx::query(statement)
+            .bind(now())
+            .bind(now())
+            .execute(&app.db)
+            .await
+            .map_err(db_err)?;
         return Ok(0);
     };
     VapidSignatureBuilder::from_base64_no_sub(&key)
@@ -450,7 +480,12 @@ mod tests {
 
     #[tokio::test]
     async fn event_and_mention_payloads_follow_fizzy_action_text() {
-        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::any::install_default_drivers();
+        let db = sqlx::any::AnyPoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         sqlx::raw_sql(include_str!("../schema.sql"))
             .execute(&db)
             .await
@@ -465,7 +500,9 @@ mod tests {
             .execute(&db).await.unwrap();
         let app = App {
             db,
+            mysql: false,
             qr_secret: "test-qr-secret".into(),
+            sgid_signer: crate::signed_global_id::Signer::new("test-qr-secret"),
             write_lock: tokio::sync::Mutex::new(()),
             auth_lock: tokio::sync::Mutex::new(()),
             notification_html_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),

@@ -1,0 +1,28 @@
+{
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "4225ca464a32cb38098c4d69abea76dd1df964a3",
+  "rizzy_binary_sha256": "3b27ae958597ae8c4eb15f9027f267e7d8dfdf0560644e4a4773c2559f2a2176",
+  "cpus": [
+    0,
+    1
+  ],
+  "workers": {
+    "fizzy": 2,
+    "rizzy": 1
+  },
+  "trials": 3,
+  "sizes": {
+    "30000": {
+      "fizzy": [
+        37.049,
+        35.527,
+        48.082
+      ],
+      "rizzy": [
+        59.007,
+        66.57,
+        67.076
+      ]
+    }
+  }
+}

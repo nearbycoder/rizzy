@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import time
+import urllib.parse
 import urllib.request
 
 from draft_workflow_parity import NoRedirect, login, request
@@ -30,6 +31,13 @@ def check_control(target, number, kind):
     if kind == "watch":
         status, _, _ = request(target, path, "DELETE", bearer=True)
         assert status == 204, (target["name"], kind, "reset", status)
+    status, _, card_page = request(target, f"/{target['account']}/cards/{number}", accept="text/html")
+    assert status == 200, (target["name"], kind, "card page", status)
+    frame = re.search(rb'<turbo-frame\b(?=[^>]*id="' + kind.encode() + rb'_card_[^"]+")(?=[^>]*src="' + re.escape(path.encode()) + rb'")[^>]*>', card_page)
+    assert frame, (target["name"], kind, "lazy card frame")
+    form = re.search(rb'<form\b[^>]*action="' + re.escape(path.encode()) + rb'"[^>]*>(.*?)</form>',
+                     card_page, re.S)
+    assert form and off_label.encode() in form.group(1), (target["name"], kind, "card action form")
     status, headers, page = request(target, path, accept="text/html")
     assert status == 200 and headers.get("ETag"), (target["name"], kind, "show", status)
     assert f'id="{kind}_card_'.encode() in page and f'id="{kind}_button_card_'.encode() in page
@@ -38,7 +46,7 @@ def check_control(target, number, kind):
     status, _, _ = request({**target, "extra_headers":{"If-None-Match":tag_before}}, path, accept="text/html")
     assert status == 304, (target["name"], kind, "unchanged", status)
     token = csrf(page)
-    status, headers, stream = request(target, path, "POST", b"", accept="text/vnd.turbo-stream.html", csrf=token)
+    status, headers, stream = request(target, path, "POST", b"", accept="text/vnd.turbo-stream.html", csrf=csrf(card_page) or token)
     assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], kind, "turbo create", status)
     assert b'<turbo-stream action="replace"' in stream and f'{kind}_button_card_'.encode() in stream and on_label.encode() in stream
     if kind == "watch":
@@ -47,7 +55,11 @@ def check_control(target, number, kind):
     assert status == 200 and headers["ETag"] != tag_before and on_label.encode() in page, (target["name"], kind, "changed", status)
     status, _, _ = request({**target, "extra_headers":{"If-None-Match":headers["ETag"]}}, path, accept="text/html")
     assert status == 304, (target["name"], kind, "unchanged active", status)
-    status, _, stream = request(target, path, "DELETE", b"", accept="text/vnd.turbo-stream.html", csrf=csrf(page))
+    active_form = re.search(rb'<form\b[^>]*action="' + re.escape(path.encode()) + rb'"[^>]*>(.*?)</form>',
+                            page, re.S)
+    assert active_form and b'name="_method" value="delete"' in active_form.group(1), (target["name"], kind, "delete form")
+    status, _, stream = request(target, path, "POST", urllib.parse.urlencode({"_method": "delete"}).encode(),
+                                accept="text/vnd.turbo-stream.html", csrf=csrf(card_page))
     assert status == 200 and off_label.encode() in stream, (target["name"], kind, "turbo destroy", status)
     status, _, _ = request(target, path, "POST", b"", bearer=True)
     assert status == 204, (target["name"], kind, "JSON create", status)

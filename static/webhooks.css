@@ -1,1 +1,67 @@
-:root{font:16px/1.5 system-ui,sans-serif;color:#f5f0e8;background:#1b1b1b}*{box-sizing:border-box}body{margin:0}a{color:#e7bd61}button,input{font:inherit}header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px max(20px,4vw);border-bottom:1px solid #383735}header h1{margin:0;font-size:28px}main{width:min(720px,calc(100% - 32px));margin:32px auto}.panel{padding:28px;border:1px solid #46433d;border-radius:16px;background:#292826;box-shadow:0 14px 40px #0005}.field{display:grid;gap:8px;margin:0 0 22px}.field input{width:100%;padding:11px;border:1px solid #666158;border-radius:8px;background:#34322f;color:#fff}.field small{display:block;color:#afa89d}.checks__actions{margin:6px 0}.checks__actions button{padding:0;border:0;background:none;color:#e7bd61;cursor:pointer}.checks ul{list-style:none;padding:0;margin:0}.checks li{margin:6px 0}.checks label{display:flex;align-items:center;gap:12px;cursor:pointer}.checks input{width:auto}.submit,button[type=submit]{display:inline-block;padding:10px 16px;border:0;border-radius:8px;background:#e7bd61;color:#201b12;text-decoration:none;font-weight:700;cursor:pointer}.webhook-list{list-style:none;padding:0}.webhook-list li{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid #46433d}.webhook-list a{text-decoration:none}.webhook-list button{background:#69423e;color:#fff}.url{overflow-wrap:anywhere}.error{color:#ffae9d}
+:root{font:19px/1.375 "Segoe UI",system-ui,sans-serif;color:#f4f5f6;background:#0d1a20}
+*{box-sizing:border-box}
+body{margin:0}
+button,input{font:inherit}
+#global-container{min-height:100vh;padding-bottom:50px}
+#header{position:relative;display:flex;align-items:flex-start;justify-content:center;height:112px;padding:16px 36px 0;border:0}
+#header .header__skip-navigation{position:absolute;left:-9999px}
+#header .header__skip-navigation:focus{left:12px;top:10px;z-index:30}
+#header>a[data-open-menu]{display:inline-flex;align-items:center;gap:8px;color:#f4f5f6;font-size:20px;font-weight:800;text-decoration:none}
+#header>a[data-open-menu]::before{content:"";display:block;width:29px;height:29px;border:1px solid #40505a;border-radius:7px;background:linear-gradient(90deg,#182730 0 19%,#e65667 19% 25%,#182730 25% 32%,#eab548 32% 38%,#182730 38% 45%,#75bf74 45% 51%,#182730 51% 58%,#56a7d8 58% 64%,#182730 64% 71%,#a67bd7 71% 77%,#182730 77%)}
+#header>a[data-open-menu]::after{content:"⌄";font-size:16px;font-weight:400;margin-left:11px}
+.webhook-header{position:absolute;inset:56px 36px auto;display:flex;align-items:center;justify-content:center;height:44px}
+.webhook-header>a{position:absolute;left:22px;color:#f4f5f6;font-size:21px;font-weight:800;text-decoration:none}
+.webhook-header>a:hover{text-decoration:underline}
+.webhook-header h1{margin:0;font-size:29px;font-weight:900;line-height:1.2}
+.webhook-header .webhook-header__edit{position:absolute;top:-2px;left:auto;right:0;display:grid;place-items:center;width:39px;height:39px;border:1px solid #40515d;border-radius:50%;color:#f4f5f6}
+.webhook-header__edit span{display:block;width:21px;height:21px;background:currentColor;mask:url('/assets/card/icons/pencil.svg') center/contain no-repeat}
+#main{width:100%;max-width:none;margin:0;padding:0 36px 86px}
+.webhook-content{width:100%;margin:0 auto}
+.webhook-content .panel{width:min(720px,100%);margin:0 auto;padding:38px;border:1px solid #26343d;border-radius:20px;background:transparent;color:#f4f5f6;box-shadow:none}
+.webhook-content .webhook-detail{display:flex;flex-direction:column;gap:24px;padding-bottom:42px;box-shadow:0 14px 35px #0003}
+.webhook-detail>header h1{margin:0;font-size:36px;font-weight:900;line-height:1.2}
+.webhook-detail>header .url{display:block;font-size:22px;line-height:1.2}
+.webhook-detail__section h2{margin:0;font-size:21px;line-height:1.25;text-transform:uppercase}
+.webhook-detail__section strong code{font-size:19px;line-height:1.3;overflow-wrap:anywhere}
+.webhook-detail__section p{margin:0;color:#a9b3ba;font-size:16px;line-height:1.4}
+.webhook-detail__section ul{margin:0;padding-left:40px;font-size:19px}
+.webhook-detail__section li{line-height:1.35}
+.webhook-content:has(.webhook-list) .panel{text-align:center;box-shadow:0 14px 35px #0003}
+.webhook-content:has(.webhook-list li) .panel{padding-bottom:37px}
+.webhook-content:has(.webhook-list) .panel>p{margin:17px 0 20px}
+.webhook-content:has(.webhook-list) .submit{display:inline-flex;align-items:center;gap:12px;margin-top:1px;padding:8px 24px;border-radius:999px;font-size:19px}
+.webhook-content:has(.webhook-list li) .submit{margin-top:0}
+.webhook-content:has(.webhook-list) .submit::before{content:"+";font-size:31px;font-weight:400;line-height:1}
+.webhook-content form{margin:0}
+.field{display:grid;gap:8px;margin:0 0 21px}
+.field:has(.checks){gap:0}
+.field label{display:block;font-weight:700}
+.field small,.field>small{display:block;color:#aab3ba;font-size:14px;font-weight:400}
+.field input:not([type=checkbox]){width:100%;height:47px;padding:8px 15px;border:1px solid #75828b;border-radius:9px;background:transparent;color:#f4f5f6;outline:0}
+.field input:not([type=checkbox]):focus{border:2px solid #87b9fa;box-shadow:none}
+.field:has(#webhook_name){margin-bottom:18px}
+.field label[for=webhook_name]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.field #webhook_name{height:71px;font-size:29px;font-weight:800;padding:11px 24px}
+.field #webhook_name::placeholder{color:#697077;opacity:1}
+.checks__actions{margin:5px 0 12px;font-size:15px}
+.checks__actions button{padding:0;border:0;background:none;color:#87b9fa;font-size:15px;text-decoration:underline;cursor:pointer}
+.checks ul{list-style:none;padding:0;margin:0}
+.checks li{margin:6px 0}
+.checks label{display:flex;align-items:center;gap:12px;font-weight:400;cursor:pointer}
+.checks input[type=checkbox]{appearance:none;position:relative;flex:none;width:42px;height:24px;margin:0;border:0;border-radius:99px;background:#7d858e;cursor:pointer}
+.checks input[type=checkbox]::before{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#0d1a20;transition:transform .15s}
+.checks input[type=checkbox]:checked{background:#87b9fa}
+.checks input[type=checkbox]:checked::before{transform:translateX(18px)}
+.checks input[type=checkbox]:focus-visible{outline:2px solid #87b9fa;outline-offset:2px}
+.submit,.webhook-content button[type=submit]{display:inline-block;padding:10px 16px;border:0;border-radius:8px;background:#87b9fa;color:#101b20;text-decoration:none;font-weight:700;cursor:pointer}
+.webhook-list{list-style:none;margin:0;padding:0;text-align:left}
+.webhook-list:has(li){margin-bottom:18px}
+.webhook-list li{display:flex;align-items:center;gap:12px;min-height:30px;margin:0;padding:0}
+.webhook-list a{min-width:0;overflow:hidden;color:#f4f5f6;font-size:21px;font-weight:800;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}
+.webhook-list a:hover{text-decoration:underline}
+.webhook-row__separator{flex:1;min-width:16px;margin:0;border:0;border-top:1px dashed #63717a}
+.webhook-content .webhook-list button[type=submit]{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:#ff9368;color:#101b20;font-size:25px;font-weight:700;line-height:1}
+.webhook-content .webhook-list button[type=submit] span{display:block;transform:translateY(-2px)}
+.url{overflow-wrap:anywhere}
+.error{color:#ffae9d}
+@media(max-width:700px){#header{height:100px;padding:12px 18px 0}.webhook-header{inset:50px 18px auto}.webhook-header>a{left:0;font-size:14px}.webhook-header h1{font-size:22px}#main{padding:0 14px 86px}.webhook-content .panel{padding:24px}}

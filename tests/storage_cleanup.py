@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Check that deleting cards and boards purges their stored image bytes."""
+"""Check that queued card and board image purges remove stored bytes."""
 import base64
 import hashlib
 import json
 import os
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 
@@ -44,6 +45,14 @@ def main():
     prefix = f"/{target['account']}"
     database = sqlite3.connect(os.environ["RIZZY_DB_PATH"])
     storage = Path(os.environ["RIZZY_STORAGE_DIR"])
+    purge_env = {**os.environ,
+                 "RIZZY_DATABASE_URL": f"sqlite://{os.environ['RIZZY_DB_PATH']}"}
+
+    def drain():
+        result = subprocess.run([str(Path(__file__).resolve().parents[1] / "target/release/rizzy"),
+                                 "purge-stored-blobs"], env=purge_env,
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr[-1000:]
     status, _, raw = call(target, prefix + "/boards", "POST",
                           {"board": {"name": f"Storage cleanup {time.time_ns()}"}})
     board = check(status, raw, 201)
@@ -51,12 +60,14 @@ def main():
         number, upload = attach(target, prefix, board["id"])
         assert (storage / upload["key"]).read_bytes() == IMAGE
         replacement = upload_to_card(target, prefix, number)
+        drain()
         assert database.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
                                 (upload["signed_id"],)).fetchone()[0] == 0
         assert not (storage / upload["key"]).exists()
         upload = replacement
         status, _, raw = call(target, prefix + f"/cards/{number}", "DELETE")
         check(status, raw, 204)
+        drain()
         assert database.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
                                 (upload["signed_id"],)).fetchone()[0] == 0
         assert not (storage / upload["key"]).exists()
@@ -65,6 +76,7 @@ def main():
         assert (storage / upload["key"]).read_bytes() == IMAGE
         status, _, raw = call(target, prefix + f"/boards/{board['id']}", "DELETE")
         check(status, raw, 204)
+        drain()
         assert database.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
                                 (upload["signed_id"],)).fetchone()[0] == 0
         assert not (storage / upload["key"]).exists()

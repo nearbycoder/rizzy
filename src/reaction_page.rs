@@ -76,7 +76,7 @@ fn render(
 pub(super) async fn reactions_html(
     app: &App,
     p: &Principal,
-    card: &SqliteRow,
+    card: &DbRow,
     comment: Option<&str>,
 ) -> Result<String> {
     let (kind, target) = if let Some(comment) = comment {
@@ -97,9 +97,9 @@ pub(super) async fn reactions_html(
 
 pub(super) fn reaction_frame(
     p: &Principal,
-    card: &SqliteRow,
+    card: &DbRow,
     comment: Option<&str>,
-    rows: &[SqliteRow],
+    rows: &[DbRow],
 ) -> String {
     let (kind, target, path) = if let Some(comment) = comment {
         (
@@ -129,14 +129,10 @@ pub(super) fn reaction_frame(
         let original_name: String = row.get("name");
         let name = escape(&original_name);
         let owner = row.get::<String, _>("reacter_id") == p.user_id;
-        let delete = if owner {
-            format!(
-                "<button type=\"button\" class=\"reaction__delete\" data-reaction-delete=\"{path}/{id}\" aria-label=\"Delete reaction\">×</button>"
-            )
-        } else {
-            String::new()
-        };
-        list.push_str(&format!("<div id=\"reaction_{id}\" class=\"reaction\"><span class=\"reaction__avatar\" title=\"{name}\">{}</span><span class=\"reaction__content\" title=\"{name} reacted {content}\">{content}</span>{delete}</div>",escape(&original_name.chars().next().unwrap_or('?').to_string())));
+        let delete = format!(
+            "<form class=\"reaction__delete-form\" method=\"post\" action=\"{path}/{id}\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\" class=\"reaction__delete\" aria-label=\"Delete this reaction\">×<span class=\"for-screen-reader\">Delete this reaction</span></button></form>"
+        );
+        list.push_str(&format!("<div id=\"reaction_{id}\" class=\"reaction{}\" data-reaction-owner=\"{}\"><span class=\"reaction__avatar\" title=\"{name}\">{}</span><span class=\"reaction__content\" data-reaction-delete-target=\"content\" title=\"{name} reacted {content}\"{}>{content}</span>{delete}</div>",if owner{" reaction--deleteable"}else{""},if owner{"true"}else{"false"},escape(&original_name.chars().next().unwrap_or('?').to_string()),if owner{" role=\"button\" tabindex=\"0\" aria-expanded=\"false\""}else{""}));
     }
     format!(
         "<turbo-frame id=\"reacting_{kind}_{target}\"><div class=\"reactions\"><div id=\"reactions_{kind}_{target}\" class=\"reactions__list\">{list}</div><turbo-frame id=\"new_reaction_{kind}_{target}\"><a href=\"{path}/new\" role=\"button\" class=\"reactions__trigger\" aria-label=\"Add your own reaction\" data-reaction-new>✦</a></turbo-frame></div></turbo-frame>"

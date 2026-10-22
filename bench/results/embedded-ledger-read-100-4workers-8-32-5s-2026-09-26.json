@@ -1,0 +1,359 @@
+{
+  "fixture_cards": 100,
+  "workload": "scoped",
+  "rounds": 2,
+  "client": "rust",
+  "host_logical_cpus": 32,
+  "runs": {
+    "fizzy": [
+      {
+        "concurrency": 8,
+        "errors": {},
+        "p50_ms": 17.26,
+        "p95_ms": 48.6,
+        "p99_ms": 79.23,
+        "path_requests": [
+          472,
+          471,
+          471,
+          471
+        ],
+        "path_response_bytes": [
+          257712,
+          724398,
+          10833000,
+          18802791
+        ],
+        "requests": 1885,
+        "response_bytes": 30617901,
+        "rps": 370.7,
+        "seconds": 5.08,
+        "server_requests": [
+          1885
+        ],
+        "generator_cpu_seconds": 0.14,
+        "server_resources": {
+          "processes_peak": 5,
+          "pss_mib_start": 733.2,
+          "pss_mib_peak": 1247.8,
+          "pss_mib_end": 1229.0,
+          "cpu_seconds": 19.16,
+          "cpu_cores_average": 3.77,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 8,
+        "errors": {},
+        "p50_ms": 16.88,
+        "p95_ms": 34.79,
+        "p99_ms": 44.76,
+        "path_requests": [
+          552,
+          552,
+          552,
+          552
+        ],
+        "path_response_bytes": [
+          301392,
+          848976,
+          12696000,
+          22036392
+        ],
+        "requests": 2208,
+        "response_bytes": 35882760,
+        "rps": 439.5,
+        "seconds": 5.02,
+        "server_requests": [
+          2208
+        ],
+        "generator_cpu_seconds": 0.17,
+        "server_resources": {
+          "processes_peak": 5,
+          "pss_mib_start": 1229.4,
+          "pss_mib_peak": 1444.6,
+          "pss_mib_end": 1433.4,
+          "cpu_seconds": 19.87,
+          "cpu_cores_average": 3.96,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 2
+      },
+      {
+        "concurrency": 32,
+        "errors": {},
+        "p50_ms": 71.14,
+        "p95_ms": 110.01,
+        "p99_ms": 130.71,
+        "path_requests": [
+          549,
+          549,
+          549,
+          548
+        ],
+        "path_response_bytes": [
+          299754,
+          844362,
+          12627000,
+          21876708
+        ],
+        "requests": 2195,
+        "response_bytes": 35647824,
+        "rps": 429.6,
+        "seconds": 5.11,
+        "server_requests": [
+          2195
+        ],
+        "generator_cpu_seconds": 0.18,
+        "server_resources": {
+          "processes_peak": 5,
+          "pss_mib_start": 1433.4,
+          "pss_mib_peak": 1517.5,
+          "pss_mib_end": 1512.3,
+          "cpu_seconds": 20.16,
+          "cpu_cores_average": 3.95,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 32,
+        "errors": {},
+        "p50_ms": 70.99,
+        "p95_ms": 119.61,
+        "p99_ms": 137.29,
+        "path_requests": [
+          550,
+          550,
+          550,
+          550
+        ],
+        "path_response_bytes": [
+          300300,
+          845900,
+          12650000,
+          21956550
+        ],
+        "requests": 2200,
+        "response_bytes": 35752750,
+        "rps": 433.1,
+        "seconds": 5.08,
+        "server_requests": [
+          2200
+        ],
+        "generator_cpu_seconds": 0.16,
+        "server_resources": {
+          "processes_peak": 5,
+          "pss_mib_start": 1512.3,
+          "pss_mib_peak": 1556.6,
+          "pss_mib_end": 1539.7,
+          "cpu_seconds": 20.13,
+          "cpu_cores_average": 3.96,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 2
+      }
+    ],
+    "rizzy": [
+      {
+        "concurrency": 8,
+        "errors": {},
+        "p50_ms": 0.82,
+        "p95_ms": 1.69,
+        "p99_ms": 2.0,
+        "path_requests": [
+          11097,
+          11097,
+          11097,
+          11097
+        ],
+        "path_response_bytes": [
+          6058962,
+          16845246,
+          251901900,
+          438009687
+        ],
+        "requests": 44388,
+        "response_bytes": 712815795,
+        "rps": 8875.9,
+        "seconds": 5.0,
+        "server_requests": [
+          44388
+        ],
+        "generator_cpu_seconds": 0.82,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 25.5,
+          "pss_mib_peak": 33.9,
+          "pss_mib_end": 33.9,
+          "cpu_seconds": 18.71,
+          "cpu_cores_average": 3.74,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 8,
+        "errors": {},
+        "p50_ms": 0.83,
+        "p95_ms": 1.7,
+        "p99_ms": 2.0,
+        "path_requests": [
+          11030,
+          11030,
+          11030,
+          11030
+        ],
+        "path_response_bytes": [
+          6022380,
+          16743540,
+          250381000,
+          435365130
+        ],
+        "requests": 44120,
+        "response_bytes": 708512050,
+        "rps": 8820.3,
+        "seconds": 5.0,
+        "server_requests": [
+          44120
+        ],
+        "generator_cpu_seconds": 0.93,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 33.9,
+          "pss_mib_peak": 34.2,
+          "pss_mib_end": 34.1,
+          "cpu_seconds": 18.71,
+          "cpu_cores_average": 3.74,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 2
+      },
+      {
+        "concurrency": 32,
+        "errors": {},
+        "p50_ms": 3.7,
+        "p95_ms": 5.19,
+        "p99_ms": 5.71,
+        "path_requests": [
+          10941,
+          10941,
+          10941,
+          10940
+        ],
+        "path_response_bytes": [
+          5973786,
+          16608438,
+          248360700,
+          431812740
+        ],
+        "requests": 43763,
+        "response_bytes": 702755664,
+        "rps": 8746.1,
+        "seconds": 5.0,
+        "server_requests": [
+          43763
+        ],
+        "generator_cpu_seconds": 0.99,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 34.1,
+          "pss_mib_peak": 36.4,
+          "pss_mib_end": 36.3,
+          "cpu_seconds": 18.9,
+          "cpu_cores_average": 3.78,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 1
+      },
+      {
+        "concurrency": 32,
+        "errors": {},
+        "p50_ms": 3.69,
+        "p95_ms": 5.17,
+        "p99_ms": 5.67,
+        "path_requests": [
+          10986,
+          10985,
+          10985,
+          10985
+        ],
+        "path_response_bytes": [
+          5998356,
+          16675230,
+          249359500,
+          433588935
+        ],
+        "requests": 43941,
+        "response_bytes": 705622021,
+        "rps": 8782.1,
+        "seconds": 5.0,
+        "server_requests": [
+          43941
+        ],
+        "generator_cpu_seconds": 0.9,
+        "server_resources": {
+          "processes_peak": 1,
+          "pss_mib_start": 36.3,
+          "pss_mib_peak": 36.6,
+          "pss_mib_end": 36.6,
+          "cpu_seconds": 18.93,
+          "cpu_cores_average": 3.79,
+          "read_mib": 0.0,
+          "write_mib": 0.0
+        },
+        "round": 2
+      }
+    ]
+  },
+  "sample_parity": {
+    "board_shape": true,
+    "card_shape": true,
+    "activity_shape": true,
+    "board_name": true,
+    "card_semantics": true,
+    "first_page_titles": true,
+    "activity_actions": true,
+    "activity_descriptions": true,
+    "description_html": true,
+    "first_page_count": true,
+    "first_page_bytes": {
+      "fizzy": 23974,
+      "rizzy": 23974
+    }
+  },
+  "comparison": [
+    {
+      "concurrency": 8,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 23.944,
+      "p95_ratio_fizzy_over_rizzy": 28.757
+    },
+    {
+      "concurrency": 8,
+      "round": 2,
+      "rps_ratio_rizzy_over_fizzy": 20.069,
+      "p95_ratio_fizzy_over_rizzy": 20.465
+    },
+    {
+      "concurrency": 32,
+      "round": 1,
+      "rps_ratio_rizzy_over_fizzy": 20.359,
+      "p95_ratio_fizzy_over_rizzy": 21.197
+    },
+    {
+      "concurrency": 32,
+      "round": 2,
+      "rps_ratio_rizzy_over_fizzy": 20.277,
+      "p95_ratio_fizzy_over_rizzy": 23.135
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Copy)]
-enum Control {
+pub(super) enum Control {
     Pin,
     Watch,
 }
@@ -42,12 +42,18 @@ async fn enabled(
     Ok(active != 0)
 }
 
-fn button(account: i64, number: i64, card_id: &str, control: Control, active: bool) -> String {
-    let (label, method, icon) = match (control, active) {
-        (Control::Pin, true) => ("Unpin this card", "delete", "◆"),
-        (Control::Pin, false) => ("Pin this card", "", "◇"),
-        (Control::Watch, true) => ("Stop watching", "delete", "◉"),
-        (Control::Watch, false) => ("Watch this", "", "◎"),
+pub(super) fn button(
+    account: i64,
+    number: i64,
+    card_id: &str,
+    control: Control,
+    active: bool,
+) -> String {
+    let (label, method) = match (control, active) {
+        (Control::Pin, true) => ("Unpin this card", "delete"),
+        (Control::Pin, false) => ("Pin this card", ""),
+        (Control::Watch, true) => ("Stop watching", "delete"),
+        (Control::Watch, false) => ("Watch this", ""),
     };
     let path = format!("/{account}/cards/{number}/{}", control.name());
     let id = escape(card_id);
@@ -57,9 +63,10 @@ fn button(account: i64, number: i64, card_id: &str, control: Control, active: bo
         format!("<input type=\"hidden\" name=\"_method\" value=\"{method}\">")
     };
     let reversed = if active { " btn--reversed" } else { "" };
+    let name = control.name();
+    let data_method = if active { "DELETE" } else { "POST" };
     format!(
-        "<div id=\"{}_button_card_{id}\"><form method=\"post\" action=\"{path}\">{method_input}<button class=\"btn btn--circle-mobile{reversed}\" type=\"submit\" aria-label=\"{label}\" title=\"{label}\">{icon}<span class=\"for-screen-reader\">{label}</span></button></form></div>",
-        control.name()
+        "<div id=\"{name}_button_card_{id}\"><form id=\"{name}-action-form\" method=\"post\" action=\"{path}\">{method_input}<button id=\"{name}\" class=\"btn btn--circle-mobile{reversed} secondary side-action side-action--{name}\" type=\"submit\" aria-label=\"{label}\" title=\"{label}\" data-method=\"{data_method}\"><span class=\"card-icon card-icon--{name}\" aria-hidden=\"true\"></span><span class=\"for-screen-reader\">{label}</span></button></form></div>"
     )
 }
 
@@ -70,11 +77,11 @@ async fn show(
     headers: &HeaderMap,
     control: Control,
 ) -> Result<Response> {
+    let principal = principal(app, headers, account).await?;
+    let card = card(app, &principal, number).await?;
     if headers.contains_key("x-rizzy-json-request") {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let principal = principal(app, headers, account).await?;
-    let card = card(app, &principal, number).await?;
     let card_id: String = card.get("id");
     let active = enabled(app, &principal, &card_id, control).await?;
     let etag = format!(
@@ -141,8 +148,16 @@ pub(super) async fn watcher_section(
     principal: &Principal,
     card_id: &str,
 ) -> Result<String> {
-    let watchers=sqlx::query("SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY u.name COLLATE NOCASE,u.id")
-        .bind(card_id).fetch_all(&app.db).await.map_err(db_err)?;
+    let statement = if app.mysql {
+        "SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY LOWER(u.name),u.id"
+    } else {
+        "SELECT u.id,u.name FROM watches w JOIN users u ON u.id=w.user_id WHERE w.card_id=? AND w.watching=1 AND u.active=1 ORDER BY u.name COLLATE NOCASE,u.id"
+    };
+    let watchers = sqlx::query(statement)
+        .bind(card_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
     let count = watchers.len();
     let avatars=watchers.iter().map(|row|{
         let id:String=row.get("id");

@@ -2,10 +2,12 @@
   const panel = document.querySelector("[data-push-settings]");
   if (!panel) return;
   const button = panel.querySelector("button");
+  const subscribeButton = panel.querySelector('[data-notifications-target="subscribeButton"]');
+  const explainer = panel.querySelector('[data-notifications-target="explainer"]');
   const state = panel.querySelector("[data-push-state]");
   const error = panel.querySelector("[data-push-error]");
   if (!("serviceWorker" in navigator) || !("Notification" in window) || !("PushManager" in window)) {
-    button.hidden = true;
+    subscribeButton.hidden = true;
     error.textContent = "Push notifications are unavailable in this browser.";
     return;
   }
@@ -19,7 +21,10 @@
     const subscription = await registration?.pushManager?.getSubscription();
     const on = Notification.permission === "granted" && !!subscription;
     state.textContent = on ? "ON" : "OFF";
-    button.hidden = on;
+    panel.classList.toggle("notifications--on", on);
+    const canSubscribe = !on && Notification.permission !== "denied";
+    subscribeButton.hidden = !canSubscribe;
+    explainer.hidden = canSubscribe;
   };
   button.addEventListener("click", async () => {
     button.disabled = true;

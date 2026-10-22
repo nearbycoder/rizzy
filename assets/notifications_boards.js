@@ -1,5 +1,6 @@
 document.querySelectorAll('[data-board-involvement]').forEach((button) => {
-  button.addEventListener('click', async () => {
+  button.addEventListener('click', async (event) => {
+    event.preventDefault();
     const next = button.dataset.involvement === 'watching' ? 'access_only' : 'watching';
     const error = document.getElementById('board-involvement-error');
     button.disabled = true;
@@ -19,6 +20,9 @@ document.querySelectorAll('[data-board-involvement]').forEach((button) => {
       button.setAttribute('title', action);
       button.setAttribute('aria-pressed', String(watching));
       button.classList.toggle('is-watching', watching);
+      button.classList.toggle('btn--reversed', watching);
+      button.form.elements.involvement.value = watching ? 'access_only' : 'watching';
+      button.querySelector('.for-screen-reader').textContent = action;
     } catch (_) {
       error.textContent = 'Could not update board notifications. Try again.';
     } finally {

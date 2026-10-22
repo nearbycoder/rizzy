@@ -99,7 +99,7 @@ fn export_rich_text(raw: &str, blobs: &HashMap<String, &ExportBlob>) -> String {
     inner
 }
 
-fn export_view(row: &SqliteRow, host: &str, slug: i64) -> Value {
+fn export_view(row: &DbRow, host: &str, slug: i64) -> Value {
     let id: String = row.get("id");
     let mut value = json!({
         "id": id,
@@ -204,12 +204,14 @@ pub(super) async fn show_user(
     .await
     .map_err(db_err)?;
     if json_request(&headers, &export_id) {
-        return Ok(Json(export_view(
-            &row.ok_or_else(missing)?,
-            &base(&headers),
-            p.slug,
-        ))
-        .into_response());
+        let Some(row) = row else {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
+        };
+        return Ok(Json(export_view(&row, &base(&headers), p.slug)).into_response());
     }
     let completed = row
         .as_ref()
@@ -290,12 +292,14 @@ pub(super) async fn show_account(
     .await
     .map_err(db_err)?;
     if json_request(&headers, &export_id) {
-        return Ok(Json(export_view(
-            &row.ok_or_else(missing)?,
-            &base(&headers),
-            p.slug,
-        ))
-        .into_response());
+        let Some(row) = row else {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            )
+                .into_response());
+        };
+        return Ok(Json(export_view(&row, &base(&headers), p.slug)).into_response());
     }
     let completed = row
         .as_ref()
@@ -352,7 +356,7 @@ pub(super) async fn download(
 
 async fn export_card(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(Value, Vec<ExportBlob>), sqlx::Error> {
     let card_id: String = row.get("id");
     let number: i64 = row.get("number");
@@ -473,7 +477,7 @@ pub(crate) fn write_archive(
 
 async fn build_user(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let export_id: String = row.get("id");
     let account_id: String = row.get("account_id");
@@ -513,11 +517,10 @@ async fn build_user(
     Ok(())
 }
 
-async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
-    let Ok(sendmail) = env::var("RIZZY_SENDMAIL") else {
+async fn send_completion_email(app: &App, row: &DbRow) -> Result<()> {
+    if env::var("RIZZY_SENDMAIL").is_err() {
         return Ok(());
-    };
-    let from = env::var("RIZZY_MAIL_FROM").unwrap_or_else(|_| "no-reply@localhost".into());
+    }
     let email: String = sqlx::query_scalar(
         "SELECT i.email_address FROM users u JOIN identities i ON i.id=u.identity_id WHERE u.id=?",
     )
@@ -525,9 +528,6 @@ async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
     .fetch_one(&app.db)
     .await
     .map_err(db_err)?;
-    if !valid_email(&email) || from.contains(['\r', '\n']) {
-        return Err(bad("Invalid mail address"));
-    }
     let origin = env::var("RIZZY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3007".into());
     let account: i64 = sqlx::query_scalar("SELECT external_account_id FROM accounts WHERE id=?")
         .bind(row.get::<String, _>("account_id"))
@@ -541,36 +541,30 @@ async fn send_completion_email(app: &App, row: &SqliteRow) -> Result<()> {
     } else {
         format!("/{account}/users/{user_id}/data_exports/{export_id}")
     };
-    let message = format!(
-        "From: {from}\nTo: {email}\nSubject: Your Rizzy data export is ready for download\nContent-Type: text/plain; charset=UTF-8\n\nYour data export is ready. Download it at:\n{origin}{path}\n"
+    let url = format!("{}{path}", origin.trim_end_matches('/'));
+    let support = mail_transport::support_address()?;
+    let plain = format!(
+        "Your Rizzy data export has finished processing and is ready to download.\n\nDownload your data: {url}\n"
     );
-    let mut child = Command::new(sendmail)
-        .arg("-t")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    };
-    stdin
-        .write_all(message.as_bytes())
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?;
-    drop(stdin);
-    if !child
-        .wait()
-        .await
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"))?
-        .success()
-    {
-        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Mail delivery failed"));
-    }
-    Ok(())
+    let content = format!(
+        "<h1 class=\"title\">Download your Rizzy data</h1>\n<p class=\"subtitle\">Your Rizzy data export has finished processing and is ready to download.</p>\n\n<p><a href=\"{}\">Download your data</a></p>\n\n<p class=\"footer\">Need help? <a href=\"mailto:{}\">Send us an email</a>.</p>\n",
+        escape(&url),
+        escape(&support)
+    );
+    let html =
+        include_str!("../assets/notification_mail_layout.html").replace("{{content}}", &content);
+    mail_transport::send_multipart(
+        &email,
+        "Your Rizzy data export is ready for download",
+        &plain,
+        &html,
+    )
+    .await
 }
 
 async fn run_one(
     app: &App,
-    row: &SqliteRow,
+    row: &DbRow,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match row.get::<String, _>("kind").as_str() {
         "user" => build_user(app, row).await,
@@ -601,35 +595,6 @@ pub(super) async fn worker(app: Arc<App>) {
             .await
             {
                 eprintln!("export recovery failed: {error}");
-            }
-        }
-        if timer_tick && (ticks == 1 || ticks.is_multiple_of(3600)) {
-            let expired = (Utc::now() - chrono::Duration::hours(24))
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            if let Ok(rows) = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
-                .bind(expired)
-                .fetch_all(&app.db)
-                .await
-            {
-                for row in rows {
-                    let id: String = row.get("id");
-                    let path = export_path(&id);
-                    match tokio::fs::remove_file(&path).await {
-                        Ok(()) => {
-                            let _ = sqlx::query("DELETE FROM exports WHERE id=?")
-                                .bind(id)
-                                .execute(&app.db)
-                                .await;
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            let _ = sqlx::query("DELETE FROM exports WHERE id=?")
-                                .bind(id)
-                                .execute(&app.db)
-                                .await;
-                        }
-                        Err(error) => eprintln!("export cleanup failed: {error}"),
-                    }
-                }
             }
         }
         let pending =
@@ -695,4 +660,28 @@ pub(super) async fn worker(app: Arc<App>) {
         }
         app.export_notify.notify_one();
     }
+}
+
+pub(super) async fn cleanup(app: &App) -> std::result::Result<usize, sqlx::Error> {
+    let expired = (Utc::now() - chrono::Duration::hours(24))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let rows = sqlx::query("SELECT id FROM exports WHERE completed_at<?")
+        .bind(expired)
+        .fetch_all(&app.db)
+        .await?;
+    let mut deleted = 0;
+    for row in rows {
+        let id: String = row.get("id");
+        match tokio::fs::remove_file(export_path(&id)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(sqlx::Error::Io(error)),
+        }
+        deleted += sqlx::query("DELETE FROM exports WHERE id=?")
+            .bind(id)
+            .execute(&app.db)
+            .await?
+            .rows_affected() as usize;
+    }
+    Ok(deleted)
 }

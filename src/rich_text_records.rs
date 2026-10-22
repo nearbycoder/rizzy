@@ -1,10 +1,10 @@
 //! Durable Action Text record identities for inline card, comment, and board text.
 use super::{Result, db_err, id};
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Any as Db, AnyPool as DbPool, QueryBuilder, Row, Transaction};
 use std::collections::HashSet;
 
 pub(super) async fn present_ids(
-    db: &SqlitePool,
+    db: &DbPool,
     record_type: &str,
     name: &str,
     ids: &[String],
@@ -13,7 +13,7 @@ pub(super) async fn present_ids(
         return Ok(HashSet::new());
     }
     let mut query =
-        QueryBuilder::<Sqlite>::new("SELECT record_id FROM rich_text_records WHERE record_type=");
+        QueryBuilder::<Db>::new("SELECT record_id FROM rich_text_records WHERE record_type=");
     query
         .push_bind(record_type)
         .push(" AND body_is_null=0 AND name=")
@@ -34,37 +34,65 @@ pub(super) async fn present_ids(
 }
 
 pub(super) async fn ensure(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     record_type: &str,
     record_id: &str,
     name: &str,
     timestamp: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=1")
-        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
-        .bind(timestamp).bind(timestamp)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let mysql = (**tx).backend_name() == "MySQL";
+    let statement = if mysql {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE updated_at=IF(body_is_null=1,?,updated_at),body_is_null=0"
+    } else {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=1"
+    };
+    let mut query = sqlx::query(statement)
+        .bind(id())
+        .bind(account_id)
+        .bind(record_type)
+        .bind(record_id)
+        .bind(name)
+        .bind(timestamp)
+        .bind(timestamp);
+    if mysql {
+        query = query.bind(timestamp);
+    }
+    query.execute(&mut **tx).await.map_err(db_err)?;
     Ok(())
 }
 
 pub(super) async fn ensure_null(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     record_type: &str,
     record_id: &str,
     name: &str,
     timestamp: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=1,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=0")
-        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
-        .bind(timestamp).bind(timestamp)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let mysql = (**tx).backend_name() == "MySQL";
+    let statement = if mysql {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE updated_at=IF(body_is_null=0,?,updated_at),body_is_null=1"
+    } else {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at,body_is_null) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=1,updated_at=excluded.updated_at WHERE rich_text_records.body_is_null=0"
+    };
+    let mut query = sqlx::query(statement)
+        .bind(id())
+        .bind(account_id)
+        .bind(record_type)
+        .bind(record_id)
+        .bind(name)
+        .bind(timestamp)
+        .bind(timestamp);
+    if mysql {
+        query = query.bind(timestamp);
+    }
+    query.execute(&mut **tx).await.map_err(db_err)?;
     Ok(())
 }
 
 pub(super) async fn sync(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Db>,
     account_id: &str,
     record_type: &str,
     record_id: &str,
@@ -76,14 +104,28 @@ pub(super) async fn sync(
     if old_body == new_body || (old_body.is_empty() && new_body.is_empty()) {
         return Ok(());
     }
-    sqlx::query("INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at")
-        .bind(id()).bind(account_id).bind(record_type).bind(record_id).bind(name)
-        .bind(timestamp).bind(timestamp)
-        .execute(&mut **tx).await.map_err(db_err)?;
+    let mysql = (**tx).backend_name() == "MySQL";
+    let statement = if mysql {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE body_is_null=0,updated_at=?"
+    } else {
+        "INSERT INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(record_type,record_id,name) DO UPDATE SET body_is_null=0,updated_at=excluded.updated_at"
+    };
+    let mut query = sqlx::query(statement)
+        .bind(id())
+        .bind(account_id)
+        .bind(record_type)
+        .bind(record_id)
+        .bind(name)
+        .bind(timestamp)
+        .bind(timestamp);
+    if mysql {
+        query = query.bind(timestamp);
+    }
+    query.execute(&mut **tx).await.map_err(db_err)?;
     Ok(())
 }
 
-pub(super) async fn migrate(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn migrate(db: &DbPool) -> std::result::Result<(), sqlx::Error> {
     let columns = sqlx::query("PRAGMA table_info(rich_text_records)")
         .fetch_all(db)
         .await?;
@@ -100,7 +142,17 @@ pub(super) async fn migrate(db: &SqlitePool) -> std::result::Result<(), sqlx::Er
     Ok(())
 }
 
-pub(super) async fn backfill(db: &SqlitePool) -> std::result::Result<(), sqlx::Error> {
+pub(super) async fn backfill(db: &DbPool, mysql: bool) -> std::result::Result<(), sqlx::Error> {
+    if mysql {
+        for statement in [
+            "INSERT IGNORE INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) SELECT CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),c.account_id,'Card',c.id,'description',c.created_at,c.updated_at FROM cards c WHERE c.description<>'' AND NOT EXISTS(SELECT 1 FROM rich_text_records r WHERE r.record_type='Card' AND r.record_id=c.id AND r.name='description')",
+            "INSERT IGNORE INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) SELECT CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),c.account_id,'Comment',m.id,'body',m.created_at,COALESCE(m.updated_at,m.created_at) FROM comments m JOIN cards c ON c.id=m.card_id WHERE m.body<>'' AND NOT EXISTS(SELECT 1 FROM rich_text_records r WHERE r.record_type='Comment' AND r.record_id=m.id AND r.name='body')",
+            "INSERT IGNORE INTO rich_text_records(id,account_id,record_type,record_id,name,created_at,updated_at) SELECT CONCAT('0',SUBSTR(LOWER(HEX(RANDOM_BYTES(16))),1,24)),b.account_id,'Board',b.id,'description',b.created_at,b.updated_at FROM boards b WHERE b.public_description<>'' AND NOT EXISTS(SELECT 1 FROM rich_text_records r WHERE r.record_type='Board' AND r.record_id=b.id AND r.name='description')",
+        ] {
+            sqlx::query(statement).execute(db).await?;
+        }
+        return Ok(());
+    }
     let sources = [
         (
             "Card",

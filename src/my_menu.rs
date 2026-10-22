@@ -12,7 +12,12 @@ fn menu_link(path: &str, label: &str, kind: &str, key: &str) -> String {
 
 fn section(title: &str, items: &str) -> String {
     format!(
-        "<details class=\"nav__section popup__section\" open><summary class=\"popup__section-title\">{}</summary><ul class=\"popup__list\">{items}</ul></details>",
+        "<details class=\"nav__section popup__section{}\" open><summary class=\"popup__section-title\">{}</summary><ul class=\"popup__list\">{items}</ul></details>",
+        if title == "Shortcuts" {
+            " nav__section--secret"
+        } else {
+            ""
+        },
         escape(title)
     )
 }
@@ -31,21 +36,31 @@ pub(super) async fn show(
         .fetch_one(&app.db)
         .await
         .map_err(db_err)?;
+    let tags_statement = if app.mysql {
+        "SELECT id,title FROM tags WHERE account_id=? ORDER BY LOWER(title),id"
+    } else {
+        "SELECT id,title FROM tags WHERE account_id=? ORDER BY title COLLATE NOCASE"
+    };
+    let users_statement = if app.mysql {
+        "SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY LOWER(name),id"
+    } else {
+        "SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY name COLLATE NOCASE"
+    };
     let (boards, tags, users, filters, accounts) = tokio::try_join!(
         sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses a ON a.board_id=b.id WHERE b.account_id=? AND a.user_id=? ORDER BY a.accessed_at DESC,b.created_at DESC")
             .bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db),
-        sqlx::query("SELECT id,title FROM tags WHERE account_id=? ORDER BY title COLLATE NOCASE")
+        sqlx::query(tags_statement)
             .bind(&p.account_id).fetch_all(&app.db),
-        sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role!='system' ORDER BY name COLLATE NOCASE")
+        sqlx::query(users_statement)
             .bind(&p.account_id).fetch_all(&app.db),
-        sqlx::query("SELECT id,fields FROM filters WHERE account_id=? AND creator_id=? ORDER BY updated_at DESC")
+        sqlx::query("SELECT id,updated_at FROM filters WHERE account_id=? AND creator_id=? ORDER BY updated_at DESC")
             .bind(&p.account_id).bind(&p.user_id).fetch_all(&app.db),
         sqlx::query("SELECT a.external_account_id,a.name FROM accounts a JOIN users u ON u.account_id=a.id WHERE u.identity_id=? AND u.active=1 AND NOT EXISTS(SELECT 1 FROM account_cancellations c WHERE c.account_id=a.id) ORDER BY a.created_at")
             .bind(&identity_id).fetch_all(&app.db),
     ).map_err(db_err)?;
 
     let mut body = format!(
-        "<turbo-frame id=\"my_menu\" target=\"_top\"><nav class=\"nav\" aria-label=\"Rizzy menu\"><header class=\"nav__header\"><h1>Menu</h1><input type=\"search\" id=\"menu-search\" placeholder=\"Type to jump to a board, person, place, or tag…\" aria-label=\"Search menu\"></header><div class=\"nav__scroll-container\"><div class=\"nav__hotkeys\" role=\"list\">{}{}{}</div>",
+        "<turbo-frame id=\"my_menu\" target=\"_top\"><nav class=\"nav\" aria-label=\"Rizzy menu\"><header class=\"nav__header\"><h1>Menu</h1><button type=\"button\" class=\"nav__close\" data-menu-close aria-label=\"Close menu\">×</button><input type=\"search\" id=\"menu-search\" placeholder=\"Type to jump to a board, person, place, or tag…\" aria-label=\"Search menu\"></header><div class=\"nav__scroll-container\"><div class=\"nav__hotkeys\" role=\"list\">{}{}{}</div>",
         menu_link(&format!("/{}/", p.slug), "Home", "hotkey", "1"),
         menu_link(
             &format!("/{}/cards?assignee_ids%5B%5D={}", p.slug, p.user_id),
@@ -76,33 +91,6 @@ pub(super) async fn show(
         ));
     }
     body.push_str(&section("Boards", &board_items));
-    let mut view_items = menu_link(
-        &format!("/{}/cards?expand_all=true", p.slug),
-        "Create a custom view",
-        "custom",
-        "create",
-    );
-    for row in filters {
-        let id: String = row.get("id");
-        let fields: String = row.get("fields");
-        let label = serde_json::from_str::<Value>(&fields)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("terms")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-            .filter(|term| !term.is_empty())
-            .unwrap_or_else(|| "Saved view".into());
-        view_items.push_str(&menu_link(
-            &format!("/{}/cards?filter_id={id}", p.slug),
-            &label,
-            "bookmark",
-            &id,
-        ));
-    }
-    body.push_str(&section("Custom views", &view_items));
     let mut tag_items = String::new();
     for row in tags {
         let id: String = row.get("id");
@@ -149,6 +137,8 @@ pub(super) async fn show(
         )
     })
     .collect::<String>();
+    let mut settings = settings;
+    settings.push_str("<li class=\"popup__item\" data-filter-target=\"item\" data-navigable-list-target=\"item\" id=\"filter-place-sign-out\"><form action=\"/session\" method=\"post\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\" class=\"popup__btn btn\"><span class=\"overflow-ellipsis\">Sign out</span></button></form></li>");
     body.push_str(&section("Settings", &settings));
     let shortcuts = [
         ("Golden cards", "indexed_by=golden"),
@@ -181,15 +171,24 @@ pub(super) async fn show(
         }
         body.push_str(&section("Accounts", &account_items));
     }
-    body.push_str("</div><footer class=\"nav__footer\">Rizzy</footer></nav><script>document.getElementById('menu-search')?.addEventListener('input',e=>{const q=e.target.value.toLocaleLowerCase();document.querySelectorAll('#my_menu [data-filter-target=item]').forEach(item=>{item.hidden=!item.textContent.toLocaleLowerCase().includes(q)})})</script></turbo-frame>");
+    body.push_str("</div><footer class=\"nav__footer\">Rizzy</footer></nav></turbo-frame>");
     let page = [
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Menu | Rizzy</title><style>",
         ":root{font:16px/1.5 system-ui,sans-serif;color:#f5f0e8;background:#1b1b1b}*{box-sizing:border-box}body{margin:0}.nav{width:min(480px,100%);min-height:100vh;margin:auto;padding:20px;background:#292826}.nav__header{padding:12px}.nav__header h1{margin:0 0 12px;font-size:26px}.nav__header input{width:100%;padding:12px;border:1px solid #666158;border-radius:9px;background:#34322f;color:#fff}.nav__hotkeys{display:grid;gap:4px;margin-bottom:18px}.nav__section{border-top:1px solid #4a4742;padding:10px 0}.popup__section-title{cursor:pointer;font-weight:700;padding:8px}.popup__list{list-style:none;margin:0;padding:0}.popup__item a{display:block;padding:8px 14px;border-radius:7px;color:inherit;text-decoration:none}.popup__item a:hover,.popup__item a:focus-visible{background:#46433d}.nav__footer{padding:18px;color:#aaa}.popup__item[hidden]{display:none}",
         "</style></head><body>",
         &body,
+        "<script>",
+        include_str!("../static/my_menu.js"),
+        "</script>",
         "</body></html>",
     ].concat();
-    let etag = format!("W/\"{}\"", hex::encode(Sha256::digest(page.as_bytes())));
+    let mut digest = Sha256::new();
+    digest.update(page.as_bytes());
+    for filter in filters {
+        digest.update(filter.get::<String, _>("id").as_bytes());
+        digest.update(filter.get::<String, _>("updated_at").as_bytes());
+    }
+    let etag = format!("W/\"{}\"", hex::encode(digest.finalize()));
     let mut response = if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())

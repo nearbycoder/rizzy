@@ -1,0 +1,220 @@
+{
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "21f46a6197a9547875f82f5768f2cf82a514a5fd",
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "28f26588a3042b81c8f0ba7850091bd5075af2f122b6bb3cb93facda3bfba1fc",
+  "server_cpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "client_cpus": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "mysql_version": "8.4.11",
+  "mysql_max_connections": 400,
+  "clients": 8,
+  "seconds": 8.0,
+  "rounds": [
+    {
+      "sample_parity": true,
+      "source_warmup_queue": {
+        "initial": {
+          "ready": 0,
+          "claimed": 0,
+          "failed": 0
+        },
+        "final": {
+          "ready": 0,
+          "claimed": 0,
+          "failed": 0
+        },
+        "drain_seconds": 0.0,
+        "drained": true
+      },
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "phases": {
+        "fizzy": {
+          "moves": 204,
+          "moves_by_client": [
+            26,
+            24,
+            24,
+            29,
+            25,
+            26,
+            26,
+            24
+          ],
+          "errors": [],
+          "elapsed_seconds": 8.296,
+          "moves_per_second": 24.59,
+          "p50_ms": 281.67,
+          "p95_ms": 664.71,
+          "p99_ms": 829.63,
+          "verified_counts": {
+            "cards": 8,
+            "move_events": 206,
+            "system_comments": 206
+          },
+          "valid": true,
+          "verification_errors": [],
+          "queue": {
+            "initial": {
+              "ready": 2,
+              "claimed": 10,
+              "failed": 0
+            },
+            "final": {
+              "ready": 0,
+              "claimed": 0,
+              "failed": 0
+            },
+            "drain_seconds": 0.21,
+            "drained": true
+          },
+          "moves_per_second_including_queue_drain": 23.98
+        },
+        "rizzy": {
+          "moves": 1423,
+          "moves_by_client": [
+            178,
+            178,
+            178,
+            178,
+            178,
+            178,
+            178,
+            177
+          ],
+          "errors": [],
+          "elapsed_seconds": 8.075,
+          "moves_per_second": 176.22,
+          "p50_ms": 46.07,
+          "p95_ms": 77.8,
+          "p99_ms": 83.61,
+          "moves_by_process": [
+            356,
+            356,
+            356,
+            355
+          ],
+          "verified_counts": {
+            "cards": 8,
+            "move_events": 1425,
+            "system_comments": 1425
+          },
+          "valid": true,
+          "verification_errors": []
+        }
+      },
+      "paired_comparable": true,
+      "paired_http_comparable": true
+    },
+    {
+      "sample_parity": true,
+      "source_warmup_queue": {
+        "initial": {
+          "ready": 0,
+          "claimed": 0,
+          "failed": 0
+        },
+        "final": {
+          "ready": 0,
+          "claimed": 0,
+          "failed": 0
+        },
+        "drain_seconds": 0.0,
+        "drained": true
+      },
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "phases": {
+        "rizzy": {
+          "moves": 1401,
+          "moves_by_client": [
+            176,
+            175,
+            175,
+            175,
+            175,
+            175,
+            175,
+            175
+          ],
+          "errors": [],
+          "elapsed_seconds": 8.073,
+          "moves_per_second": 173.54,
+          "p50_ms": 45.72,
+          "p95_ms": 75.52,
+          "p99_ms": 84.08,
+          "moves_by_process": [
+            351,
+            350,
+            350,
+            350
+          ],
+          "verified_counts": {
+            "cards": 8,
+            "move_events": 1403,
+            "system_comments": 1403
+          },
+          "valid": true,
+          "verification_errors": []
+        },
+        "fizzy": {
+          "moves": 202,
+          "moves_by_client": [
+            25,
+            26,
+            25,
+            22,
+            26,
+            26,
+            28,
+            24
+          ],
+          "errors": [],
+          "elapsed_seconds": 8.189,
+          "moves_per_second": 24.67,
+          "p50_ms": 300.55,
+          "p95_ms": 727.64,
+          "p99_ms": 857.15,
+          "verified_counts": {
+            "cards": 8,
+            "move_events": 204,
+            "system_comments": 204
+          },
+          "valid": true,
+          "verification_errors": [],
+          "queue": {
+            "initial": {
+              "ready": 0,
+              "claimed": 2,
+              "failed": 0
+            },
+            "final": {
+              "ready": 0,
+              "claimed": 0,
+              "failed": 0
+            },
+            "drain_seconds": 0.62,
+            "drained": true
+          },
+          "moves_per_second_including_queue_drain": 22.93
+        }
+      },
+      "paired_comparable": true,
+      "paired_http_comparable": true
+    }
+  ]
+}

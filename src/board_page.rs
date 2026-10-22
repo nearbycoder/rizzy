@@ -2,7 +2,7 @@ use axum::{
     http::header,
     response::{Html, IntoResponse, Response},
 };
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, any::AnyRow as DbRow};
 use std::collections::HashMap;
 
 use super::{
@@ -11,6 +11,24 @@ use super::{
 };
 
 const TEMPLATE: &str = include_str!("../static/board.html");
+
+fn add_shell(values: &mut HashMap<&'static str, String>, account: i64) {
+    values.insert(
+        "SHELL_STYLES",
+        [
+            ":root{--color-canvas:#101b20;--color-ink:#f4f5f6}",
+            include_str!("../static/shell_footer.css"),
+            include_str!("../static/notification_cards.css"),
+            include_str!("../static/menu_overlay.css"),
+        ]
+        .concat(),
+    );
+    values.insert(
+        "SHELL_FOOTER",
+        include_str!("../static/home_footer.html").replace("{{ACCOUNT}}", &account.to_string()),
+    );
+    values.insert("SHELL_SCRIPT", include_str!("../static/events.js").into());
+}
 
 fn webhook_link(principal: &Principal, board_id: &str) -> String {
     if principal.role == "owner" || principal.role == "admin" {
@@ -38,17 +56,60 @@ fn column_color_class(color: &str) -> &'static str {
     }
 }
 
-fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
+fn column_color_picker(selected: &str) -> String {
+    let colors = [
+        ("Blue", "var(--color-card-default)"),
+        ("Gray", "var(--color-card-1)"),
+        ("Tan", "var(--color-card-2)"),
+        ("Yellow", "var(--color-card-3)"),
+        ("Lime", "var(--color-card-4)"),
+        ("Aqua", "var(--color-card-5)"),
+        ("Violet", "var(--color-card-6)"),
+        ("Purple", "var(--color-card-7)"),
+        ("Pink", "var(--color-card-8)"),
+    ];
+    let mut html =
+        String::from("<fieldset class=\"color-picker__colors\"><legend>Column color</legend>");
+    for (name, value) in colors {
+        html.push_str(&format!(
+            "<label title=\"{name}\"><input type=\"radio\" name=\"color\" value=\"{}\" {}><span class=\"color-picker__swatch {}\" aria-hidden=\"true\"></span><span class=\"for-screen-reader\">{name}</span></label>",
+            escape(value),
+            if value == selected { "checked" } else { "" },
+            column_color_class(value),
+        ));
+    }
+    html.push_str("</fieldset>");
+    html
+}
+
+fn quick_filter(label: &str, selected: bool, searchable: bool, choices: &str) -> String {
+    format!(
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" role=\"dialog\" aria-label=\"{}\" tabindex=\"-1\" hidden>{}{choices}</div></div>",
+        if selected { " is-selected" } else { "" },
+        escape(label),
+        escape(label),
+        if searchable {
+            "<input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter…\" autocomplete=\"off\" autocorrect=\"off\">".to_owned()
+        } else {
+            String::new()
+        }
+    )
+}
+
+async fn filter_form(
+    app: &App,
+    principal: &Principal,
+    board_id: &str,
+    query: &CardQuery,
+    expanded: bool,
+) -> Result<String> {
+    let account = principal.slug;
     let term = query.terms.first().map(String::as_str).unwrap_or("");
     let mut preserved = String::new();
     for (key, values) in [
         ("terms[]", query.terms.iter().skip(1).collect::<Vec<_>>()),
         ("card_ids[]", query.card_ids.iter().collect()),
         ("column_ids[]", query.column_ids.iter().collect()),
-        ("tag_ids[]", query.tag_ids.iter().collect()),
-        ("assignee_ids[]", query.assignee_ids.iter().collect()),
-        ("creator_ids[]", query.creator_ids.iter().collect()),
-        ("closer_ids[]", query.closer_ids.iter().collect()),
     ] {
         for value in values {
             preserved.push_str(&format!(
@@ -58,7 +119,6 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
         }
     }
     for (key, value) in [
-        ("assignment_status", query.assignment_status.as_deref()),
         ("creation", query.creation.as_deref()),
         ("closure", query.closure.as_deref()),
     ] {
@@ -69,18 +129,152 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
             ));
         }
     }
-    let option = |value: &str, label: &str, current: Option<&str>| {
+    let radio_option = |name: &str, value: &str, label: &str, current: &str| {
         format!(
-            "<option value=\"{value}\"{}>{label}</option>",
-            if current == Some(value) {
-                " selected"
-            } else {
-                ""
-            }
+            "<label class=\"filter-choice\"><input type=\"radio\" name=\"{name}\" value=\"{value}\"{}><span>{label}</span></label>",
+            if current == value { " checked" } else { "" }
         )
     };
     let index = query.indexed_by.as_deref().unwrap_or("all");
     let sort = query.sorted_by.as_deref().unwrap_or("latest");
+    let tags = sqlx::query("SELECT id,title FROM tags WHERE account_id=? ORDER BY title,id")
+        .bind(&principal.account_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let tag_choices = if tags.is_empty() {
+        "<p class=\"filter-choices__empty\">No tags yet</p>".to_owned()
+    } else {
+        tags.iter()
+            .map(|tag| {
+                let id: String = tag.get("id");
+                let title: String = tag.get("title");
+                format!(
+                    "<label class=\"filter-choice\"><input type=\"checkbox\" name=\"tag_ids[]\" value=\"{}\"{}><span>#{}</span></label>",
+                    escape(&id),
+                    if query.tag_ids.contains(&id) { " checked" } else { "" },
+                    escape(&title)
+                )
+            })
+            .collect::<String>()
+    };
+    let users =
+        sqlx::query("SELECT id,name FROM users WHERE account_id=? AND active=1 AND role IN ('owner','admin','member') ORDER BY name,id")
+            .bind(&principal.account_id)
+            .fetch_all(&app.db)
+            .await
+            .map_err(db_err)?;
+    let user_choices = |name: &str, selected: &[String]| {
+        users.iter()
+            .map(|user| {
+                let id: String = user.get("id");
+                let display_name: String = user.get("name");
+                format!(
+                    "<label class=\"filter-choice\"><input type=\"checkbox\" name=\"{name}\" value=\"{}\"{}><span>{}</span></label>",
+                    escape(&id),
+                    if selected.contains(&id) { " checked" } else { "" },
+                    escape(&display_name)
+                )
+            })
+            .collect::<String>()
+    };
+    let assignee_choices = format!(
+        "<label class=\"filter-choice\"><input type=\"checkbox\" name=\"assignment_status\" value=\"unassigned\"{}><span>No one</span></label>{}",
+        if query.assignment_status.as_deref() == Some("unassigned") {
+            " checked"
+        } else {
+            ""
+        },
+        user_choices("assignee_ids[]", &query.assignee_ids)
+    );
+    let creator_choices = user_choices("creator_ids[]", &query.creator_ids);
+    let closer_choices = user_choices("closer_ids[]", &query.closer_ids);
+    let board_choices = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=? ORDER BY x.accessed_at DESC,b.id")
+        .bind(&principal.account_id)
+        .bind(&principal.user_id)
+        .fetch_all(&app.db)
+        .await
+        .map_err(db_err)?;
+    let board_options = board_choices
+        .iter()
+        .map(|board| {
+            let id: String = board.get("id");
+            let name: String = board.get("name");
+            format!(
+                "<button class=\"filter-choice filter-choice--board\" type=\"button\" data-board-filter-id=\"{}\" role=\"checkbox\" aria-checked=\"{}\">{}</button>",
+                escape(&id),
+                false,
+                escape(&name)
+            )
+        })
+        .collect::<String>();
+    let status_label = match index {
+        "all" => "Status…",
+        "closed" => "Done",
+        "not_now" => "Not now",
+        "stalled" => "Stalled",
+        "postponing_soon" => "Closing soon",
+        "golden" => "Golden",
+        _ => "Status…",
+    };
+    let sort_label = match sort {
+        "newest" => "Newest to oldest",
+        "oldest" => "Oldest to newest",
+        _ => "Recently updated",
+    };
+    let status_options = [
+        ("all", "Open"),
+        ("closed", "Done"),
+        ("not_now", "Not now"),
+        ("stalled", "Stalled"),
+        ("postponing_soon", "Closing soon"),
+        ("golden", "Golden"),
+    ]
+    .iter()
+    .map(|(value, label)| radio_option("indexed_by", value, label, index))
+    .collect::<String>();
+    let sort_options = [
+        ("newest", "Newest to oldest"),
+        ("oldest", "Oldest to newest"),
+        ("latest", "Recently updated"),
+    ]
+    .iter()
+    .map(|(value, label)| radio_option("sorted_by", value, label, sort))
+    .collect::<String>();
+    let filter_controls = [
+        quick_filter("Board…", false, board_choices.len() > 1, &board_options),
+        quick_filter(sort_label, sort != "latest", false, &sort_options),
+        quick_filter(status_label, index != "all", false, &status_options),
+        if tags.is_empty() {
+            String::new()
+        } else {
+            quick_filter(
+                "Tagged…",
+                !query.tag_ids.is_empty(),
+                tags.len() > 1,
+                &tag_choices,
+            )
+        },
+        quick_filter(
+            "Assigned to…",
+            !query.assignee_ids.is_empty() || query.assignment_status.is_some(),
+            users.len() > 1,
+            &assignee_choices,
+        ),
+        quick_filter(
+            "Added by…",
+            !query.creator_ids.is_empty(),
+            users.len() > 1,
+            &creator_choices,
+        ),
+        quick_filter(
+            "Closed by…",
+            !query.closer_ids.is_empty(),
+            users.len() > 1,
+            &closer_choices,
+        ),
+    ]
+    .concat();
     let clear = if !query.terms.is_empty()
         || !matches!(index, "all")
         || !matches!(sort, "latest")
@@ -93,49 +287,62 @@ fn filter_form(account: i64, board_id: &str, query: &CardQuery) -> String {
         || query.closure.is_some()
     {
         format!(
-            "<a class=\"filter-clear\" href=\"/{account}/boards/{}\" aria-label=\"Clear filters\" title=\"Clear filters\">×</a>",
+            "<a class=\"filter-clear\" href=\"/{account}/boards/{}\" aria-label=\"Clear all\" title=\"Clear all\">×</a>",
             escape(board_id)
         )
     } else {
         String::new()
     };
-    format!(
-        "<form class=\"board-filter\" method=\"get\" action=\"/{account}/boards/{}\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<details class=\"filter-more\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"filter-more__fields\"><label>Show<select name=\"indexed_by\">{}</select></label><label>Sort<select name=\"sorted_by\">{}</select></label><button class=\"button\" type=\"submit\">Filter</button></div></details>{clear}</form>",
+    Ok(format!(
+        "<form class=\"board-filter{}\" method=\"get\" action=\"/{account}/boards/{}\"><input type=\"hidden\" name=\"expand_all\" value=\"true\"{}><input type=\"hidden\" name=\"board_ids[]\" value=\"{}\" data-board-scope><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<div class=\"quick-filters\" id=\"board-filter-options\">{filter_controls}</div><button class=\"filter-more__toggle\" type=\"button\" aria-label=\"{}\" title=\"{}\" aria-expanded=\"{}\" aria-controls=\"board-filter-options\">☷{}</button>{clear}</form>",
+        if expanded { " is-expanded" } else { "" },
+        escape(board_id),
+        if expanded { "" } else { " disabled" },
         escape(board_id),
         escape(term),
-        [
-            ("all", "Open"),
-            ("closed", "Done"),
-            ("not_now", "Not Now"),
-            ("stalled", "Stalled"),
-            ("postponing_soon", "Closing soon"),
-            ("golden", "Golden")
-        ]
-        .iter()
-        .map(|(value, label)| option(value, label, Some(index)))
-        .collect::<String>(),
-        [
-            ("latest", "Latest activity"),
-            ("newest", "Newest"),
-            ("oldest", "Oldest")
-        ]
-        .iter()
-        .map(|(value, label)| option(value, label, Some(sort)))
-        .collect::<String>(),
-    )
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        expanded,
+        if query.tag_ids.is_empty()
+            && query.assignee_ids.is_empty()
+            && query.creator_ids.is_empty()
+            && query.closer_ids.is_empty()
+            && query.assignment_status.is_none()
+        {
+            String::new()
+        } else {
+            format!(
+                "<span class=\"filter-count\">{}</span>",
+                query.tag_ids.len()
+                    + query.assignee_ids.len()
+                    + query.creator_ids.len()
+                    + query.closer_ids.len()
+                    + usize::from(query.assignment_status.is_some())
+            )
+        },
+    ))
 }
 
 pub(super) async fn show_filtered(
     app: &App,
     principal: &Principal,
-    board: &SqliteRow,
+    board: &DbRow,
     query: &CardQuery,
     raw_query: Option<&str>,
+    timezone: chrono_tz::Tz,
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
     let (offset, limit) = page_window(query.page);
-    let mut count = cards_query("SELECT COUNT(*)", principal, query);
+    let mut count = cards_query("SELECT COUNT(*)", principal, query, app.mysql, timezone);
     let total: i64 = count
         .build_query_scalar()
         .fetch_one(&app.db)
@@ -146,6 +353,8 @@ pub(super) async fn show_filtered(
         "SELECT c.*,b.name AS board_name,(SELECT name FROM columns WHERE id=c.column_id) AS column_name,(SELECT color FROM columns WHERE id=c.column_id) AS column_color,(SELECT name FROM users WHERE id=c.creator_id) AS creator_name",
         principal,
         query,
+        app.mysql,
+        timezone,
     );
     builder
         .push(format!(" ORDER BY {order} LIMIT "))
@@ -162,18 +371,11 @@ pub(super) async fn show_filtered(
     }
     list.push_str("</div>");
     let page_url = |page: i64| {
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        for (key, value) in url::form_urlencoded::parse(raw_query.unwrap_or("").as_bytes()) {
-            if key != "page" {
-                serializer.append_pair(&key, &value);
-            }
-        }
-        serializer.append_pair("page", &page.to_string());
         format!(
             "/{}/boards/{}?{}",
             principal.slug,
             escape(&board_id),
-            escape(&serializer.finish())
+            escape(&cards_page::page_query(raw_query, page, None))
         )
     };
     if query.page > 1 {
@@ -189,11 +391,10 @@ pub(super) async fn show_filtered(
         ));
     }
     list.push_str("</section></div>");
-    let values = HashMap::from([
+    let mut values = HashMap::from([
         ("ACCOUNT", principal.slug.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
-        ("HOME_PATH", format!("/{}/", principal.slug)),
         ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
         (
             "SETTINGS_LINK",
@@ -206,9 +407,23 @@ pub(super) async fn show_filtered(
             ),
         ),
         ("ADD_COLUMN", String::new()),
-        ("FILTER_FORM", filter_form(principal.slug, &board_id, query)),
+        (
+            "FILTER_FORM",
+            filter_form(
+                app,
+                principal,
+                &board_id,
+                query,
+                raw_query.is_some_and(|raw| {
+                    url::form_urlencoded::parse(raw.as_bytes())
+                        .any(|(key, value)| key == "expand_all" && value == "true")
+                }),
+            )
+            .await?,
+        ),
         ("COLUMNS", list),
     ]);
+    add_shell(&mut values, principal.slug);
     Ok(Html(render_template(TEMPLATE, &values)))
 }
 
@@ -219,7 +434,7 @@ fn column_html(
     title: &str,
     color: &str,
     count: i64,
-    cards: Option<&Vec<SqliteRow>>,
+    cards: Option<&Vec<DbRow>>,
     rendered_cards: Option<&str>,
     path: &str,
     add_card: bool,
@@ -231,7 +446,7 @@ fn column_html(
         _ => format!("column_{id}"),
     };
     let mut html = format!(
-        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\"><header class=\"cards__header\"><button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button></header><div class=\"cards__list\">",
+        "<section class=\"cards cards--{} {} {}\" id=\"{}\" data-column-id=\"{}\" data-count=\"{count}\" aria-label=\"{}\" tabindex=\"0\"><header class=\"cards__header\">",
         if id == "maybe" {
             "maybe"
         } else if id == "done" {
@@ -250,9 +465,27 @@ fn column_html(
         escape(&dom_id),
         escape(id),
         escape(title),
+    );
+    if !matches!(id, "maybe" | "not-now" | "done") {
+        html.push_str(&format!(
+            "<div class=\"cards__menu\"><button class=\"cards__menu-trigger\" type=\"button\" aria-label=\"Column options\" aria-expanded=\"false\">⋯</button><div class=\"cards__menu-panel\" hidden><button type=\"button\" data-column-action=\"edit\">Edit column</button><button type=\"button\" data-column-action=\"left\">Move to the left</button><button type=\"button\" data-column-action=\"right\">Move to the right</button><button type=\"button\" data-column-action=\"delete\">Delete column</button></div><dialog class=\"column-dialog\"><form class=\"column-form\" data-column-form=\"edit\"><label><span>Column name</span><input name=\"name\" value=\"{}\" placeholder=\"Name this column\" required pattern=\".*\\S.*\" autocomplete=\"off\"></label>{}<div class=\"column-dialog__actions\"><button type=\"button\" data-close-dialog>Cancel</button><button type=\"submit\">Save changes</button></div></form></dialog></div>",
+            escape(title),
+            column_color_picker(color),
+        ));
+    }
+    html.push_str(&format!(
+        "<button class=\"cards__toggle\" type=\"button\" aria-expanded=\"{}\"><span class=\"cards__count\">{count}</span><h2>{}</h2></button>",
         if id == "maybe" { "true" } else { "false" },
         escape(title),
-    );
+    ));
+    if !matches!(id, "maybe" | "not-now" | "done") {
+        html.push_str(&format!(
+            "<a class=\"cards__maximize\" href=\"/{account}/boards/{}/columns/{}\" aria-label=\"Maximize column\" title=\"Maximize column\">▦</a>",
+            escape(board_id),
+            escape(id),
+        ));
+    }
+    html.push_str("</header><div class=\"cards__list\">");
     if add_card {
         html.push_str(&format!(
             "<div class=\"board-tools\"><form id=\"add-card\" action=\"/{account}/boards/{}/cards\" method=\"post\"><button class=\"button\" type=\"submit\">Add a card <kbd>C</kbd></button></form>{}</div>",
@@ -292,6 +525,29 @@ fn column_html(
     }
     html.push_str("</section>");
     html
+}
+
+pub(super) fn named_column_html(
+    account: i64,
+    board_id: &str,
+    id: &str,
+    name: &str,
+    color: &str,
+    count: i64,
+) -> String {
+    column_html(
+        account,
+        board_id,
+        id,
+        name,
+        color,
+        count,
+        None,
+        None,
+        &format!("/columns/{id}"),
+        false,
+        None,
+    )
 }
 
 async fn board_footer(app: &App, principal: &Principal, board_id: &str) -> Result<String> {
@@ -338,13 +594,13 @@ async fn board_footer(app: &App, principal: &Principal, board_id: &str) -> Resul
     ))
 }
 
-pub(super) async fn drop_column_response(
+pub(super) async fn drop_column_stream(
     app: &App,
     principal: &Principal,
     board_id: &str,
     destination: &str,
     column_id: Option<&str>,
-) -> Result<Response> {
+) -> Result<String> {
     let (id, title, color, path, add_card) = match destination {
         "closure" => (
             "done".to_owned(),
@@ -452,15 +708,35 @@ pub(super) async fn drop_column_response(
         add_card,
         footer.as_deref(),
     );
-    Ok(([(header::CONTENT_TYPE, "text/vnd.turbo-stream.html; charset=utf-8")],
-        format!("<turbo-stream action=\"replace\" method=\"morph\" target=\"{}\"><template>{content}</template></turbo-stream>", escape(&target))).into_response())
+    Ok(format!(
+        "<turbo-stream action=\"replace\" method=\"morph\" target=\"{}\"><template>{content}</template></turbo-stream>",
+        escape(&target)
+    ))
+}
+
+pub(super) async fn drop_column_response(
+    app: &App,
+    principal: &Principal,
+    board_id: &str,
+    destination: &str,
+    column_id: Option<&str>,
+) -> Result<Response> {
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/vnd.turbo-stream.html; charset=utf-8",
+        )],
+        drop_column_stream(app, principal, board_id, destination, column_id).await?,
+    )
+        .into_response())
 }
 
 pub(super) async fn show(
     app: &App,
     principal: &Principal,
-    board: &SqliteRow,
+    board: &DbRow,
     page: i64,
+    expanded: bool,
 ) -> Result<Html<String>> {
     let board_id: String = board.get("id");
     let board_name: String = board.get("name");
@@ -551,16 +827,33 @@ pub(super) async fn show(
         None,
     ));
     column_markup.push_str("</div>");
-    let values = HashMap::from([
+    let mut values = HashMap::from([
         ("ACCOUNT", account.to_string()),
         ("BOARD_ID", escape(&board_id)),
         ("BOARD_NAME", escape(&board_name)),
-        ("HOME_PATH", format!("/{account}/")),
         ("WEBHOOKS_LINK", webhook_link(principal, &board_id)),
-        ("SETTINGS_LINK", format!("<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",escape(&board_id),escape(&board_name),escape(&board_name))),
-        ("ADD_COLUMN", "<button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button>".to_owned()),
-        ("FILTER_FORM", filter_form(account, &board_id, &CardQuery::default())),
+        (
+            "SETTINGS_LINK",
+            format!(
+                "<a class=\"board-settings\" href=\"/{account}/boards/{}/edit\" aria-label=\"Settings for {}\" title=\"Settings for {}\">⚙<span class=\"for-screen-reader\">Settings</span></a>",
+                escape(&board_id),
+                escape(&board_name),
+                escape(&board_name)
+            ),
+        ),
+        (
+            "ADD_COLUMN",
+            format!(
+                "<div class=\"board-new-column\"><button class=\"board-add-column\" id=\"add-column\" type=\"button\" aria-label=\"Add a column\" title=\"Add a column\">+<span class=\"for-screen-reader\">Add column</span></button><dialog class=\"column-dialog\" id=\"new-column-dialog\"><form class=\"column-form\" data-column-form=\"new\"><label><span>Column name</span><input name=\"name\" placeholder=\"Name this column\" required pattern=\".*\\S.*\" autocomplete=\"off\"></label>{}<div class=\"column-dialog__actions\"><button type=\"button\" data-close-dialog>Cancel</button><button type=\"submit\">Add column</button></div></form></dialog></div>",
+                column_color_picker("var(--color-card-default)")
+            ),
+        ),
+        (
+            "FILTER_FORM",
+            filter_form(app, principal, &board_id, &CardQuery::default(), expanded).await?,
+        ),
         ("COLUMNS", column_markup),
     ]);
+    add_shell(&mut values, account);
     Ok(Html(render_template(TEMPLATE, &values)))
 }

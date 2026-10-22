@@ -6,10 +6,12 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 from auth import BINARY, ROOT, cookie, start, stop
@@ -38,10 +40,14 @@ def call(port, path, method="GET", body=None, bearer=None, cookies=(), status=20
 
 
 def main():
+    mysql_url = os.environ.get("RIZZY_TEST_MYSQL_URL")
+    if mysql_url and not mysql_url.startswith("mysql:"):
+        raise SystemExit("RIZZY_TEST_MYSQL_URL must be a dedicated MySQL database")
     subprocess.run(["cargo", "build", "--quiet"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory() as temp:
-        env = {**os.environ, "RIZZY_DATABASE_URL": f"sqlite://{Path(temp) / 'join.sqlite3'}"}
-        result = subprocess.run([BINARY, "seed"], cwd=ROOT, env={**env, "RIZZY_SEED_EMAIL": "join-owner@example.com"},
+        env = {**os.environ, "RIZZY_DATABASE_URL": mysql_url or f"sqlite://{Path(temp) / 'join.sqlite3'}"}
+        owner_email = "join-owner-" + uuid.uuid4().hex + "@example.com" if mysql_url else "join-owner@example.com"
+        result = subprocess.run([BINARY, "seed"], cwd=ROOT, env={**env, "RIZZY_SEED_EMAIL": owner_email},
                                 capture_output=True, text=True, check=True)
         account = re.search(r"Account: (\d+)", result.stdout).group(1)
         owner_token = re.search(r"Bearer token: (\w+)", result.stdout).group(1)
@@ -141,8 +147,14 @@ def main():
             print("Join passed: redemption, setup, limits, two-process race, reset, permissions")
         finally:
             stop(server)
-        with sqlite3.connect(Path(temp) / "join.sqlite3") as db:
-            db.execute("DELETE FROM account_join_codes")
+            if sys.exc_info()[0] is not None:
+                print(server.stderr.read().decode()[-6000:], file=sys.stderr)
+        if mysql_url:
+            from mysql_core import mysql_scalar
+            mysql_scalar(mysql_url, f"DELETE FROM account_join_codes WHERE account_id=(SELECT id FROM accounts WHERE external_account_id={int(account)})")
+        else:
+            with sqlite3.connect(Path(temp) / "join.sqlite3") as db:
+                db.execute("DELETE FROM account_join_codes")
         port, server = start(env)
         try:
             restored, _ = call(port, f"/{account}/account/join_code", bearer=owner_token)

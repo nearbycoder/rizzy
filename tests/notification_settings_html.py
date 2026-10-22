@@ -62,8 +62,16 @@ def main():
             board_id = re.search(r'/boards/([^/.]+)', headers['Location']).group(1)
             status, _, html = call(path)
             assert status == 200 and b'Notification Settings' in html and b'Email Notifications' in html
+            assert b'id="global-container"' in html and b'id="menu-dialog"' in html
+            assert b'class="header__title"' in html and b'class="settings__panel settings__panel--users panel shadow"' in html
+            assert b'class="settings__scrollable-list flex flex-column gap-half"' in html
+            assert b'data-controller="notifications"' in html and b'data-controller="form"' in html
+            assert b'data-action="change->form#submit"' in html
+            assert b'<button type="submit">Save</button>' not in html
             assert b'Boards' in html and b'value="every_few_hours" selected' in html
             assert b'Launch board' in html and b'data-board-involvement' in html
+            assert b'class="button_to"' in html and b'name="_method" value="put"' in html
+            assert b'event.preventDefault()' in html
             assert b'data-involvement="watching"' in html and b'aria-label="Stop watching"' in html
             assert b'fetch(button.dataset.url' in html
             involvement_path = f'/{account}/boards/{board_id}/involvement'

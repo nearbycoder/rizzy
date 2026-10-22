@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Import a real Fizzy account ZIP into a disposable Rizzy database."""
 import argparse
+from collections import defaultdict
 import io
 import json
 import os
@@ -21,14 +22,20 @@ ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "target/debug/rizzy"
 FRESH_UPDATE_TABLES = {
     "user_settings": "user_settings_records",
+    "tags": "tags",
+    "taggings": "taggings",
+    "pins": "pins",
+    "reactions": "reactions",
     "boards": "boards",
     "columns": "columns",
     "board_publications": "board_publications",
     "webhooks": "webhooks",
+    "webhook_delinquency_trackers": "webhook_delinquency_trackers",
     "accesses": "access_records",
     "cards": "cards",
     "comments": "comments",
     "steps": "steps",
+    "assignments": "assignments",
     "closures": "closures",
     "card_goldnesses": "card_goldnesses",
     "card_not_nows": "card_not_nows",
@@ -129,13 +136,17 @@ def run(archive_path):
                                 "assignments", "taggings", "closures", "card_goldnesses",
                                 "card_not_nows", "card_activity_spikes", "watches", "pins",
                                 "reactions", "mentions", "events", "notifications",
-                                "notification_bundles", "webhooks", "board_publications",
+                                "notification_bundles", "webhooks", "webhook_delinquency_trackers",
+                                "board_publications",
                                 "active_storage_blobs", "active_storage_variant_records",
                                 "active_storage_attachments")}
         blob_metadata = [json.loads(z.read(name)) for name in z.namelist()
                          if name.startswith("data/active_storage_blobs/")]
         bundles = [json.loads(z.read(name)) for name in z.namelist()
                    if name.startswith("data/notification_bundles/")]
+        owner_notices = [json.loads(z.read(name)) for name in z.namelist()
+                         if name.startswith("data/notifications/")
+                         and json.loads(z.read(name))["user_id"] == owner["id"]]
         rich_texts = [json.loads(z.read(name)) for name in z.namelist()
                       if name.startswith("data/action_text_rich_texts/")]
         described_cards = sum(rich.get("record_type") == "Card" and
@@ -147,6 +158,31 @@ def run(archive_path):
         user_gid = f'gid="gid://fizzy/User/{owner["id"]}"'
         has_user_mention = any(user_gid in (rich.get("body") or "") for rich in rich_texts)
         original_bytes = {blob["id"]: z.read(f"storage/{blob['key']}") for blob in blob_metadata}
+        cards_by_id = {card["id"]: card for card in
+                       (json.loads(z.read(name)) for name in z.namelist()
+                        if name.startswith("data/cards/"))}
+        comments_by_id = {comment["id"]: comment for comment in
+                          (json.loads(z.read(name)) for name in z.namelist()
+                           if name.startswith("data/comments/"))}
+        rich_by_id = {rich["id"]: rich for rich in rich_texts}
+        expected_board_bytes = defaultdict(int)
+        for name in z.namelist():
+            if not name.startswith("data/active_storage_attachments/"):
+                continue
+            attachment = json.loads(z.read(name))
+            kind, record_id = attachment["record_type"], attachment["record_id"]
+            if kind == "ActionText::RichText":
+                rich = rich_by_id[record_id]
+                kind, record_id = rich["record_type"], rich["record_id"]
+            if kind == "Card":
+                board_id = cards_by_id[record_id]["board_id"]
+            elif kind == "Comment":
+                board_id = cards_by_id[comments_by_id[record_id]["card_id"]]["board_id"]
+            elif kind == "Board":
+                board_id = record_id
+            else:
+                continue
+            expected_board_bytes[board_id] += len(original_bytes[attachment["blob_id"]])
         dated_cards = [json.loads(z.read(name)) for name in z.namelist()
                        if name.startswith("data/cards/") and json.loads(z.read(name)).get("due_on")]
         golden_records = [json.loads(z.read(name)) for name in z.namelist()
@@ -216,6 +252,19 @@ def run(archive_path):
                     "SELECT name,created_at,updated_at FROM accounts WHERE id=?", (imported_id,)
                 ).fetchone()
                 assert imported_account[0] == account["name"]
+                ledger = dict(db.execute(
+                    "SELECT board_id,SUM(delta) FROM storage_entries WHERE account_id=? "
+                    "GROUP BY board_id", (imported_id,)).fetchall())
+                assert ledger == {board: size for board, size in expected_board_bytes.items()
+                                  if size}, (ledger, expected_board_bytes)
+                assert db.execute(
+                    "SELECT COUNT(*) FROM storage_entries WHERE account_id=? AND operation!='reconcile'",
+                    (imported_id,)).fetchone()[0] == 0
+                account_total = db.execute(
+                    "SELECT bytes_stored,last_entry_id FROM storage_totals "
+                    "WHERE owner_type='Account' AND owner_id=?", (imported_id,)).fetchone()
+                assert account_total and account_total[0] == sum(expected_board_bytes.values())
+                assert bool(account_total[1]) == bool(expected_board_bytes), account_total
                 if account["name"] != "Import" or account.get("cards_count", 0) != 0:
                     assert_fresh(imported_account[2], import_started)
                 for user in users:
@@ -254,6 +303,8 @@ def run(archive_path):
                     assert actual == expected, (group, actual, expected)
                 assert db.execute("SELECT COUNT(*) FROM users WHERE account_id=? AND role='owner' AND id=?",
                                   (imported_id, owner["id"])).fetchone()[0] == 1
+                assert db.execute("SELECT identity_id FROM users WHERE account_id=? AND role='system'",
+                                  (imported_id,)).fetchone() == (None,)
                 assert db.execute("SELECT COUNT(*) FROM cards WHERE account_id=? AND description!=''",
                                   (imported_id,)).fetchone()[0] == described_cards
                 assert db.execute("SELECT COUNT(*) FROM comments m JOIN cards c ON c.id=m.card_id WHERE c.account_id=? AND m.body!=''",
@@ -376,21 +427,28 @@ def run(archive_path):
                         assert owner["name"].split()[0] in card["description"]
                         assert 'class="mention"' in card["description_html"]
             board_ids = set()
+            visible_board_ids = {access["board_id"] for access in access_records
+                                 if access["user_id"] == owner["id"]}
             for page in range(1, counts["boards"] + 2):
                 status, boards = call(url, token, f"/{created['account']}/boards?page={page}")
                 assert status == 200, (status, page)
                 board_ids.update(board["id"] for board in boards)
-                if len(board_ids) == counts["boards"] or not boards:
+                if len(board_ids) == len(visible_board_ids) or not boards:
                     break
-            assert len(board_ids) == counts["boards"], (len(board_ids), counts["boards"])
-            if counts["notifications"]:
+            assert board_ids == visible_board_ids, (board_ids, visible_board_ids)
+            if owner_notices:
                 status, notices = call(url, token, f"/{created['account']}/notifications")
-                assert status == 200 and any(notice["source_type"] == "mention"
-                                             and notice["title"] == f"{owner['name'].split()[0]} @mentioned you"
-                                             and "Hello world" in notice["body"] for notice in notices), notices
-                if has_user_mention:
-                    assert any(owner["name"].split()[0] in notice["body"]
-                               for notice in notices if notice["source_type"] == "mention"), notices
+                assert status == 200 and len(notices) == len(owner_notices), (status, notices, owner_notices)
+                if any(item["source_type"] == "Mention" for item in owner_notices):
+                    assert any(notice["source_type"] == "mention"
+                                          and notice["title"] == f"{owner['name'].split()[0]} @mentioned you"
+                                          and "Hello world" in notice["body"] for notice in notices), notices
+                    if has_user_mention:
+                        assert any(owner["name"].split()[0] in notice["body"]
+                                   for notice in notices if notice["source_type"] == "mention"), notices
+            else:
+                status, notices = call(url, token, f"/{created['account']}/notifications")
+                assert status == 200 and notices == [], (status, notices)
             status, export = call(url, token, f"/{created['account']}/account/exports", "POST")
             assert status == 201 and export["status"] == "pending", (status, export)
             for _ in range(300):
@@ -528,6 +586,8 @@ def run(archive_path):
             with sqlite3.connect(database) as db:
                 expired = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 db.execute("UPDATE imports SET created_at=? WHERE id=?", (expired, invalid["id"]))
+            subprocess.run([BINARY, "cleanup-imports"], cwd=ROOT, env=env,
+                           capture_output=True, text=True, check=True)
             server = subprocess.Popen([BINARY], cwd=ROOT, env={**env, "RIZZY_BIND": f"127.0.0.1:{port}"},
                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             for _ in range(100):

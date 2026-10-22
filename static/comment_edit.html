@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rizzy</title>
+<link rel="stylesheet" href="/assets/lexxy/lexxy.css">
+<link rel="stylesheet" href="/assets/lexxy/rizzy-dark.css">
+<script type="importmap">{"imports":{"@rails/activestorage":"/assets/lexxy/activestorage.esm.js"}}</script>
+<script type="module" src="/assets/lexxy/lexxy.js"></script>
+<style>{{STYLES}}</style>
+</head>
+<body class="comment-edit-standalone" data-account="{{ACCOUNT}}">
+<a class="skip" href="#main">Skip to main content</a>
+<header class="site"><a href="/{{ACCOUNT}}/my/menu" data-open-menu aria-haspopup="dialog" aria-expanded="false"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header>
+<dialog id="menu-dialog" aria-label="Rizzy menu"><turbo-frame id="my_menu"></turbo-frame></dialog>
+<main id="main">{{FRAME}}</main>
+{{FOOTER}}
+<script>{{COMMENT_EDIT_SCRIPT}}</script>
+<script>{{SHELL_SCRIPT}}</script>
+</body>
+</html>

@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 
 from draft_workflow_parity import NoRedirect, login, request
+from html_form_inventory import Forms
 
 
 def target(name):
@@ -29,6 +30,34 @@ def csrf_token(body):
     return match.group(1).decode() if match else None
 
 
+def assert_shell(target, body):
+    for marker in (b'id="global-container"', b'id="header"', b'id="main"',
+                   b'id="footer"', b'href="#main"'):
+        assert marker in body, (target["name"], "webhook page shell", marker)
+
+
+def assert_subscription_controls(target, body):
+    forms = re.findall(rb'<form\b[^>]*>.*?</form>', body, re.S)
+    subscription_form = next((item for item in forms
+                              if b'webhook[subscribed_actions][]' in item), None)
+    assert subscription_form, (target["name"], "subscription form missing")
+    fields = re.findall(rb'<input\b[^>]*>', subscription_form)
+    hidden = [item for item in fields if b'name="webhook[subscribed_actions][]"' in item
+              and b'type="hidden"' in item and b'value=""' in item]
+    checks = [item for item in fields if b'name="webhook[subscribed_actions][]"' in item
+              and b'type="checkbox"' in item]
+    assert len(hidden) == 1 and len(checks) == 11, (target["name"], "subscription inputs", len(hidden), len(checks))
+    assert subscription_form.index(hidden[0]) < subscription_form.index(checks[0]), target["name"]
+
+
+def webhook_form_contract(target, body):
+    parser = Forms(target["account"])
+    parser.feed(body.decode())
+    parser.close()
+    return next(item for item in parser.forms if "webhooks" in item[0]
+                and any(name == "webhook[name]" for _, name, _ in item[2]))
+
+
 def check(target):
     login(target)
     account = target["account"]
@@ -42,8 +71,13 @@ def check(target):
         assert status == 200 and base.encode() in board_page, (target["name"], "board webhook link", status)
         status, _, page = request(target, base, accept="text/html")
         assert status == 200 and b"Set up a new webhook" in page, (target["name"], "index", status)
+        assert_shell(target, page)
         status, _, page = request(target, base + "/new", accept="text/html")
         assert status == 200 and b"Payload URL" in page and b"Enable all" in page, (target["name"], "new form", status)
+        assert_shell(target, page)
+        assert_subscription_controls(target, page)
+        new_form_contract = webhook_form_contract(target, page)
+        assert b"Back to Webhooks" in page and f'href="{base}"'.encode() in page, (target["name"], "new form navigation")
         csrf = csrf_token(page)
 
         status, _, page = request(target, base, "POST", form(**{"webhook[name]":"", "webhook[url]":"invalid-url"}), accept="text/html", csrf=csrf)
@@ -61,12 +95,21 @@ def check(target):
 
         status, _, page = request(target, base, accept="text/html")
         assert status == 200 and name.encode() in page and detail.encode() in page, (target["name"], "populated index", status)
+        for marker in (b"<hr", f"Remove {name}".encode(), b"Are you sure you want to permanently remove this webhook?"):
+            assert marker in page, (target["name"], "populated webhook row", marker)
         status, _, page = request(target, detail, accept="text/html")
         assert status == 200 and name.encode() in page and payload_url.encode() in page, (target["name"], "show", status)
+        assert_shell(target, page)
+        assert f'href="{detail}/edit"'.encode() in page and b"Back to Webhooks" in page, (target["name"], "detail navigation")
+        assert b"verify that the request came from us" in page, (target["name"], "signature guidance")
         assert b"Secret" in page and b"Subscribed to" in page and b"Card added" in page and b"Card moved to" in page
 
         status, _, page = request(target, detail + "/edit", accept="text/html")
         assert status == 200 and b"Save Changes" in page and name.encode() in page, (target["name"], "edit form", status)
+        assert_shell(target, page)
+        assert_subscription_controls(target, page)
+        edit_form_contract = webhook_form_contract(target, page)
+        assert f"<title>{name} | ".encode() in page and b"Name your Webhook" in page, (target["name"], "edit title and placeholder")
         assert b'name="webhook[url]"' not in page, (target["name"], "url should not be editable")
         csrf = csrf_token(page)
         status, _, page = request(target, detail, "POST", form(**{"_method":"put", "webhook[name]":""}), accept="text/html", csrf=csrf)
@@ -75,13 +118,18 @@ def check(target):
         assert status == 302 and urllib.parse.urlparse(headers["Location"]).path == detail, (target["name"], "update", status)
         status, _, page = request(target, detail, accept="text/html")
         assert status == 200 and b"Renamed webhook" in page and b"Comment added" in page and payload_url.encode() in page, (target["name"], "updated show", status)
+        status, headers, _ = request(target, detail, "POST", form(**{"_method":"put", "webhook[name]":"Renamed webhook", "webhook[subscribed_actions][]":[""]}), accept="text/html", csrf=csrf)
+        assert status == 302 and urllib.parse.urlparse(headers["Location"]).path == detail, (target["name"], "clear subscriptions", status)
+        status, _, raw = request(target, detail, bearer=True)
+        assert status == 200 and json.loads(raw)["subscribed_actions"] == [], (target["name"], "empty subscriptions", status)
         status, headers, _ = request(target, detail, "POST", form(**{"_method":"delete"}), accept="text/html", csrf=csrf)
         assert status == 302 and urllib.parse.urlparse(headers["Location"]).path == base, (target["name"], "delete", status)
         status, _, _ = request(target, detail, accept="text/html")
         assert status == 404, (target["name"], "deleted", status)
         status, _, raw = request(target, base, bearer=True)
         assert status == 200 and json.loads(raw) == [], (target["name"], "JSON collection", status)
-        return {"index":200,"new":200,"invalid":422,"create":302,"show":200,"edit":200,"update":302,"delete":302}
+        return {"index":200,"new":200,"invalid":422,"create":302,"show":200,"edit":200,"update":302,"delete":302,
+                "new_form_contract":new_form_contract,"edit_form_contract":edit_form_contract}
     finally:
         status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)
         assert status == 204, (target["name"], "cleanup", status)

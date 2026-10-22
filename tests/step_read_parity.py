@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import time
+import urllib.parse
 import urllib.request
 
 from draft_workflow_parity import NoRedirect, login, request
@@ -32,15 +33,36 @@ def run(target):
         assert value == {"id": step["id"], "content": "First <task> & check", "completed": False}
         checked(target, path + "/edit.json", expected=406)
 
+        card_page = checked(target, f"/cards/{number}", accept="text/html", bearer=False).decode()
+        assert re.search(rf'<a\b[^>]*href="/{target["account"]}{re.escape(path)}/edit"[^>]*>First &lt;task&gt; &amp; check</a>', card_page), card_page[:500]
+        assert '<ol class="steps txt-small margin-block-start-auto">' in card_page
+        assert f'<turbo-frame id="step_{step["id"]}">' in card_page
+        assert 'name="_method" value="patch"' in card_page
+        assert any('name="step[completed]"' in field and 'value="0"' in field
+                   for field in re.findall(r"<input\b[^>]*>", card_page))
+
         show = checked(target, path, accept="text/html", bearer=False).decode()
         edit = checked(target, path + "/edit", accept="text/html", bearer=False).decode()
-        assert f'id="step_{step["id"]}"' in show and "First &lt;task&gt; &amp; check" in show
+        assert show.count(f'id="step_{step["id"]}"') == 2 and "First &lt;task&gt; &amp; check" in show
+        assert 'id="global-container"' in show and 'id="global-container"' in edit
         assert f"{path}/edit" in show
         assert f'id="step_{step["id"]}"' in edit
+        assert any(f'action="/{target["account"]}{path}"' in form and 'method="post"' in form
+                   for form in re.findall(r"<form\b[^>]*>", edit))
+        assert 'name="_method" value="patch"' in edit
+        assert 'name="_method" value="delete"' in edit
+        assert 'data-form-target="cancel" hidden' in edit
         content_fields = re.findall(r"<input\b[^>]*>", edit)
         assert any('name="step[content]"' in field and 'value="First &lt;task&gt; &amp; check"' in field
                    for field in content_fields), edit[max(0, edit.find('First &lt;task') - 260):edit.find('First &lt;task') + 200]
         assert "Save changes" in edit and "Delete this step" in edit
+
+        form_body = urllib.parse.urlencode({"_method": "patch", "step[content]": "Form update"}).encode()
+        status, headers, stream = request(target, f"/{target['account']}{path}", "POST", form_body,
+                                          accept="text/vnd.turbo-stream.html", bearer=True)
+        assert status == 200 and headers["Content-Type"].startswith("text/vnd.turbo-stream.html")
+        assert f'action="replace" target="step_{step["id"]}"' in stream.decode()
+        assert checked(target, path + ".json")["content"] == "Form update"
 
         edited = checked(target, path + ".json", "PATCH",
                          {"step": {"content": "Revised task", "completed": True}})
@@ -48,9 +70,15 @@ def run(target):
         assert checked(target, path + ".json") == edited
         edit = checked(target, path + "/edit", accept="text/html", bearer=False).decode()
         assert 'value="Revised task"' in edit and re.search(r'type="checkbox"[^>]*checked', edit)
+        status, headers, stream = request(target, f"/{target['account']}{path}", "POST", b"_method=delete",
+                                          accept="text/vnd.turbo-stream.html", bearer=True)
+        assert status == 200 and headers["Content-Type"].startswith("text/vnd.turbo-stream.html")
+        assert f'action="remove" target="step_{step["id"]}"' in stream.decode()
+        checked(target, path + ".json", expected=404)
         checked(target, f"/cards/{number}/steps/missing-step.json", expected=404)
-        return {"detail_json": True, "edit_json_406": True, "show_html": True,
-                "edit_html": True, "edited_value": True, "missing_404": True}
+        return {"detail_json": True, "edit_json_406": True, "card_edit_link": True, "show_html": True,
+                "edit_html": True, "edited_value": True, "form_update": True,
+                "form_delete": True, "missing_404": True}
     finally:
         checked(target, f"/boards/{board['id']}", "DELETE", expected=204)
 

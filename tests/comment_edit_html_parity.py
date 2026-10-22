@@ -35,12 +35,20 @@ def check(target):
         assert status == 201, (target["name"], "card", status)
         card = json.loads(raw)
         number = card["number"]
+        status, _, _ = request(target, f"/{account}/cards/{number}/watch", "DELETE", bearer=True)
+        assert status == 204, (target["name"], "unwatch", status)
+        with sqlite3.connect(target["db"]) as db:
+            watch_rows = db.execute("SELECT watching FROM watches WHERE card_id=(SELECT id FROM cards WHERE number=?)", (number,)).fetchall()
+        assert watch_rows == [(0,)], (target["name"], "before comment", watch_rows)
         status, _, first_card_html = request(target, f"/{account}/cards/{number}", accept="text/html")
         assert status == 200 and "Next, add some notes, context, pictures, or video about this…".encode() in first_card_html
         status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
                                  {"comment":{"body":"Original comment"}}, bearer=True)
         assert status == 201, (target["name"], "comment", status)
         comment_id = json.loads(raw)["id"]
+        with sqlite3.connect(target["db"]) as db:
+            watch_rows = db.execute("SELECT watching FROM watches WHERE card_id=(SELECT id FROM cards WHERE number=?)", (number,)).fetchall()
+        assert watch_rows == [(1,)], (target["name"], "comment rewatch", watch_rows)
         path = f"/{account}/cards/{number}/comments/{comment_id}"
         index_path = f"/{account}/cards/{number}/comments"
         for method in ("POST", "DELETE"):
@@ -52,6 +60,8 @@ def check(target):
         assert request(target, path, accept="text/vnd.turbo-stream.html")[0] == 406
         status, _, body = request(target, path + "/edit", accept="text/html")
         assert status == 200, (target["name"], "edit", status)
+        for marker in (b'<main', b'id="footer"', b'<lexxy-editor', b'comment__avatar'):
+            assert marker in body, (target["name"], "edit page shell", marker)
         csrf_match = re.search(rb'<meta name="csrf-token" content="([^"]+)"', body)
         csrf = csrf_match.group(1).decode() if csrf_match else None
         new_target = f"new_comment_card_{card['id']}".encode()
@@ -119,6 +129,25 @@ def check(target):
         assert b'action="replace"' in stream and b"Updated by Turbo form" in stream
         status, _, raw = request(target, path, bearer=True)
         assert status == 200 and "Updated by Turbo form" in json.loads(raw)["body"]["plain_text"]
+        status, _, _ = request(target, path, "PATCH",
+                               {"comment":{"body":"Saved despite HTML 406"}},
+                               accept="text/html", csrf=csrf)
+        assert status == 406, (target["name"], "HTML update", status)
+        status, _, raw = request(target, path, bearer=True)
+        assert status == 200 and json.loads(raw)["body"]["plain_text"] == "Saved despite HTML 406"
+        status, _, _ = request(target, path, "POST",
+                               b"_method=patch&comment%5Bbody%5D=Saved+by+HTML+form",
+                               accept="text/html", csrf=csrf)
+        assert status == 406, (target["name"], "HTML form update", status)
+        status, _, raw = request(target, path, bearer=True)
+        assert status == 200 and json.loads(raw)["body"]["plain_text"] == "Saved by HTML form"
+        status, _, _ = request(target, index_path, "POST",
+                               {"comment":{"body":"Created despite HTML 406"}},
+                               accept="text/html", csrf=csrf)
+        assert status == 406, (target["name"], "HTML create", status)
+        status, _, raw = request(target, index_path, bearer=True)
+        assert status == 200 and any(comment["body"]["plain_text"] == "Created despite HTML 406"
+                                     for comment in json.loads(raw)), target["name"]
         status, _, _ = request(target, path, "DELETE", accept="text/html", csrf=csrf)
         assert status == 406, (target["name"], "unsupported HTML delete", status)
         assert request(target, path, bearer=True)[0] == 404
@@ -132,25 +161,21 @@ def check(target):
         assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html"
         assert b'action="remove"' in stream and f"container_comment_{turbo_comment}".encode() in stream
         assert request(target, turbo_path, bearer=True)[0] == 404
-        if target["name"] == "rizzy":
-            status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
-                                     {"comment":{"body":"Form comment"}}, bearer=True)
-            assert status == 201
-            form_comment = json.loads(raw)["id"]
-            form_path = f"/{account}/cards/{number}/comments/{form_comment}"
-            status, headers, _ = request(target, form_path, "POST",
-                                         b"_method=patch&comment%5Bbody%5D=Saved+by+form", accept="text/html")
-            assert status == 302 and headers["Location"] == f"/{account}/cards/{number}"
-            status, _, raw = request(target, form_path, bearer=True)
-            assert status == 200 and "Saved by form" in json.loads(raw)["body"]["plain_text"]
-            status, headers, _ = request(target, form_path, "POST", b"_method=delete", accept="text/html")
-            assert status == 302 and headers["Location"] == f"/{account}/cards/{number}"
-            assert request(target, form_path, bearer=True)[0] == 404
+        status, _, raw = request(target, f"/{account}/cards/{number}/comments", "POST",
+                                 {"comment":{"body":"Form comment"}}, bearer=True)
+        assert status == 201
+        form_comment = json.loads(raw)["id"]
+        form_path = f"/{account}/cards/{number}/comments/{form_comment}"
+        status, _, _ = request(target, form_path, "POST", b"_method=delete",
+                               accept="text/html", csrf=csrf)
+        assert status == 406, (target["name"], "HTML form delete", status)
+        assert request(target, form_path, bearer=True)[0] == 404
         return {"edit":200,"json_edit":406,"json_update":200,"browser_card":200,
                 "json_index":200,"html_index":406,"turbo_show":406,"flat_json":200,
                 "turbo_create":200,"turbo_form_create":200,"backdated_create":201,
                 "html_show":200,"turbo_update":200,"turbo_form":200,
-                "turbo_destroy":200,"html_delete":406}
+                "turbo_destroy":200,"html_delete":406,"html_update":406,
+                "html_create":406,"html_form_update":406,"html_form_delete":406}
     finally:
         for board_id in boards:
             status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)

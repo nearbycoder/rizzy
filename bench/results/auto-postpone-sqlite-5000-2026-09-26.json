@@ -1,0 +1,78 @@
+{
+  "source_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rust_commit": "8b0d7133218b507cc50725c9670877e67f10da64",
+  "rust_worktree_dirty_at_run": true,
+  "cpu_affinity": [
+    0,
+    1
+  ],
+  "database": "SQLite",
+  "timing": "sweep body only",
+  "fixture": "four boards, half inherited 30-day and half overridden 7-day; equal overdue and recent published cards inserted directly",
+  "runs": [
+    {
+      "cards_due": 5000,
+      "cards_recent": 5000,
+      "boards": 4,
+      "round": 1,
+      "app": "fizzy",
+      "seconds": 68.10909,
+      "cards_per_second": 73.41,
+      "counts": {
+        "not_now": 5000,
+        "events": 5000,
+        "system_comments": 5000,
+        "recent_remaining": 5000,
+        "cards_verified": 10000
+      }
+    },
+    {
+      "cards_due": 5000,
+      "cards_recent": 5000,
+      "boards": 4,
+      "round": 1,
+      "app": "rizzy",
+      "seconds": 0.688732,
+      "cards_per_second": 7259.72,
+      "counts": {
+        "not_now": 5000,
+        "events": 5000,
+        "system_comments": 5000,
+        "recent_remaining": 5000,
+        "cards_verified": 10000
+      }
+    },
+    {
+      "cards_due": 5000,
+      "cards_recent": 5000,
+      "boards": 4,
+      "round": 2,
+      "app": "rizzy",
+      "seconds": 0.645407,
+      "cards_per_second": 7747.05,
+      "counts": {
+        "not_now": 5000,
+        "events": 5000,
+        "system_comments": 5000,
+        "recent_remaining": 5000,
+        "cards_verified": 10000
+      }
+    },
+    {
+      "cards_due": 5000,
+      "cards_recent": 5000,
+      "boards": 4,
+      "round": 2,
+      "app": "fizzy",
+      "seconds": 68.083402,
+      "cards_per_second": 73.44,
+      "counts": {
+        "not_now": 5000,
+        "events": 5000,
+        "system_comments": 5000,
+        "recent_remaining": 5000,
+        "cards_verified": 10000
+      }
+    }
+  ]
+}

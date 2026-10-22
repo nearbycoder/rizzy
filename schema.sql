@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS accounts (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS account_external_id_sequences (
+  id INTEGER PRIMARY KEY,
+  value INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS account_cancellations (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
@@ -20,6 +24,17 @@ CREATE TABLE IF NOT EXISTS account_cancellations (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_cancellations_due ON account_cancellations(created_at);
+CREATE TABLE IF NOT EXISTS cancellation_mail_jobs (
+  id TEXT PRIMARY KEY,
+  cancellation_id TEXT NOT NULL UNIQUE REFERENCES account_cancellations(id) ON DELETE CASCADE,
+  recipient TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  status INTEGER NOT NULL DEFAULT 0,
+  claimed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cancellation_mail_jobs_pending ON cancellation_mail_jobs(status,claimed_at);
 CREATE TABLE IF NOT EXISTS account_join_codes (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
@@ -250,11 +265,15 @@ CREATE TABLE IF NOT EXISTS cards (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_active_at TEXT NOT NULL,
+  bulk_touch_epoch INTEGER NOT NULL DEFAULT 0,
   UNIQUE(account_id, number)
 );
 CREATE INDEX IF NOT EXISTS cards_board_active ON cards(board_id, status, closed, postponed, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS cards_board_column_active ON cards(board_id, column_id, status, closed, postponed, golden DESC, last_active_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS cards_account_latest ON cards(account_id, last_active_at DESC);
+CREATE TABLE IF NOT EXISTS card_bulk_touches (
+  board_id TEXT PRIMARY KEY REFERENCES boards(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS storage_blobs (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -300,6 +319,46 @@ CREATE UNIQUE INDEX IF NOT EXISTS storage_user_avatar_blob_unique
 CREATE UNIQUE INDEX IF NOT EXISTS storage_embed_unique
   ON storage_attachments(record_type,record_id,name,blob_id) WHERE name='embed';
 CREATE INDEX IF NOT EXISTS storage_attachments_record ON storage_attachments(record_type,record_id);
+CREATE INDEX IF NOT EXISTS storage_attachments_blob_type ON storage_attachments(account_id,blob_id,record_type);
+CREATE TABLE IF NOT EXISTS storage_purge_jobs (
+  blob_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  claimed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS storage_purge_jobs_pending ON storage_purge_jobs(state,created_at,blob_id);
+CREATE TABLE IF NOT EXISTS storage_entries (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  blob_id TEXT,
+  board_id TEXT,
+  created_at TEXT NOT NULL,
+  delta INTEGER NOT NULL,
+  operation TEXT NOT NULL,
+  recordable_id TEXT,
+  recordable_type TEXT,
+  request_id TEXT,
+  user_id TEXT
+);
+CREATE INDEX IF NOT EXISTS storage_entries_account ON storage_entries(account_id,id);
+CREATE INDEX IF NOT EXISTS storage_entries_board ON storage_entries(board_id,id);
+CREATE INDEX IF NOT EXISTS storage_entries_blob ON storage_entries(blob_id);
+CREATE INDEX IF NOT EXISTS storage_entries_recordable ON storage_entries(recordable_type,recordable_id);
+CREATE INDEX IF NOT EXISTS storage_entries_request ON storage_entries(request_id);
+CREATE INDEX IF NOT EXISTS storage_entries_user ON storage_entries(user_id);
+CREATE TABLE IF NOT EXISTS storage_totals (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  owner_id TEXT NOT NULL,
+  owner_type TEXT NOT NULL,
+  bytes_stored INTEGER NOT NULL DEFAULT 0,
+  last_entry_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(owner_type,owner_id)
+);
+CREATE INDEX IF NOT EXISTS storage_totals_account ON storage_totals(account_id);
 CREATE TABLE IF NOT EXISTS storage_download_tokens (
   token_hash TEXT PRIMARY KEY,
   blob_id TEXT NOT NULL REFERENCES storage_blobs(id) ON DELETE CASCADE,
@@ -394,11 +453,15 @@ CREATE TABLE IF NOT EXISTS tags (
   account_id TEXT NOT NULL REFERENCES accounts(id),
   title TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(account_id,title)
 );
 CREATE TABLE IF NOT EXISTS taggings (
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  id TEXT,
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(card_id,tag_id)
 );
 CREATE TABLE IF NOT EXISTS assignments (
@@ -408,6 +471,7 @@ CREATE TABLE IF NOT EXISTS assignments (
   assignee_id TEXT NOT NULL REFERENCES users(id),
   assigner_id TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(card_id,assignee_id)
 );
 CREATE INDEX IF NOT EXISTS assignments_assignee ON assignments(assignee_id,card_id);
@@ -426,6 +490,7 @@ CREATE TABLE IF NOT EXISTS pins (
   card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(user_id,card_id)
 );
 CREATE INDEX IF NOT EXISTS pins_user_recent ON pins(user_id,created_at DESC);
@@ -436,7 +501,8 @@ CREATE TABLE IF NOT EXISTS reactions (
   reactable_id TEXT NOT NULL,
   reacter_id TEXT NOT NULL REFERENCES users(id),
   content TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS reactions_target ON reactions(reactable_type,reactable_id,created_at);
 CREATE TABLE IF NOT EXISTS mentions (
@@ -482,6 +548,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   UNIQUE(user_id,card_id)
 );
 CREATE INDEX IF NOT EXISTS notifications_user_read ON notifications(user_id,read_at,updated_at DESC);
+CREATE INDEX IF NOT EXISTS notifications_source ON notifications(source_type,source_id);
 CREATE TRIGGER IF NOT EXISTS notifications_event_delete AFTER DELETE ON events BEGIN
   DELETE FROM notifications WHERE source_type='Event' AND source_id=OLD.id;
 END;
@@ -612,6 +679,16 @@ CREATE TABLE IF NOT EXISTS webhooks (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS webhooks_board_order ON webhooks(board_id,name,id DESC);
+CREATE TABLE IF NOT EXISTS webhook_delinquency_trackers (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  webhook_id TEXT NOT NULL UNIQUE REFERENCES webhooks(id) ON DELETE CASCADE,
+  consecutive_failures_count INTEGER NOT NULL DEFAULT 0,
+  first_failure_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS webhook_delinquency_trackers_account ON webhook_delinquency_trackers(account_id);
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -625,10 +702,11 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 );
 CREATE INDEX IF NOT EXISTS webhook_deliveries_webhook_recent ON webhook_deliveries(webhook_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS webhook_deliveries_pending ON webhook_deliveries(state,created_at);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_stale ON webhook_deliveries(created_at,id);
 CREATE TRIGGER IF NOT EXISTS cards_touch_board_insert AFTER INSERT ON cards WHEN NEW.status='published' BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
-CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.status='published' BEGIN
+CREATE TRIGGER IF NOT EXISTS cards_touch_board_update AFTER UPDATE ON cards WHEN NEW.bulk_touch_epoch=OLD.bulk_touch_epoch AND NEW.status='published' AND NOT EXISTS(SELECT 1 FROM card_bulk_touches WHERE board_id=NEW.board_id) BEGIN
   UPDATE boards SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=NEW.board_id;
 END;
 CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(title,description,tokenize='porter unicode61');

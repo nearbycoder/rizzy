@@ -1,0 +1,50 @@
+{
+  "database": "Oracle MySQL 8",
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "095e0c15c9c90b23eeacda5e14f0e16684d0086e",
+  "rizzy_binary_sha256": "ee860a8e6fcc0b3a201f6a54e53c10abcf0d1fb503dd735c6cc9ba35765a4426",
+  "server_cpus": [
+    0,
+    1
+  ],
+  "source_workers": 2,
+  "rust_processes": 1,
+  "sizes": {
+    "1000": {
+      "samples_ms": {
+        "fizzy": [
+          79.419,
+          28.288,
+          17.509
+        ],
+        "rizzy": [
+          19.322,
+          19.226,
+          19.476
+        ]
+      },
+      "median_ms": {
+        "fizzy": 28.288,
+        "rizzy": 19.322
+      }
+    },
+    "10000": {
+      "samples_ms": {
+        "fizzy": [
+          66.133,
+          118.675,
+          52.275
+        ],
+        "rizzy": [
+          184.883,
+          178.069,
+          181.139
+        ]
+      },
+      "median_ms": {
+        "fizzy": 66.133,
+        "rizzy": 181.139
+      }
+    }
+  }
+}

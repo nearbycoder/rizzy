@@ -6,15 +6,17 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 from card_image_parity import IMAGE, call
-from avatar_parity import PNG
+from avatar_parity import PNG, SVG
 
 FILE = b"hello text\n"
+BMP = (Path(__file__).resolve().parents[1] / "tests/fixtures/tiny.bmp").read_bytes()
 
 
 def request(target, path, method="GET", payload=None, *, bearer=True):
@@ -109,6 +111,30 @@ def run(target):
         assert status == 201, (status, file_card)
         results["file"] = (file_card["description"], file_card["has_attachments"],
                            normalized(file_card["description_html"], target, file_blob))
+        for label, content, filename, content_type in (
+            ("svg", SVG, "avatar.svg", "image/svg+xml"),
+            ("bmp", BMP, "tiny.bmp", "image/bmp"),
+        ):
+            nonvariable_blob = upload(target, content, filename, content_type)
+            markup = (f'<p><action-text-attachment sgid="{nonvariable_blob["attachable_sgid"]}">'
+                      '</action-text-attachment></p>')
+            status, _, nonvariable_card = request(
+                target, f"/boards/{board['id']}/cards", "POST",
+                {"card": {"title": f"{label.upper()} embed", "description": markup}})
+            assert status == 201, (status, nonvariable_card)
+            assert "attachment--file" in nonvariable_card["description_html"]
+            assert "/representations/" not in nonvariable_card["description_html"]
+            results[label] = (nonvariable_card["description"], nonvariable_card["has_attachments"],
+                              normalized(nonvariable_card["description_html"], target, nonvariable_blob))
+            path = (f"/{target['account']}/rails/active_storage/blobs/redirect/"
+                    f"{nonvariable_blob['signed_id']}/{filename}")
+            status, headers, _ = call(target, path)
+            assert status == 302, status
+            with urllib.request.urlopen(urllib.parse.urljoin(target["url"], headers["Location"]), timeout=10) as response:
+                assert response.read() == content
+                downloaded_type = response.headers.get_content_type()
+                assert downloaded_type == ("application/octet-stream" if label == "svg" else "image/bmp")
+                results[f"{label}_download_type"] = downloaded_type
         png_blob = upload(target, PNG, "avatar.png", "image/png")
         png_markup = f'<p><action-text-attachment sgid="{png_blob["attachable_sgid"]}"></action-text-attachment></p>'
         status, _, png_card = request(target, f"/boards/{board['id']}/cards", "POST",
@@ -149,6 +175,7 @@ def run(target):
         status, _, _ = request(target, f"/cards/{card['number']}/comments/{comment['id']}", "DELETE")
         assert status == 204, status
         if target.get("database"):
+            drain_rizzy(target)
             db = sqlite3.connect(target["database"])
             try:
                 assert db.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
@@ -177,6 +204,7 @@ def run(target):
 
 
 def assert_deleted(target, blob):
+    drain_rizzy(target)
     db = sqlite3.connect(target["database"])
     try:
         assert db.execute("SELECT COUNT(*) FROM storage_blobs WHERE signed_id=?",
@@ -185,6 +213,16 @@ def assert_deleted(target, blob):
         assert not (Path(target["storage_dir"]) / (blob["key"] + ".large.jpg")).exists()
     finally:
         db.close()
+
+
+def drain_rizzy(target):
+    env = {**os.environ,
+           "RIZZY_DATABASE_URL": f"sqlite://{target['database']}",
+           "RIZZY_STORAGE_DIR": str(target["storage_dir"])}
+    binary = Path(__file__).resolve().parents[1] / "target/release/rizzy"
+    result = subprocess.run([binary, "purge-stored-blobs"], env=env,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr[-1000:]
 
 
 def main():

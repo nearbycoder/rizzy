@@ -5,15 +5,23 @@ pub(super) async fn new(
     Path((account, number)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    let p = principal(&app, &headers, &account).await?;
+    let card = card(&app, &p, &number).await?;
     if headers.contains_key("x-rizzy-json-request") || wants_turbo_stream(&headers) {
         return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
     }
-    let p = principal(&app, &headers, &account).await?;
-    let card = card(&app, &p, &number).await?;
     let frame = picker(&app, &p, &card).await?;
     let meta = meta(&app, &p, &card).await?;
     let page = format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Assign card | Rizzy</title><style>:root{{font:16px/1.5 system-ui,sans-serif;background:#1b1b1b;color:#f5f0e8}}*{{box-sizing:border-box}}body{{margin:0}}main{{max-width:560px;margin:36px auto;padding:24px;border:1px solid #46433d;border-radius:14px;background:#292826}}a{{color:#e7bd61}}strong{{font-size:22px}}input{{width:100%;margin:16px 0;padding:10px;border:1px solid #666158;border-radius:8px;background:#34322f;color:#fff}}ul{{list-style:none;padding:0}}li{{margin:4px 0}}button{{display:flex;width:100%;justify-content:space-between;padding:10px;border:0;border-radius:7px;background:transparent;color:#f5f0e8;text-align:left;font:inherit;cursor:pointer}}button:hover{{background:#46433d}}.popup__footer{{color:#afa89d;font-size:13px}}</style></head><body><main><p><a href=\"/{account}/cards/{number}\">← Back to card</a></p>{meta}{frame}<p role=\"alert\" id=\"assignment-error\"></p></main><script>document.querySelector('main').addEventListener('input',event=>{{if(event.target.id!=='user-search')return;const value=event.target.value.toLocaleLowerCase();document.querySelectorAll('.popup__item').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))}});document.querySelector('main').addEventListener('submit',async event=>{{const form=event.target;if(!form.closest('turbo-frame'))return;event.preventDefault();const button=event.submitter;button.disabled=true;document.getElementById('assignment-error').textContent='';try{{const response=await fetch(form.action,{{method:'POST',headers:{{Accept:'text/vnd.turbo-stream.html'}}}});if(!response.ok)throw Error('Could not update assignment');const update=new DOMParser().parseFromString(await response.text(),'text/html');const stream=update.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,old=stream&&document.getElementById(stream.getAttribute('target'));if(!old||!replacement)throw Error('Assignment update missing');old.replaceWith(document.importNode(replacement,true));const frame=update.querySelector('turbo-frame[id^=assignment_card_]');if(!frame)throw Error('Assignment picker update missing');document.getElementById(frame.id)?.replaceWith(document.importNode(frame,true))}}catch(error){{document.getElementById('assignment-error').textContent=error.message;button.disabled=false}}}})</script></body></html>"
+    );
+    let page = page.replacen(
+        "</body>",
+        &format!(
+            "<script>{}</script></body>",
+            include_str!("../static/assignment_limit.js")
+        ),
+        1,
     );
     let etag = format!("W/\"{}\"", hex::encode(Sha256::digest(page.as_bytes())));
     let mut response = if headers
@@ -35,7 +43,7 @@ pub(super) async fn new(
     Ok(response)
 }
 
-pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result<String> {
+pub(super) async fn picker(app: &App, p: &Principal, card: &DbRow) -> Result<String> {
     let account = p.slug;
     let number: i64 = card.get("number");
     let card_id: String = card.get("id");
@@ -53,8 +61,10 @@ pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result
         let name: String = user.get("name");
         let label = if user_id == p.user_id { "Me" } else { &name };
         let selected = user.get::<i64, _>("assigned") != 0;
+        let limited = user_id != p.user_id && !selected;
         options.push_str(&format!(
-            "<li class=\"popup__item\" data-filter-target=\"item\" aria-checked=\"{}\"><form method=\"post\" action=\"/{account}/cards/{number}/assignments?assignee_id={}\"><button class=\"popup__btn btn\" type=\"submit\">{}<span class=\"checked\" aria-hidden=\"true\">{}</span></button></form></li>",
+            "<li class=\"popup__item\" data-filter-target=\"item\" data-navigable-list-target=\"item\"{} aria-checked=\"{}\"><form method=\"post\" action=\"/{account}/cards/{number}/assignments?assignee_id={}\"><button class=\"popup__btn btn\" type=\"submit\">{}<span class=\"checked\" aria-hidden=\"true\">{}</span></button></form></li>",
+            if limited { " data-assignment-limit-target=\"unassigned\"" } else { "" },
             selected,
             escape(&user_id),
             escape(label),
@@ -62,12 +72,12 @@ pub(super) async fn picker(app: &App, p: &Principal, card: &SqliteRow) -> Result
         ));
     }
     Ok(format!(
-        "<turbo-frame id=\"assignment_card_{}\"><div class=\"assignment-picker\" data-assignment-limit-count-value=\"{count}\" data-assignment-limit-limit-value=\"100\"><strong class=\"popup__title\">Assign this to…</strong><input type=\"search\" id=\"user-search\" placeholder=\"Filter…\" aria-label=\"Filter people\" autofocus><ul class=\"popup__list\">{options}</ul><div class=\"popup__footer\">Maximum 100 assignees</div></div></turbo-frame>",
+        "<turbo-frame id=\"assignment_card_{}\"><div class=\"assignment-picker\" data-controller=\"filter navigable-list assignment-limit\" data-assignment-limit-count-value=\"{count}\" data-assignment-limit-limit-value=\"100\"><strong class=\"popup__title\">Assign this to…</strong><input type=\"search\" id=\"user-search\" placeholder=\"Filter…\" aria-label=\"Filter people\" autofocus><ul class=\"popup__list\" data-filter-target=\"list\">{options}</ul><div class=\"popup__footer\" hidden data-assignment-limit-target=\"limitMessage\">Maximum 100 assignees</div></div></turbo-frame>",
         escape(&card_id)
     ))
 }
 
-pub(super) async fn meta(app: &App, p: &Principal, card: &SqliteRow) -> Result<String> {
+pub(super) async fn meta(app: &App, p: &Principal, card: &DbRow) -> Result<String> {
     let card_id: String = card.get("id");
     let creator_id: String = card.get("creator_id");
     let number: i64 = card.get("number");

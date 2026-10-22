@@ -58,26 +58,33 @@ def rust_env(directory):
             "RIZZY_DISABLE_WEBHOOK_DELIVERY": "1"}
 
 
-def prepare_source(directory, workers):
-    env = source_env(directory, workers)
-    subprocess.run(["bin/rails", "db:prepare"], cwd=SOURCE, env=env,
-                   capture_output=True, text=True, check=True)
+def prepare_source(directory, workers, env=None):
+    env = env or source_env(directory, workers)
+    prepared = subprocess.run(["bin/rails", "db:prepare"], cwd=SOURCE, env=env,
+                              capture_output=True, text=True)
+    if prepared.returncode:
+        raise RuntimeError(f"Fizzy database setup failed: {prepared.stderr[-2000:]}")
     script = '''require "json"
-      identity = Identity.create!(email_address: "mixed-benchmark@example.com")
+      identity = Identity.create!(email_address: "owner@example.com")
       account = Account.create_with_owner(
-        account: { external_account_id: 123456789, name: "Mixed benchmark" },
-        owner: { name: "Benchmark Owner", identity: identity })
+        account: { external_account_id: 1, name: "Rizzy" },
+        owner: { name: "Owner", identity: identity })
       token = identity.access_tokens.create!(description: "Benchmark", permission: "write")
       puts JSON.generate({ account: account.external_account_id, token: token.token })'''
     result = subprocess.run(["bin/rails", "runner", script], cwd=SOURCE, env=env,
-                            capture_output=True, text=True, check=True)
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"Fizzy account setup failed: {result.stderr[-2000:]}")
     return env, json.loads(result.stdout)
 
 
-def prepare_rust(directory):
-    env = rust_env(directory)
+def prepare_rust(directory, env=None):
+    env = env or rust_env(directory)
     seeded = subprocess.run([RUST, "seed"], cwd=ROOT, env=env,
-                            capture_output=True, text=True, check=True).stdout
+                            capture_output=True, text=True)
+    if seeded.returncode:
+        raise RuntimeError(f"Rizzy database setup failed: {seeded.stderr[-2000:]}")
+    seeded = seeded.stdout
     return env, {"account": re.search(r"Account: (\d+)", seeded).group(1),
                  "token": re.search(r"Bearer token: (\w+)", seeded).group(1)}
 
@@ -90,13 +97,15 @@ def start_server(name, directory, env, cpus):
     cwd = SOURCE if name == "fizzy" else ROOT
     local_env = {**env, "PORT": str(port)} if name == "fizzy" else {
         **env, "RIZZY_BIND": address}
+    url = "http://" + address
+    if name == "rizzy":
+        local_env.setdefault("RIZZY_PASSKEY_ORIGIN", f"http://localhost:{port}")
     log_path = directory / f"{name}.log"
     with log_path.open("w") as log:
         process = subprocess.Popen(command, cwd=cwd, env=local_env,
                                    stdout=log, stderr=subprocess.STDOUT,
                                    start_new_session=True,
                                    preexec_fn=lambda: os.sched_setaffinity(0, cpus))
-    url = "http://" + address
     for _ in range(200):
         if process.poll() is not None:
             raise RuntimeError(f"{name} exited: {log_path.read_text()[-2000:]}")
@@ -119,9 +128,9 @@ def stop_server(process):
         process.wait(timeout=5)
 
 
-def fixture(target, cards):
+def fixture(target, cards, board_name="Mixed workload"):
     board, _ = expect(target, "/boards", "POST",
-                      {"board": {"name": "Mixed workload"}}, 201)
+                      {"board": {"name": board_name}}, 201)
     board_id = board["id"]
     first = None
     for index in range(cards):
@@ -166,6 +175,38 @@ def first_difference(left, right, path="sample"):
     return None
 
 
+def comparable_json(value, target):
+    """Keep response content while masking fixture-specific IDs, URLs, and times.
+
+    IDs are numbered by first use, so repeated references must still agree within
+    each response. Sorting object keys makes that numbering independent of the
+    serializer's object field order.
+    """
+    identifiers = {}
+    root = f"{target['url']}/{target['account']}"
+    timestamp = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z")
+    generated_id = re.compile(r"\b[0-9a-z]{25}\b")
+
+    def replace_id(match):
+        identifier = match.group()
+        if identifier not in identifiers:
+            identifiers[identifier] = f"$ID{len(identifiers)}"
+        return identifiers[identifier]
+
+    def normalize(item):
+        if isinstance(item, dict):
+            return {key: normalize(item[key]) for key in sorted(item)}
+        if isinstance(item, list):
+            return [normalize(entry) for entry in item]
+        if isinstance(item, str):
+            if timestamp.fullmatch(item):
+                return "$TIME"
+            return generated_id.sub(replace_id, item.replace(root, "$ROOT"))
+        return item
+
+    return normalize(value)
+
+
 def read_four(target, paths):
     timings = []
     for path in paths:
@@ -183,37 +224,51 @@ def read_four(target, paths):
     return timings
 
 
+def target_process_sample(target):
+    samples = [process_sample(pid) for pid in target.get("pids", [target["pid"]])]
+    return {key: sum(sample[key] for sample in samples) for key in samples[0]}
+
+
 def run_load(target, board_id, paths, seconds, clients):
-    before = process_sample(target["pid"])
+    before = target_process_sample(target)
     started = time.monotonic()
     deadline = started + seconds
     sequence = itertools.count(1)
     stop = threading.Event()
 
-    def worker(_):
+    def worker(worker_index):
         unit_times, read_times, workflow_times, errors = [], [], [], []
+        urls = target.get("urls")
+        worker_target = {**target, "url": urls[worker_index % len(urls)]} if urls else target
+        boards = board_id if isinstance(board_id, list) else [board_id]
+        # Keep each client's board fixed across targets even when they use a
+        # different number of server processes.
+        board_index = worker_index % len(boards)
+        worker_board = boards[board_index]
+        worker_paths = paths[board_index] if isinstance(board_id, list) else paths
         while time.monotonic() < deadline and not stop.is_set():
             beginning = time.perf_counter()
             try:
-                reads = read_four(target, paths)
-                result = workflow(target, board_id, next(sequence))
+                reads = read_four(worker_target, worker_paths)
+                result = workflow(worker_target, worker_board, next(sequence))
                 read_times.extend(reads)
                 workflow_times.append(sum(result["timings"].values()))
                 unit_times.append(time.perf_counter() - beginning)
             except Exception as error:
                 errors.append(f"{type(error).__name__}: {str(error)[:180]}")
                 stop.set()
-        return unit_times, read_times, workflow_times, errors
+        return unit_times, read_times, workflow_times, errors, (
+            worker_index % len(urls) if urls else 0), board_index
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=clients) as pool:
         workers = list(pool.map(worker, range(clients)))
     elapsed = time.monotonic() - started
-    after = process_sample(target["pid"])
+    after = target_process_sample(target)
     units = [value for worker in workers for value in worker[0]]
     reads = [value for worker in workers for value in worker[1]]
     workflows = [value for worker in workers for value in worker[2]]
     errors = [error for worker in workers for error in worker[3]]
-    return {"seconds_requested": seconds, "seconds_elapsed": round(elapsed, 2),
+    result = {"seconds_requested": seconds, "seconds_elapsed": round(elapsed, 2),
             "clients": clients, "units_completed": len(units),
             "units_per_second": round(len(units) / elapsed, 2),
             "read_requests": len(reads) + len(workflows),
@@ -227,6 +282,16 @@ def run_load(target, board_id, paths, seconds, clients):
                 "pss_mib_start": round(before["pss_mib"], 1),
                 "pss_mib_end": round(after["pss_mib"], 1),
                 "write_mib": round(after["write_mib"] - before["write_mib"], 1)}}
+    if target.get("urls"):
+        result["units_by_process"] = [
+            sum(len(worker[0]) for worker in workers if worker[4] == index)
+            for index in range(len(target["urls"]))]
+    if isinstance(board_id, list):
+        result["client_board_indexes"] = [worker[5] for worker in workers]
+        result["units_by_board"] = [
+            sum(len(worker[0]) for worker in workers if worker[5] == index)
+            for index in range(len(board_id))]
+    return result
 
 
 def verify_counts(database, board_id, initial_cards, units):

@@ -1,0 +1,116 @@
+{
+  "cards": 10000,
+  "trials": 3,
+  "rizzy_revision": "2d2a9e92e1e2e6a0fa49f691dbdd05743c4d0c3a",
+  "rizzy_binary_sha256": "2412a5218c57babb4111a97a873f9d2de4c7927a0d7f7cd3fa9b33dffb9a32e5",
+  "variants": {
+    "guard_query": [
+      {
+        "lock": 161,
+        "guard": 125,
+        "nullify": 83036,
+        "touch_cards": 106971,
+        "delete_column": 7022,
+        "unguard": 47,
+        "touch_board": 133,
+        "total": 201062
+      },
+      {
+        "lock": 121,
+        "guard": 62,
+        "nullify": 61336,
+        "touch_cards": 107462,
+        "delete_column": 7053,
+        "unguard": 33,
+        "touch_board": 96,
+        "total": 179621
+      },
+      {
+        "lock": 155,
+        "guard": 82,
+        "nullify": 63733,
+        "touch_cards": 113314,
+        "delete_column": 7173,
+        "unguard": 41,
+        "touch_board": 101,
+        "total": 188329
+      }
+    ],
+    "row_epoch": [
+      {
+        "lock": 152,
+        "nullify": 62121,
+        "touch_cards": 122889,
+        "delete_column": 6880,
+        "touch_board": 114,
+        "total": 195742
+      },
+      {
+        "lock": 127,
+        "nullify": 62215,
+        "touch_cards": 114258,
+        "delete_column": 7276,
+        "touch_board": 108,
+        "total": 187518
+      },
+      {
+        "lock": 130,
+        "nullify": 65260,
+        "touch_cards": 122232,
+        "delete_column": 6913,
+        "touch_board": 139,
+        "total": 198280
+      }
+    ],
+    "row_epoch_single": [
+      {
+        "lock": 355,
+        "touch_and_nullify": 139587,
+        "delete_column": 5505,
+        "touch_board": 91,
+        "total": 148211
+      },
+      {
+        "lock": 115,
+        "touch_and_nullify": 143228,
+        "delete_column": 5824,
+        "touch_board": 128,
+        "total": 152058
+      },
+      {
+        "lock": 124,
+        "touch_and_nullify": 145752,
+        "delete_column": 5992,
+        "touch_board": 140,
+        "total": 155090
+      }
+    ]
+  },
+  "median_us": {
+    "guard_query": {
+      "lock": 155,
+      "guard": 82,
+      "nullify": 63733,
+      "touch_cards": 107462,
+      "delete_column": 7053,
+      "unguard": 41,
+      "touch_board": 101,
+      "total": 188329
+    },
+    "row_epoch": {
+      "lock": 130,
+      "nullify": 62215,
+      "touch_cards": 122232,
+      "delete_column": 6913,
+      "touch_board": 114,
+      "total": 195742
+    },
+    "row_epoch_single": {
+      "lock": 124,
+      "touch_and_nullify": 143228,
+      "delete_column": 5824,
+      "touch_board": 128,
+      "total": 152058
+    }
+  }
+}

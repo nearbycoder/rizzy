@@ -5,10 +5,12 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -41,19 +43,37 @@ def login(target):
     status, headers, _ = request(target, "/session", "POST", {"email_address": target["email"]})
     assert status == 201, status
     if target["name"] == "fizzy":
-        with sqlite3.connect(target["db"]) as db:
-            code = db.execute(
+        if target.get("mysql_database"):
+            client = target["mysql_client"]
+            statement = (
                 "SELECT m.code FROM magic_links m JOIN identities i ON i.id=m.identity_id "
-                "WHERE i.email_address=? ORDER BY m.created_at DESC LIMIT 1", (target["email"],)
-            ).fetchone()[0]
+                "WHERE i.email_address='" + target["email"].replace("'", "''") + "' "
+                "ORDER BY m.created_at DESC LIMIT 1"
+            )
+            mysql_env = {**os.environ, "MYSQL_PWD": target["mysql_password"],
+                         "LD_LIBRARY_PATH": str(Path(client).resolve().parents[1] / "lib")}
+            code = subprocess.run(
+                [client, "--no-defaults", "--host=" + target["mysql_host"],
+                 "--port=" + str(target["mysql_port"]), "--user=" + target["mysql_user"],
+                 "--database=" + target["mysql_database"], "--skip-column-names",
+                 "--execute=" + statement], env=mysql_env, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+        else:
+            with sqlite3.connect(target["db"]) as db:
+                code = db.execute(
+                    "SELECT m.code FROM magic_links m JOIN identities i ON i.id=m.identity_id "
+                    "WHERE i.email_address=? ORDER BY m.created_at DESC LIMIT 1", (target["email"],)
+                ).fetchone()[0]
     else:
         code = headers["X-Magic-Link-Code"]
     status, _, _ = request(target, "/session/magic_link", "POST", {"code": code})
     assert status == 200, status
 
 
-def run(target):
-    login(target)
+def run(target, signed_in=False):
+    if not signed_in:
+        login(target)
     account = target["account"]
     status, _, raw = request(target, f"/{account}/boards", "POST", {"board": {"name": f"Draft parity {time.time_ns()}"}}, bearer=True)
     assert status == 201, (status, raw[:100])

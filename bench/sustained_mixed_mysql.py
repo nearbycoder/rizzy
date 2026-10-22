@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+"""Parity-checked Fizzy/Rizzy mixed workload on one disposable MySQL server.
+
+Requires a running local MySQL server and a socket-authenticated root account.
+All benchmark schemas have unique rzbench_ names and are dropped at the end.
+"""
+
+import argparse
+import concurrent.futures
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from pathlib import Path
+
+from sustained_mixed import (ROOT, RUST, SOURCE, RUBY, first_difference, fixture,
+                             preflight, prepare_rust, prepare_source, read_four, run_load,
+                             start_server, stop_server)
+from card_workflow import workflow
+
+
+def mysql_admin(client, socket, statement):
+    env = {**os.environ, "LD_LIBRARY_PATH": str(Path(client).resolve().parents[1] / "lib")}
+    return subprocess.run([client, "--no-defaults", "--batch", "--skip-column-names",
+                           f"--socket={socket}", "-uroot",
+                           f"--execute={statement}"], env=env, check=True,
+                          capture_output=True, text=True).stdout
+
+
+def mysql_query(client, socket, database, statement):
+    return mysql_admin(client, socket, f"USE `{database}`; {statement}").strip()
+
+
+def create_databases(client, socket, names):
+    for name in names:
+        mysql_admin(client, socket,
+                    f"CREATE DATABASE `{name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; "
+                    f"GRANT ALL PRIVILEGES ON `{name}`.* TO 'rizzy'@'127.0.0.1';")
+
+
+def drop_databases(client, socket, names):
+    for name in names:
+        mysql_admin(client, socket, f"DROP DATABASE IF EXISTS `{name}`")
+
+
+def source_env(directory, workers, host, port, databases):
+    env = {**os.environ,
+           "PATH": str(RUBY / "bin") + ":" + os.environ.get("PATH", ""),
+           "LD_LIBRARY_PATH": str(RUBY / "lib"),
+           "BUNDLE_PATH": "/home/nearby/.local/rizzy-bundle",
+           "RAILS_ENV": "production", "DATABASE_ADAPTER": "mysql",
+           "MYSQL_HOST": host, "MYSQL_PORT": str(port),
+           "MYSQL_USER": "rizzy", "MYSQL_PASSWORD": "rizzy",
+           "DISABLE_SSL": "true", "SOLID_QUEUE_IN_PUMA": "false",
+           "DISABLE_DATABASE_ENVIRONMENT_CHECK": "1",
+           "SECRET_KEY_BASE": "0123456789abcdef" * 4,
+           "WEB_CONCURRENCY": str(workers),
+           "PIDFILE": str(directory / "puma.pid")}
+    for role, database in databases.items():
+        env[role + "DATABASE_URL"] = f"trilogy://rizzy:rizzy@{host}:{port}/{database}"
+    return env
+
+
+def rust_env(directory, host, port, database):
+    return {**os.environ,
+            "RIZZY_DATABASE_URL": f"mysql://rizzy:rizzy@{host}:{port}/{database}",
+            "RIZZY_STORAGE_DIR": str(directory / "storage"),
+            "RIZZY_DISABLE_WEBHOOK_DELIVERY": "1",
+            "RIZZY_DISABLE_PUSH_DELIVERY": "1"}
+
+
+def observed_counts(client, socket, database, boards=1):
+    board_names = ("name='Mixed workload'" if boards == 1
+                   else "name LIKE 'Mixed workload %'")
+    board_ids = f"SELECT id FROM boards WHERE {board_names}"
+    statement = ("SELECT (SELECT COUNT(*) FROM cards WHERE board_id IN (" + board_ids + ")), "
+                 "(SELECT COUNT(*) FROM events WHERE board_id IN (" + board_ids + ")), "
+                 "(SELECT COUNT(*) FROM comments WHERE card_id IN "
+                 "(SELECT id FROM cards WHERE board_id IN (" + board_ids + ")))")
+    actual = [int(value) for value in mysql_query(client, socket, database,
+                                                  statement).split("\t")]
+    return dict(zip(("cards", "events", "comments"), actual))
+
+
+def verify_counts(client, socket, database, initial_cards, units, boards=1):
+    actual = observed_counts(client, socket, database, boards)
+    expected = [initial_cards + units, initial_cards + 4 * units, 3 * units]
+    assert list(actual.values()) == expected, (database, actual, expected)
+    return actual
+
+
+def warmup_fixed_units(target, board_ids, paths, units, clients):
+    """Run the same number of complete read/write units on each target."""
+    boards = board_ids if isinstance(board_ids, list) else [board_ids]
+    urls = target.get("urls")
+    started = time.monotonic()
+
+    def run(index):
+        worker_target = {**target, "url": urls[index % len(urls)]} if urls else target
+        process_index = index % len(urls) if urls else 0
+        board_index = index % len(boards)
+        worker_paths = paths[board_index] if isinstance(board_ids, list) else paths
+        try:
+            read_four(worker_target, worker_paths)
+            workflow(worker_target, boards[board_index], 1_000_000 + index)
+            return board_index, process_index, None
+        except Exception as error:
+            return board_index, process_index, f"{type(error).__name__}: {str(error)[:180]}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(clients, max(units, 1))) as pool:
+        outcomes = list(pool.map(run, range(units)))
+    completed = [(board, process) for board, process, error in outcomes if error is None]
+    result = {"units_requested": units, "units_completed": len(completed),
+            "seconds_elapsed": round(time.monotonic() - started, 2),
+            "errors": [error for _, _, error in outcomes if error is not None][:10],
+            "units_by_board": [sum(board == index for board, _ in completed)
+                               for index in range(len(boards))]}
+    if urls:
+        result["units_by_process"] = [sum(process == index for _, process in completed)
+                                      for index in range(len(urls))]
+    return result
+
+
+def run_pair(args, server_cpus, order):
+    prefix = "rzbench_" + uuid.uuid4().hex[:12]
+    source_dbs = {role: prefix + "_f" + suffix for role, suffix in
+                  (("", ""), ("CABLE_", "_c"), ("CACHE_", "_k"), ("QUEUE_", "_q"))}
+    rust_db = prefix + "_r"
+    databases = [*source_dbs.values(), rust_db]
+    processes, logs = {}, {}
+    active_name = "setup"
+    created = False
+    with tempfile.TemporaryDirectory(prefix="rizzy-mysql-bench-") as temp:
+        root = Path(temp)
+        try:
+            created = True
+            create_databases(args.mysql_client, args.mysql_socket, databases)
+            targets, paths, samples, boards, shapes = {}, {}, {}, {}, {}
+            for name in ("fizzy", "rizzy"):
+                active_name = name + " setup"
+                directory = root / name
+                directory.mkdir()
+                env, credentials = (
+                    prepare_source(directory, args.server_cpus,
+                                   source_env(directory, args.server_cpus, args.mysql_host,
+                                              args.mysql_port, source_dbs))
+                    if name == "fizzy" else
+                    prepare_rust(directory, rust_env(directory, args.mysql_host,
+                                                     args.mysql_port, rust_db)))
+                process, url = start_server(name, directory, env, server_cpus)
+                processes[name] = process
+                logs[name] = directory / f"{name}.log"
+                target = {"url": url, "account": str(credentials["account"]),
+                          "token": credentials["token"], "pid": process.pid}
+                if name == "rizzy" and args.rizzy_processes > 1:
+                    target["urls"] = [url]
+                    target["pids"] = [process.pid]
+                    for index in range(2, args.rizzy_processes + 1):
+                        worker_directory = root / f"rizzy-{index}"
+                        worker_directory.mkdir()
+                        worker_process, worker_url = start_server(
+                            "rizzy", worker_directory, env, server_cpus)
+                        key = f"rizzy-{index}"
+                        processes[key] = worker_process
+                        logs[key] = worker_directory / "rizzy.log"
+                        target["urls"].append(worker_url)
+                        target["pids"].append(worker_process.pid)
+                targets[name] = target
+                shapes[name] = preflight(target)
+                if args.boards == 1:
+                    boards[name], paths[name], samples[name] = fixture(target, args.cards)
+                else:
+                    boards[name], paths[name], samples[name] = [], [], []
+                    for index in range(args.boards):
+                        board, path, sample = fixture(
+                            target, args.cards // args.boards,
+                            board_name=f"Mixed workload {index}")
+                        boards[name].append(board)
+                        paths[name].append(path)
+                        samples[name].append(sample)
+            if difference := first_difference(shapes["fizzy"], shapes["rizzy"]):
+                raise AssertionError("workflow shapes: " + difference)
+            if difference := first_difference(samples["fizzy"], samples["rizzy"]):
+                raise AssertionError("fixture: " + difference)
+            result = {"sample_parity": samples["fizzy"], "warmups": {}, "runs": {},
+                      "paired_comparable": True}
+            for name in order:
+                active_name = name + " warmup"
+                database = source_dbs[""] if name == "fizzy" else rust_db
+                warmup = warmup_fixed_units(targets[name], boards[name], paths[name],
+                                            args.warmup_units, args.clients)
+                result["warmups"][name] = warmup
+                if args.warmup_units:
+                    print(f"{name} warmup: {warmup['units_completed']}/{args.warmup_units} "
+                          f"units, {len(warmup['errors'])} errors", file=sys.stderr, flush=True)
+                if warmup["errors"]:
+                    warmup["observed_counts"] = observed_counts(
+                        args.mysql_client, args.mysql_socket, database, args.boards)
+                    result["paired_comparable"] = False
+                    break
+                try:
+                    warmup["verified_counts"] = verify_counts(
+                        args.mysql_client, args.mysql_socket, database, args.cards,
+                        warmup["units_completed"], args.boards)
+                except AssertionError as error:
+                    warmup["count_verification_error"] = str(error)
+                    result["paired_comparable"] = False
+                    break
+                active_name = name + " load"
+                sample = run_load(targets[name], boards[name], paths[name],
+                                  args.seconds, args.clients)
+                result["runs"][name] = sample
+                if sample["errors"]:
+                    sample["observed_counts"] = observed_counts(
+                        args.mysql_client, args.mysql_socket, database, args.boards)
+                    sample["valid_for_throughput_comparison"] = False
+                    result["paired_comparable"] = False
+                else:
+                    try:
+                        sample["verified_counts"] = verify_counts(
+                            args.mysql_client, args.mysql_socket, database, args.cards,
+                            warmup["units_completed"] + sample["units_completed"], args.boards)
+                        sample["valid_for_throughput_comparison"] = True
+                    except AssertionError as error:
+                        sample["count_verification_error"] = str(error)
+                        sample["observed_counts"] = observed_counts(
+                            args.mysql_client, args.mysql_socket, database, args.boards)
+                        sample["valid_for_throughput_comparison"] = False
+                        result["paired_comparable"] = False
+                print(f"{name}: {sample['units_per_second']} units/s, "
+                      f"{len(sample['errors'])} errors, "
+                      f"comparable={sample['valid_for_throughput_comparison']}",
+                      file=sys.stderr, flush=True)
+            if len(result["runs"]) == 2 and result["runs"]["fizzy"]["client_board_indexes"] != result["runs"]["rizzy"]["client_board_indexes"]:
+                raise AssertionError("client-to-board assignment differs between targets")
+            if (len(result["warmups"]) == 2
+                    and all(not warmup["errors"] for warmup in result["warmups"].values())
+                    and result["warmups"]["fizzy"]["units_by_board"] != result["warmups"]["rizzy"]["units_by_board"]):
+                raise AssertionError("warmup board assignment differs between targets")
+            if not result["paired_comparable"]:
+                failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
+                result["diagnostics"] = {}
+                for name, log in logs.items():
+                    if log.exists():
+                        preserved = failure_dir / f"{name}.log"
+                        preserved.write_bytes(log.read_bytes())
+                        lines = log.read_text().splitlines()
+                        result["diagnostics"][name] = {
+                            "full_log": str(preserved),
+                            "error_lines": [line for line in lines if any(
+                                marker in line for marker in
+                                ("ERROR --", "500 Internal", "Deadlocked", "1213:", "Exception"))][-20:],
+                        }
+            return result
+        except Exception:
+            print(f"benchmark failed during {active_name}", file=sys.stderr)
+            failure_dir = Path(tempfile.mkdtemp(prefix="rizzy-mysql-bench-failure-"))
+            for name, log in logs.items():
+                if log.exists():
+                    preserved = failure_dir / f"{name}.log"
+                    preserved.write_bytes(log.read_bytes())
+                    print(f"{name} full log: {preserved}", file=sys.stderr)
+                    lines = log.read_text().splitlines()
+                    errors = [line for line in lines if "ERROR" in line or "500 Internal" in line
+                              or "Exception" in line]
+                    print(f"{name} error lines: {errors[-20:]}", file=sys.stderr)
+                    print(f"{name} log tail: {'\n'.join(lines[-25:])}", file=sys.stderr)
+            raise
+        finally:
+            for process in processes.values():
+                stop_server(process)
+            if created:
+                drop_databases(args.mysql_client, args.mysql_socket, databases)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seconds", type=float, default=30)
+    parser.add_argument("--clients", type=int, default=16)
+    parser.add_argument("--cards", type=int, default=100)
+    parser.add_argument("--boards", type=int, default=1)
+    parser.add_argument("--rounds", type=int, default=2)
+    parser.add_argument("--server-cpus", type=int, default=4)
+    parser.add_argument("--rizzy-processes", type=int, default=1)
+    parser.add_argument("--warmup-units", type=int, default=0)
+    parser.add_argument("--mysql-client", default="/tmp/rizzy-mysql8/bin/mysql")
+    parser.add_argument("--mysql-socket", default="/tmp/rizzy-mysql8/mysql.sock")
+    parser.add_argument("--mysql-host", default="127.0.0.1")
+    parser.add_argument("--mysql-port", type=int, default=33080)
+    parser.add_argument("--output")
+    args = parser.parse_args()
+    if min(args.seconds, args.clients, args.cards, args.boards, args.rounds,
+           args.server_cpus, args.rizzy_processes) <= 0:
+        parser.error("all numeric arguments must be positive")
+    if args.warmup_units < 0:
+        parser.error("warmup units must be nonnegative")
+    if args.cards % args.boards:
+        parser.error("cards must be divisible by boards")
+    available = sorted(os.sched_getaffinity(0))
+    if len(available) <= args.server_cpus:
+        parser.error("leave at least one CPU for the load generator")
+    server_cpus = available[:args.server_cpus]
+    os.sched_setaffinity(0, available[args.server_cpus:])
+    subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=ROOT, check=True)
+    with RUST.open("rb") as binary:
+        binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
+    result = {"database": "MySQL", "source_revision": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], cwd=SOURCE, text=True).strip(),
+              "source_dirty": bool(subprocess.check_output(
+                  ["git", "status", "--porcelain"], cwd=SOURCE)),
+              "rizzy_revision": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+              "rizzy_dirty": bool(subprocess.check_output(
+                  ["git", "status", "--porcelain"], cwd=ROOT)),
+              "rizzy_binary_sha256": binary_sha256,
+              "workload": "four JSON reads plus create/edit/comment/close/read per unit",
+              "initial_cards": args.cards, "boards": args.boards,
+              "seconds_per_target": args.seconds,
+              "warmup_units_per_target": args.warmup_units,
+              "clients": args.clients, "source_puma_workers": args.server_cpus,
+              "rizzy_processes": args.rizzy_processes,
+              "server_cpus": server_cpus,
+              "load_generator_cpus": sorted(os.sched_getaffinity(0)), "rounds": []}
+    for number in range(args.rounds):
+        order = ("fizzy", "rizzy") if number % 2 == 0 else ("rizzy", "fizzy")
+        result["rounds"].append({"number": number + 1, "order": order,
+                                 **run_pair(args, server_cpus, order)})
+    result["status"] = ("complete" if all(round_["paired_comparable"] for round_ in result["rounds"])
+                        else "has_errors")
+    output = json.dumps(result, indent=2) + "\n"
+    if args.output:
+        path = (ROOT / args.output).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(output)
+        print(path)
+    else:
+        print(output)
+    if result["status"] != "complete":
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

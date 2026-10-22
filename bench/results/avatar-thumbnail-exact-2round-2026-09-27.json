@@ -1,0 +1,121 @@
+{
+  "rizzy_commit": "4ce85823c66200f549ecc7e5bd91d52bcd30b90c",
+  "upstream_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "fixture": "806x926 PNG resized to 256x256",
+  "server_cpus": 2,
+  "source_workers": 2,
+  "rounds": [
+    {
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "runs": {
+        "fizzy": [
+          {
+            "concurrency": 32,
+            "seconds": 3.04,
+            "requests": 1492,
+            "errors": {},
+            "rps": 490.8,
+            "p50_ms": 57.28,
+            "p95_ms": 105.64,
+            "p99_ms": 130.19
+          },
+          {
+            "concurrency": 64,
+            "seconds": 3.06,
+            "requests": 1690,
+            "errors": {},
+            "rps": 551.5,
+            "p50_ms": 110.4,
+            "p95_ms": 162.94,
+            "p99_ms": 185.63
+          }
+        ],
+        "rizzy": [
+          {
+            "concurrency": 32,
+            "seconds": 3.01,
+            "requests": 6313,
+            "errors": {},
+            "rps": 2097.5,
+            "p50_ms": 14.71,
+            "p95_ms": 23.66,
+            "p99_ms": 27.7
+          },
+          {
+            "concurrency": 64,
+            "seconds": 3.01,
+            "requests": 5519,
+            "errors": {},
+            "rps": 1831.6,
+            "p50_ms": 33.57,
+            "p95_ms": 50.56,
+            "p99_ms": 59.29
+          }
+        ]
+      },
+      "thumbnail_bytes": {
+        "fizzy": 70367,
+        "rizzy": 70367
+      }
+    },
+    {
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "runs": {
+        "rizzy": [
+          {
+            "concurrency": 32,
+            "seconds": 3.01,
+            "requests": 6307,
+            "errors": {},
+            "rps": 2095.4,
+            "p50_ms": 14.54,
+            "p95_ms": 23.97,
+            "p99_ms": 28.68
+          },
+          {
+            "concurrency": 64,
+            "seconds": 3.02,
+            "requests": 5614,
+            "errors": {},
+            "rps": 1860.3,
+            "p50_ms": 33.16,
+            "p95_ms": 48.86,
+            "p99_ms": 56.95
+          }
+        ],
+        "fizzy": [
+          {
+            "concurrency": 32,
+            "seconds": 3.04,
+            "requests": 1502,
+            "errors": {},
+            "rps": 494.0,
+            "p50_ms": 58.03,
+            "p95_ms": 112.98,
+            "p99_ms": 128.94
+          },
+          {
+            "concurrency": 64,
+            "seconds": 3.09,
+            "requests": 1714,
+            "errors": {},
+            "rps": 555.2,
+            "p50_ms": 111.03,
+            "p95_ms": 128.61,
+            "p99_ms": 178.19
+          }
+        ]
+      },
+      "thumbnail_bytes": {
+        "rizzy": 70367,
+        "fizzy": 70367
+      }
+    }
+  ]
+}

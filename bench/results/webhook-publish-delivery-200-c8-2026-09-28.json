@@ -1,0 +1,294 @@
+{
+  "database": "SQLite",
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "160258bcd53cf3c9339dca9da794edbd1b07e1a4",
+  "source_dirty": false,
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "732a5ca00717f657619fc0f596bc2b8250bc9983c33413558c03744c0f145519",
+  "workload": "Concurrent card POST through completed blocked webhook delivery",
+  "cards_per_target": 200,
+  "clients": 8,
+  "server_cpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "source_puma_workers": 3,
+  "source_job_processes": 1,
+  "rizzy_processes": 1,
+  "client_cpus": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "fizzy": {
+        "clients": 8,
+        "cards": 200,
+        "card_post_seconds": 2.36,
+        "all_deliveries_seconds": 4.79,
+        "card_posts_per_second": 84.89,
+        "completed_deliveries_per_second": 41.79,
+        "p50_card_post_ms": 70.95,
+        "p95_card_post_ms": 211.28,
+        "http_errors": [],
+        "unique_card_numbers": 200,
+        "final_counts": {
+          "cards": 200,
+          "events": 200,
+          "deliveries": 200,
+          "completed": 200
+        },
+        "delivery_sample_shape": [
+          {
+            "id": "str",
+            "state": "str",
+            "created_at": "str",
+            "updated_at": "str",
+            "request": {
+              "headers": {
+                "User-Agent": "str",
+                "Content-Type": "str",
+                "X-Webhook-Timestamp": "str"
+              }
+            },
+            "response": {
+              "code": "NoneType",
+              "error": "str"
+            },
+            "event": {
+              "id": "str",
+              "action": "str",
+              "created_at": "str",
+              "creator": {
+                "id": "str",
+                "name": "str"
+              },
+              "eventable": {
+                "type": "str",
+                "id": "str",
+                "url": "str"
+              }
+            }
+          }
+        ],
+        "server_resources": {
+          "cpu_seconds": 10.37,
+          "pss_mib_start": 324.1,
+          "pss_mib_end": 1021.1,
+          "write_mib": 0.0
+        }
+      },
+      "rizzy": {
+        "clients": 8,
+        "cards": 200,
+        "card_post_seconds": 0.05,
+        "all_deliveries_seconds": 5.74,
+        "card_posts_per_second": 4003.18,
+        "completed_deliveries_per_second": 34.86,
+        "p50_card_post_ms": 1.76,
+        "p95_card_post_ms": 3.05,
+        "http_errors": [],
+        "unique_card_numbers": 200,
+        "final_counts": {
+          "cards": 200,
+          "events": 200,
+          "deliveries": 200,
+          "completed": 200
+        },
+        "delivery_sample_shape": [
+          {
+            "created_at": "str",
+            "event": {
+              "action": "str",
+              "created_at": "str",
+              "creator": {
+                "id": "str",
+                "name": "str"
+              },
+              "eventable": {
+                "id": "str",
+                "type": "str",
+                "url": "str"
+              },
+              "id": "str"
+            },
+            "id": "str",
+            "request": {
+              "headers": {
+                "Content-Type": "str",
+                "User-Agent": "str",
+                "X-Webhook-Timestamp": "str"
+              }
+            },
+            "response": {
+              "code": "NoneType",
+              "error": "str"
+            },
+            "state": "str",
+            "updated_at": "str"
+          }
+        ],
+        "server_resources": {
+          "cpu_seconds": 0.25,
+          "pss_mib_start": 22.5,
+          "pss_mib_end": 30.7,
+          "write_mib": 0.1
+        }
+      }
+    },
+    {
+      "number": 2,
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "rizzy": {
+        "clients": 8,
+        "cards": 200,
+        "card_post_seconds": 0.07,
+        "all_deliveries_seconds": 5.24,
+        "card_posts_per_second": 2903.22,
+        "completed_deliveries_per_second": 38.17,
+        "p50_card_post_ms": 2.17,
+        "p95_card_post_ms": 3.29,
+        "http_errors": [],
+        "unique_card_numbers": 200,
+        "final_counts": {
+          "cards": 200,
+          "events": 200,
+          "deliveries": 200,
+          "completed": 200
+        },
+        "delivery_sample_shape": [
+          {
+            "created_at": "str",
+            "event": {
+              "action": "str",
+              "created_at": "str",
+              "creator": {
+                "id": "str",
+                "name": "str"
+              },
+              "eventable": {
+                "id": "str",
+                "type": "str",
+                "url": "str"
+              },
+              "id": "str"
+            },
+            "id": "str",
+            "request": {
+              "headers": {
+                "Content-Type": "str",
+                "User-Agent": "str",
+                "X-Webhook-Timestamp": "str"
+              }
+            },
+            "response": {
+              "code": "NoneType",
+              "error": "str"
+            },
+            "state": "str",
+            "updated_at": "str"
+          }
+        ],
+        "server_resources": {
+          "cpu_seconds": 0.26,
+          "pss_mib_start": 22.1,
+          "pss_mib_end": 31.3,
+          "write_mib": 0.1
+        }
+      },
+      "fizzy": {
+        "clients": 8,
+        "cards": 200,
+        "card_post_seconds": 2.32,
+        "all_deliveries_seconds": 4.55,
+        "card_posts_per_second": 86.18,
+        "completed_deliveries_per_second": 43.98,
+        "p50_card_post_ms": 73.85,
+        "p95_card_post_ms": 188.84,
+        "http_errors": [],
+        "unique_card_numbers": 200,
+        "final_counts": {
+          "cards": 200,
+          "events": 200,
+          "deliveries": 200,
+          "completed": 200
+        },
+        "delivery_sample_shape": [
+          {
+            "id": "str",
+            "state": "str",
+            "created_at": "str",
+            "updated_at": "str",
+            "request": {
+              "headers": {
+                "User-Agent": "str",
+                "Content-Type": "str",
+                "X-Webhook-Timestamp": "str"
+              }
+            },
+            "response": {
+              "code": "NoneType",
+              "error": "str"
+            },
+            "event": {
+              "id": "str",
+              "action": "str",
+              "created_at": "str",
+              "creator": {
+                "id": "str",
+                "name": "str"
+              },
+              "eventable": {
+                "type": "str",
+                "id": "str",
+                "url": "str"
+              }
+            }
+          }
+        ],
+        "server_resources": {
+          "cpu_seconds": 10.13,
+          "pss_mib_start": 283.5,
+          "pss_mib_end": 985.8,
+          "write_mib": 0.0
+        }
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Datelike;
 
 const ACTION_LABELS: &[(&str, &str)] = &[
     ("card_published", "Card added"),
@@ -26,14 +27,38 @@ fn label(action: &str) -> &str {
         .unwrap_or(action)
 }
 
-fn page(account: i64, board_id: &str, title: &str, content: &str) -> Html<String> {
-    let base = format!("/{account}/boards/{}", escape(board_id));
-    Html(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} | Rizzy</title><style>{}</style></head><body><header><a href=\"{base}\">← Board</a><h1>{}</h1><a href=\"{base}/webhooks\">Webhooks</a></header><main>{content}</main></body></html>",
-        escape(title),
+fn page(
+    account: i64,
+    title: &str,
+    content: &str,
+    back_path: &str,
+    back_label: &str,
+    show_header_title: bool,
+    header_edit_path: Option<&str>,
+) -> Html<String> {
+    let heading = if show_header_title {
+        format!("<h1>{}</h1>", escape(title))
+    } else {
+        String::new()
+    };
+    let edit_link = header_edit_path
+        .map(|path| {
+            format!(
+                "<a class=\"webhook-header__edit\" href=\"{path}\" aria-label=\"Edit\"><span aria-hidden=\"true\"></span></a>"
+            )
+        })
+        .unwrap_or_default();
+    signed_in_shell_html(
+        account,
+        title,
+        &format!("<div class=\"webhook-content\">{content}</div>"),
+        "",
         include_str!("../static/webhooks.css"),
-        escape(title)
-    ))
+        &format!(
+            "<nav class=\"webhook-header\" aria-label=\"Webhook navigation\"><a href=\"{back_path}\">Back to {}</a>{heading}{edit_link}</nav>",
+            escape(back_label)
+        ),
+    )
 }
 
 fn actions(selected: &[String]) -> String {
@@ -50,44 +75,46 @@ fn actions(selected: &[String]) -> String {
         list.push_str(&format!("<li><label><input type=\"checkbox\" name=\"webhook[subscribed_actions][]\" value=\"{key}\"{checked}><span>{}</span></label></li>",escape(title)));
     }
     format!(
-        "<div class=\"checks\"><div class=\"checks__actions\"><button type=\"button\" data-checks=\"all\">Enable all</button> · <button type=\"button\" data-checks=\"none\">Disable all</button></div><ul>{list}</ul></div>"
+        "<div class=\"checks\"><div class=\"checks__actions\"><button type=\"button\" name=\"button\" data-checks=\"all\">Enable all</button> · <button type=\"button\" name=\"button\" data-checks=\"none\">Disable all</button></div><input type=\"hidden\" name=\"webhook[subscribed_actions][]\" value=\"\"><ul>{list}</ul></div>"
     )
 }
 
 fn form(
     account: i64,
     board_id: &str,
-    webhook: Option<&SqliteRow>,
+    webhook: Option<&DbRow>,
     error: Option<&str>,
     submitted: Option<(&str, &str, &[String])>,
 ) -> Html<String> {
     let base = format!("/{account}/boards/{}/webhooks", escape(board_id));
-    let (title, mut name, mut url, mut selected, action, method, submit) = if let Some(row) =
-        webhook
-    {
-        let id: String = row.get("id");
-        let selected: Vec<String> =
-            serde_json::from_str(&row.get::<String, _>("subscribed_actions")).unwrap_or_default();
-        (
-            "Edit Webhook",
-            row.get::<String, _>("name"),
-            None,
-            selected,
-            format!("{base}/{}", escape(&id)),
-            "<input type=\"hidden\" name=\"_method\" value=\"put\">",
-            "Save Changes",
-        )
-    } else {
-        (
-            "Set up a Webhook",
-            String::new(),
-            Some(String::new()),
-            Vec::new(),
-            base.clone(),
-            "",
-            "Create Webhook",
-        )
-    };
+    let (title, mut name, mut url, mut selected, action, method, submit, placeholder) =
+        if let Some(row) = webhook {
+            let id: String = row.get("id");
+            let selected: Vec<String> =
+                serde_json::from_str(&row.get::<String, _>("subscribed_actions"))
+                    .unwrap_or_default();
+            (
+                row.get::<String, _>("name"),
+                row.get::<String, _>("name"),
+                None,
+                selected,
+                format!("{base}/{}", escape(&id)),
+                "<input type=\"hidden\" name=\"_method\" value=\"put\">",
+                "Save Changes",
+                "Name your Webhook…",
+            )
+        } else {
+            (
+                "Set up a Webhook".to_owned(),
+                String::new(),
+                Some(String::new()),
+                Vec::new(),
+                base.clone(),
+                "",
+                "Create Webhook",
+                "Name this Webhook…",
+            )
+        };
     if let Some((submitted_name, submitted_url, submitted_actions)) = submitted {
         name = submitted_name.to_owned();
         if url.is_some() {
@@ -100,11 +127,24 @@ fn form(
         .map(|message| format!("<p class=\"error\" role=\"alert\">{}</p>", escape(message)))
         .unwrap_or_default();
     let content = format!(
-        "<article class=\"panel\">{error}<form method=\"post\" action=\"{action}\">{method}<div class=\"field\"><label for=\"webhook_name\">Webhook name</label><input id=\"webhook_name\" name=\"webhook[name]\" value=\"{}\" placeholder=\"Name this Webhook…\" required autofocus></div>{url_field}<div class=\"field\"><strong>Events</strong><small>Trigger a call to the Payload URL when:</small>{}</div><button class=\"submit\" type=\"submit\">{submit}</button></form></article><script>document.querySelectorAll('[data-checks]').forEach(button=>button.addEventListener('click',()=>document.querySelectorAll('.checks input[type=checkbox]').forEach(input=>input.checked=button.dataset.checks==='all')))</script>",
+        "<article class=\"panel\">{error}<form method=\"post\" action=\"{action}\">{method}<div class=\"field\"><label for=\"webhook_name\">Webhook name</label><input id=\"webhook_name\" type=\"text\" name=\"webhook[name]\" value=\"{}\" placeholder=\"{placeholder}\" required autofocus></div>{url_field}<div class=\"field\"><strong>Events</strong><small>Trigger a call to the Payload URL when:</small>{}</div><button class=\"submit\" type=\"submit\" name=\"button\">{submit}</button></form></article><script>document.querySelectorAll('[data-checks]').forEach(button=>button.addEventListener('click',()=>document.querySelectorAll('.checks input[type=checkbox]').forEach(input=>input.checked=button.dataset.checks==='all')))</script>",
         escape(&name),
         actions(&selected)
     );
-    page(account, board_id, title, &content)
+    let (back_path, back_label, show_header_title) = if let Some(row) = webhook {
+        (action, row.get::<String, _>("name"), false)
+    } else {
+        (base, "Webhooks".to_owned(), true)
+    };
+    page(
+        account,
+        &title,
+        &content,
+        &back_path,
+        &back_label,
+        show_header_title,
+        None,
+    )
 }
 
 pub(super) async fn new(
@@ -112,12 +152,12 @@ pub(super) async fn new(
     Path((account, board_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.account_admin()?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(form(p.slug, &board_id, None, None, None))
 }
 
@@ -126,20 +166,20 @@ pub(super) async fn edit(
     Path((account, board_id, webhook_id)): Path<(String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Html<String>> {
-    if headers.contains_key("x-rizzy-json-request") {
-        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
-    }
     let p = principal(&app, &headers, &account).await?;
     board(&app, &p, &board_id).await?;
     p.account_admin()?;
     let webhook = webhook_row(&app, &p, &board_id, &webhook_id).await?;
+    if headers.contains_key("x-rizzy-json-request") {
+        return Err(err(StatusCode::NOT_ACCEPTABLE, "Not Acceptable"));
+    }
     Ok(form(p.slug, &board_id, Some(&webhook), None, None))
 }
 
 pub(super) fn invalid_form(
     account: i64,
     board_id: &str,
-    webhook: Option<&SqliteRow>,
+    webhook: Option<&DbRow>,
     error: &str,
     name: &str,
     url: &str,
@@ -157,7 +197,8 @@ pub(super) fn invalid_form(
 pub(super) fn index(
     account: i64,
     board_id: &str,
-    rows: &[SqliteRow],
+    board_name: &str,
+    rows: &[DbRow],
     page_number: i64,
     total: i64,
     offset: i64,
@@ -169,7 +210,7 @@ pub(super) fn index(
         let id: String = row.get("id");
         let name: String = row.get("name");
         let path = format!("{base}/webhooks/{}", escape(&id));
-        entries.push_str(&format!("<li><a href=\"{path}\"><strong>{}</strong></a><form method=\"post\" action=\"{path}\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\" aria-label=\"Remove {}\" onclick=\"return confirm('Remove this webhook?')\">Remove</button></form></li>",escape(&name),escape(&name)));
+        entries.push_str(&format!("<li><a href=\"{path}\"><strong>{}</strong></a><hr class=\"webhook-row__separator\" aria-hidden=\"true\"><form method=\"post\" action=\"{path}\" data-confirm=\"Are you sure you want to permanently remove this webhook?\"><input type=\"hidden\" name=\"_method\" value=\"delete\"><button type=\"submit\" aria-label=\"Remove {}\"><span aria-hidden=\"true\">−</span></button></form></li>",escape(&name),escape(&name)));
     }
     let intro = if rows.is_empty() {
         "<p>Webhooks can notify another application when something happens in this Rizzy board. You’ll choose which events to subscribe to and provide a URL to receive the data.</p><p>For example, you could create a webhook that posts to a Campfire chat in Basecamp when new cards are added to Rizzy.</p>"
@@ -193,16 +234,16 @@ pub(super) fn index(
         String::new()
     };
     let content = format!(
-        "<section class=\"panel\">{intro}<ul class=\"webhook-list\">{entries}</ul><nav class=\"pagination\">{before}{after}</nav><a class=\"submit\" href=\"{base}/webhooks/new\">Set up a new webhook</a></section>"
+        "<section class=\"panel\">{intro}<ul class=\"webhook-list\">{entries}</ul><nav class=\"pagination\">{before}{after}</nav><a class=\"submit\" href=\"{base}/webhooks/new\">Set up a new webhook</a></section><script>document.querySelectorAll('.webhook-list form[data-confirm]').forEach(form=>form.addEventListener('submit',event=>{{if(!window.confirm(form.dataset.confirm))event.preventDefault()}}))</script>"
     );
-    page(account, board_id, "Webhooks", &content)
+    page(account, "Webhooks", &content, &base, board_name, true, None)
 }
 
 pub(super) fn show(
     account: i64,
     board_id: &str,
-    row: &SqliteRow,
-    deliveries: &[SqliteRow],
+    row: &DbRow,
+    deliveries: &[DbRow],
 ) -> Html<String> {
     let id: String = row.get("id");
     let path = format!(
@@ -231,14 +272,7 @@ pub(super) fn show(
     } else {
         format!(
             "<ul>{}</ul>",
-            deliveries
-                .iter()
-                .map(|delivery| format!(
-                    "<li><strong>{}</strong> <time>{}</time></li>",
-                    escape(&delivery.get::<String, _>("state")),
-                    escape(&delivery.get::<String, _>("created_at"))
-                ))
-                .collect::<String>()
+            deliveries.iter().map(delivery_entry).collect::<String>()
         )
     };
     let reactivate = if row.get::<i64, _>("active") == 0 {
@@ -249,10 +283,101 @@ pub(super) fn show(
         String::new()
     };
     let content = format!(
-        "<section class=\"panel\"><a href=\"{path}/edit\">Edit</a><h2>{}</h2><p class=\"url\">{}</p>{reactivate}<h3>Secret</h3><strong><code>{}</code></strong><p>We'll send an <code>X-Webhook-Signature</code> header with each request. Generate an HMAC using SHA256 of the request body with this secret to verify the request.</p><h3>Subscribed to</h3>{actions_html}<h3>Deliveries</h3>{delivery_html}</section>",
+        "<section class=\"panel webhook-detail\"><header><h1>{}</h1><span class=\"url\">{}</span></header>{reactivate}<section class=\"webhook-detail__section\"><h2>Secret</h2><strong><code>{}</code></strong><p>We'll send a <code>X-Webhook-Signature</code> header with each request. You can generate a <code>HMAC</code> using <code>SHA256</code> of the request body with this secret to verify that the request came from us.</p></section><section class=\"webhook-detail__section\"><h2>Subscribed to</h2>{actions_html}</section><section class=\"webhook-detail__section\"><h2>Deliveries</h2>{delivery_html}</section></section>",
         escape(&name),
         escape(&url),
         escape(&secret)
     );
-    page(account, board_id, &name, &content)
+    page(
+        account,
+        &name,
+        &content,
+        &format!("/{account}/boards/{}/webhooks", escape(board_id)),
+        "Webhooks",
+        false,
+        Some(&format!("{path}/edit")),
+    )
+}
+
+fn delivery_entry(delivery: &DbRow) -> String {
+    let id: String = delivery.get("id");
+    let state: String = delivery.get("state");
+    let response: Option<String> = delivery.get("response");
+    let response: Value = response
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or(Value::Null);
+    let succeeded = state == "completed"
+        && response
+            .get("code")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| (200..=299).contains(&code))
+        && response
+            .get("error")
+            .is_none_or(|error| error.is_null() || error == "");
+    let class = if succeeded { "delivery--succeeded" } else { "" };
+    let created_at: String = delivery.get("created_at");
+    let datetime = chrono::DateTime::parse_from_rfc3339(&created_at).ok();
+    let (datetime_value, age) = if let Some(created) = datetime {
+        let current = chrono::Utc::now();
+        let occurred = created.to_utc();
+        let (from, to) = if occurred <= current {
+            (occurred, current)
+        } else {
+            (current, occurred)
+        };
+        let minutes = ((to - from).num_milliseconds() as f64 / 60_000.0).round() as i64;
+        let age = match minutes {
+            0 => "less than a minute".to_owned(),
+            1 => "1 minute".to_owned(),
+            2..=44 => format!("{minutes} minutes"),
+            45..=89 => "about 1 hour".to_owned(),
+            90..=1439 => format!("about {} hours", (minutes as f64 / 60.0).round() as i64),
+            1440..=2519 => "1 day".to_owned(),
+            2520..=43199 => format!("{} days", (minutes as f64 / 1440.0).round() as i64),
+            43200..=86399 => {
+                format!("about {} months", (minutes as f64 / 43200.0).round() as i64)
+            }
+            86400..=525599 => {
+                format!("{} months", (minutes as f64 / 43200.0).round() as i64)
+            }
+            _ => {
+                let from_year = from.year() + i32::from(from.month() >= 3);
+                let to_year = to.year() - i32::from(to.month() < 3);
+                let leap_count = |year: i32| year / 4 - year / 100 + year / 400;
+                let leap_years = if from_year > to_year {
+                    0
+                } else {
+                    leap_count(to_year) - leap_count(from_year - 1)
+                };
+                let adjusted = minutes - i64::from(leap_years) * 1440;
+                let years = adjusted / 525600;
+                let remainder = adjusted % 525600;
+                if remainder < 131400 {
+                    format!(
+                        "about {years} {}",
+                        if years == 1 { "year" } else { "years" }
+                    )
+                } else if remainder < 394200 {
+                    format!("over {years} {}", if years == 1 { "year" } else { "years" })
+                } else {
+                    let years = years + 1;
+                    format!(
+                        "almost {years} {}",
+                        if years == 1 { "year" } else { "years" }
+                    )
+                }
+            }
+        };
+        (created.format("%Y-%m-%dT%H:%M:%SZ").to_string(), age)
+    } else {
+        (created_at.clone(), created_at)
+    };
+    format!(
+        "<li id=\"webhook_delivery_{}\" class=\"{class}\"><strong>{}</strong><div class=\"txt-subtle\"><time datetime=\"{}\">{}</time></div></li>",
+        escape(&id),
+        escape(&state),
+        escape(&datetime_value),
+        escape(&age)
+    )
 }

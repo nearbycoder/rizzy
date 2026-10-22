@@ -40,6 +40,10 @@ def check(target):
         assert status == 200 and headers.get("ETag"), (target["name"], "picker", status)
         for marker in (b'id="board_picker"', b"Move this card to", first["name"].encode(), second["name"].encode()):
             assert marker in body, (target["name"], marker)
+        for marker in (b'data-controller="filter navigable-list"', b'data-filter-target="list"',
+                       b'data-navigable-list-target="item"', b'name="search"',
+                       b'aria-checked="true"', b'aria-checked="false"'):
+            assert marker in body, (target["name"], "picker structure", marker)
         assert f'board_id={first["id"]}'.encode() in body and f'board_id={second["id"]}'.encode() in body
         token = re.search(rb'<meta name="csrf-token" content="([^"]+)"', body)
         csrf = token.group(1).decode() if token else None

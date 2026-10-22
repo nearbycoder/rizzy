@@ -36,6 +36,10 @@ def run(target):
         status, _, html = request(target, board_path + "/edit", accept="text/html")
         assert status == 200 and b"Board Settings" in html and title.encode() in html
         assert b"Who can access this board?" in html and b"Delete this board" in html
+        assert b'id="global-container"' in html and b'<main id="main">' in html
+        assert b'class="settings' in html and b'settings__panel--users' in html
+        assert b'id="footer"' in html and f'action="{board_path}"'.encode() in html
+        assert html.count(b"<form") == 6, (target["name"], "board settings form count", html.count(b"<form"))
         options = []
         for tag in re.findall(rb'<input\b[^>]*>', html):
             if b'type="radio"' in tag and b'name="board[auto_postpone_period_in_days]"' in tag:
@@ -43,6 +47,54 @@ def run(target):
                 assert value, tag
                 options.append(value.group(1))
         assert options == [b"3", b"7", b"30", b"90", b"365", b"11"], (target["name"], options)
+        entropy_path = board_path + "/entropy"
+        publication_path = board_path + "/publication"
+        assert f'action="{entropy_path}"'.encode() in html, (target["name"], "entropy form")
+        assert f'action="{publication_path}"'.encode() in html, (target["name"], "publication form")
+        entropy_form = urllib.parse.urlencode({"_method": "patch", "board[auto_postpone_period_in_days]": "7"}).encode()
+        status, headers, stream = request(target, entropy_path, "POST", entropy_form,
+                                          accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], status)
+        assert f'target="entropy_board_{board_id}"'.encode() in stream and b'value="7"' in stream
+        status, headers, stream = request(target, publication_path, "POST",
+                                          urllib.parse.urlencode({"published": "1"}).encode(),
+                                          accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], status)
+        assert f'target="publication_board_{board_id}"'.encode() in stream
+        assert b'board[public_description]' in stream and b'name="_method" value="delete"' in stream
+        status, headers, stream = request(target, publication_path, "POST",
+                                          urllib.parse.urlencode({"_method": "delete", "published": "0"}).encode(),
+                                          accept="text/vnd.turbo-stream.html", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], status)
+        assert f'target="publication_board_{board_id}"'.encode() in stream
+        assert b'board[public_description]' not in stream
+        html_entropy = urllib.parse.urlencode({"_method": "patch", "board[auto_postpone_period_in_days]": "90"}).encode()
+        status, headers, body = request(target, entropy_path, "POST", html_entropy,
+                                        accept="text/html", csrf=csrf)
+        assert status == 406 and headers.get_content_type() == "text/html" and not body, (target["name"], status)
+        status, headers, body = request(target, publication_path, "POST",
+                                        urllib.parse.urlencode({"published": "1"}).encode(),
+                                        accept="text/html", csrf=csrf)
+        assert status == 406 and headers.get_content_type() == "text/html" and not body, (target["name"], status)
+        status, _, page = request(target, board_path + "/edit", accept="text/html")
+        assert status == 200 and b'board[public_description]' in page, (target["name"], "HTML publish")
+        status, headers, body = request(target, publication_path, "POST",
+                                        urllib.parse.urlencode({"_method": "delete", "published": "0"}).encode(),
+                                        accept="text/html", csrf=csrf)
+        assert status == 406 and headers.get_content_type() == "text/html" and not body, (target["name"], status)
+        status, _, page = request(target, board_path + "/edit", accept="text/html")
+        assert status == 200 and b'board[public_description]' not in page, (target["name"], "HTML unpublish")
+        status, headers, body = request(target, entropy_path, "POST", entropy_form,
+                                        accept="application/json", csrf=csrf)
+        assert status == 200 and headers.get_content_type() == "application/json" and json.loads(body)["id"] == board_id, (target["name"], status)
+        status, headers, body = request(target, publication_path, "POST",
+                                        urllib.parse.urlencode({"published": "1"}).encode(),
+                                        accept="application/json", csrf=csrf)
+        assert status == 201 and headers.get_content_type() == "application/json" and json.loads(body)["id"] == board_id, (target["name"], status)
+        status, headers, body = request(target, publication_path, "POST",
+                                        urllib.parse.urlencode({"_method": "delete", "published": "0"}).encode(),
+                                        accept="application/json", csrf=csrf)
+        assert status == 204 and not body, (target["name"], status)
         updated = title + " edited"
         form = urllib.parse.urlencode([
             ("_method", "patch"), ("board[name]", updated),
@@ -53,14 +105,18 @@ def run(target):
         status, _, raw = request(target, board_path + ".json", bearer=True)
         board = json.loads(raw)
         assert status == 200 and board["name"] == updated and not board["all_access"] and board["auto_postpone_period_in_days"] == 11, (status, board)
-        status, headers, body = request(target, board_path, "DELETE", accept="text/html", csrf=csrf)
+        status, headers, body = request(target, board_path, "POST",
+                                        urllib.parse.urlencode({"_method": "delete"}).encode(),
+                                        accept="text/html", csrf=csrf)
         assert status == 302 and urllib.parse.urlparse(headers["Location"]).path == f"/{account}/", (target["name"], status, headers.get("Location"), body[:200])
         deleted = True
         status, _, _ = request(target, board_path + ".json", bearer=True)
         assert status == 404, status
         return {"new": True, "create_redirect": True, "edit": True,
                 "entropy_options": [int(option) for option in options], "update_redirect": True,
-                "saved_name_access_entropy": True, "delete_redirect": True}
+                "saved_name_access_entropy": True, "delete_redirect": True,
+                "entropy_form_stream": True, "publication_form_stream": True,
+                "form_html_negotiation": True, "form_json_negotiation": True}
     finally:
         if not deleted:
             request(target, board_path, "DELETE", bearer=True)

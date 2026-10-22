@@ -26,10 +26,14 @@ def main():
     assert code, "Start Rizzy with RIZZY_DEV_MAGIC_LINKS=1 for this local check"
     status, headers, _ = request(target, "/session/magic_link", "POST",
                                  urllib.parse.urlencode({"code": code.group(1).decode()}).encode(), accept="text/html")
-    assert status == 302 and headers["Location"] == "/", status
-    status, _, html = request(target, "/", accept="text/html")
-    assert status == 200 and b'Boards' in html, status
-    print("Browser form sign-in matched: email, code entry, and board landing")
+    assert status == 302 and headers["Location"] == "/landing", status
+    status, headers, _ = request(target, "/landing", accept="text/html")
+    assert status == 302 and headers["Location"] == "/session/menu", status
+    status, headers, _ = request(target, "/session/menu", accept="text/html")
+    assert status == 302 and re.fullmatch(r"/\d+/", headers["Location"]), status
+    status, _, html = request(target, headers["Location"], accept="text/html")
+    assert status == 200 and b'Latest Activity' in html, status
+    print("Browser form sign-in matched: email, code entry, and account home")
 
 
 if __name__ == "__main__":

@@ -119,6 +119,10 @@ def check(target, tag):
         comment_doc = html(target, "overflowing" + tag)
         assert any("Some card" in title for title in titles(comment_doc))
         assert 'class="search__excerpt search__excerpt--comment' in comment_doc and "text issue" in comment_doc
+        assert re.search(
+            rf'<span class="avatar"[^>]*><img [^>]*src="/{target["account"]}/users/[^"/]+/avatar"[^>]*/?></span>',
+            comment_doc,
+        ), target["name"]
         both_doc = html(target, tag)
         assert sum("Just " + tag in title for title in titles(both_doc)) == 2
         assert re.search(r'<mark class="circled-text"><span></span>' + tag + '</mark>', both_doc, re.I)

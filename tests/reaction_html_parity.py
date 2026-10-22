@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare card and comment reaction forms with Fizzy."""
 import http.cookiejar
+import hashlib
 import json
 import os
 import re
@@ -47,6 +48,11 @@ def check(target):
         csrf = csrf_match.group(1).decode() if csrf_match else None
         paths = [f"/{account}/cards/{number}/reactions",
                  f"/{account}/cards/{number}/comments/{comment_id}/reactions"]
+        stream_headers = []
+        def validator(headers, body):
+            etag = headers.get("ETag")
+            return (bool(etag), etag == 'W/"' + hashlib.sha256(body).hexdigest()[:32] + '"',
+                    headers.get("Cache-Control"))
         for path, kind, target_id in zip(paths, ("card", "comment"), (card_id, comment_id)):
             status, _, html = request(target, path, accept="text/html")
             assert status == 200 and f"reacting_{kind}_{target_id}".encode() in html
@@ -66,12 +72,14 @@ def check(target):
             assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html", (target["name"], path, status, stream[:180])
             assert b'action="replace"' in stream and f"reacting_{kind}_{target_id}".encode() in stream
             assert b"Great work!" in stream
+            stream_headers.append(validator(headers, stream))
             status, _, raw = request(target, path, bearer=True)
             reaction_id = next(item["id"] for item in json.loads(raw) if item["content"] == "Great work!")
             status, headers, stream = request(target, path + "/" + reaction_id, "DELETE",
                                                accept="text/vnd.turbo-stream.html", csrf=csrf)
             assert status == 200 and headers.get_content_type() == "text/vnd.turbo-stream.html"
             assert b'action="remove"' in stream and f"reaction_{reaction_id}".encode() in stream
+            stream_headers.append(validator(headers, stream))
             assert all(item["id"] != reaction_id for item in json.loads(request(target, path, bearer=True)[2]))
             status, _, _ = request(target, path, "POST", b"reaction%5Bcontent%5D=Plain+HTML",
                                     accept="text/html", csrf=csrf)
@@ -85,7 +93,8 @@ def check(target):
         if target["name"] == "rizzy":
             status, _, body = request(target, f"/{account}/cards/{number}", accept="text/html")
             assert status == 200 and all((path + "/new").encode() in body for path in paths)
-        return {"card_form":200,"comment_form":200,"create":201,"html_index":200,"turbo_create":200,"turbo_destroy":200}
+        return {"card_form":200,"comment_form":200,"create":201,"html_index":200,
+                "turbo_create":200,"turbo_destroy":200,"stream_headers":stream_headers}
     finally:
         for board_id in boards:
             status, _, _ = request(target, f"/{account}/boards/{board_id}", "DELETE", bearer=True)

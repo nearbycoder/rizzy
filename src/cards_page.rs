@@ -1,5 +1,5 @@
 use axum::response::Html;
-use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow};
+use sqlx::{Any as Db, QueryBuilder, Row, any::AnyRow as DbRow};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
@@ -38,12 +38,17 @@ struct PreviewMeta {
     assignees: Vec<(String, String)>,
 }
 
-async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<String, PreviewMeta>> {
+async fn preview_metadata(app: &App, cards: &[DbRow]) -> Result<HashMap<String, PreviewMeta>> {
     let mut metadata = HashMap::new();
     if cards.is_empty() {
         return Ok(metadata);
     }
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
+    let step_relation = if app.mysql {
+        "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,CAST(COALESCE(SUM(s.completed),0) AS SIGNED) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN ("
+    } else {
+        "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN ("
+    };
     // Each relationship is read in one page-scoped query. The UNION avoids a
     // per-card set of round trips while leaving the JSON card API untouched.
     let relations = [
@@ -51,10 +56,7 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
             "SELECT 'tag' AS kind,g.card_id,t.title AS label,NULL AS user_id,0 AS completed,1 AS amount FROM taggings g JOIN tags t ON t.id=g.tag_id WHERE g.card_id IN (",
             "",
         ),
-        (
-            "SELECT 'step' AS kind,s.card_id,NULL AS label,NULL AS user_id,COALESCE(SUM(s.completed),0) AS completed,COUNT(*) AS amount FROM steps s WHERE s.card_id IN (",
-            " GROUP BY s.card_id",
-        ),
+        (step_relation, " GROUP BY s.card_id"),
         (
             "SELECT 'comment' AS kind,m.card_id,NULL AS label,NULL AS user_id,0 AS completed,COUNT(*) AS amount FROM comments m JOIN users u ON u.id=m.creator_id AND u.role!='system' WHERE m.card_id IN (",
             " GROUP BY m.card_id",
@@ -68,7 +70,7 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
             "",
         ),
     ];
-    let mut builder = QueryBuilder::<Sqlite>::new("");
+    let mut builder = QueryBuilder::<Db>::new("");
     for (index, (relation, suffix)) in relations.iter().enumerate() {
         if index > 0 {
             builder.push(" UNION ALL ");
@@ -100,16 +102,21 @@ async fn preview_metadata(app: &App, cards: &[SqliteRow]) -> Result<HashMap<Stri
     Ok(metadata)
 }
 
-pub(super) async fn previews(
+pub(super) async fn previews(app: &App, principal: &Principal, cards: &[DbRow]) -> Result<String> {
+    Ok(preview_fragments(app, principal, cards).await?.concat())
+}
+
+pub(super) async fn preview_fragments(
     app: &App,
     principal: &Principal,
-    cards: &[SqliteRow],
-) -> Result<String> {
+    cards: &[DbRow],
+) -> Result<Vec<String>> {
     let metadata = preview_metadata(app, cards).await?;
     let ids: Vec<String> = cards.iter().map(|card| card.get("id")).collect();
     let images = storage::image_urls_for_cards(app, principal, &ids).await?;
-    let mut html = String::new();
+    let mut fragments = Vec::with_capacity(cards.len());
     for card in cards {
+        let mut html = String::new();
         let id: String = card.get("id");
         let meta = metadata.get(&id);
         let number: i64 = card.get("number");
@@ -237,16 +244,37 @@ pub(super) async fn previews(
             escape(last_active_at.get(..10).unwrap_or(&last_active_at)),
             escape(&familiar_name)
         );
+        fragments.push(html);
     }
-    Ok(html)
+    Ok(fragments)
 }
 
-fn page_query(raw: Option<&str>, page: i64, target: Option<&str>) -> String {
+pub(super) fn page_query(raw: Option<&str>, page: i64, target: Option<&str>) -> String {
     let mut params = url::form_urlencoded::Serializer::new(String::new());
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
-        if key != "page" && key != "target" {
-            params.append_pair(&key, &value);
+        if key == "page"
+            || (target.is_some() && key == "target")
+            || matches!(
+                key.as_ref(),
+                "script_name"
+                    | "original_script_name"
+                    | "host"
+                    | "protocol"
+                    | "port"
+                    | "subdomain"
+                    | "domain"
+                    | "tld_length"
+                    | "trailing_slash"
+                    | "only_path"
+                    | "relative_url_root"
+                    | "anchor"
+                    | "params"
+                    | "_recall"
+            )
+        {
+            continue;
         }
+        params.append_pair(&key, &value);
     }
     if let Some(target) = target {
         params.append_pair("target", target);
@@ -275,16 +303,27 @@ pub(super) fn next_link(
     )
 }
 
-fn option(value: &str, label: &str, current: Option<&str>) -> String {
+fn radio_option(name: &str, value: &str, label: &str, current: &str) -> String {
     format!(
-        "<option value=\"{}\"{}>{}</option>",
+        "<label class=\"quick-filter__choice\"><input type=\"radio\" name=\"{}\" value=\"{}\"{}><span>{}</span></label>",
+        escape(name),
         escape(value),
-        if current == Some(value) {
-            " selected"
-        } else {
-            ""
-        },
+        if current == value { " checked" } else { "" },
         escape(label)
+    )
+}
+
+fn quick_filter(label: &str, selected: bool, searchable: bool, choices: &str) -> String {
+    format!(
+        "<div class=\"quick-filter{}\"><button class=\"quick-filter__toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"quick-filter__popup\" role=\"dialog\" aria-label=\"{}\" tabindex=\"-1\" hidden>{}{choices}</div></div>",
+        if selected { " is-selected" } else { "" },
+        escape(label),
+        escape(label),
+        if searchable {
+            "<input class=\"quick-filter__search\" type=\"search\" placeholder=\"Filter…\" aria-label=\"Filter…\" autocomplete=\"off\" autocorrect=\"off\">".to_owned()
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -293,23 +332,44 @@ fn choice_group(
     name: &str,
     choices: &[(String, String)],
     selected: &[String],
+    extra: Option<(&str, &str, &str, bool)>,
 ) -> String {
     let selected_ids: HashSet<&str> = selected.iter().map(String::as_str).collect();
-    let selected_names: Vec<&str> = choices
+    let mut selected_names: Vec<&str> = choices
         .iter()
         .filter(|(id, _)| selected_ids.contains(id.as_str()))
         .map(|(_, title)| title.as_str())
         .collect();
+    if let Some((_, _, title, true)) = extra {
+        selected_names.push(title);
+    }
+    let prefix = match name {
+        "assignee_ids[]" => "Assigned to ",
+        "creator_ids[]" => "Added by ",
+        "closer_ids[]" => "Closed by ",
+        _ => "",
+    };
     let summary = match selected_names.len() {
         0 => label.to_owned(),
-        1 => selected_names[0].to_owned(),
-        amount => format!("{label} ({amount})"),
+        1 => format!("{prefix}{}", selected_names[0]),
+        2 => format!("{prefix}{} or {}", selected_names[0], selected_names[1]),
+        count => format!(
+            "{prefix}{}, or {}",
+            selected_names[..count - 1].join(", "),
+            selected_names[count - 1]
+        ),
     };
-    let mut html = format!(
-        "<details class=\"choice-popover\"><summary>{}</summary><div class=\"choice-popover__items\" role=\"group\" aria-label=\"{}\">",
-        escape(&summary),
-        escape(label)
-    );
+    let mut choices_html = String::new();
+    if let Some((field, value, title, checked)) = extra {
+        let _ = write!(
+            choices_html,
+            "<label class=\"quick-filter__choice\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{}><span>{}</span></label>",
+            escape(field),
+            escape(value),
+            if checked { " checked" } else { "" },
+            escape(title)
+        );
+    }
     for (id, title) in choices {
         let checked = if selected_ids.contains(id.as_str()) {
             " checked"
@@ -317,18 +377,26 @@ fn choice_group(
             ""
         };
         let _ = write!(
-            html,
-            "<label class=\"choice-popover__item\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{checked}><span>{}</span></label>",
+            choices_html,
+            "<label class=\"quick-filter__choice\"><input type=\"checkbox\" name=\"{}\" value=\"{}\"{checked}><span>{}</span></label>",
             escape(name),
             escape(id),
             escape(title)
         );
     }
-    html.push_str("</div></details>");
-    html
+    if choices_html.is_empty() {
+        String::new()
+    } else {
+        quick_filter(
+            &summary,
+            !selected_names.is_empty(),
+            choices.len() > 1,
+            &choices_html,
+        )
+    }
 }
 
-fn board_label(boards: &[SqliteRow], selected: &[String]) -> String {
+fn board_label(boards: &[DbRow], selected: &[String]) -> String {
     let selected: HashSet<&str> = selected.iter().map(String::as_str).collect();
     let names: Vec<String> = if selected.is_empty() {
         if boards.len() == 1 {
@@ -358,12 +426,12 @@ fn board_label(boards: &[SqliteRow], selected: &[String]) -> String {
 pub(super) async fn show(
     app: &App,
     principal: &Principal,
-    cards: &[SqliteRow],
+    cards: &[DbRow],
     total: i64,
     query: &CardQuery,
     raw: Option<&str>,
 ) -> Result<Html<String>> {
-    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=? ORDER BY lower(b.name),b.id")
+    let boards = sqlx::query("SELECT b.id,b.name FROM boards b JOIN accesses x ON x.board_id=b.id WHERE b.account_id=? AND x.user_id=? ORDER BY x.accessed_at DESC,b.id")
         .bind(&principal.account_id).bind(&principal.user_id).fetch_all(&app.db).await.map_err(db_err)?;
     let tags = sqlx::query("SELECT id,title FROM tags WHERE account_id=? ORDER BY lower(title),id")
         .bind(&principal.account_id)
@@ -385,25 +453,39 @@ pub(super) async fn show(
         .iter()
         .map(|user| (user.get("id"), user.get("name")))
         .collect();
-    let board_control = choice_group("Board", "board_ids[]", &board_choices, &query.board_ids);
-    let tag_control = choice_group("Tag", "tag_ids[]", &tag_choices, &query.tag_ids);
+    let board_control = choice_group(
+        "Board…",
+        "board_ids[]",
+        &board_choices,
+        &query.board_ids,
+        None,
+    );
+    let tag_control = choice_group("Tagged…", "tag_ids[]", &tag_choices, &query.tag_ids, None);
     let assignee_control = choice_group(
-        "Assigned to",
+        "Assigned to…",
         "assignee_ids[]",
         &user_choices,
         &query.assignee_ids,
+        Some((
+            "assignment_status",
+            "unassigned",
+            "No one",
+            query.assignment_status.as_deref() == Some("unassigned"),
+        )),
     );
     let creator_control = choice_group(
-        "Added by",
+        "Added by…",
         "creator_ids[]",
         &user_choices,
         &query.creator_ids,
+        None,
     );
     let closer_control = choice_group(
-        "Closed by",
+        "Closed by…",
         "closer_ids[]",
         &user_choices,
         &query.closer_ids,
+        None,
     );
     let mut preserved = String::new();
     for (key, values) in [
@@ -419,31 +501,87 @@ pub(super) async fn show(
             );
         }
     }
+    for (key, value) in [
+        ("creation", query.creation.as_deref()),
+        ("closure", query.closure.as_deref()),
+    ] {
+        if let Some(value) = value {
+            let _ = write!(
+                preserved,
+                "<input type=\"hidden\" name=\"{key}\" value=\"{}\">",
+                escape(value)
+            );
+        }
+    }
+    let expanded = raw.is_some_and(|raw| {
+        url::form_urlencoded::parse(raw.as_bytes())
+            .any(|(key, value)| key == "expand_all" && value == "true")
+    });
+    let index = query.indexed_by.as_deref().unwrap_or("all");
+    let sort = query.sorted_by.as_deref().unwrap_or("latest");
     let statuses = [
         ("all", "Open"),
-        ("maybe", "Maybe?"),
-        ("not_now", "Not now"),
         ("closed", "Done"),
-        ("golden", "Golden"),
+        ("not_now", "Not now"),
         ("stalled", "Stalled"),
         ("postponing_soon", "Closing soon"),
+        ("golden", "Golden"),
     ];
     let status_options = statuses
         .iter()
-        .map(|(value, label)| option(value, label, query.indexed_by.as_deref()))
+        .map(|(value, label)| radio_option("indexed_by", value, label, index))
         .collect::<String>();
     let sort_options = [
-        ("latest", "Latest activity"),
-        ("newest", "Newest"),
-        ("oldest", "Oldest"),
+        ("newest", "Newest to oldest"),
+        ("oldest", "Oldest to newest"),
+        ("latest", "Recently updated"),
     ]
     .iter()
-    .map(|(value, label)| option(value, label, query.sorted_by.as_deref()))
+    .map(|(value, label)| radio_option("sorted_by", value, label, sort))
     .collect::<String>();
-    let assignment_options = [("", "Any assignment"), ("unassigned", "Unassigned")]
-        .iter()
-        .map(|(value, label)| option(value, label, query.assignment_status.as_deref()))
-        .collect::<String>();
+    let status_label = match index {
+        "all" => "Status…",
+        "closed" => "Done",
+        "not_now" => "Not now",
+        "stalled" => "Stalled",
+        "postponing_soon" => "Closing soon",
+        "golden" => "Golden",
+        _ => "Status…",
+    };
+    let sort_label = match sort {
+        "newest" => "Newest to oldest",
+        "oldest" => "Oldest to newest",
+        _ => "Recently updated",
+    };
+    let controls = [
+        board_control,
+        quick_filter(sort_label, sort != "latest", false, &sort_options),
+        quick_filter(status_label, index != "all", false, &status_options),
+        tag_control,
+        assignee_control,
+        creator_control,
+        closer_control,
+    ]
+    .concat();
+    let filters_used = !query.board_ids.is_empty()
+        || !query.terms.is_empty()
+        || index != "all"
+        || sort != "latest"
+        || !query.tag_ids.is_empty()
+        || !query.assignee_ids.is_empty()
+        || !query.creator_ids.is_empty()
+        || !query.closer_ids.is_empty()
+        || query.assignment_status.is_some()
+        || query.creation.is_some()
+        || query.closure.is_some();
+    let clear = if filters_used {
+        format!(
+            "<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all\" title=\"Clear all\">×</a>",
+            principal.slug
+        )
+    } else {
+        String::new()
+    };
     let mut list = previews(app, principal, cards).await?;
     if cards.is_empty() {
         list.push_str("<div class=\"blank-slate\">No cards match this filter</div>");
@@ -471,12 +609,22 @@ pub(super) async fn show(
         String::new()
     };
     let form = format!(
-        "<form class=\"filter-form\" action=\"/{}/cards\" method=\"get\"><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{board_control}<details class=\"more-filters\"><summary aria-label=\"Expand filter options\" title=\"Expand filter options\">☷</summary><div class=\"more-filters__fields\"><label>Status<select name=\"indexed_by\">{status_options}</select></label><label>Sort<select name=\"sorted_by\">{sort_options}</select></label>{tag_control}{assignee_control}{creator_control}{closer_control}<label>Assignment<select name=\"assignment_status\">{assignment_options}</select></label><label>Created<input name=\"creation\" value=\"{}\" placeholder=\"This week\"></label><label>Closed<input name=\"closure\" value=\"{}\" placeholder=\"This month\"></label><button type=\"submit\">Apply filters</button></div></details>{preserved}<a class=\"clear-link\" href=\"/{}/cards\" aria-label=\"Clear all filters\" title=\"Clear all filters\">×</a></form>",
+        "<form class=\"filter-form{}\" action=\"/{}/cards\" method=\"get\"><input type=\"hidden\" name=\"expand_all\" value=\"true\"{}><label class=\"filter-search\"><span class=\"for-screen-reader\">Filter these cards</span><input type=\"search\" name=\"terms[]\" value=\"{}\" placeholder=\"Filter these cards… [F]\" autocomplete=\"off\"></label>{preserved}<div class=\"quick-filters\" id=\"cards-filter-options\">{controls}</div><button class=\"more-filters__toggle\" type=\"button\" aria-label=\"{}\" title=\"{}\" aria-expanded=\"{}\" aria-controls=\"cards-filter-options\">☷</button>{clear}</form>",
+        if expanded { " is-expanded" } else { "" },
         principal.slug,
+        if expanded { "" } else { " disabled" },
         escape(query.terms.first().map(String::as_str).unwrap_or("")),
-        escape(query.creation.as_deref().unwrap_or("")),
-        escape(query.closure.as_deref().unwrap_or("")),
-        principal.slug
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        if expanded {
+            "Collapse filter options"
+        } else {
+            "Expand filter options"
+        },
+        expanded
     );
     let settings_link = query
         .board_ids
@@ -501,6 +649,22 @@ pub(super) async fn show(
         ("COUNT", total.to_string()),
         ("PREVIOUS", previous),
         ("SETTINGS_LINK", settings_link),
+        (
+            "SHELL_STYLES",
+            [
+                ":root{--color-canvas:#101b20;--color-ink:#f4f5f6}",
+                include_str!("../static/shell_footer.css"),
+                include_str!("../static/notification_cards.css"),
+                include_str!("../static/menu_overlay.css"),
+            ]
+            .concat(),
+        ),
+        (
+            "SHELL_FOOTER",
+            include_str!("../static/home_footer.html")
+                .replace("{{ACCOUNT}}", &principal.slug.to_string()),
+        ),
+        ("SHELL_SCRIPT", include_str!("../static/events.js").into()),
     ]);
     Ok(Html(render_template(TEMPLATE, &values)))
 }

@@ -1,0 +1,81 @@
+{
+  "rizzy_commit": "999398f2b47b78122f9c8ab76300f1be6f04eb94",
+  "rizzy_dirty": false,
+  "rizzy_binary_sha256": "b011ba93cd6267721e3f4575507ef2c7446862bdd32fd356e99f79a5f4b54300",
+  "upstream_commit": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "fixture": {
+    "format": "PNG",
+    "width": 806,
+    "height": 926,
+    "bytes": 347501
+  },
+  "server_cpus": 2,
+  "source_workers": 2,
+  "replacements_per_app_per_round": 12,
+  "rounds": [
+    {
+      "order": [
+        "fizzy",
+        "rizzy"
+      ],
+      "fizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 66.62,
+          "p95_ms": 201.21
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 16.19,
+          "p95_ms": 35.62
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      },
+      "rizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 41.78,
+          "p95_ms": 43.63
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 1.4,
+          "p95_ms": 1.91
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      }
+    },
+    {
+      "order": [
+        "rizzy",
+        "fizzy"
+      ],
+      "rizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 42.26,
+          "p95_ms": 43.65
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 1.5,
+          "p95_ms": 2.05
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      },
+      "fizzy": {
+        "attachment": {
+          "count": 12,
+          "median_ms": 70.51,
+          "p95_ms": 161.06
+        },
+        "first_thumbnail": {
+          "count": 12,
+          "median_ms": 17.74,
+          "p95_ms": 27.73
+        },
+        "thumbnail_sha256": "e395365f9628f59bbe6958df52fc863ac76b171dae19285aaf524c3cccca49e2"
+      }
+    }
+  ]
+}

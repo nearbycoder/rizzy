@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,7 +105,20 @@ def main():
                 for index in range(9):
                     db.execute("INSERT INTO exports(id,account_id,user_id,kind,created_at,updated_at) VALUES(?,?,?,'user',?,?)", (f"limit-{index}", account_id, owner["id"], recent, recent))
             call(url, token, f"/users/{owner['id']}/data_exports", "POST", expected=429)
-            print("User exports passed: archive content, access scope, download, and 24-hour limit")
+            archive_path = Path(env["RIZZY_EXPORT_DIR"]) / f"{exported['id']}.zip"
+            assert archive_path.exists()
+            expired = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat(
+                timespec="milliseconds").replace("+00:00", "Z")
+            with sqlite3.connect(db_path) as db:
+                db.execute("UPDATE exports SET completed_at=? WHERE id=?", (expired, exported["id"]))
+            subprocess.run([BINARY, "cleanup-exports"], cwd=ROOT, env=env,
+                           capture_output=True, text=True, check=True)
+            assert not archive_path.exists()
+            with sqlite3.connect(db_path) as db:
+                assert db.execute("SELECT COUNT(*) FROM exports WHERE id=?", (exported["id"],)).fetchone()[0] == 0
+                assert db.execute("SELECT COUNT(*) FROM exports WHERE id LIKE 'limit-%'").fetchone()[0] == 9
+            call(url, token, f"/exports/{exported['id']}/download", expected=404)
+            print("User exports passed: archive content, access scope, download, limit, and expiry cleanup")
         finally:
             server.terminate()
             server.wait(timeout=5)

@@ -9,77 +9,230 @@
 <script type="importmap">{"imports":{"@rails/activestorage":"/assets/lexxy/activestorage.esm.js"}}</script>
 <script type="module" src="/assets/lexxy/lexxy.js"></script>
 <style>
-:root{font:16px/1.5 system-ui,sans-serif;color:#f5f0e8;background:#1b1b1b}*{box-sizing:border-box}body{margin:0}a{color:inherit}button,textarea,input{font:inherit}.skip{position:absolute;left:-9999px}.skip:focus{left:16px;top:12px;z-index:10}header.site{height:70px;display:flex;align-items:center;padding:0 max(20px,4vw);border-bottom:1px solid #383735}header.site a{font-size:29px;font-weight:800;letter-spacing:-.055em;text-decoration:none}main{width:min(900px,calc(100% - 32px));margin:36px auto 70px}nav a{color:#d6c9b5;text-decoration:none;font-weight:650}nav a:hover{text-decoration:underline}.card-perma{margin-top:24px;background:#292826;border:1px solid #46433d;border-radius:18px;box-shadow:0 14px 40px #0005;overflow:hidden}.card__header{padding:18px 28px 15px;border-bottom:1px solid #45433e;color:#bbb5aa;font-size:14px;display:flex;justify-content:space-between;gap:12px}.card__header strong{color:#f5f0e8}.card__body{padding:24px 28px 28px}.card__title{font-size:clamp(28px,5vw,42px);line-height:1.15;letter-spacing:-.045em;margin:0 0 20px}.card__description{min-height:24px;overflow-wrap:anywhere}.card__description a{color:#e7bd61}.card__footer{padding:18px 28px;background:#242320;border-top:1px solid #45433e;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.byline,.muted{color:#afa89d;font-size:14px}.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{border:1px solid #d5a94c;background:#e7bd61;color:#201b12;border-radius:9px;padding:9px 15px;font-weight:700;cursor:pointer}button:hover{background:#f0ca77}button.secondary{border-color:#666158;background:#393733;color:#f6f0e8}button.secondary:hover{background:#4a463f}button:disabled{opacity:.5;cursor:wait}textarea,input{display:block;width:100%;margin:8px 0 18px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px;outline:none}textarea:focus,input:focus{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}label{display:block;color:#d1cbc1;font-size:14px;font-weight:600}lexxy-editor{display:block;min-height:160px;margin:8px 0 18px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px}lexxy-editor:focus-within{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}lexxy-toolbar button{border:0;background:transparent;color:#f8f4ed;padding:6px}lexxy-toolbar button:hover{background:#48443e}section.messages{margin-top:42px}.messages h2{font-size:22px;letter-spacing:-.03em}.comment{padding:18px 0;border-top:1px solid #45433e}.comment h3{font-size:15px;margin:0 0 8px}.comment time{font-weight:400;color:#afa89d}.comment__body{overflow-wrap:anywhere}.comment__body a{color:#e7bd61}.empty{color:#afa89d}.steps{margin:24px 0 0;padding-left:22px}.steps li{padding:3px 0}details.editor{border-top:1px solid #45433e;padding:20px 28px}details.editor summary{cursor:pointer;font-weight:700}details.editor form{margin-top:18px}.error{color:#ff9f96;min-height:24px}.status{border:1px solid #736348;border-radius:99px;padding:3px 9px;font-size:12px;font-weight:700;color:#e7bd61}@media(max-width:600px){main{margin-top:22px}.card__header,.card__body,.card__footer,details.editor{padding-left:18px;padding-right:18px}}
+:root{font:16px/1.5 system-ui,sans-serif;color:#f5f0e8;background:#1b1b1b}*{box-sizing:border-box}body{margin:0}a{color:inherit}button,textarea,input{font:inherit}.skip{position:absolute;left:-9999px}.skip:focus{left:16px;top:12px;z-index:10}header.site{height:70px;display:flex;align-items:center;padding:0 max(20px,4vw);border-bottom:1px solid #383735}header.site a{font-size:29px;font-weight:800;letter-spacing:-.055em;text-decoration:none}main{width:min(900px,calc(100% - 32px));margin:36px auto 70px}nav a{color:#d6c9b5;text-decoration:none;font-weight:650}nav a:hover{text-decoration:underline}.card-perma{margin-top:24px;background:#292826;border:1px solid #46433d;border-radius:18px;box-shadow:0 14px 40px #0005;overflow:hidden}.card__header{padding:18px 28px 15px;border-bottom:1px solid #45433e;color:#bbb5aa;font-size:14px;display:flex;justify-content:space-between;gap:12px}.card__header strong{color:#f5f0e8}.card__body{padding:24px 28px 28px}.card__title{font-size:clamp(28px,5vw,42px);line-height:1.15;letter-spacing:-.045em;margin:0 0 20px}.card__description{min-height:24px;overflow-wrap:anywhere}.card__description a{color:#e7bd61}.card__footer{padding:18px 28px;background:#242320;border-top:1px solid #45433e;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.byline,.muted{color:#afa89d;font-size:14px}.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{border:1px solid #d5a94c;background:#e7bd61;color:#201b12;border-radius:9px;padding:9px 15px;font-weight:700;cursor:pointer}button:hover{background:#f0ca77}button.secondary{border-color:#666158;background:#393733;color:#f6f0e8}button.secondary:hover{background:#4a463f}button:disabled{opacity:.5;cursor:wait}textarea,input{display:block;width:100%;margin:8px 0 18px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px;outline:none}textarea:focus,input:focus{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}label{display:block;color:#d1cbc1;font-size:14px;font-weight:600}lexxy-editor{display:block;min-height:160px;margin:8px 0 18px;border:1px solid #57534d;background:#201f1e;color:#f8f4ed;border-radius:10px;padding:12px 14px}lexxy-editor:focus-within{border-color:#e6b857;box-shadow:0 0 0 3px #e6b85729}lexxy-toolbar button{border:0;background:transparent;color:#f8f4ed;padding:6px}lexxy-toolbar button:hover{background:#48443e}section.messages{margin-top:42px}.messages h2{font-size:22px;letter-spacing:-.03em}.comment{padding:18px 0;border-top:1px solid #45433e}.comment h3{font-size:15px;margin:0 0 8px}.comment time{font-weight:400;color:#afa89d}.comment__body{overflow-wrap:anywhere}.comment__body a{color:#e7bd61}.empty{color:#afa89d}.steps{margin:24px 0 0;padding-left:22px}.steps li{padding:3px 0}.error{color:#ff9f96;min-height:24px}.status{border:1px solid #736348;border-radius:99px;padding:3px 9px;font-size:12px;font-weight:700;color:#e7bd61}@media(max-width:600px){main{margin-top:22px}.card__header,.card__body,.card__footer{padding-left:18px;padding-right:18px}}
 </style>
 <style>.column-picker{padding:18px 28px;border-top:1px solid #45433e}.column-picker[hidden]{display:none}.column-picker .card__stages{display:flex;flex-wrap:wrap;gap:8px}.column-picker .card__column-name{background:#393733;border-color:var(--column-color,#666158);color:#f6f0e8}.column-picker .card__column-name--current{background:#665532;border-color:#e7bd61}.column-picker .card__column-name:disabled{cursor:default;opacity:1}.for-screen-reader{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>
 <style>
 :root{font:19px/1.375 "Segoe UI",system-ui,sans-serif;color:#f4f5f6;background:#101b20}header.site{height:52px;justify-content:center;border:0;padding:0}header.site a{display:flex;align-items:center;gap:7px;font-size:22px;letter-spacing:0}.site-logo{display:flex;align-items:center;justify-content:center;gap:2px;width:29px;height:29px;border:1px solid #40505a;border-radius:7px;background:#182730}.site-logo i{display:block;height:18px;width:3px;border-radius:2px;background:#e65667}.site-logo i:nth-child(2){background:#eab548}.site-logo i:nth-child(3){background:#75bf74}.site-logo i:nth-child(4){background:#56a7d8}.site-logo i:nth-child(5){background:#a67bd7}
-main{width:100%;margin:0 auto;padding:0 36px 90px}main>nav{margin:9px 22px 41px}main>nav a{color:#f4f5f6;font-size:21px;font-weight:800}.card-perma{position:relative;width:calc(100% - 120px);max-width:1320px;min-height:710px;margin:0 auto;padding:48px 47px 0;overflow:visible;border:0;border-radius:2px;background:#304b69;box-shadow:none}.card__header,.card__body,.card__footer{background:#101b20;color:#f4f5f6;border:0}.card__header{height:39px;padding:0;display:flex;align-items:start;font-size:16px}.card__board-label{display:flex;align-items:center;gap:12px;max-width:100%;min-height:39px;padding:5px 25px;background:#87b9fa;color:#101b20;border-radius:3px 0 2px 0;font-size:17px;font-weight:500;white-space:nowrap}.card__board-label strong{color:#101b20;font-weight:850}.card__board-label span{margin-left:3px;padding-left:14px;border-left:1px solid #4d7fbb;font-weight:850;text-transform:uppercase}.card__body{display:flex;gap:30px;min-height:500px;padding:10px 25px 24px}.card__content{display:flex;flex-direction:column;flex:1;min-width:0}.card__content>section[aria-label=Steps]{margin-top:auto}.card__title{margin:0 0 22px;font-size:36px;line-height:1.12;letter-spacing:-.03em;font-weight:900}.card__description{font-size:19px;color:#d7e0e8}.card__description a,.comment__body a{color:#89bcff}.card__description p{margin:0 0 15px}.stage-rail{flex:0 0 95px;display:flex;flex-direction:column;align-items:stretch;gap:2px;padding-top:13px}.stage-rail__option{width:100%;border:0;border-radius:3px;background:none;color:#a8cbf2;padding:4px 8px;text-align:left;text-transform:uppercase;font-size:15px;font-weight:700;line-height:1.25}.stage-rail__option:hover{background:#203d57}.stage-rail__option.is-current{background:#87b9fa;color:#101b20}.steps{margin:0;padding:0;list-style:none;font-size:16px;color:#d6e1ea}.steps li{padding:2px 0}.steps label,.steps__form label{display:flex;align-items:center;gap:6px;cursor:pointer;color:#d6e1ea;font-weight:400}.steps input[type=checkbox]{appearance:none;display:block;flex:none;width:18px;height:18px;margin:0;border:1px solid #b6c6d2;border-radius:3px;background:transparent;padding:0}.steps input[type=checkbox]:checked{background:#8bbbf3;border-color:#8bbbf3}.steps input[type=checkbox]:checked:after{content:"✓";display:block;text-align:center;color:#101b20;line-height:16px}.steps input:checked+span{text-decoration:line-through;opacity:.7}.steps__form{margin:2px 0 0}.steps__form label>span{width:18px;color:#a8cbf2}.steps__form input{width:220px;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:#d6e1ea;box-shadow:none;font-size:16px}.steps__form input:focus{border:0;box-shadow:none}.steps__form input::placeholder{color:#8ab8e6}.card__footer{padding:18px 25px;border-top:1px solid #304553}.byline,.muted{color:#a7b6c3}.card__footer button:not(.side-action){border-color:#53718e;background:#243b50;color:#e0ecf4}.card__footer #closure{background:#87b9fa;color:#101b20}
+main{width:100%;margin:0 auto;padding:0 36px 90px}main>nav{margin:9px 22px 41px}main>nav a{color:#f4f5f6;font-size:21px;font-weight:800}.card-perma{position:relative;width:calc(100% - 120px);max-width:1320px;min-height:666px;margin:0 auto;padding:48px 47px 0;overflow:visible;border:0;border-radius:2px;background:#304b69;box-shadow:none}.card__header,.card__body,.card__footer{background:#101b20;color:#f4f5f6;border:0}.card__header{height:39px;padding:0;display:flex;align-items:start;font-size:16px}.card__board-label{display:flex;align-items:center;gap:12px;max-width:100%;min-height:39px;padding:5px 25px;background:#87b9fa;color:#101b20;border-radius:3px 0 2px 0;font-size:17px;font-weight:500;white-space:nowrap}.card__board-label strong{color:#101b20;font-weight:850}.card__board-label span{margin-left:3px;padding-left:14px;border-left:1px solid #4d7fbb;font-weight:850;text-transform:uppercase}.card__body{display:flex;gap:30px;min-height:500px;padding:10px 25px 24px}.card__content{display:flex;flex-direction:column;flex:1;min-width:0}.card__content>section[aria-label=Steps]{margin-top:auto}.card__title{margin:0 0 22px;font-size:36px;line-height:1.12;letter-spacing:-.03em;font-weight:900}.card__description{font-size:19px;color:#d7e0e8}.card__description a,.comment__body a{color:#89bcff}.card__description p{margin:0 0 15px}.stage-rail{flex:0 0 95px;display:flex;flex-direction:column;align-items:stretch;gap:2px;padding-top:13px}.stage-rail__option{width:100%;border:0;border-radius:3px;background:none;color:#a8cbf2;padding:4px 8px;text-align:left;text-transform:uppercase;font-size:15px;font-weight:700;line-height:1.25}.stage-rail__option:hover{background:#203d57}.stage-rail__option.is-current{background:#87b9fa;color:#101b20}.steps{margin:0;padding:0;list-style:none;font-size:16px;color:#d6e1ea}.steps li{padding:2px 0}.steps label,.steps__form label{display:flex;align-items:center;gap:6px;cursor:pointer;color:#d6e1ea;font-weight:400}.steps input[type=checkbox]{appearance:none;display:block;flex:none;width:18px;height:18px;margin:0;border:1px solid #b6c6d2;border-radius:3px;background:transparent;padding:0}.steps input[type=checkbox]:checked{background:#8bbbf3;border-color:#8bbbf3}.steps input[type=checkbox]:checked:after{content:"✓";display:block;text-align:center;color:#101b20;line-height:16px}.steps__form{margin:2px 0 0}.steps__form label>span{width:18px;color:#a8cbf2}.steps__form input{width:220px;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:#d6e1ea;box-shadow:none;font-size:16px}.steps__form input:focus{border:0;box-shadow:none}.steps__form input::placeholder{color:#8ab8e6}.card__footer{padding:4px 25px 8px;border-top:1px solid #304553}.byline,.muted{color:#a7b6c3}.card-perma__notch{display:flex;justify-content:center;margin:42px auto 0}.card-perma__notch .actions{justify-content:center}.card-perma__notch .actions>button:not(.side-action){border-color:#53718e;background:#243b50;color:#e0ecf4}.card-perma__notch #closure{background:#87b9fa;color:#101b20}
+.step--new{display:flex;align-items:center;gap:6px}.step--new>.steps__form{margin:0}
+.stage-rail__mobile-icon{display:none}
+.card-icon{--svg:none;display:inline-block;flex:none;width:26px;height:26px;background:currentColor;mask-image:var(--svg);mask-repeat:no-repeat;mask-position:center;mask-size:contain;pointer-events:none}
+.card-icon--arrow-left{--svg:url('/assets/card/icons/arrow-left.svg');width:21px;height:21px}
+.card-icon--golden-ticket{--svg:url('/assets/card/icons/golden-ticket.svg')}
+.card-icon--picture-add{--svg:url('/assets/card/icons/picture-add.svg')}
+.card-icon--picture-remove{--svg:url('/assets/card/icons/picture-remove.svg')}
+.card-icon--pencil{--svg:url('/assets/card/icons/pencil.svg')}
+.card-icon--check{--svg:url('/assets/card/icons/check.svg')}
+.card-icon--tag{--svg:url('/assets/card/icons/tag.svg');width:19px;height:19px}
+.card-icon--watch{--svg:url('/assets/card/icons/bell-off.svg')}
+#watch[data-method="DELETE"] .card-icon--watch{--svg:url('/assets/card/icons/bell.svg')}
+.card-icon--pin{--svg:url('/assets/card/icons/unpinned.svg')}
+#pin[data-method="DELETE"] .card-icon--pin{--svg:url('/assets/card/icons/pinned.svg')}
+main>nav a{display:inline-flex;align-items:center;gap:8px}
+@media(min-width:851px){main>nav a .card-icon{display:none}}
+#closure .card-icon{display:none}
 .side-action{position:absolute;display:grid;place-items:center;width:50px;height:50px;padding:0;border:1px solid #3b5362;border-radius:50%;background:#101b20;color:#f4f5f6;font-size:26px;z-index:2}.side-action:hover{background:#243b50}.side-action svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8}.side-action--gold{top:0;left:-60px}.side-action--watch{top:0;right:-60px}.side-action--pin{top:60px;right:-60px}.card__footer .side-action{border:1px solid #3b5362;background:#101b20;color:#f4f5f6}.card__footer .side-action:hover{background:#243b50}
-.side-action--image{top:60px;left:-60px;cursor:pointer}.side-action--image input{position:absolute;width:1px;height:1px;opacity:0}.side-action--image:focus-within{outline:2px solid #87b9fa;outline-offset:3px}.card-perma__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.card-perma.has-image .card__body{background:#101b20ba}.card__header,.card__body,.card__footer,details.editor{position:relative;z-index:1}
+.card-perma__notch .side-action{background:#101b20;border-color:#3b5362;color:#f4f5f6}
+.card-perma__notch .side-action:hover{background:#243b50}
+.card-perma #watch[data-method="DELETE"],.card-perma #pin[data-method="DELETE"]{background:#f4f5f6;border-color:#f4f5f6;color:#101b20}
+.card-perma #watch[data-method="DELETE"]:hover,.card-perma #pin[data-method="DELETE"]:hover{background:#fff}
+.side-action--image{top:60px;left:-60px;cursor:pointer}.side-action--image input{position:absolute;width:1px;height:1px;opacity:0}.side-action--image:focus-within{outline:2px solid #87b9fa;outline-offset:3px}.card-perma__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.card-perma.has-image .card__body{background:#101b20ba}.card__header,.card__body,.card__footer{position:relative;z-index:1}
 .card-tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card-tags details{position:relative}.card-tags summary{display:grid;place-items:center;width:31px;height:31px;border:1px solid #526d80;border-radius:50%;list-style:none;cursor:pointer;color:#a8cbf2}.card-tags summary::-webkit-details-marker{display:none}.card-tags summary svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}.card-tags__picker{position:absolute;top:35px;left:0;z-index:9;display:grid;gap:7px;width:240px;padding:12px;border:1px solid #536574;border-radius:9px;background:#1d2c35;box-shadow:0 10px 25px #0009}.card-tags__picker label{color:#dbe5ec}.card-tags__picker input{width:100%;margin:4px 0 9px;padding:7px}.card-tags__picker button{width:100%;padding:7px;font-size:13px}.card-tags__list{display:flex;gap:6px;white-space:nowrap;overflow:hidden}.card-tags__link{color:#a8cbf2;font-size:13px;font-weight:750;text-transform:uppercase;text-decoration:none}.card-tags__link:hover{text-decoration:underline}
-.card__tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card__tag-picker-button{width:31px;height:31px;display:grid;place-items:center;padding:0;border:1px solid #526d80;border-radius:50%;background:transparent;color:#a8cbf2;font-size:20px}.card__tag-picker-button:hover{background:#203d57}.tag-dialog{width:min(410px,calc(100vw - 24px));max-height:75vh;padding:20px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.tag-dialog::backdrop{background:#0008}.tag-dialog__close{float:right;border:0;background:none;color:#f4f5f6}.tag-dialog .popup__list{max-height:48vh;overflow:auto;margin:10px 0;padding:0;list-style:none}.tag-dialog .popup__item button{width:100%;display:flex;justify-content:space-between;padding:9px;border:0;background:transparent;color:#f4f5f6;text-align:left}.tag-dialog .popup__item button:hover{background:#304553}.tag-dialog .popup__item[hidden]{display:none}.tag-dialog input{margin:10px 0}.tag-dialog__error{min-height:0}
-.reactions{display:flex;align-items:center;gap:9px;padding:8px 25px 13px;background:#101b20}.reactions__list{display:flex;flex-wrap:wrap;gap:6px}.reaction{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid #405a6c;border-radius:99px;color:#e4ebf1;font-size:15px}.reaction__avatar{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#47647b;font-size:12px}.reaction__delete{border:0;background:transparent;color:#edaaac;padding:0 3px}.reactions__trigger{display:inline-grid;place-items:center;width:32px;height:32px;border:1px solid #54718d;border-radius:50%;color:#a8cbf2;text-decoration:none}.reaction__form{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.reaction__form input{width:135px;margin:0;padding:5px}.reaction__form .reaction__emoji-list{display:flex;flex-wrap:wrap;gap:2px}.reaction__form .reaction__emoji-btn{padding:3px 5px;border:0;background:transparent;color:#fff;font-size:18px}.reaction__form .actions{gap:5px}.reaction__form .actions button,.reaction__form .actions a{font-size:13px;padding:5px 8px}.comment .reactions{padding:8px 0 0;background:transparent}
+.card__tags{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 9px}.card__tag-picker-button{width:31px;height:31px;display:grid;place-items:center;padding:0;border:1px solid #526d80;border-radius:50%;background:transparent;color:#a8cbf2;font-size:20px}.card__tag-picker-button:hover{background:#203d57}.tag-dialog{width:min(410px,calc(100vw - 24px));max-height:75vh;padding:20px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.tag-dialog::backdrop{background:#0008}.tag-dialog__close{float:right;border:0;background:none;color:#f4f5f6}.tag-dialog .popup__list{max-height:48vh;overflow:auto;margin:10px 0;padding:0;list-style:none}.tag-dialog .popup__item button{width:100%;display:flex;justify-content:space-between;padding:9px;border:0;background:transparent;color:#f4f5f6;text-align:left}.tag-dialog .popup__item button:hover,.tag-dialog .popup__item[aria-selected=true] button{background:#304553}.tag-dialog .popup__item[hidden]{display:none}.tag-dialog input{margin:10px 0}.tag-dialog__error{min-height:0}
+.reactions{display:flex;align-items:center;gap:9px;padding:8px 25px 13px;background:#101b20}.reactions__list{display:flex;flex-wrap:wrap;gap:6px}.reaction{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid #405a6c;border-radius:99px;color:#e4ebf1;font-size:15px}.reaction--deleteable .reaction__content{cursor:pointer}.reaction__avatar{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#47647b;font-size:12px}.reaction__delete-form{display:contents}.reaction__delete{display:none;border:0;background:transparent;color:#edaaac;padding:0 3px}.reaction.expanded .reaction__delete{display:inline-grid}.reactions__trigger{display:inline-grid;place-items:center;width:32px;height:32px;border:1px solid #54718d;border-radius:50%;color:#a8cbf2;text-decoration:none}.reaction__form{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.reaction__form input{width:135px;margin:0;padding:5px}.reaction__form .reaction__emoji-list{display:flex;flex-wrap:wrap;gap:2px}.reaction__form .reaction__emoji-btn{padding:3px 5px;border:0;background:transparent;color:#fff;font-size:18px}.reaction__form .actions{gap:5px}.reaction__form .actions button,.reaction__form .actions a{font-size:13px;padding:5px 8px}.comment .reactions{padding:8px 0 0;background:transparent}
 turbo-frame[id^=reacting_],turbo-frame[id^=new_reaction_]{display:block}.reaction__form .reaction__emoji-list{max-height:105px;overflow:auto}
 .card__header{justify-content:flex-start;z-index:3}.card__board-label a{margin-left:3px;padding-left:14px;border-left:1px solid #4d7fbb;color:#101b20;text-decoration:none;font-weight:850;text-transform:uppercase}
-.messages{width:min(995px,calc(100% - 120px));margin:42px auto}.messages h2{color:#f4f5f6}.comment{border-color:#344b5b}details.editor{background:#101b20;border-color:#344b5b}details.editor summary{color:#a8cbf2}textarea,input{background:#172731;border-color:#536574;color:#f4f5f6}button{border-color:#6288af;background:#87b9fa;color:#101b20}button:hover{background:#a6cbfa}
+.board-picker-dialog{width:min(430px,calc(100vw - 24px));max-height:75vh;padding:18px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.board-picker-dialog::backdrop{background:#0008}.board-picker-dialog h1{margin:0 0 8px;font-size:21px}.board-picker-dialog input{width:100%;margin:4px 0 8px;padding:9px;background:#263b49;color:#f4f5f6;border:1px solid #65737a;border-radius:6px}.board-picker-dialog .popup__list{max-height:48vh;overflow:auto;margin:0;padding:0;list-style:none}.board-picker-dialog .popup__item[hidden]{display:none}.board-picker-dialog .popup__item button{width:100%;display:flex;align-items:center;justify-content:space-between;padding:9px;border:0;background:transparent;color:#f4f5f6;text-align:left;font:inherit;cursor:pointer}.board-picker-dialog .popup__item[aria-selected=true] button,.board-picker-dialog .popup__item button:hover{background:#304553}.board-picker-dialog .checked{visibility:hidden}.board-picker-dialog .popup__item[aria-checked=true] .checked{visibility:visible}.board-picker-dialog__close{float:right;border:0;background:none;color:#f4f5f6;font-size:21px;cursor:pointer}
+.card__header{gap:0}
+.card__body{padding-bottom:17px}
+.messages{width:min(995px,calc(100% - 120px));margin:42px auto}.messages h2{color:#f4f5f6}.comment{border-color:#344b5b}textarea,input{background:#172731;border-color:#536574;color:#f4f5f6}button{border-color:#6288af;background:#87b9fa;color:#101b20}button:hover{background:#a6cbfa}
 .comments{display:block;text-align:center}.comments #comments{display:flex;flex-direction:column;gap:18px;align-items:center}.comments turbo-frame[id^="container_comment_"]{display:block;width:100%;max-width:70ch}.comments .comment{display:flex;align-items:flex-start;gap:12px;width:100%;max-width:70ch;padding:0;border:0;text-align:left}.comment__avatar{flex:none;margin:8px 0 0}.comment__avatar img,.comments__subscribers img{display:block;width:38px;height:38px;object-fit:cover;border-radius:50%}.comment__content{position:relative;flex:1;min-width:0;padding:12px 16px;background:#172731;border-radius:4px}.comment__author{display:flex;align-items:center;gap:10px}.comment__author h3{flex:1;min-width:0;margin:0 0 8px;font-size:15px;font-weight:400}.comment__author h3 strong{font-weight:700}.comment__author a{text-decoration:none}.comment__author a:hover{text-decoration:underline}.comment__permalink-title{color:#a7b6c3;text-transform:capitalize}.comment__edit{font-size:13px;color:#a8cbf2}.comment__body{font-size:16px}.comment__body p:last-child{margin-bottom:0}.comment .reactions{padding:8px 0 0}.comment--new{margin-top:12px}.comment--new .comment__content{padding:10px 16px}.comment--new form{width:100%}.comment--new lexxy-editor{margin:0 0 10px;min-height:120px}.comment__submit{display:block;margin-left:auto}.comments__subscribers{width:100%;max-width:70ch;padding:22px 0 0;text-align:left;color:#a7b6c3}.comments__subscribers strong{color:#f4f5f6;font-size:13px;text-transform:uppercase}.comments__subscribers p{margin:4px 0 12px}.comments__subscribers>div{display:flex;align-items:center;gap:6px}.comments__subscribers img{width:30px;height:30px}.comment-by-system{display:none!important}.comments--system-expanded .comment-by-system{display:block!important}.comment-by-system:nth-last-child(1 of .comment-by-system){display:block!important}.comment-by-system .comment{justify-content:center;text-align:center}.comment-by-system .comment__content{flex:none;width:calc(100% - 50px);background:repeating-linear-gradient(45deg,#172731 0 1px,#203849 1px 10px)}.comment-by-system .comment__author h3 strong{display:none}.comment-by-system .comment__body{text-align:center}.comment-by-system .reactions{display:none}.comment__history{display:none;padding:2px 7px;border:0;background:transparent;color:#a8cbf2;font-size:12px}.comment-by-system:nth-last-child(1 of .comment-by-system):not(:nth-child(1 of .comment-by-system)) .comment__history{display:inline-flex}.for-screen-reader{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.bottom-bar{position:fixed;bottom:0;left:0;right:0;z-index:5;display:grid;grid-template-columns:repeat(3,1fr);height:50px;border-top:1px solid #34434b;background:#101b20}.bottom-bar button{border:0;background:none;color:#a5afb4;text-transform:uppercase;font-size:14px;font-weight:700;cursor:pointer}.bottom-bar button:hover,.bottom-bar button:focus-visible{background:#20313b;color:#fff}.utility-panel{position:fixed;inset:auto 0 51px auto;width:min(430px,calc(100vw - 24px));max-height:65vh;margin:auto 12px 0 auto;padding:18px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.utility-panel::backdrop{background:#0006}.utility-panel h2{font-size:20px;margin:0 35px 14px 0}.utility-close{position:absolute;top:10px;right:10px;border:0;background:none;color:#f4f5f6;font-size:26px;cursor:pointer}.utility-content{max-height:45vh;overflow:auto;display:grid;gap:7px}.utility-content a{display:block;padding:9px;border:1px solid #4f6069;border-radius:7px;text-decoration:none;font-size:15px}.utility-content p{margin:4px 0;color:#a5afb4;font-size:14px}.utility-search{width:100%;margin-bottom:12px;border:1px solid #65737a;border-radius:8px;background:#101b20;color:#fff;padding:9px;font-size:15px}
-.card__body{min-height:370px}
+.card__body{min-height:366px}
 .actions>a.secondary{display:inline-flex;align-items:center;padding:9px 15px;border:1px solid #53718e;border-radius:9px;background:#243b50;color:#e0ecf4;text-decoration:none;font-weight:700}.card__meta{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.card__meta-text--assignees{font-size:14px;color:#b5cce0}.assignment-dialog{width:min(410px,calc(100vw - 24px));max-height:75vh;padding:20px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009}.assignment-dialog::backdrop{background:#0008}.assignment-dialog .popup__list{max-height:48vh;overflow:auto;margin:10px 0;padding:0;list-style:none}.assignment-dialog .popup__item button{width:100%;display:flex;justify-content:space-between;padding:9px;border:0;background:transparent;color:#f4f5f6;text-align:left}.assignment-dialog .popup__item button:hover{background:#304553}.assignment-dialog .popup__item[hidden]{display:none}.assignment-dialog input{margin:10px 0}.assignment-dialog__close{float:right;border:0;background:none;color:#f4f5f6}
 .card__title-link{color:inherit;text-decoration:none}.card__title-link:hover{text-decoration:underline}.card__title-link code{border-radius:4px;background:#1c3347;padding:0 .12em;font-size:.88em}.delete-card{margin:50px 0 0;padding:22px 0;border-top:1px solid #344b5b;text-align:center}.delete-card>button{color:#f0a7a7;border-color:#8b5353;background:transparent}.delete-card dialog{width:min(420px,calc(100vw - 24px));padding:24px;border:1px solid #65737a;border-radius:12px;background:#1d2c35;color:#f4f5f6;box-shadow:0 10px 30px #0009;text-align:left}.delete-card dialog::backdrop{background:#0009}.delete-card dialog h3{margin:0}.delete-card dialog .actions{margin-top:20px}.delete-card dialog form{margin:0}.delete-card dialog form button{color:#fff;background:#9e3f46;border-color:#9e3f46}
-@media(max-width:850px){main{padding:0 12px 70px}main>nav{margin:12px 8px 25px}.card-perma{width:calc(100% - 60px);padding:20px 12px 0}.side-action--gold,.side-action--image{left:-54px}.side-action--watch,.side-action--pin{right:-54px}.card__body{min-height:400px;padding:13px 14px}.card__title{font-size:30px}.stage-rail{flex-basis:80px}.stage-rail__option{font-size:12px}.card__board-label{padding:5px 10px;font-size:13px}.messages{width:100%}}
+@media(max-width:850px){main{padding:0 12px 70px}main>nav{margin:12px 8px 25px}.card-perma{width:calc(100% - 60px);padding:20px 12px 0}.side-action--gold,.side-action--image{left:-42px}.side-action--watch,.side-action--pin{right:-42px}.card__body{min-height:400px;padding:13px 14px}.card__title{font-size:30px}.stage-rail{flex-basis:80px}.stage-rail__option{font-size:12px}.card__board-label{padding:5px 10px;font-size:13px}.messages{width:100%}}
+@media(max-width:639px){.card-perma,.card__body{min-height:0}}
 </style>
 <style>
-.card__footer{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"meta actions" "reactions reactions";align-items:end;gap:10px}
+.card__footer{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"meta reactions";align-items:center;gap:10px}
 .card__footer>.card__meta{grid-area:meta}
-.card__footer>.actions{grid-area:actions}
 .card__footer>turbo-frame[id^="reacting_card_"]{grid-area:reactions;justify-self:end}
 .card__footer>turbo-frame[id^="reacting_card_"] .reactions{padding:0;background:transparent}
-.card__meta{display:grid;grid-template-columns:30px max-content minmax(0,1fr) auto;grid-template-rows:18px 18px;grid-template-areas:"avatars-author text-added text-updated avatars-assignees" "avatars-author text-author text-assignees avatars-assignees";column-gap:8px;align-items:center;width:max-content;max-width:100%;font-size:12px;text-transform:uppercase;color:#a9c3d7}
+.card__meta{display:grid;grid-template-columns:30px max-content minmax(0,1fr) auto;grid-template-rows:18px 18px;grid-template-areas:"avatars-author text-added text-updated avatars-assignees" "avatars-author text-author text-assignees avatars-assignees";column-gap:8px;row-gap:0;align-items:center;width:max-content;max-width:100%;font-size:12px;text-transform:uppercase;color:#a9c3d7}
 .card__meta-avatars--author{grid-area:avatars-author}.card__meta-avatars--assignees{grid-area:avatars-assignees}
 .card__meta-text--added{grid-area:text-added}.card__meta-text--author{grid-area:text-author}.card__meta-text--updated{grid-area:text-updated}.card__meta-text--assignees{grid-area:text-assignees}
 .card__meta-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card__meta-text strong{color:#dceaff}.card__meta .avatar{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;overflow:hidden}.card__meta .avatar img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
 .card__assignees-trigger{display:flex;align-items:center;text-decoration:none}.card__assignees-trigger .avatar+.avatar{margin-left:-8px}.card__assign-add{display:grid;place-items:center;width:30px;height:30px;border:1px solid #6b87a1;border-radius:50%;background:#192d3d;color:#d4e7f5;font-size:21px;line-height:1}.card__assignees-trigger:hover .card__assign-add,.card__assignees-trigger:focus-visible .card__assign-add{background:#42617b}.card__assignees[hidden]{display:none}
-@media(max-width:850px){.card__footer{grid-template-columns:1fr;grid-template-areas:"meta" "reactions" "actions"}.card__meta{width:100%;grid-template-columns:30px auto minmax(0,1fr) auto}.card__footer>.actions{justify-self:start}}
+@media(max-width:850px){.card__footer{grid-template-columns:1fr;grid-template-areas:"meta" "reactions"}.card__meta{width:100%;grid-template-columns:30px auto minmax(0,1fr) auto}}
 </style>
+<style>
+.steps .step{display:flex;align-items:center;gap:8px;min-height:27px}
+.steps .step__checkbox{display:flex;align-items:center;flex:none}
+.steps .step__content{color:inherit;text-decoration:none;overflow-wrap:anywhere}
+.steps .step__content{font-weight:500}
+.steps .step__content:hover{text-decoration:underline}
+.steps input[type=checkbox]:disabled{opacity:.45}
+.steps .step>form:has(input:checked)+.step__content{text-decoration:line-through;opacity:.7}
+.steps>turbo-frame{display:block}
+.steps .step>form{margin:0}
+.steps turbo-frame>.flex{display:flex;align-items:center;gap:8px}
+.steps form.step{display:flex;align-items:center;gap:8px;min-width:0}
+.steps form.step input[type=text]{flex:1;min-width:0;width:auto;margin:0;padding:3px 6px;border-radius:3px}
+.steps form.step button,.steps form.button_to button{padding:3px 8px;font-size:13px}
+.steps form.button_to button{background:#4e2929;border-color:#994c4c;color:#ffe5e5}
+.steps .for-screen-reader{position:absolute;clip:rect(0,0,0,0);width:1px;height:1px;overflow:hidden}
+</style>
+<style>
+#edit-mobile{display:none}
+.card-perma__closure-message{max-width:48ch;margin:16px auto 28px;padding:0 12px;color:#89bcff;text-align:center;font-size:16px;line-height:1.45}
+.card-perma__closure-message .local-time-value{font-weight:700}
+.card-perma__closure-message--completed{position:relative;z-index:4;display:flex;align-items:center;justify-content:center;gap:7px;max-width:none;color:#d6dee2}
+.card-perma__closure-message--completed button{padding:0;border:0;background:none;color:inherit;font-weight:inherit;text-decoration:underline}
+.display-contents,#gold-action-form,#closure-action-form,#watch-action-form,#pin-action-form,turbo-frame[id^="watch_card_"],turbo-frame[id^="pin_card_"],.actions>[id^="watch_button"],.actions>[id^="pin_button"]{display:contents}
+#undo-closure-form{display:inline}
+.card-perma__notch .actions>form>button:not(.side-action){border-color:#53718e;background:#243b50;color:#e0ecf4}
+.card-perma.is-closed{background:transparent}
+.card-perma.is-closed::before{content:"";position:absolute;inset:0 0 83px;background:#586269;z-index:0}
+.card-perma.is-closed .card__header,.card-perma.is-closed .card__body,.card-perma.is-closed .card__footer{background:#19242a}
+.card-perma.is-closed .card__body{z-index:3}
+.card-perma.is-closed .card__board-label{background:#d5d7d8}
+.card-perma.is-closed #gold,.card-perma.is-closed #edit-mobile,.card-perma.is-closed #closure,.card-perma.is-closed #choose-column{display:none}
+.card__closed{position:absolute;right:10px;bottom:-56px;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:132px;padding:8px 9px;border:4px solid #326849;border-radius:2px;background:#15242a;color:#cbd5d8;box-shadow:0 0 0 2px #16262b inset;transform:rotate(5deg);pointer-events:none;font-size:12px;line-height:1.15}
+.card__closed-title{font-size:20px;font-weight:900;text-transform:uppercase;color:#4c945e}
+.card__closed-date{font-family:ui-monospace,monospace;text-transform:uppercase}
+.card__closed-by{border-bottom:1px dashed currentColor}
+.card__closed--system{border-color:#8b6565}.card__closed--system .card__closed-title{color:#bb8585}
+@media(max-width:639px){
+  main{position:relative;padding:22px 0 90px}
+  main>nav{position:absolute;top:-42px;left:20px;z-index:30;margin:0}
+  main>nav a{display:grid;place-items:center;width:38px;height:38px}
+  main>nav a strong{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  main>nav a .card-icon{width:26px;height:26px}
+  .card-perma{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));width:100%;max-width:none;min-height:0;margin:0;padding:5px 4px 17px;border-radius:0}
+  .card-perma:not(.is-closed):not(.has-image){background:#101b20}
+  .card-perma:not(.is-closed):not(.has-image)::before{content:"";grid-column:1/-1;grid-row:1/4;margin:-5px -4px 0;background:#304b69;z-index:0}
+  .card-perma:not(.is-closed):not(.has-image)::after{content:"";grid-column:1/-1;grid-row:4;margin:0 -4px;background:linear-gradient(to bottom,#304b69 0,#304b69 40px,#101b20 40px);z-index:0}
+  .card__header,.card__body,.card__footer{grid-column:1/-1}
+  .card__header{grid-row:1;height:35px}
+  .card__board-label{min-height:35px;padding:4px 12px;font-size:15px}
+  .card__body{grid-row:2;display:flex;flex-direction:column;gap:0;min-height:0;padding:16px 21px 18px}
+  .card__title{margin:0 0 18px;font-size:24px;line-height:1.15}
+  .card__description{font-size:17px;line-height:1.4}
+  .card__content>section[aria-label=Steps]{margin-top:20px}
+  .card-perma.is-description-empty .card__description{min-height:0}
+  .card-perma.is-description-empty .card__content>section[aria-label=Steps]{margin-top:0}
+  .stage-rail{display:flex;flex-direction:row;flex:0 0 auto;align-items:center;gap:0;width:100%;height:48px;margin-top:18px;padding:0;border:1px solid #87b9fa;border-radius:5px}
+  .stage-rail__option{flex:1;width:auto;min-width:0;padding:9px 3px;text-align:center;font-size:14px;white-space:nowrap}
+  .stage-rail__mobile-icon{display:inline-block;width:20px;height:20px;margin-right:5px;vertical-align:-4px;fill:currentColor}
+  .card__footer{grid-row:3;position:relative;display:block;min-height:150px;padding:0 21px 15px}
+  .card__meta{display:grid;grid-template-columns:75px minmax(0,1fr);grid-template-rows:repeat(3,20px) 30px;grid-template-areas:"text-added text-added" "text-author avatars-author" "text-updated text-updated" "avatars-assignees text-assignees";gap:4px 8px;width:100%;font-size:13px}
+  .card__meta-avatars--author .avatar{width:20px;height:20px}
+  .card__meta-text{white-space:normal}
+  .card__meta-text--assignees{align-self:center}
+  .card__footer>turbo-frame[id^="reacting_card_"]{position:absolute;right:21px;bottom:12px}
+  .card-perma.is-closed .card__footer{min-height:141px}
+  .card-perma.is-closed .card__body{padding-bottom:2px}
+  .card-perma.is-closed .stage-rail{margin-top:11px;border-color:#bfc8cd}
+  .card-perma.is-closed .stage-rail__option.is-current{background:#d5d7d8}
+  .card-perma.is-closed .card__meta{position:relative;top:18px;grid-template-columns:1fr;grid-template-areas:"text-added" "text-author" "text-updated" "text-assignees";gap:4px 0}
+  .card-perma.is-closed .card__meta-avatars{display:none}
+  .card-perma.is-closed #watch{background:#d5d7d8;color:#101b20}
+  .card-perma.is-closed #pin{background:#101b20;color:#d5d7d8}
+  .card-perma.is-closed .card-perma__notch #watch,.card-perma.is-closed .card-perma__notch #pin{margin-top:16px}
+  .card-perma.is-closed .card__closed{right:3px;bottom:-59px}
+  .card-perma__notch,.card-perma__notch .actions{display:contents}
+  .side-action,#edit-mobile,#closure{position:static;align-self:start;justify-self:center;display:grid;place-items:center;width:50px;height:50px;margin:16px 0 0;padding:0;border-radius:50%;font-size:26px}
+  #gold{grid-column:1;grid-row:4} .side-action--image{grid-column:2;grid-row:4}
+  #image-upload-form{grid-column:2;grid-row:4;position:relative;z-index:2}
+  #edit-mobile{grid-column:3;grid-row:4;border-color:#87b9fa;background:#87b9fa;color:#101b20}
+  #closure{grid-column:4;grid-row:4;border-color:#87b9fa;background:#87b9fa;color:#101b20;font-size:0}
+  #closure .card-icon{display:inline-block}
+  #watch{grid-column:5;grid-row:4} #pin{grid-column:6;grid-row:4}
+  #edit-mobile,#closure{position:relative;z-index:1}
+  #watch[data-method="DELETE"]{border-color:#f4f5f6;background:#f4f5f6;color:#101b20}
+  #pin{border-color:#3b5362;background:#101b20;color:#f4f5f6}
+  .card-perma__closure-message{grid-column:1/-1;grid-row:5;max-width:370px;margin:17px auto 0;padding:0 18px;font-size:16px}
+  .card-perma:not(.is-closed) .card-perma__closure-message{position:relative;z-index:1}
+  .card-perma__closure-message--completed{margin:26px auto 0;padding:0 12px;white-space:nowrap;font-size:16px}
+  .card-perma.is-closed{padding-bottom:9px}
+  .card-perma.is-closed .card-perma__notch{grid-column:1/-1;grid-row:4}
+  #choose-column{display:none}
+  #column-picker{grid-column:1/-1;grid-row:6}
+  section.messages{width:100%;margin:0 auto 18px}
+  section.messages:has(.comment-by-system){margin-top:2px}
+  .comments #comments:has(.comment-by-system){gap:16px}
+  .comment-by-system .comment__content{padding-top:8px;padding-bottom:8px}
+  .comment--new{margin-top:0}
+  .comment--new .comment__content{margin-left:-16px;margin-right:25px}
+  .comment--new lexxy-editor{border:0;padding:0;border-radius:0;background:transparent;--lexxy-toolbar-button-size:32px}
+}
+</style>
+<style>turbo-frame[id^="edit_card_"]{display:block}turbo-frame[id^="edit_card_"] form{display:grid;gap:8px}turbo-frame[id^="edit_card_"] form .card__title{margin-bottom:0}turbo-frame[id^="edit_card_"] form button[type=submit]{justify-self:start}turbo-frame[id^="edit_card_"] form a{color:#a8cbf2}turbo-frame[id^="edit_card_"] #edit-error{min-height:0;color:#ff9f96}</style>
+<style>{{COMMENT_EDIT_STYLES}}</style>
+<style>{{SHELL_STYLES}}</style>
 </head>
-<body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}">
-<a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header>
+<body data-account="{{ACCOUNT}}" data-number="{{NUMBER}}" data-board-id="{{BOARD_ID}}" data-card-revision="{{CARD_REVISION}}">
+<a class="skip" href="#main">Skip to main content</a><header class="site"><a href="/{{ACCOUNT}}/my/menu" data-open-menu aria-haspopup="dialog" aria-expanded="false"><span class="site-logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Rizzy⌄</a></header><dialog id="menu-dialog" aria-label="Rizzy menu"><turbo-frame id="my_menu"></turbo-frame></dialog>
 <main id="main">
-<nav><a href="/{{ACCOUNT}}/boards/{{BOARD_ID}}">Back to {{BOARD_NAME}}</a></nav>
-<article class="card-perma{{IMAGE_CLASS}}" id="card">
+<nav><a id="card-back-link" class="btn--back" href="/{{ACCOUNT}}/boards/{{BOARD_ID}}"><span class="card-icon card-icon--arrow-left" aria-hidden="true"></span><strong>Back to {{BOARD_NAME}}</strong></a></nav>
+<section id="card_container_card_{{CARD_ID}}"><article class="card-perma{{IMAGE_CLASS}}{{STATE_CLASS}}{{DESCRIPTION_CLASS}}" id="card">
   {{IMAGE}}
-  <button id="gold" class="side-action side-action--gold" type="button" aria-label="{{GOLD_LABEL}}" title="{{GOLD_LABEL}}">★</button>
+  {{GOLD_FORM}}
   {{IMAGE_BUTTON}}
-  <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Move this card to another board">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
-  <div class="card__body"><div class="card__content"><h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div>{{STEPS}}</div>{{STAGE_RAIL}}</div>
-  <div class="card__footer">{{ASSIGNMENT_META}}{{REACTIONS}}<div class="actions">
-    <form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>
-    <button id="watch" class="secondary side-action side-action--watch" type="button" aria-label="{{WATCH_LABEL}}" title="{{WATCH_LABEL}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4"/></svg></button>
-    <button id="pin" class="secondary side-action side-action--pin" type="button" aria-label="{{PIN_LABEL}}" title="{{PIN_LABEL}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 0-1 7 3 3v2H7v-2l3-3-1-7ZM12 15v6"/></svg></button>
-    <button id="choose-column" class="secondary" type="button" aria-expanded="false" aria-controls="column-picker">Move</button>
-    <button id="closure" type="button">{{CLOSURE_LABEL}}</button>
-  </div></div>
+  <div class="card__header"><span class="card__board-label">No. <strong>{{NUMBER}}</strong><a id="board-picker-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/board/edit" aria-label="Choose a board for this card" aria-haspopup="dialog" aria-controls="board-picker-dialog">{{BOARD_NAME}}⌄</a></span>{{TAG_CONTROL}}{{STATUS}}</div>
+  <div class="card__body"><div class="card__content"><turbo-frame id="edit_card_{{CARD_ID}}">{{CLOSURE_RESTORE_STREAM}}<h1 class="card__title"><a class="card__title-link" href="/{{ACCOUNT}}/cards/{{NUMBER}}/edit">{{TITLE_HTML}}</a></h1><div class="card__description lexxy-content">{{DESCRIPTION_HTML}}</div></turbo-frame>{{STEPS}}</div>{{STAGE_RAIL}}{{STAMP}}</div>
+  <div class="card__footer">{{ASSIGNMENT_META}}<form id="self-assignment-form" method="post" action="/{{ACCOUNT}}/cards/{{NUMBER}}/self_assignment" hidden><button type="submit" hidden>Assign to me</button></form>{{REACTIONS}}</div>
+  <div class="card-perma__actions card-perma__actions--right display-contents">{{WATCH_FORM}}{{PIN_FORM}}</div>
+  {{CLOSURE_TOGGLE}}
   <section id="column-picker" class="column-picker" aria-label="Choose a column for this card" hidden></section>
   <dialog class="assignment-dialog" id="assignment-dialog" aria-label="Assign this card"><button type="button" class="assignment-dialog__close" aria-label="Close assignment picker">×</button><div id="assignment-dialog-content"></div><p class="error" role="alert" id="assignment-dialog-error"></p></dialog>
-  <details class="editor" id="edit"><summary>Edit card</summary><form id="edit-form">
-    <label for="title">Name it</label><textarea id="title" maxlength="255" required>{{TITLE}}</textarea>
-    <label for="description">Add some notes, context, pictures, or video</label>
-    <lexxy-editor id="description" name="card[description]" value="{{DESCRIPTION_VALUE}}" placeholder="Add some notes, context, pictures, or video about this…" data-direct-upload-url="/{{ACCOUNT}}/rails/active_storage/direct_uploads" data-blob-url-template="/{{ACCOUNT}}/rails/active_storage/blobs/redirect/:signed_id/:filename">
-      <lexxy-prompt trigger="@" src="/{{ACCOUNT}}/prompts/boards/{{BOARD_ID}}/users" name="mention"></lexxy-prompt>
-      <lexxy-prompt trigger="#" src="/{{ACCOUNT}}/prompts/cards" name="card" insert-editable-text="true" remote-filtering="true" supports-space-in-searches="true"></lexxy-prompt>
-    </lexxy-editor><button type="submit">Save changes</button><p class="error" role="alert" id="edit-error"></p>
-  </form></details>
-</article>
+  <dialog class="board-picker-dialog" id="board-picker-dialog" aria-label="Choose a board for this card"><button type="button" class="board-picker-dialog__close" aria-label="Close board picker">×</button><div id="board-picker-dialog-content"></div><p class="error" role="alert" id="board-picker-dialog-error"></p></dialog>
+</article></section>
 <section class="messages"><turbo-frame id="messages_card_{{CARD_ID}}" class="comments" role="group" aria-label="Messages"><div id="comments">{{COMMENTS}}{{NEW_COMMENT_FORM}}{{COMMENT_WATCHERS}}</div>{{DELETE_ACTION}}</turbo-frame></section>
 </main>
-<footer class="bottom-bar"><button type="button" data-utility="pins">Pinned</button><button type="button" data-utility="search">Search</button><button type="button" data-utility="notifications">Notifications</button></footer>
-<dialog class="utility-panel" id="utility-panel"><button type="button" class="utility-close" aria-label="Close">×</button><h2 id="utility-title"></h2><input type="search" class="utility-search" id="utility-search" placeholder="Search all cards" aria-label="Search all cards" hidden><div class="utility-content" id="utility-content"></div></dialog>
+{{SHELL_FOOTER}}
+<script>{{TAG_PICKER_SCRIPT}}</script>
+<script>{{ASSIGNMENT_LIMIT_SCRIPT}}</script>
 <script>
 const account=document.body.dataset.account,number=document.body.dataset.number;
+const cardRoot=document.getElementById('card');
+const backLink=document.getElementById('card-back-link');
+if(backLink){
+  let remembered,referrer;
+  try{remembered=JSON.parse(sessionStorage.getItem('rizzy-card-referrer')||'null')}catch{}
+  try{referrer=new URL(document.referrer)}catch{}
+  const path=referrer?.pathname.replace(/\/$/,'');
+  const root=`/${account}`,cards=`/${account}/cards`,board=`/${account}/boards/${document.body.dataset.boardId}`;
+  if(referrer?.origin===location.origin&&[root,cards,board].includes(path)){
+    backLink.href=referrer.href;
+    const label=remembered?.url===referrer.href?remembered.label:null;
+    if(label)backLink.querySelector('strong').textContent=`Back to ${label==='All boards'?'all boards':label}`;
+    else if(path===root)backLink.querySelector('strong').textContent='Back to Home';
+    else if(path===cards)backLink.querySelector('strong').textContent='Back to all boards';
+  }
+  backLink.addEventListener('click',event=>{
+    if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+    let selected;
+    try{selected=JSON.parse(sessionStorage.getItem('rizzy-card-selected')||'null')}catch{}
+    if(selected?.url===backLink.href&&selected.number===number)sessionStorage.setItem('rizzy-card-return',JSON.stringify({url:backLink.href,number,expiresAt:Date.now()+15000}));
+  });
+  document.addEventListener('keydown',event=>{
+    if(!['Escape','ArrowLeft'].includes(event.key)||event.repeat||event.altKey||event.ctrlKey||event.metaKey||document.querySelector('dialog[open]')||event.target.closest('input,textarea,lexxy-editor,[contenteditable="true"]'))return;
+    event.preventDefault();backLink.click();
+  });
+}
+const boardPickerDialog=document.getElementById('board-picker-dialog'),boardPickerContent=document.getElementById('board-picker-dialog-content'),boardPickerError=document.getElementById('board-picker-dialog-error');
+function boardPickerItems(){return [...boardPickerContent.querySelectorAll('.popup__item:not([hidden])')]}
+function selectBoardPickerItem(item){for(const option of boardPickerContent.querySelectorAll('.popup__item'))option.setAttribute('aria-selected',String(option===item));item?.scrollIntoView({block:'nearest'})}
+document.addEventListener('click',async event=>{const link=event.target.closest('#board-picker-link');if(!link||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();boardPickerError.textContent='';boardPickerDialog.showModal();if(boardPickerContent.firstElementChild){boardPickerContent.querySelector('#board-search')?.focus();return}boardPickerContent.textContent='Loading…';try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load board picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame#board_picker');if(!frame)throw Error('Board picker missing');boardPickerContent.replaceChildren(document.importNode(frame,true));selectBoardPickerItem(boardPickerItems()[0]);boardPickerContent.querySelector('#board-search')?.focus()}catch(error){boardPickerContent.textContent='';boardPickerError.textContent=error.message}});
+boardPickerDialog.querySelector('.board-picker-dialog__close').addEventListener('click',()=>boardPickerDialog.close());boardPickerDialog.addEventListener('click',event=>{if(event.target===boardPickerDialog)boardPickerDialog.close()});boardPickerDialog.addEventListener('close',()=>document.getElementById('board-picker-link')?.focus());
+boardPickerContent.addEventListener('input',event=>{if(event.target.id!=='board-search')return;const value=event.target.value.toLocaleLowerCase();for(const item of boardPickerContent.querySelectorAll('.popup__item'))item.hidden=!item.textContent.toLocaleLowerCase().includes(value);selectBoardPickerItem(boardPickerItems()[0])});
+boardPickerContent.addEventListener('keydown',event=>{if(!['ArrowDown','ArrowUp','Enter'].includes(event.key))return;const items=boardPickerItems();if(!items.length)return;const selected=items.findIndex(item=>item.getAttribute('aria-selected')==='true');if(event.key==='Enter'){event.preventDefault();items[Math.max(selected,0)].querySelector('button')?.click();return}event.preventDefault();selectBoardPickerItem(items[(selected+(event.key==='ArrowDown'?1:-1)+items.length)%items.length])});
+boardPickerContent.addEventListener('submit',async event=>{const form=event.target;if(!form.closest('turbo-frame#board_picker'))return;event.preventDefault();const button=event.submitter;if(button)button.disabled=true;boardPickerError.textContent='';try{const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});if(!response.ok)throw Error('Could not move card');window.location.assign(response.url)}catch(error){boardPickerError.textContent=error.message;if(button)button.disabled=false}});
 const assignmentDialog=document.getElementById('assignment-dialog'),assignmentContent=document.getElementById('assignment-dialog-content'),assignmentError=document.getElementById('assignment-dialog-error');
 function relativeDates(){const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());for(const time of document.querySelectorAll('time[data-relative-date]')){const date=new Date(time.dateTime);if(Number.isNaN(date.getTime()))continue;const day=new Date(date.getFullYear(),date.getMonth(),date.getDate());const days=Math.round((today-day)/86400000);time.textContent=days===0?'today':days===1?'yesterday':days>1&&days<7?`${days} days ago`:date.toLocaleDateString(undefined,{month:'short',day:'numeric'});time.removeAttribute('data-relative-date')}}
+function formatClosureNotice(){const time=document.querySelector('.card-perma__closure-message time[data-local-time-target]');if(!time)return;const date=new Date(Number(time.getAttribute('datetime'))*1000);if(Number.isNaN(date.getTime()))return;if(time.dataset.localTimeTarget==='shortdate'){time.textContent=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric'}).format(date);time.title=commentTitleFormatter.format(date);return}const days=Math.round(Math.abs(commentDayStart(date)-commentDayStart(new Date()))/86400000);const value=days===0?'today':days===1?'tomorrow':`in ${days} days`;time.innerHTML=days>1?`in <span class="local-time-value">${days}</span> days`:`<span class="local-time-value">${value}</span>`}
 relativeDates();new MutationObserver(relativeDates).observe(document.querySelector('.card__footer'),{childList:true,subtree:true});
 document.addEventListener('click',async event=>{const link=event.target.closest('#assignment-link');if(!link)return;event.preventDefault();assignmentError.textContent='';assignmentDialog.showModal();if(assignmentContent.firstElementChild){assignmentContent.querySelector('#user-search')?.focus();return}assignmentContent.textContent='Loading…';try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load assignment picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=assignment_card_]');if(!frame)throw Error('Assignment picker missing');assignmentContent.replaceChildren(document.importNode(frame,true));assignmentContent.querySelector('#user-search')?.focus()}catch(error){assignmentContent.textContent='';assignmentError.textContent=error.message}});
 assignmentDialog.querySelector('.assignment-dialog__close').addEventListener('click',()=>assignmentDialog.close());assignmentDialog.addEventListener('click',event=>{if(event.target===assignmentDialog)assignmentDialog.close()});assignmentContent.addEventListener('input',event=>{if(event.target.id!=='user-search')return;const value=event.target.value.toLocaleLowerCase();assignmentContent.querySelectorAll('.popup__item').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))});
@@ -87,24 +240,169 @@ assignmentContent.addEventListener('submit',async event=>{const form=event.targe
 document.addEventListener('keydown',async event=>{if(event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.target.closest('input,textarea,lexxy-editor,[contenteditable="true"]'))return;if(event.key==='a'){const link=document.getElementById('assignment-link');if(link&&!link.closest('[hidden]')){event.preventDefault();link.click()}}else if(event.key==='m'){const link=document.getElementById('assignment-link');if(!link||link.closest('[hidden]'))return;event.preventDefault();try{const response=await fetch(document.getElementById('self-assignment-form').action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'}});if(!response.ok)throw Error('Could not update assignment');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target'));if(!target||!replacement)throw Error('Assignment update missing');target.replaceWith(document.importNode(replacement,true));assignmentContent.replaceChildren()}catch(error){alert(error.message)}}});
 const deleteCardDialog=document.getElementById('delete-card-dialog');document.getElementById('delete-card-open')?.addEventListener('click',()=>deleteCardDialog.showModal());document.getElementById('delete-card-cancel')?.addEventListener('click',()=>deleteCardDialog.close());deleteCardDialog?.addEventListener('click',event=>{if(event.target===deleteCardDialog)deleteCardDialog.close()});
 async function mutation(path,method,body){const r=await fetch(`/${account}/cards/${number}${path}`,{method,headers:{Accept:'application/json','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){let message=`Request failed (${r.status})`;try{const result=await r.json();message=result.message||message}catch{}throw Error(message)}return r}
-function action(button,path,method){button.addEventListener('click',async()=>{button.disabled=true;try{await mutation(path,method);location.reload()}catch(error){button.disabled=false;alert(error.message)}})}
-action(document.getElementById('closure'),'/closure','{{CLOSURE_METHOD}}');
-action(document.getElementById('watch'),'/watch','{{WATCH_METHOD}}');
-action(document.getElementById('pin'),'/pin','{{PIN_METHOD}}');
-action(document.getElementById('gold'),'/goldness','{{GOLD_METHOD}}');
-document.getElementById('remove-image')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/image`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not remove image');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
+async function submitCardControlForm(form,button){
+  if(button)button.disabled=true;
+  const refreshCard=form.matches('#gold-action-form,#closure-action-form,#undo-closure-form');
+  try{
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});
+    if(!response.ok)throw Error(`Request failed (${response.status})`);
+    if(refreshCard){await refreshLiveCard(true);return}
+    if(form.id==='watch-action-form')cardControlEpoch.watch++;
+    else if(form.id==='pin-action-form')cardControlEpoch.pin++;
+    const page=new DOMParser().parseFromString(await response.text(),'text/html');
+    for(const stream of page.querySelectorAll('turbo-stream[target]')){
+      const target=document.getElementById(stream.getAttribute('target'));
+      const replacement=stream.querySelector('template')?.content.firstElementChild;
+      if(target&&replacement)target.replaceWith(document.importNode(replacement,true));
+    }
+  }catch(error){if(button)button.disabled=false;alert(error.message)}
+}
+const cardControlFormSelector='#watch-action-form,#pin-action-form,#gold-action-form,#closure-action-form,#undo-closure-form';
+document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.target.closest('input,textarea,lexxy-editor,[contenteditable]'))return;
+  const key=event.key.toLowerCase();
+  const selector=event.shiftKey?{g:'#gold',n:'#watch',p:'#pin'}[key]:{e:'.card__title-link',d:'#closure',t:'.card__tag-picker-button'}[key];
+  if(!selector)return;
+  const control=document.querySelector(selector);
+  if(!control||control.disabled||!control.getClientRects().length||getComputedStyle(control).pointerEvents==='none')return;
+  event.preventDefault();control.click();
+});
+window.addEventListener('click',event=>{
+  const button=event.target.closest('#watch,#pin,#gold,#closure,#undo-closure');
+  const form=button?.form;
+  if(!form?.matches(cardControlFormSelector))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  void submitCardControlForm(form,button);
+},true);
+window.addEventListener('submit',event=>{
+  const form=event.target;
+  if(!form.matches(cardControlFormSelector))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  void submitCardControlForm(form,event.submitter||form.querySelector('button[type=submit]'));
+},true);
+cardRoot.addEventListener('click',async event=>{const button=event.target.closest('#remove-image');if(!button)return;button.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/image`,{method:'DELETE',headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not remove image');location.reload()}catch(error){button.disabled=false;alert(error.message)}});
 const cardHeader=document.querySelector('.card__header');
-cardHeader.addEventListener('click',async event=>{const trigger=event.target.closest('[data-tag-picker-url]');if(trigger){const dialog=trigger.closest('.card__tags').querySelector('.tag-dialog'),content=dialog.querySelector('.tag-dialog__content'),error=dialog.querySelector('.tag-dialog__error');error.textContent='';dialog.showModal();if(content.firstElementChild){content.querySelector('#tag-search')?.focus();return}content.textContent='Loading…';try{const response=await fetch(trigger.dataset.tagPickerUrl,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load tag picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!frame)throw Error('Tag picker missing');content.replaceChildren(document.importNode(frame,true));content.querySelector('#tag-search')?.focus()}catch(ex){content.textContent='';error.textContent=ex.message}return}const close=event.target.closest('.tag-dialog__close');if(close)close.closest('dialog').close()});
-cardHeader.addEventListener('input',event=>{if(event.target.id!=='tag-search')return;const value=event.target.value.toLocaleLowerCase();event.target.closest('.tag-dialog').querySelectorAll('.popup__item[data-filter-target]').forEach(item=>item.hidden=!item.textContent.toLocaleLowerCase().includes(value))});
-cardHeader.addEventListener('submit',async event=>{const form=event.target;if(!form.closest('.tag-dialog'))return;event.preventDefault();const button=event.submitter,dialog=form.closest('.tag-dialog'),error=dialog.querySelector('.tag-dialog__error');if(button)button.disabled=true;error.textContent='';try{const body=new URLSearchParams(new FormData(form)),response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body});if(!response.ok)throw Error('Could not update tag');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target')),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!target||!replacement||!frame)throw Error('Tag update missing');replacement.querySelector('.tag-dialog__content')?.append(document.importNode(frame,true));dialog.close();target.replaceWith(document.importNode(replacement,true))}catch(ex){error.textContent=ex.message;if(button)button.disabled=false}});
-const chooseColumn=document.getElementById('choose-column'),columnPicker=document.getElementById('column-picker');
-chooseColumn.addEventListener('click',async()=>{if(!columnPicker.hidden){columnPicker.hidden=true;chooseColumn.setAttribute('aria-expanded','false');return}chooseColumn.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/column/edit`,{headers:{Accept:'text/html'}});if(!response.ok)throw Error(`Request failed (${response.status})`);columnPicker.innerHTML=await response.text();columnPicker.hidden=false;chooseColumn.setAttribute('aria-expanded','true')}catch(error){alert(error.message)}finally{chooseColumn.disabled=false}});
+cardHeader.addEventListener('click',async event=>{const trigger=event.target.closest('[data-tag-picker-url]');if(trigger){const dialog=trigger.closest('.card__tags').querySelector('.tag-dialog'),content=dialog.querySelector('.tag-dialog__content'),error=dialog.querySelector('.tag-dialog__error');error.textContent='';if(dialog.open)return;dialog.addEventListener('close',()=>trigger.focus(),{once:true});dialog.showModal();if(content.firstElementChild){openTagPicker(content.querySelector('.tag-picker'));return}content.textContent='Loading…';try{const response=await fetch(trigger.dataset.tagPickerUrl,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load tag picker');const page=new DOMParser().parseFromString(await response.text(),'text/html'),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!frame)throw Error('Tag picker missing');content.replaceChildren(document.importNode(frame,true));openTagPicker(content.querySelector('.tag-picker'))}catch(ex){content.textContent='';error.textContent=ex.message}return}const close=event.target.closest('.tag-dialog__close');if(close)close.closest('dialog').close()});
+cardHeader.addEventListener('input',event=>{if(event.target.id==='tag-search')scheduleTagPickerFilter(event.target.closest('.tag-picker'))});
+cardHeader.addEventListener('keydown',navigateTagPicker);
+cardHeader.addEventListener('submit',async event=>{const form=event.target;if(!form.closest('.tag-dialog'))return;event.preventDefault();if(form.id.startsWith('tags_form_card_')&&!form.elements.tag_title.value.trim())return;const button=event.submitter,dialog=form.closest('.tag-dialog'),error=dialog.querySelector('.tag-dialog__error');if(button)button.disabled=true;error.textContent='';try{const body=new URLSearchParams(new FormData(form)),response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body});if(!response.ok)throw Error('Could not update tag');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[target]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target')),frame=page.querySelector('turbo-frame[id^=tagging_card_]');if(!target||!replacement||!frame)throw Error('Tag update missing');replacement.querySelector('.tag-dialog__content')?.append(document.importNode(frame,true));dialog.close();target.replaceWith(document.importNode(replacement,true))}catch(ex){error.textContent=ex.message;if(button)button.disabled=false}});
+const columnPicker=document.getElementById('column-picker');
+cardRoot.addEventListener('click',event=>{if(event.target.closest('#edit-mobile'))void openCardEditor(`/${account}/cards/${number}/edit`)});
+cardRoot.addEventListener('click',async event=>{const chooseColumn=event.target.closest('#choose-column');if(!chooseColumn)return;if(!columnPicker.hidden){columnPicker.hidden=true;chooseColumn.setAttribute('aria-expanded','false');return}chooseColumn.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/column/edit`,{headers:{Accept:'text/html'}});if(!response.ok)throw Error(`Request failed (${response.status})`);columnPicker.innerHTML=await response.text();columnPicker.hidden=false;chooseColumn.setAttribute('aria-expanded','true')}catch(error){alert(error.message)}finally{chooseColumn.disabled=false}});
 async function chooseStage(button){if(button.disabled||button.getAttribute('aria-checked')==='true')return;const stage=button.dataset.stage;const action=stage==='not_now'?['/not_now','POST']:stage==='maybe'?['/triage','DELETE']:stage==='done'?['/closure','POST']:['/triage','POST'];button.disabled=true;try{await mutation(action[0],action[1],stage==='column'?{column_id:button.dataset.columnId}:undefined);location.reload()}catch(error){button.disabled=false;alert(error.message)}}
 columnPicker.addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
 document.querySelector('.stage-rail').addEventListener('click',event=>{const button=event.target.closest('button[data-stage]');if(button)chooseStage(button)});
-document.querySelectorAll('[data-step-id]').forEach(checkbox=>checkbox.addEventListener('change',async()=>{checkbox.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps/${checkbox.dataset.stepId}`,{method:'PUT',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{completed:checkbox.checked}})});if(!response.ok)throw Error('Could not update step');checkbox.closest('li').classList.toggle('is-completed',checkbox.checked)}catch(error){checkbox.checked=!checkbox.checked;alert(error.message)}finally{checkbox.disabled=false}}));
-document.getElementById('step-form').addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('new-step'),content=input.value.trim();if(!content)return;input.disabled=true;try{const response=await fetch(`/${account}/cards/${number}/steps`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({step:{content}})});if(!response.ok)throw Error('Could not add step');location.reload()}catch(error){input.disabled=false;alert(error.message)}});
-document.getElementById('edit-form').addEventListener('submit',async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;const error=document.getElementById('edit-error');error.textContent='';try{await mutation('','PATCH',{card:{title:document.getElementById('title').value,description:document.getElementById('description').value}});location.reload()}catch(ex){error.textContent=ex.message;button.disabled=false}});
+const stepRoot=document.querySelector('.card__content');
+const stepPending=new Map();
+function frameFromStepPage(html,id){
+  const page=new DOMParser().parseFromString(html,'text/html');
+  return [...page.querySelectorAll(`turbo-frame[id="${CSS.escape(id)}"]`)].at(-1);
+}
+function applyStepStream(html){
+  const page=new DOMParser().parseFromString(html,'text/html');
+  let applied=false;
+  for(const stream of page.querySelectorAll('turbo-stream')){
+    const target=document.getElementById(stream.getAttribute('target'));
+    if(!target)continue;
+    const action=stream.getAttribute('action');
+    if(action==='remove'){target.remove();applied=true;continue}
+    const content=stream.querySelector('template')?.content.cloneNode(true);
+    if(!content)continue;
+    if(action==='replace'){target.replaceWith(content);applied=true}
+    else if(action==='before'){target.before(content);applied=true}
+  }
+  return applied;
+}
+async function closeStepEditor(frame){
+  const response=await fetch(frame.querySelector('[data-form-target="cancel"]').href,{headers:{Accept:'text/html'}});
+  if(!response.ok)throw Error('Could not cancel step edit');
+  const replacement=frameFromStepPage(await response.text(),frame.id);
+  if(!replacement)throw Error('Step response has no frame');
+  frame.replaceWith(replacement);
+}
+stepRoot.addEventListener('click',async event=>{
+  const link=event.target.closest('a[data-step-edit]');
+  if(!link)return;
+  event.preventDefault();
+  const frame=link.closest('turbo-frame');
+  if(!frame)return;
+  try{
+    if(stepPending.has(frame.id))await stepPending.get(frame.id);
+    const current=document.getElementById(frame.id);
+    const currentLink=current?.querySelector('a[data-step-edit]');
+    if(!currentLink||current.hasAttribute('data-edit-loading'))return;
+    current.dataset.editLoading='';
+    const response=await fetch(currentLink.href,{headers:{Accept:'text/html'}});
+    if(!response.ok)throw Error('Could not edit step');
+    const replacement=frameFromStepPage(await response.text(),current.id);
+    if(!replacement)throw Error('Step editor response has no frame');
+    replacement.querySelector('form:has(input[name="step[content]"])').dataset.stepEditor='';
+    replacement.querySelector('form:has(input[name="_method"][value="delete"])').dataset.stepDeleteForm='';
+    const live=document.getElementById(frame.id);
+    if(!live)return;
+    live.replaceWith(replacement);
+    const input=replacement.querySelector('input[name="step[content]"]');
+    input.focus();input.select();
+  }catch(error){document.getElementById(frame.id)?.removeAttribute('data-edit-loading');alert(error.message)}
+});
+stepRoot.addEventListener('keydown',event=>{
+  if(event.key!=='Escape'||!event.target.closest('[data-step-editor]'))return;
+  event.preventDefault();
+  void closeStepEditor(event.target.closest('turbo-frame')).catch(error=>alert(error.message));
+});
+stepRoot.addEventListener('change',async event=>{
+  const checkbox=event.target.closest('input[data-step-id]');
+  if(!checkbox)return;
+  const frame=checkbox.closest('turbo-frame');
+  const form=checkbox.form,body=new URLSearchParams(new FormData(form));
+  checkbox.disabled=true;
+  const pending=(async()=>{
+    try{
+      const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body});
+      if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not update step');
+      void refreshLiveCard(true);
+    }catch(error){checkbox.checked=!checkbox.checked;checkbox.disabled=false;alert(error.message)}
+  })();
+  stepPending.set(frame.id,pending);
+  await pending;
+  if(stepPending.get(frame.id)===pending)stepPending.delete(frame.id);
+});
+stepRoot.addEventListener('submit',async event=>{
+  const form=event.target;
+  if(!form.matches('[data-step-editor],[data-step-delete-form]'))return;
+  event.preventDefault();
+  if(form.matches('[data-step-editor]')&&!form.querySelector('input[name="step[content]"]').value.trim())return;
+  const button=form.querySelector('button[type=submit]');
+  button.disabled=true;
+  try{
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:new URLSearchParams(new FormData(form))});
+    if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not save step');
+    void refreshLiveCard(true);
+  }catch(error){button.disabled=false;alert(error.message)}
+});
+let stepComposing=false;
+stepRoot.addEventListener('compositionstart',event=>{if(event.target.id==='new-step')stepComposing=true});
+stepRoot.addEventListener('compositionend',event=>{if(event.target.id==='new-step')stepComposing=false});
+stepRoot.addEventListener('submit',async event=>{
+  if(event.target.id!=='step-form')return;
+  event.preventDefault();
+  const form=event.target,input=form.querySelector('#new-step');
+  if(stepComposing)return;
+  if(!input.value.trim()){
+    input.setCustomValidity('Please fill out this field');input.reportValidity();
+    input.addEventListener('input',()=>input.setCustomValidity(''),{once:true});
+    return;
+  }
+  input.disabled=true;
+  try{
+    const body=new URLSearchParams({"step[content]":input.value});
+    const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body});
+    if(!response.ok||!applyStepStream(await response.text()))throw Error('Could not add step');
+    input.value='';input.disabled=false;input.focus();
+    void refreshLiveCard(true);
+  }catch(error){input.disabled=false;alert(error.message)}
+});
+
 const commentList=document.getElementById('comments');
 const commentTimezone=document.querySelector('meta[name="timezone"]')?.content;
 let commentDateFormatter;
@@ -113,6 +411,7 @@ const commentTimeFormatter=new Intl.DateTimeFormat('en-US',{timeStyle:'short'});
 const commentTitleFormatter=new Intl.DateTimeFormat('en-US',{dateStyle:'short',timeStyle:'short'});
 const commentWeekdayFormatter=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'});
 function commentDayStart(date){const parts=Object.fromEntries(commentDateFormatter.formatToParts(date).filter(part=>part.type!=='literal').map(part=>[part.type,Number(part.value)]));return Date.UTC(parts.year,parts.month-1,parts.day)}
+formatClosureNotice();setInterval(formatClosureNotice,30000);
 function formatCommentTimes(){const now=new Date();for(const time of commentList.querySelectorAll('time[data-local-time-target]')){if(time.dataset.localTimeReady)continue;const seconds=Number(time.getAttribute('datetime')),date=new Date(seconds*1000);if(!Number.isFinite(seconds)||Number.isNaN(date.getTime()))continue;if(time.dataset.localTimeTarget==='time'){time.textContent=commentTimeFormatter.format(date)}else{const days=Math.round(Math.abs(commentDayStart(now)-commentDayStart(date))/86400000);time.innerHTML=days<=1?`<span class="local-time-value">${days===0?'today':'yesterday'}</span>`:commentWeekdayFormatter.format(date)}time.title=commentTitleFormatter.format(date);time.dataset.localTimeReady='true'}}
 formatCommentTimes();new MutationObserver(()=>formatCommentTimes()).observe(commentList,{childList:true,subtree:true});
 const commentDraftKey='comment-{{CARD_ID}}';
@@ -131,17 +430,247 @@ async function applyCommentStream(response){if(!response.ok)throw Error(`Could n
 commentList.addEventListener('click',async event=>{const link=event.target.closest('a[data-comment-edit],a[data-comment-cancel]');if(!link||!commentList.contains(link))return;event.preventDefault();try{await loadCommentFrame(link.href)}catch(error){alert(error.message)}});
 commentList.addEventListener('submit',async event=>{const form=event.target,editing=form.id.startsWith('edit_comment_'),deleting=form.id.startsWith('delete_comment_');if(!editing&&!deleting)return;event.preventDefault();if(deleting&&!confirm('Are you sure you want to delete this comment?'))return;const button=event.submitter;if(button)button.disabled=true;try{const response=await fetch(form.action,editing?{method:'PATCH',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/json'},body:JSON.stringify({comment:{body:form.querySelector('lexxy-editor').value}})}:{method:'DELETE',headers:{Accept:'text/vnd.turbo-stream.html'}});await applyCommentStream(response)}catch(error){const message=form.closest('turbo-frame')?.querySelector('#comment_error');if(message)message.textContent=error.message;if(button)button.disabled=false}});
 const reactionRoot=document.querySelector('main');
-reactionRoot.addEventListener('click',async event=>{const emoji=event.target.closest('[data-emoji]');if(emoji){const input=emoji.closest('form')?.querySelector('[name="reaction[content]"]');if(input){input.value=emoji.dataset.emoji;input.focus()}return}const link=event.target.closest('[data-reaction-new],[data-reaction-cancel]');if(link){event.preventDefault();try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load reactions');const page=new DOMParser().parseFromString(await response.text(),'text/html');if(link.hasAttribute('data-reaction-new')){const frame=page.querySelector('turbo-frame[id^=new_reaction_]'),target=link.closest('turbo-frame');if(!frame||!target)throw Error('Reaction form missing');target.replaceWith(document.importNode(frame,true));document.querySelector('turbo-frame[id^=new_reaction_] input')?.focus()}else{const frame=page.querySelector('turbo-frame[id^=reacting_]'),target=link.closest('turbo-frame[id^=reacting_]');if(!frame||!target)throw Error('Reaction list missing');target.replaceWith(document.importNode(frame,true))}}catch(error){alert(error.message)}return}const button=event.target.closest('[data-reaction-delete]');if(button){button.disabled=true;try{const response=await fetch(button.dataset.reactionDelete,{method:'DELETE',headers:{Accept:'text/vnd.turbo-stream.html'}});if(!response.ok)throw Error('Could not delete reaction');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[action=remove]');if(!stream)throw Error('Reaction removal missing');document.getElementById(stream.getAttribute('target'))?.remove()}catch(error){button.disabled=false;alert(error.message)}}});
+reactionRoot.addEventListener('click',event=>{const content=event.target.closest('.reaction--deleteable .reaction__content');if(!content)return;const reaction=content.closest('.reaction');reaction.classList.toggle('expanded');content.setAttribute('aria-expanded',reaction.classList.contains('expanded')?'true':'false');if(reaction.classList.contains('expanded'))reaction.querySelector('.reaction__delete')?.focus()});
+reactionRoot.addEventListener('keydown',event=>{if(event.key!=='Enter')return;const content=event.target.closest('.reaction--deleteable .reaction__content');if(!content)return;event.preventDefault();content.click()});
+window.addEventListener('submit',async event=>{const form=event.target;if(!form.matches('.reaction__delete-form'))return;event.preventDefault();event.stopImmediatePropagation();const button=form.querySelector('button[type=submit]');button.disabled=true;try{const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});if(!response.ok)throw Error(`Could not delete reaction (${response.status})`);const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[action=remove]');if(!stream)throw Error('Reaction removal missing');document.getElementById(stream.getAttribute('target'))?.remove()}catch(error){button.disabled=false;alert(error.message)}},true);
+reactionRoot.addEventListener('click',async event=>{const emoji=event.target.closest('[data-emoji]');if(emoji){const input=emoji.closest('form')?.querySelector('[name="reaction[content]"]');if(input){input.value=emoji.dataset.emoji;input.focus()}return}const link=event.target.closest('[data-reaction-new],[data-reaction-cancel]');if(link){event.preventDefault();try{const response=await fetch(link.href,{headers:{Accept:'text/html'}});if(!response.ok)throw Error('Could not load reactions');const page=new DOMParser().parseFromString(await response.text(),'text/html');if(link.hasAttribute('data-reaction-new')){const frame=page.querySelector('turbo-frame[id^=new_reaction_]'),target=link.closest('turbo-frame');if(!frame||!target)throw Error('Reaction form missing');target.replaceWith(document.importNode(frame,true));document.querySelector('turbo-frame[id^=new_reaction_] input')?.focus()}else{const frame=page.querySelector('turbo-frame[id^=reacting_]'),target=link.closest('turbo-frame[id^=reacting_]');if(!frame||!target)throw Error('Reaction list missing');target.replaceWith(document.importNode(frame,true))}}catch(error){alert(error.message)}return}});
 reactionRoot.addEventListener('submit',async event=>{const form=event.target;if(!form.matches('.reaction__form'))return;event.preventDefault();const button=event.submitter;if(button)button.disabled=true;try{const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});if(!response.ok)throw Error('Could not add reaction');const page=new DOMParser().parseFromString(await response.text(),'text/html'),stream=page.querySelector('turbo-stream[action=replace]'),replacement=stream?.querySelector('template')?.content.firstElementChild,target=stream&&document.getElementById(stream.getAttribute('target'));if(!replacement||!target)throw Error('Reaction update missing');target.replaceWith(document.importNode(replacement,true))}catch(error){if(button)button.disabled=false;alert(error.message)}});
-const utility=document.getElementById('utility-panel'),utilityTitle=document.getElementById('utility-title'),utilitySearch=document.getElementById('utility-search'),utilityContent=document.getElementById('utility-content');
-function utilityList(items,empty){utilityContent.replaceChildren();if(!items.length){const message=document.createElement('p');message.textContent=empty;utilityContent.append(message);return}for(const item of items){const link=document.createElement('a');link.href=item.url;link.textContent=item.title;utilityContent.append(link)}}
-async function loadUtility(kind,term=''){utilityContent.textContent='Loading…';try{const url=kind==='pins'?`/${account}/my/pins`:kind==='notifications'?`/${account}/notifications/tray`:`/${account}/search?q=${encodeURIComponent(term)}`;const response=await fetch(url,{headers:{Accept:'application/json'}});if(!response.ok)throw Error('Could not load');const data=await response.json(),rows=Array.isArray(data)?data:[];utilityList(rows.map(item=>kind==='notifications'?{url:item.card?.url||'#',title:item.card?.title||'Notification'}:{url:item.url,title:item.title}),kind==='pins'?'No pinned cards yet':kind==='notifications'?'No notifications':'No matching cards')}catch{utilityContent.textContent='Could not load items.'}}
-document.querySelectorAll('[data-utility]').forEach(button=>button.addEventListener('click',()=>{const kind=button.dataset.utility;utilityTitle.textContent=kind==='pins'?'Pinned cards':kind==='notifications'?'Notifications':'Search cards';utilitySearch.hidden=kind!=='search';utilityContent.replaceChildren();utility.showModal();if(kind==='search'){utilitySearch.value='';utilitySearch.focus()}else loadUtility(kind)}));
-utility.querySelector('.utility-close').addEventListener('click',()=>utility.close());utility.addEventListener('click',event=>{if(event.target===utility)utility.close()});let utilitySearchTimer;utilitySearch.addEventListener('input',()=>{clearTimeout(utilitySearchTimer);if(utilitySearch.value.trim())utilitySearchTimer=setTimeout(()=>loadUtility('search',utilitySearch.value.trim()),300);else utilityContent.replaceChildren()});
+</script>
+<script>{{CARD_EDIT_DRAFT_SCRIPT}}</script>
+<script>
+// Keep an open card current without replacing the editor or the comment draft.
+const liveCardEditor=()=>document.getElementById('edit_card_{{CARD_ID}}');
+let liveCardDisplayFrame=null;
+const cardEditOpen=()=>!!liveCardEditor()?.querySelector('form[id^=edit_form_card_]');
+const liveCardComments=document.getElementById('comments');
+let liveCardRevision=document.body.dataset.cardRevision;
+let liveCardRefreshing=false;
+let liveCardPendingRevision=null;
+const cardControlEpoch={watch:0,pin:0};
+async function refreshCardControlFrame(kind){
+  const frame=document.getElementById(`${kind}_card_{{CARD_ID}}`);
+  if(!frame?.getAttribute('src'))return;
+  const epoch=++cardControlEpoch[kind];
+  try{
+    const response=await fetch(frame.getAttribute('src'),{headers:{Accept:'text/html','Turbo-Frame':frame.id},cache:'no-store'});
+    if(!response.ok)throw Error(`Could not load ${kind} control (${response.status})`);
+    const page=new DOMParser().parseFromString(await response.text(),'text/html');
+    const updated=page.getElementById(frame.id)?.firstElementChild;
+    if(epoch!==cardControlEpoch[kind]||!frame.isConnected||!updated)return;
+    const current=frame.firstElementChild;
+    if(current?.outerHTML!==updated.outerHTML)frame.replaceChildren(document.importNode(updated,true));
+  }catch(error){console.warn(`Could not refresh ${kind} control`,error)}
+}
+void Promise.all(['watch','pin'].map(refreshCardControlFrame));
+async function refreshLiveCard(force=false,revisionHint=null){
+  if(liveCardRefreshing){liveCardPendingRevision=revisionHint||'*';return}
+  if(document.visibilityState==='hidden')return;
+  liveCardRefreshing=true;
+  try{
+    let nextRevision=revisionHint;
+    if(nextRevision===null){
+      const revisionResponse=await fetch(`/${account}/cards/${number}/revision`,{headers:{Accept:'application/json'},cache:'no-store'});
+      if(!revisionResponse.ok)return;
+      nextRevision=(await revisionResponse.json()).revision;
+    }
+    if(!force&&nextRevision===liveCardRevision)return;
+    const pageResponse=await fetch(`/${account}/cards/${number}`,{headers:{Accept:'text/html'},cache:'no-store'});
+    if(!pageResponse.ok)return;
+    const nextPage=new DOMParser().parseFromString(await pageResponse.text(),'text/html');
+    const nextTitle=nextPage.querySelector('.card__title');
+    const nextDescription=nextPage.querySelector('.card__description');
+    if(!nextTitle||!nextDescription)return;
+    const nextCard=nextPage.getElementById('card');
+    if(nextCard){
+      cardRoot.classList.toggle('has-image',nextCard.classList.contains('has-image'));
+      cardRoot.classList.toggle('is-closed',nextCard.classList.contains('is-closed'));
+      cardRoot.classList.toggle('is-postponed',nextCard.classList.contains('is-postponed'));
+      const image=cardRoot.querySelector(':scope > .card-perma__image'),updatedImage=nextCard.querySelector(':scope > .card-perma__image');
+      if(image&&!updatedImage)image.remove();
+      else if(!image&&updatedImage)cardRoot.querySelector('#gold-action-form').before(document.importNode(updatedImage,true));
+      else if(image&&updatedImage&&image.getAttribute('src')!==updatedImage.getAttribute('src'))image.replaceWith(document.importNode(updatedImage,true));
+      const imageControl=cardRoot.querySelector(':scope > #remove-image, :scope > #image-upload-form');
+      const updatedControl=nextCard.querySelector(':scope > #remove-image, :scope > #image-upload-form');
+      const selectedFile=imageControl?.querySelector('input[type=file]')?.files?.length;
+      if(!selectedFile&&imageControl?.outerHTML!==updatedControl?.outerHTML){
+        imageControl?.remove();
+        if(updatedControl)cardRoot.querySelector('.card__header').before(document.importNode(updatedControl,true));
+      }
+    }
+    if(!cardEditOpen()){
+      document.querySelector('.card__title').innerHTML=nextTitle.innerHTML;
+      document.querySelector('.card__description').innerHTML=nextDescription.innerHTML;
+      document.title=nextPage.title;
+      const closure=cardRoot.querySelector('[id^="card_closure_toggle_card_"]');
+      const updatedClosure=nextCard?.querySelector('[id^="card_closure_toggle_card_"]');
+      if(closure&&updatedClosure&&closure.outerHTML!==updatedClosure.outerHTML)closure.replaceWith(document.importNode(updatedClosure,true));
+    }
+    for(const id of ['gold-action-form',...(!cardEditOpen()?['closure-action-form']:[])]){
+      const form=document.getElementById(id),updated=nextPage.getElementById(id);
+      if(form&&updated&&form.outerHTML!==updated.outerHTML)form.replaceWith(document.importNode(updated,true));
+      else if(form&&!updated)form.remove();
+      else if(!form&&updated){
+        const parent=id==='closure-action-form'?cardRoot.querySelector('.card-perma__notch .actions'):cardRoot;
+        parent?.append(document.importNode(updated,true));
+      }
+    }
+    await Promise.all(['watch','pin'].map(refreshCardControlFrame));
+    const status=document.querySelector('.card__header .status'),nextStatus=nextPage.querySelector('.card__header .status');
+    if(status&&!nextStatus)status.remove();
+    else if(!status&&nextStatus)document.querySelector('.card__header').append(document.importNode(nextStatus,true));
+    const closureNotice=cardRoot.querySelector('.card-perma__closure-message'),nextClosureNotice=nextCard?.querySelector('.card-perma__closure-message');
+    if(!cardEditOpen()){
+      if(closureNotice&&!nextClosureNotice)closureNotice.remove();
+      else if(!closureNotice&&nextClosureNotice)cardRoot.querySelector('[id^="card_closure_toggle_card_"]').append(document.importNode(nextClosureNotice,true));
+      else if(closureNotice&&nextClosureNotice&&closureNotice.outerHTML!==nextClosureNotice.outerHTML)closureNotice.replaceWith(document.importNode(nextClosureNotice,true));
+    }
+    formatClosureNotice();
+    const stamp=cardRoot.querySelector('.card__closed'),nextStamp=nextCard?.querySelector('.card__closed');
+    if(stamp&&!nextStamp)stamp.remove();
+    else if(!stamp&&nextStamp)cardRoot.querySelector('.card__body').append(document.importNode(nextStamp,true));
+    else if(stamp&&nextStamp&&stamp.outerHTML!==nextStamp.outerHTML)stamp.replaceWith(document.importNode(nextStamp,true));
+    const stageRail=document.querySelector('.stage-rail'),nextStageRail=nextPage.querySelector('.stage-rail');
+    if(stageRail&&nextStageRail)stageRail.innerHTML=nextStageRail.innerHTML;
+    const stepSection=stepRoot.querySelector('section[aria-label="Steps"]'),nextStepSection=nextPage.querySelector('.card__content > section[aria-label="Steps"]');
+    if(stepSection&&nextStepSection&&stepSection.innerHTML!==nextStepSection.innerHTML){
+      const draft=stepSection.querySelector('#new-step'),draftValue=draft?.value||'';
+      const draftFocused=document.activeElement===draft,focusedStep=document.activeElement?.dataset?.stepId;
+      const cursorStart=draftFocused?draft.selectionStart:null,cursorEnd=draftFocused?draft.selectionEnd:null;
+      const editFocus=document.activeElement?.closest('[data-step-editor]')?document.activeElement:null;
+      const editCursorStart=editFocus?.tagName==='INPUT'&&editFocus.type==='text'?editFocus.selectionStart:null;
+      const editCursorEnd=editCursorStart===null?null:editFocus.selectionEnd;
+      const openEdits=[...stepSection.querySelectorAll('turbo-frame[id^="step_"]')].filter(frame=>frame.querySelector('[data-step-editor]'));
+      stepSection.innerHTML=nextStepSection.innerHTML;
+      for(const editor of openEdits){
+        const replacement=stepSection.querySelector(`turbo-frame[id="${CSS.escape(editor.id)}"]`);
+        if(replacement)replacement.replaceWith(editor);
+        else if(stepSection.querySelector('#new-step'))stepSection.querySelector('#new-step').closest('li').before(editor);
+        else stepSection.querySelector('ol').append(editor);
+      }
+      const replacement=stepSection.querySelector('#new-step');
+      if(replacement){replacement.value=draftValue;if(draftFocused){replacement.focus();replacement.setSelectionRange(cursorStart,cursorEnd)}}
+      if(editFocus){editFocus.focus();if(editCursorStart!==null)editFocus.setSelectionRange(editCursorStart,editCursorEnd)}
+      if(focusedStep)stepSection.querySelector(`input[data-step-id="${CSS.escape(focusedStep)}"]`)?.focus();
+    }
+    for(const [selector,preserve] of [
+      ['.card__board-label',null],
+      ['.card__header .card__tags','dialog[open]'],
+      ['.card__footer .card__meta',null],
+      ['.card__footer turbo-frame[id^="reacting_card_"]','form'],
+      ['#comments .comments__subscribers',null]
+    ]){
+      const current=document.querySelector(selector),updated=nextPage.querySelector(selector);
+      if(current&&updated&&(!preserve||!current.querySelector(preserve)))current.replaceWith(document.importNode(updated,true));
+    }
+    const nextFrames=[...nextPage.querySelectorAll('#comments > turbo-frame[id^="container_comment_"]')];
+    const nextIds=new Set(nextFrames.map(frame=>frame.id));
+    for(const frame of [...liveCardComments.querySelectorAll(':scope > turbo-frame[id^="container_comment_"]')]){
+      if(!nextIds.has(frame.id)&&!frame.querySelector('form'))frame.remove();
+    }
+    let following=liveCardComments.querySelector('.comment--new');
+    for(const frame of nextFrames.reverse()){
+      let current=liveCardComments.querySelector(`:scope > turbo-frame[id="${CSS.escape(frame.id)}"]`);
+      if(!current){
+        current=document.importNode(frame,true);
+        following.before(current);
+      }else if(current.dataset.commentRevision!==frame.dataset.commentRevision&&!current.querySelector('form')){
+        const updated=document.importNode(frame,true);
+        current.replaceWith(updated);
+        current=updated;
+      }
+      if(current.nextElementSibling!==following)following.before(current);
+      following=current;
+    }
+    liveCardRevision=nextRevision;
+  }catch(error){console.warn('Could not refresh card',error)}finally{
+    liveCardRefreshing=false;
+    if(liveCardPendingRevision!==null){
+      const pending=liveCardPendingRevision;
+      liveCardPendingRevision=null;
+      if(pending==='*'||pending!==liveCardRevision)void refreshLiveCard(true);
+    }
+  }
+}
+function applyCardClosureStream(root){
+  const target=document.getElementById('card_closure_toggle_card_{{CARD_ID}}');
+  const stream=[...root.querySelectorAll('turbo-stream[target]')].find(item=>item.getAttribute('target')===target?.id);
+  const content=stream?.querySelector('template')?.content;
+  if(!target||!content)return;
+  if(stream.getAttribute('action')==='replace')target.replaceWith(document.importNode(content,true));
+  else if(stream.getAttribute('action')==='update')target.replaceChildren(document.importNode(content,true));
+}
+async function openCardEditor(url){
+  if(cardEditOpen()){liveCardEditor().querySelector('textarea')?.focus();return}
+  const frame=liveCardEditor();
+  try{
+    const response=await fetch(url,{headers:{Accept:'text/html','Turbo-Frame':frame.id}});
+    if(!response.ok)throw Error(`Could not open editor (${response.status})`);
+    const page=new DOMParser().parseFromString(await response.text(),'text/html');
+    const nextFrame=page.getElementById(frame.id);
+    if(!nextFrame)throw Error('Card edit frame missing');
+    liveCardDisplayFrame=frame.cloneNode(true);
+    frame.replaceWith(document.importNode(nextFrame,true));
+    applyCardClosureStream(liveCardEditor());
+    await restoreCardEditDraft(liveCardEditor().querySelector('form'));
+    liveCardEditor().querySelector('textarea')?.focus();
+  }catch(error){console.warn('Could not open card editor',error);location.href=url}
+}
+function closeCardEditor(){
+  if(!cardEditOpen())return;
+  if(liveCardDisplayFrame)liveCardEditor().replaceWith(liveCardDisplayFrame);
+  liveCardDisplayFrame=null;
+  applyCardClosureStream(liveCardEditor());
+  document.querySelector('.card__title-link')?.focus();
+  void refreshLiveCard(true);
+}
+document.addEventListener('click',event=>{
+  const link=event.target.closest('.card__title-link');
+  if(link){
+    if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+    event.preventDefault();
+    void openCardEditor(link.href);
+    return;
+  }
+  const cancel=event.target.closest('turbo-frame[id^="edit_card_"] form a');
+  if(cancel){event.preventDefault();closeCardEditor()}
+});
+document.addEventListener('submit',async event=>{
+  const form=event.target;
+  if(!form.matches('form[id^="edit_form_card_"]'))return;
+  event.preventDefault();
+  const button=event.submitter,error=form.querySelector('#edit-error');
+  if(button)button.disabled=true;
+  error.textContent='';
+  try{
+    const response=await fetch(form.action,{method:'PATCH',headers:{Accept:'text/vnd.turbo-stream.html','Content-Type':'application/json'},body:JSON.stringify({card:{title:form.querySelector('[name="card[title]"]').value,description:form.querySelector('[name="card[description]"]').value}})});
+    if(!response.ok)throw Error(`Could not save changes (${response.status})`);
+    const page=new DOMParser().parseFromString(await response.text(),'text/html');
+    const stream=[...page.querySelectorAll('turbo-stream[action="update"]')].find(item=>item.getAttribute('target')===liveCardEditor().id);
+    const template=stream?.querySelector('template');
+    if(!template)throw Error('Card update frame missing');
+    clearCardEditDraft(form);
+    liveCardEditor().replaceChildren(document.importNode(template.content,true));
+    applyCardClosureStream(page);
+    liveCardDisplayFrame=null;
+    void refreshLiveCard(true);
+  }catch(cause){error.textContent=cause.message;if(button)button.disabled=false}
+});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&cardEditOpen()&&liveCardEditor().contains(event.target)){
+    event.preventDefault();event.stopImmediatePropagation();closeCardEditor();
+  }else if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&cardEditOpen()&&liveCardEditor().contains(event.target)){
+    event.preventDefault();liveCardEditor().querySelector('form')?.requestSubmit();
+  }
+},true);
+const liveCardStream='EventSource' in window?new EventSource(`/${account}/cards/${number}/live`):null;
+if(liveCardStream)liveCardStream.onmessage=event=>void refreshLiveCard(false,event.data);
+window.addEventListener('pagehide',()=>liveCardStream?.close());
+setInterval(()=>{if(!liveCardStream||liveCardStream.readyState!==EventSource.OPEN)void refreshLiveCard()},1500);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshLiveCard()});
 </script>
 <script>
-const imageForm=document.getElementById('image-upload-form');
-document.getElementById('image-upload')?.addEventListener('change',event=>{if(event.currentTarget.files?.length)imageForm.requestSubmit()});
-imageForm?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('image-upload');if(!input.files?.length)return;const data=new FormData(imageForm);input.disabled=true;try{const response=await fetch(imageForm.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:data});if(!response.ok)throw Error('Could not attach image');location.reload()}catch(error){input.disabled=false;alert(error.message||String(error))}});
+cardRoot.addEventListener('change',event=>{if(event.target.id==='image-upload'&&event.target.files?.length)event.target.closest('form').requestSubmit()});
+cardRoot.addEventListener('submit',async event=>{const imageForm=event.target;if(imageForm.id!=='image-upload-form')return;event.preventDefault();const input=imageForm.querySelector('#image-upload');if(!input.files?.length)return;const data=new FormData(imageForm);input.disabled=true;try{const response=await fetch(imageForm.action,{method:'POST',headers:{Accept:'text/vnd.turbo-stream.html'},body:data});if(!response.ok)throw Error('Could not attach image');location.reload()}catch(error){input.disabled=false;alert(error.message||String(error))}});
 </script>
+<script>{{SHELL_SCRIPT}}</script>
 </body></html>

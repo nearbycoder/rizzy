@@ -118,7 +118,8 @@ def main():
         board_id = urllib.parse.urlparse(headers["Location"]).path.rsplit("/", 1)[-1]
         status, _, _ = request(target, "DELETE", f"/boards/{board_id}")
         assert status == 204, (target["name"], "same-origin form cleanup", status)
-    assert html_results[0] == html_results[1] and html_results[0][0] == 422
+    assert html_results[0] == html_results[1] and html_results[0][0] == 422, (
+        [(status, content_type, len(body)) for status, content_type, body in html_results])
     print(f"Request forgery decisions matched on {len(source)} JSON writes, HTML acceptance and rejection, and unsubscribe exemption")
 
 

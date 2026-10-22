@@ -1,0 +1,37 @@
+{
+  "status": "aborted_after_one_complete_pair",
+  "database": "MySQL 8.4.11",
+  "source_revision": "477c943e0506f109e5bc83ae9dadbe519732c045",
+  "rizzy_revision": "5cb881ba8a0b0c957ac7f7bff179262655c2370c",
+  "rizzy_binary_sha256": "8ab9b2c86f49a045d30b5d7c010c4529ac2f72496363e1921e255099de18d2cb",
+  "initial_cards": 500,
+  "clients": 8,
+  "seconds_per_target_requested": 20,
+  "rounds_requested": 2,
+  "sample_parity": "passed_in_both_rounds",
+  "rounds": [
+    {
+      "number": 1,
+      "order": ["fizzy", "rizzy"],
+      "fizzy_units_per_second": 23.25,
+      "rizzy_units_per_second": 156.16,
+      "both_runs_http_errors": 0,
+      "both_runs_stored_counts_verified": true
+    },
+    {
+      "number": 2,
+      "order": ["rizzy", "fizzy"],
+      "rizzy_units_per_second": 149.93,
+      "rizzy_http_errors": 0,
+      "rizzy_stored_counts_verified": true,
+      "fizzy_status": "aborted",
+      "failed_request": "PATCH /123456789/cards/818",
+      "http_status": 500,
+      "source_request_id": "3769e977-715e-4a6e-9be0-69d02c1946d5",
+      "source_exception": "ActiveSearch::AdapterError (MysqlSharded request failed: ActiveRecord::Deadlocked)",
+      "mysql_error": "1213: Deadlock found when trying to get lock; try restarting transaction",
+      "source_location": "lib/active_search/store_adapters/mysql_sharded.rb:19"
+    }
+  ],
+  "note": "The benchmark stopped on Fizzy's first HTTP error. Round 1 is a paired comparison; round 2 cannot be used to calculate a paired throughput ratio."
+}

@@ -82,13 +82,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seconds", type=float, default=5)
     parser.add_argument("--concurrency", default="32,64")
+    parser.add_argument("--order", choices=("fizzy,rizzy", "rizzy,fizzy"), default="fizzy,rizzy")
     args = parser.parse_args()
+    order = args.order.split(",")
     targets = {name.lower(): {key.lower(): os.environ[f"{name}_{key}"] for key in ("URL", "ACCOUNT", "TOKEN")}
                for name in ("FIZZY", "RIZZY")}
     paths = {}
-    results = {"fixture": "806x926 PNG resized to 256x256", "runs": {}}
+    results = {"fixture": "806x926 PNG resized to 256x256", "order": order, "runs": {}}
     try:
-        for name, target in targets.items():
+        for name in order:
+            target = targets[name]
             paths[name] = fixture(target)
             thumbnail = fetch(target, paths[name])
             assert thumbnail.startswith(b"\x89PNG\r\n\x1a\n")
@@ -97,7 +100,8 @@ def main():
             for _ in range(20):
                 fetch(target, paths[name])
         for concurrency in map(int, args.concurrency.split(",")):
-            for name, target in targets.items():
+            for name in order:
+                target = targets[name]
                 outcome = run(target, paths[name], concurrency, args.seconds)
                 results["runs"].setdefault(name, []).append(outcome)
                 print(name, outcome, file=sys.stderr, flush=True)
